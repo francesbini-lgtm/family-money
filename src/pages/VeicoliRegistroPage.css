@@ -1,0 +1,36 @@
+.veh-card { padding: 0; overflow: hidden; }
+
+.veh-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; gap: 12px; flex-wrap: wrap;
+}
+
+.veh-card-left  { display: flex; align-items: center; gap: 14px; }
+.veh-card-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.veh-icon { font-size: 28px; }
+.veh-name { font-size: 16px; font-weight: 700; }
+.veh-meta { font-size: 12px; color: var(--text3); margin-top: 2px; }
+
+.veh-stat { text-align: right; }
+.veh-stat-label { font-size: 10px; color: var(--text3); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.veh-stat-val   { font-size: 15px; font-weight: 700; font-family: var(--font-mono); }
+
+.veh-expenses { border-top: 1px solid var(--border); }
+.veh-no-exp   { padding: 20px; text-align: center; font-size: 13px; color: var(--text3); }
+
+.veh-table { width: 100%; border-collapse: collapse; }
+.veh-table thead th {
+  padding: 8px 14px; font-size: 11px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text3); background: var(--surface2);
+  border-bottom: 1px solid var(--border); text-align: left;
+}
+.veh-exp-row { border-bottom: 1px solid var(--border); transition: background .1s; }
+.veh-exp-row:last-child { border-bottom: none; }
+.veh-exp-row:hover { background: var(--surface2); }
+.veh-exp-row td { padding: 8px 14px; font-size: 13px; vertical-align: middle; }
+.veh-exp-date { font-size: 12px; color: var(--text3); font-family: var(--font-mono); }
+.veh-exp-cat  { font-size: 11px; padding: 2px 8px; background: var(--blue-l); color: var(--blue); border-radius: 12px; font-weight: 700; }
+.veh-exp-desc { color: var(--text2); }
+.veh-exp-amt  { font-family: var(--font-mono); font-weight: 700; text-align: right; }

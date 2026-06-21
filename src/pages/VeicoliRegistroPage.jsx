@@ -1,0 +1,1039 @@
+import { useState, useMemo, useRef } from 'react'
+import { useStore } from '../store/useStore'
+import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
+import { uploadExpenseFiles, deleteExpenseFile } from '../services/storage'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line, PieChart, Pie, Cell, Area, AreaChart
+} from 'recharts'
+import { Plus, Trash2, Link } from 'lucide-react'
+import './VeicoliRegistroPage.css'
+import { fmtIT } from '../utils/format'
+
+const VEH_ICONS = ['🚗','🚙','🚕','🏎','🚐','🛻','🏍','🚤','⛵','🚁','🛵','🚌',
+  'svg:motocross','svg:motoscafo','svg:bmw1','svg:jeep']
+
+// SVG custom icons
+const SVG_ICONS = {
+  'svg:motocross': (
+    <svg viewBox="0 0 48 32" width="32" height="22" xmlns="http://www.w3.org/2000/svg">
+      {/* rear wheel */}
+      <circle cx="10" cy="23" r="8" fill="none" stroke="#1a4a8a" strokeWidth="2.5"/>
+      <circle cx="10" cy="23" r="3" fill="#1a4a8a"/>
+      {/* front wheel */}
+      <circle cx="40" cy="24" r="7" fill="none" stroke="#1a4a8a" strokeWidth="2.5"/>
+      <circle cx="40" cy="24" r="2.5" fill="#1a4a8a"/>
+      {/* frame */}
+      <path d="M10 15 L22 8 L34 10 L40 17" fill="none" stroke="#1a4a8a" strokeWidth="2.5" strokeLinecap="round"/>
+      <path d="M10 15 L18 22" fill="none" stroke="#1a4a8a" strokeWidth="2.5" strokeLinecap="round"/>
+      <path d="M22 8 L20 22" fill="none" stroke="#2a6ac8" strokeWidth="2" strokeLinecap="round"/>
+      {/* handlebar */}
+      <path d="M34 10 L38 6 L42 7" fill="none" stroke="#1a4a8a" strokeWidth="2" strokeLinecap="round"/>
+      {/* seat */}
+      <path d="M20 8 L30 7" fill="none" stroke="#1a4a8a" strokeWidth="3" strokeLinecap="round"/>
+      {/* exhaust */}
+      <path d="M14 18 L8 20" fill="none" stroke="#2a6ac8" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  ),
+  'svg:motoscafo': (
+    <svg viewBox="0 0 56 32" width="36" height="22" xmlns="http://www.w3.org/2000/svg">
+      {/* hull */}
+      <path d="M4 22 L8 28 L48 28 L54 22 L4 22Z" fill="#ddd" stroke="#999" strokeWidth="1.2"/>
+      {/* cabin */}
+      <rect x="14" y="10" width="24" height="13" rx="3" fill="white" stroke="#aaa" strokeWidth="1.2"/>
+      {/* windshield */}
+      <path d="M14 16 L18 10 L36 10 L38 16" fill="#cde" stroke="#aaa" strokeWidth="1"/>
+      {/* windows */}
+      <rect x="17" y="12" width="6" height="5" rx="1" fill="#b8d8f0" stroke="#aaa" strokeWidth="0.8"/>
+      <rect x="27" y="12" width="6" height="5" rx="1" fill="#b8d8f0" stroke="#aaa" strokeWidth="0.8"/>
+      {/* bow */}
+      <path d="M38 18 L54 22" fill="none" stroke="#bbb" strokeWidth="1.5"/>
+      {/* antenna */}
+      <line x1="32" y1="10" x2="32" y2="5" stroke="#888" strokeWidth="1"/>
+      <circle cx="32" cy="4.5" r="1" fill="#888"/>
+    </svg>
+  ),
+  'svg:bmw1': (
+    <svg viewBox="0 0 56 28" width="36" height="22" xmlns="http://www.w3.org/2000/svg">
+      {/* body */}
+      <path d="M4 20 L6 14 L14 8 L34 7 L44 12 L52 14 L52 20Z" fill="#111" stroke="#333" strokeWidth="1"/>
+      {/* roof */}
+      <path d="M14 8 L18 4 L36 4 L42 8" fill="#111" stroke="#333" strokeWidth="1"/>
+      {/* windshield */}
+      <path d="M18 4 L16 8 L14 8" fill="none" stroke="#555" strokeWidth="1"/>
+      <path d="M18 4 L36 4 L42 8 L38 8" fill="#2a2a2a" stroke="#444" strokeWidth="0.8"/>
+      {/* rear window */}
+      <path d="M14 8 L18 4" fill="none" stroke="#444" strokeWidth="1"/>
+      {/* wheels */}
+      <circle cx="14" cy="21" r="5.5" fill="#222" stroke="#555" strokeWidth="1.5"/>
+      <circle cx="14" cy="21" r="2.5" fill="#444" stroke="#666" strokeWidth="1"/>
+      <circle cx="42" cy="21" r="5.5" fill="#222" stroke="#555" strokeWidth="1.5"/>
+      <circle cx="42" cy="21" r="2.5" fill="#444" stroke="#666" strokeWidth="1"/>
+      {/* headlights */}
+      <rect x="47" y="14" width="4" height="2.5" rx="1" fill="#ffe"/>
+      {/* kidney grille */}
+      <rect x="47" y="17" width="2" height="2" rx="0.5" fill="#333"/>
+      <rect x="50" y="17" width="2" height="2" rx="0.5" fill="#333"/>
+      {/* ground line */}
+      <line x1="4" y1="26" x2="52" y2="26" stroke="#333" strokeWidth="0.5"/>
+    </svg>
+  ),
+  'svg:jeep': (
+    <svg viewBox="0 0 56 32" width="36" height="22" xmlns="http://www.w3.org/2000/svg">
+      {/* body — boxy */}
+      <rect x="6" y="10" width="44" height="16" rx="2" fill="#111" stroke="#333" strokeWidth="1"/>
+      {/* roof — flat */}
+      <rect x="8" y="5" width="40" height="7" rx="1" fill="#111" stroke="#333" strokeWidth="1"/>
+      {/* windshield */}
+      <rect x="10" y="6" width="15" height="6" rx="1" fill="#2a2a2a" stroke="#444" strokeWidth="0.8"/>
+      {/* rear window */}
+      <rect x="31" y="6" width="14" height="6" rx="1" fill="#2a2a2a" stroke="#444" strokeWidth="0.8"/>
+      {/* wheels — big off-road */}
+      <circle cx="16" cy="26" r="6" fill="#1a1a1a" stroke="#444" strokeWidth="2"/>
+      <circle cx="16" cy="26" r="2.5" fill="#333" stroke="#555" strokeWidth="1"/>
+      <circle cx="40" cy="26" r="6" fill="#1a1a1a" stroke="#444" strokeWidth="2"/>
+      <circle cx="40" cy="26" r="2.5" fill="#333" stroke="#555" strokeWidth="1"/>
+      {/* headlights */}
+      <rect x="48" y="13" width="3" height="3" rx="0.5" fill="#ffe" stroke="#aaa" strokeWidth="0.5"/>
+      {/* grille */}
+      <line x1="49" y1="17" x2="49" y2="22" stroke="#444" strokeWidth="1"/>
+      <line x1="51" y1="17" x2="51" y2="22" stroke="#444" strokeWidth="1"/>
+      {/* spare wheel hint on back */}
+      <circle cx="7" cy="18" r="4" fill="#1a1a1a" stroke="#444" strokeWidth="1.5"/>
+      <circle cx="7" cy="18" r="1.5" fill="#333"/>
+    </svg>
+  ),
+}
+
+function renderIcon(icon, size = 36) {
+  if (icon && icon.startsWith('svg:')) return SVG_ICONS[icon] || '🚗'
+  return <span style={{fontSize: size}}>{icon || '🚗'}</span>
+}
+const VEH_CATS  = ['Carburante','Assicurazione','Tagliando','Revisione','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Extra','Altro']
+const VEH_COLORS = ['#2a5c8a','#c8622a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#f39c12','#1abc9c','#8e44ad','#2980b9','#27ae60']
+const CAT_COLORS = {
+  Carburante:'#2a5c8a',Assicurazione:'#c8622a',Tagliando:'#2a7a4a',Revisione:'#b8942a',
+  Gomme:'#9b59b6',Bollo:'#2a9aa0',CarWashing:'#e74c3c',Autostrade:'#f39c12',
+  Parcheggio:'#1abc9c',Multa:'#e91e63',Extra:'#607080',Altro:'#888'
+}
+const MONTHS_IT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+function getLast6Months() {
+  const now = new Date(), r = []
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1)
+    r.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
+  }
+  return r
+}
+function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
+const fmtDate = d => {
+  const m = (d||'').match(/\d{4}-(\d{2})-(\d{2})/)
+  return m ? `${parseInt(m[2])} ${MONTHS_IT[parseInt(m[1])-1]}` : d||'—'
+}
+
+// ── Add/Edit Vehicle Modal ────────────────────────────────
+function VehicleModal({ vehicle, onClose }) {
+  const { addVehicle, updateVehicle } = useStore()
+  const [form, setForm] = useState(vehicle || {
+    name:'', targa:'', marca:'', anno:'', icon:'🚗',
+    assicurazione:'', tagliando:'', revisione:'', bollo:''
+  })
+  const set = (k,v) => setForm(f=>({...f,[k]:v}))
+  const isEdit = !!vehicle
+
+  function save() {
+    if (!form.name) return
+    if (isEdit) { updateVehicle(vehicle.id, form); onClose() }
+    else { addVehicle(form); onClose() }
+  }
+
+  return (
+    <Modal title={isEdit ? `✏️ ${vehicle.name}` : '+ Aggiungi Veicolo'} onClose={onClose} width={560}>
+      <FormRow label="Nome"><Input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="es. BMW X3" autoFocus/></FormRow>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <FormRow label="Targa"><Input value={form.targa} onChange={e=>set('targa',e.target.value.toUpperCase())} placeholder="AB123CD"/></FormRow>
+        <FormRow label="Marca"><Input value={form.marca} onChange={e=>set('marca',e.target.value)} placeholder="BMW"/></FormRow>
+        <FormRow label="Anno"><Input type="number" value={form.anno} onChange={e=>set('anno',e.target.value)} placeholder="2022"/></FormRow>
+        <FormRow label="Icona">
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {VEH_ICONS.map(ic=>(
+              <button key={ic} onClick={()=>set('icon',ic)} style={{
+                padding:'4px 6px',borderRadius:7,border:`2px solid ${form.icon===ic?'var(--accent)':'var(--border)'}`,
+                background:form.icon===ic?'var(--accent-l)':'var(--surface)',cursor:'pointer',
+                display:'flex',alignItems:'center',justifyContent:'center',minWidth:36,minHeight:32}}>
+                {ic.startsWith('svg:')
+                  ? <span style={{display:'flex',alignItems:'center'}}>{SVG_ICONS[ic]}</span>
+                  : <span style={{fontSize:20,lineHeight:1}}>{ic}</span>
+                }
+              </button>
+            ))}
+          </div>
+        </FormRow>
+      </div>
+      <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',margin:'12px 0 8px'}}>📅 Scadenze</div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <FormRow label="Assicurazione"><Input type="date" value={form.assicurazione||''} onChange={e=>set('assicurazione',e.target.value)}/></FormRow>
+        <FormRow label="Tagliando"><Input type="date" value={form.tagliando||''} onChange={e=>set('tagliando',e.target.value)}/></FormRow>
+        <FormRow label="Revisione"><Input type="date" value={form.revisione||''} onChange={e=>set('revisione',e.target.value)}/></FormRow>
+        <FormRow label="Bollo"><Input type="date" value={form.bollo||''} onChange={e=>set('bollo',e.target.value)}/></FormRow>
+      </div>
+      <ModalFooter>
+        <button className="btn btn-primary" onClick={save}>{isEdit?'Aggiorna':'Salva'}</button>
+        <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
+// ── Add/Edit Expense Modal ────────────────────────────────
+// expense = null → add mode; expense = obj → edit mode
+function AddExpenseModal({ vehicles, preVehicleId, expense: editingExpense, onClose }) {
+  const { addVehExpense, updateVehExpense } = useStore()
+  const isEdit = !!editingExpense
+
+  const [form, setForm] = useState(() => {
+    if (isEdit) return {
+      date: editingExpense.date || new Date().toISOString().slice(0,10),
+      desc: editingExpense.desc || '',
+      cat: editingExpense.cat || 'Carburante',
+      amount: editingExpense.amount != null ? String(editingExpense.amount) : '',
+      vehicleId: editingExpense.vehicleId || vehicles[0]?.id || '',
+      payMethod: editingExpense.payMethod || 'carta',
+      notes: editingExpense.notes || '',
+    }
+    return {
+      date: new Date().toISOString().slice(0,10),
+      desc: '', cat: 'Carburante', amount: '',
+      vehicleId: preVehicleId || vehicles[0]?.id || '',
+      payMethod: 'carta', notes: ''
+    }
+  })
+  const set = (k,v) => setForm(f=>({...f,[k]:v}))
+
+  // Existing attachments (edit mode) — can be individually removed
+  const [existingAtts, setExistingAtts] = useState(isEdit ? (editingExpense.attachments || []) : [])
+  const [files,    setFiles]    = useState([])   // new File[] pending upload
+  const [uploading, setUploading] = useState(false)
+  const [monthOnly, setMonthOnly] = useState(isEdit && (editingExpense.date||'').endsWith('-15'))
+  const fileRef = useRef()
+
+  function addFiles(newFiles) {
+    setFiles(prev => [...prev, ...Array.from(newFiles)])
+  }
+  function removeFile(idx) { setFiles(f => f.filter((_,i)=>i!==idx)) }
+
+  async function removeExistingAtt(idx) {
+    const att = existingAtts[idx]
+    if (att?.path) {
+      try { await deleteExpenseFile(att.path) } catch(e) { console.warn(e) }
+    }
+    setExistingAtts(prev => prev.filter((_,i)=>i!==idx))
+  }
+
+  function onDrop(e) {
+    e.preventDefault()
+    addFiles(e.dataTransfer.files)
+  }
+
+  async function save() {
+    if (!form.amount || !form.vehicleId) return
+    setUploading(true)
+    let newAttachments = []
+    if (files.length > 0) {
+      const expId = isEdit ? editingExpense.id : uid()
+      try { newAttachments = await uploadExpenseFiles(expId, files) } catch(e) { console.error(e) }
+    }
+    const attachments = [...existingAtts, ...newAttachments]
+
+    if (isEdit) {
+      updateVehExpense(editingExpense.id, { ...form, amount: parseFloat(form.amount), attachments })
+    } else {
+      addVehExpense({ ...form, amount: parseFloat(form.amount), id: uid(), attachments })
+    }
+    setUploading(false)
+    onClose()
+  }
+
+  const fmtSize = b => b < 1024*1024 ? `${(b/1024).toFixed(0)} KB` : `${(b/1024/1024).toFixed(1)} MB`
+
+  return (
+    <Modal title={isEdit ? `✏️ Modifica spesa` : '+ Spesa Veicolo'} onClose={onClose} width={500}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <FormRow label="Veicolo">
+          <Select value={form.vehicleId} onChange={e=>set('vehicleId',e.target.value)}>
+            {vehicles.map(v=><option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+          </Select>
+        </FormRow>
+        <FormRow label="Categoria">
+          <Select value={form.cat} onChange={e=>set('cat',e.target.value)}>
+            {VEH_CATS.map(c=><option key={c}>{c}</option>)}
+          </Select>
+        </FormRow>
+        <FormRow label={
+          <span style={{display:'flex',alignItems:'center',gap:6}}>
+            Data
+            <label style={{display:'flex',alignItems:'center',gap:4,fontWeight:400,fontSize:10,color:'var(--text3)',cursor:'pointer'}}>
+              <input type="checkbox" checked={monthOnly} onChange={e=>{
+                setMonthOnly(e.target.checked)
+                if(e.target.checked) {
+                  // keep only YYYY-MM, set day to 15 as neutral
+                  const ym = form.date.slice(0,7)
+                  set('date', ym+'-15')
+                }
+              }} style={{accentColor:'var(--accent)',width:11,height:11}}/>
+              so solo il mese
+            </label>
+          </span>
+        }>
+          {monthOnly
+            ? <Input type="month" value={form.date.slice(0,7)}
+                onChange={e=>set('date', e.target.value+'-15')}/>
+            : <Input type="date" value={form.date} onChange={e=>set('date',e.target.value)}/>
+          }
+        </FormRow>
+        <FormRow label="Importo €"><Input type="number" value={form.amount} onChange={e=>set('amount',e.target.value)} placeholder="0" step="0.01" autoFocus/></FormRow>
+        <FormRow label="Metodo pagamento">
+          <Select value={form.payMethod} onChange={e=>set('payMethod',e.target.value)}>
+            <option value="carta">💳 Carta</option>
+            <option value="cash">💵 Cash</option>
+            <option value="bonifico">🏦 Bonifico</option>
+            <option value="altro">• Altro</option>
+          </Select>
+        </FormRow>
+      </div>
+      <FormRow label="Descrizione"><Input value={form.desc} onChange={e=>set('desc',e.target.value)} placeholder="es. Rifornimento IP Como"/></FormRow>
+
+      {/* File drop zone */}
+      <div style={{marginTop:12}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:6}}>
+          📎 Allegati (foto, PDF)
+        </div>
+        <div
+          onDrop={onDrop} onDragOver={e=>e.preventDefault()}
+          onClick={()=>fileRef.current?.click()}
+          style={{border:'2px dashed var(--border)',borderRadius:8,padding:'14px 16px',
+            cursor:'pointer',textAlign:'center',color:'var(--text3)',fontSize:12,
+            background:'var(--surface2)',transition:'border-color .15s'}}
+          onMouseEnter={e=>e.currentTarget.style.borderColor='var(--accent)'}
+          onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
+          Trascina file qui oppure <span style={{color:'var(--accent)',fontWeight:600}}>clicca per selezionare</span>
+          <br/><span style={{fontSize:10,marginTop:2,display:'block'}}>JPG, PNG, PDF — più file supportati</span>
+        </div>
+        <input ref={fileRef} type="file" multiple accept="image/*,.pdf" style={{display:'none'}}
+          onChange={e=>addFiles(e.target.files)}/>
+
+        {files.length > 0 && (
+          <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
+            {files.map((f,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 8px',
+                background:'var(--surface)',borderRadius:6,border:'1px solid var(--border)'}}>
+                <span style={{fontSize:16}}>{f.type.startsWith('image/')?' 🖼':'📄'}</span>
+                <span style={{flex:1,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name}</span>
+                <span style={{fontSize:10,color:'var(--text3)',flexShrink:0}}>{fmtSize(f.size)}</span>
+                <button onClick={e=>{e.stopPropagation();removeFile(i)}}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',padding:2,fontSize:14,lineHeight:1}}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Existing attachments (edit mode) */}
+      {isEdit && existingAtts.length > 0 && (
+        <div style={{marginTop:8}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:5}}>
+            Allegati esistenti
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:4}}>
+            {existingAtts.map((att,i)=>(
+              <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 8px',
+                background:'var(--surface)',borderRadius:6,border:'1px solid var(--border)'}}>
+                <span style={{fontSize:16}}>{att.type?.startsWith('image/')?'🖼':'📄'}</span>
+                <span style={{flex:1,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  <a href={att.url} target="_blank" rel="noreferrer" style={{color:'var(--accent)',textDecoration:'none'}}>{att.name}</a>
+                </span>
+                <button onClick={()=>removeExistingAtt(i)}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',padding:2,fontSize:14,lineHeight:1}}>×</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <ModalFooter>
+        <button className="btn btn-primary" onClick={save} disabled={uploading}>
+          {uploading ? '⏳ Caricamento…' : isEdit ? 'Aggiorna' : 'Aggiungi'}
+        </button>
+        <button className="btn btn-secondary" onClick={onClose} disabled={uploading}>Annulla</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
+// ── Attachments viewer modal ──────────────────────────────
+function AttachmentsModal({ expense, onClose, onDelete }) {
+  const atts = expense.attachments || []
+
+  function isImage(att) { return att.type?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name) }
+
+  return (
+    <Modal title={`📎 Allegati — ${expense.desc || 'Spesa'}`} onClose={onClose} width={520}>
+      {atts.length === 0
+        ? <div style={{textAlign:'center',color:'var(--text3)',padding:24}}>Nessun allegato.</div>
+        : <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {atts.map((att,i)=>(
+              <div key={i} style={{border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
+                {isImage(att) && (
+                  <img src={att.url} alt={att.name}
+                    style={{width:'100%',maxHeight:260,objectFit:'contain',background:'var(--surface2)',display:'block'}}/>
+                )}
+                <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:'var(--surface)'}}>
+                  <span style={{fontSize:18}}>{isImage(att)?'🖼':'📄'}</span>
+                  <span style={{flex:1,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{att.name}</span>
+                  <a href={att.url} target="_blank" rel="noreferrer"
+                    style={{fontSize:11,color:'var(--accent)',fontWeight:600,textDecoration:'none',flexShrink:0}}>
+                    Apri ↗
+                  </a>
+                  {onDelete && (
+                    <button onClick={()=>onDelete(att,i)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:12,padding:'0 4px'}}>
+                      🗑
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+      }
+      <ModalFooter><button className="btn btn-secondary" onClick={onClose}>Chiudi</button></ModalFooter>
+    </Modal>
+  )
+}
+
+// ── Reconcile Modal ───────────────────────────────────────
+// allExpenses needed to detect already-assigned cashEntries
+function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehExpenses, onSave, onClose }) {
+  const [search, setSearch] = useState('')
+  const isCash = (payMethod || expense.payMethod) === 'cash'
+
+  // IDs of cashEntries already linked to other veh expenses
+  const usedCashIds = new Set(
+    (allVehExpenses||[]).filter(e=>e.id!==expense.id && e.reconType==='cash' && e.reconRef)
+      .map(e=>e.reconRef)
+  )
+
+  // Build candidate list based on payment method
+  let candidates = []
+  if (isCash) {
+    // Cash mode: show only ATM withdrawals (prelievi) before the expense date, not yet assigned
+    candidates = (cashEntries||[])
+      .filter(e => {
+        const notUsed = !usedCashIds.has(`💵 ${e.note||e.cat1||'Contanti'} · ${e.date} · €${fmtIT(e.amount||0,2)}`)
+        const beforeDate = !expense.date || (e.date||'') <= expense.date
+        return beforeDate && notUsed && (e.amount||0) > 0
+      })
+      .map(e => ({
+        id:`cash-${e.id}`,
+        label:`💵 ${e.note||e.cat1||'Contanti'} · ${e.date} · €${fmtIT(e.amount||0,2)}`,
+        amount: e.amount||0, type:'cash', rawEntry: e
+      }))
+  } else {
+    // Bank/other: show transactions before expense date
+    candidates = transactions
+      .filter(t => !t.excluded && t.amount < 0 && (!expense.date || (t._effDate||(t._effDate||t.date||'')) <= expense.date))
+      .map(t=>({
+        id:`tx-${t.txId}`,
+        label:`${t.descAI||(t.description||'').slice(0,30)} · ${t._effDate||t.date} · €${fmtIT(Math.abs(t.amount),2)}`,
+        amount: Math.abs(t.amount), type:'bank'
+      }))
+  }
+
+  // Sort by closeness to expense amount
+  const sorted = candidates
+    .map(c=>({...c, delta: Math.abs(c.amount - expense.amount)}))
+    .sort((a,b)=>a.delta-b.delta)
+  const filtered = search ? sorted.filter(c=>c.label.toLowerCase().includes(search.toLowerCase())) : sorted.slice(0,40)
+
+  // For cash: detect partial match (withdrawal > expense)
+  function handleSelect(c) {
+    if (isCash && c.rawEntry && c.rawEntry.amount > expense.amount * 1.05) {
+      // Partial: note that only part of the withdrawal is used
+      onSave({ ...c, partial: true, usedAmount: expense.amount })
+    } else {
+      onSave(c)
+    }
+  }
+
+  return (
+    <Modal title={`🔗 Collega — ${expense.desc || 'Spesa'}`} onClose={onClose} width={540}>
+      <div style={{marginBottom:10,padding:'8px 12px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--blue)'}}>
+        <strong>{expense.desc||'—'}</strong> · € {fmtIT(expense.amount,2)} · {expense.date}
+        {isCash && <span style={{marginLeft:8,fontSize:11,background:'var(--gold-l)',color:'var(--gold)',padding:'1px 7px',borderRadius:8,fontWeight:700}}>💵 Cash — mostra prelievi prima di questa data</span>}
+      </div>
+      <FormRow label="Cerca"><Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cerca…" autoFocus/></FormRow>
+      <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:300,overflowY:'auto',marginBottom:4}}>
+        {filtered.length===0
+          ? <div style={{textAlign:'center',fontSize:12,color:'var(--text3)',padding:16}}>
+              {isCash ? 'Nessun prelievo disponibile prima di questa data.' : 'Nessuna transazione trovata.'}
+            </div>
+          : filtered.map(c=>{
+              const isPartial = isCash && c.amount > expense.amount * 1.05
+              return (
+                <button key={c.id} onClick={()=>handleSelect(c)}
+                  style={{padding:'8px 12px',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',
+                    background:'var(--surface)',cursor:'pointer',textAlign:'left',fontFamily:'var(--font-sans)',
+                    display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:11,padding:'2px 6px',borderRadius:4,fontWeight:700,flexShrink:0,
+                    background:c.type==='cash'?'var(--gold-l)':'var(--blue-l)',
+                    color:c.type==='cash'?'var(--gold)':'var(--blue)'}}>
+                    {c.type==='cash'?'💵':'🏦'}
+                  </span>
+                  <span style={{fontSize:12,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.label}</span>
+                  {isPartial && <span style={{fontSize:10,color:'var(--gold)',fontWeight:700,flexShrink:0,border:'1px solid var(--gold)',borderRadius:4,padding:'0 5px'}}>parziale €{fmtIT(expense.amount,2)}</span>}
+                  {!isPartial && c.delta < expense.amount * 0.15 && <span style={{fontSize:10,color:'var(--green)',fontWeight:700,flexShrink:0}}>≈ match</span>}
+                </button>
+              )
+            })
+        }
+      </div>
+      <ModalFooter><button className="btn btn-secondary" onClick={onClose}>Annulla</button></ModalFooter>
+    </Modal>
+  )
+}
+
+// ── Vehicle Compact Card ──────────────────────────────────
+function VehicleChip({ vehicle, onEdit, onDelete }) {
+  const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
+    .filter(([k]) => vehicle[k])
+    .map(([k,icon]) => {
+      const days = Math.round((new Date(vehicle[k]) - new Date()) / 86400000)
+      const color = days < 0 ? 'var(--red)' : days < 30 ? 'var(--red)' : days < 90 ? 'var(--gold)' : 'var(--green)'
+      const bg    = days < 0 ? 'var(--red-l)' : days < 30 ? 'var(--red-l)' : days < 90 ? 'var(--gold-l)' : 'var(--green-l)'
+      return { key:k, icon, color, bg, label: days < 0 ? '⚠ scaduta' : days < 90 ? `${days}gg` : '✓', date: vehicle[k] }
+    })
+
+  return (
+    <div className="card" style={{padding:'14px 16px',display:'flex',alignItems:'flex-start',gap:14,position:'relative'}}>
+      {/* Edit pencil — top right corner */}
+      <button onClick={onEdit} title="Modifica" style={{
+        position:'absolute',top:8,right:8,background:'none',border:'none',cursor:'pointer',
+        color:'var(--text3)',padding:3,borderRadius:4,lineHeight:1,opacity:0.5,transition:'opacity .15s'}}
+        onMouseEnter={e=>e.currentTarget.style.opacity=1}
+        onMouseLeave={e=>e.currentTarget.style.opacity=0.5}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+      {/* Delete — bottom right corner */}
+      <button onClick={()=>{if(confirm(`Eliminare ${vehicle.name}?`)) onDelete(vehicle.id)}} title="Elimina" style={{
+        position:'absolute',bottom:8,right:8,background:'none',border:'none',cursor:'pointer',
+        color:'var(--red)',padding:3,borderRadius:4,lineHeight:1,opacity:0.35,transition:'opacity .15s'}}
+        onMouseEnter={e=>e.currentTarget.style.opacity=1}
+        onMouseLeave={e=>e.currentTarget.style.opacity=0.35}>
+        <Trash2 size={11}/>
+      </button>
+
+      <span style={{flexShrink:0,display:'flex',alignItems:'center'}}>{renderIcon(vehicle.icon, 36)}</span>
+      <div style={{flex:1,minWidth:0,paddingRight:20}}>
+        <div style={{fontWeight:700,fontSize:15}}>{vehicle.name}</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:6}}>
+          {[vehicle.targa, vehicle.marca, vehicle.anno].filter(Boolean).join(' · ')}
+        </div>
+        {scadenze.length > 0 && (
+          <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+            {scadenze.map(s=>(
+              <span key={s.key} style={{fontSize:10,padding:'2px 7px',borderRadius:5,background:s.bg,color:s.color,fontWeight:700}}>
+                {s.icon} {s.key.slice(0,4)}: {s.date?.slice(5).replace('-','/')} {s.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Charts Section ────────────────────────────────────────
+const CHART_TOOLTIP = { fontSize:11, border:'1px solid var(--border)', borderRadius:7, background:'var(--surface)' }
+
+function VehicleCharts({ vehicles, allExpenses }) {
+  const last6 = getLast6Months()
+  const noData = allExpenses.length === 0
+  const empty = <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>Nessuna spesa registrata.</div>
+
+  // ── Chart 1: Andamento Carburante (bar, 6 mesi) ──────────
+  const fuelData = last6.map(ym => ({
+    label: MONTHS_IT[parseInt(ym.slice(5))-1],
+    Carburante: allExpenses.filter(e=>e.cat==='Carburante'&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0)
+  }))
+  const fuelAvg = fuelData.reduce((s,d)=>s+(d.Carburante||0),0) / (fuelData.filter(d=>d.Carburante>0).length||1)
+
+  // ── Chart 2: Donut carburante per veicolo — N/A, invece facciamo distribuzione categorie (escluso carburante) ──
+  const nonFuelExp = allExpenses.filter(e=>e.cat!=='Carburante')
+  const catTotals = VEH_CATS.filter(c=>c!=='Carburante').map(c=>({
+    name: c,
+    value: Math.round(nonFuelExp.filter(e=>e.cat===c).reduce((s,e)=>s+(e.amount||0),0))
+  })).filter(x=>x.value>0)
+
+  // ── Chart 3: Costo per veicolo donut (escluso carburante) ──
+  const vehTotals = vehicles.map((v,i)=>({
+    name: v.name,
+    value: Math.round(nonFuelExp.filter(e=>e.vehicleId===v.id).reduce((s,e)=>s+(e.amount||0),0)),
+    color: VEH_COLORS[i%VEH_COLORS.length]
+  })).filter(x=>x.value>0)
+
+  // ── Chart 4: Trend costi totali — area chart ──────────────
+  const trendData = last6.map(ym => ({
+    label: MONTHS_IT[parseInt(ym.slice(5))-1],
+    Totale: Math.round(allExpenses.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0))
+  }))
+
+  const DONUT_COLORS = ['#c8622a','#2a5c8a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#1abc9c']
+
+  const ChartCard = ({title, children}) => (
+    <div className="card" style={{padding:'16px 18px'}}>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:10,color:'var(--text)'}}>{title}</div>
+      {noData ? empty : children}
+    </div>
+  )
+
+  const renderLegend = (items, colors) => (
+    <div style={{display:'flex',flexWrap:'wrap',gap:'4px 12px',marginTop:8,justifyContent:'center'}}>
+      {items.map((item,i)=>(
+        <span key={item.name||item} style={{fontSize:10,display:'flex',alignItems:'center',gap:4}}>
+          <span style={{width:8,height:8,borderRadius:'50%',background:colors[i%colors.length],display:'inline-block',flexShrink:0}}/>
+          {item.name||item}
+        </span>
+      ))}
+    </div>
+  )
+
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
+
+      {/* 1 — Andamento Carburante */}
+      <ChartCard title="⛽ Andamento Spesa Carburante">
+        <ResponsiveContainer width="100%" height={190}>
+          <BarChart data={fuelData} margin={{top:4,right:4,bottom:0,left:0}}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={44} tickFormatter={v=>`€${v}`}/>
+            <Tooltip formatter={v=>[`€ ${fmtIT(Math.round(v),0)}`,'Carburante']} contentStyle={CHART_TOOLTIP}/>
+            {/* media dashed line via reference line approximated with a custom shape */}
+            <Bar dataKey="Carburante" radius={[4,4,0,0]}>
+              {fuelData.map((d,i)=>(
+                <Cell key={i} fill={d.Carburante > fuelAvg ? '#c8622a' : '#e8a888'}/>
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div style={{fontSize:10,color:'var(--text3)',textAlign:'right',marginTop:4}}>
+          Media: € {fmtIT(Math.round(fuelAvg),0)}/mese
+        </div>
+      </ChartCard>
+
+      {/* 2 — Distribuzione categorie (escluso carburante) */}
+      <ChartCard title="📊 Costi per Categoria (escluso carburante)">
+        {catTotals.length === 0
+          ? empty
+          : <>
+            <ResponsiveContainer width="100%" height={160}>
+              <PieChart>
+                <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
+                  dataKey="value" paddingAngle={2}>
+                  {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
+                </Pie>
+                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
+              </PieChart>
+            </ResponsiveContainer>
+            {renderLegend(catTotals, DONUT_COLORS)}
+          </>
+        }
+      </ChartCard>
+
+      {/* 3 — Costo per Veicolo donut (escluso carburante) */}
+      <ChartCard title="🚗 Costo per Veicolo (escluso carburante)">
+        {vehTotals.length === 0
+          ? empty
+          : <>
+            <ResponsiveContainer width="100%" height={160}>
+              <PieChart>
+                <Pie data={vehTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
+                  dataKey="value" paddingAngle={2}>
+                  {vehTotals.map((v,i)=><Cell key={i} fill={v.color}/>)}
+                </Pie>
+                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
+              </PieChart>
+            </ResponsiveContainer>
+            {renderLegend(vehTotals, vehTotals.map(v=>v.color))}
+          </>
+        }
+      </ChartCard>
+
+      {/* 4 — Trend costi totali (area) */}
+      <ChartCard title="📈 Trend Costi Totali">
+        <ResponsiveContainer width="100%" height={190}>
+          <AreaChart data={trendData} margin={{top:4,right:4,bottom:0,left:0}}>
+            <defs>
+              <linearGradient id="vehGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#c8622a" stopOpacity={0.25}/>
+                <stop offset="95%" stopColor="#c8622a" stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={48} tickFormatter={v=>`€${v}`}/>
+            <Tooltip formatter={v=>[`€ ${fmtIT(Math.round(v),0)}`,'Totale']} contentStyle={CHART_TOOLTIP}/>
+            <Area type="monotone" dataKey="Totale" stroke="#c8622a" strokeWidth={2.5}
+              fill="url(#vehGrad)" dot={{r:3,fill:'#c8622a'}} activeDot={{r:5}}/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+    </div>
+  )
+}
+
+// ── All Expenses Table ────────────────────────────────────
+function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, onAddExpense }) {
+  const { deleteVehExpense, updateVehExpense } = useStore()
+  const [sortKey, setSortKey] = useState('date')
+  const [sortDir, setSortDir] = useState('desc')
+  const [filterVeh, setFilterVeh] = useState('')
+  const [filterCat, setFilterCat] = useState('')
+  const [reconExp,  setReconExp]  = useState(null)
+  const [attExp,    setAttExp]    = useState(null)  // expense whose attachments we're viewing
+  const [editExp,   setEditExp]   = useState(null)  // expense being edited
+
+  const vehMap = Object.fromEntries(vehicles.map(v=>[v.id, v]))
+
+  function toggleSort(k) {
+    if (sortKey===k) setSortDir(d=>d==='asc'?'desc':'asc')
+    else { setSortKey(k); setSortDir('desc') }
+  }
+  const sortIcon = (k) => sortKey===k ? (sortDir==='asc'?'▲':'▼') : ''
+
+  const rows = useMemo(() => {
+    return [...allExpenses]
+      .filter(e => !filterVeh || e.vehicleId===filterVeh)
+      .filter(e => !filterCat || e.cat===filterCat)
+      .sort((a,b) => {
+        if (sortKey==='amount') return sortDir==='asc' ? (a.amount||0)-(b.amount||0) : (b.amount||0)-(a.amount||0)
+        return sortDir==='asc'
+          ? (a[sortKey]||'').localeCompare(b[sortKey]||'')
+          : (b[sortKey]||'').localeCompare(a[sortKey]||'')
+      })
+  }, [allExpenses, filterVeh, filterCat, sortKey, sortDir])
+
+  const total = rows.reduce((s,e)=>s+(e.amount||0),0)
+
+  const TH = ({k,label,right=false}) => (
+    <th onClick={()=>toggleSort(k)} style={{
+      padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
+      textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',
+      textAlign:right?'right':'left',cursor:'pointer',whiteSpace:'nowrap',userSelect:'none'}}>
+      {label} <span style={{fontSize:9}}>{sortIcon(k)}</span>
+    </th>
+  )
+
+  return (
+    <div style={{marginTop:8}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+        padding:'12px 16px',background:'var(--surface2)',
+        borderRadius:'var(--radius) var(--radius) 0 0',border:'1px solid var(--border)',borderBottom:'none'}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700}}>📋 Tutte le spese veicoli</div>
+          <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>{rows.length} spese · € {fmtIT(Math.round(total),0)} totale</div>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <select value={filterVeh} onChange={e=>setFilterVeh(e.target.value)}
+            style={{padding:'5px 9px',border:'1px solid var(--border)',borderRadius:6,fontSize:11,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}}>
+            <option value="">Tutti i veicoli</option>
+            {vehicles.map(v=><option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+          </select>
+          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)}
+            style={{padding:'5px 9px',border:'1px solid var(--border)',borderRadius:6,fontSize:11,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}}>
+            <option value="">Tutte le categorie</option>
+            {VEH_CATS.map(c=><option key={c}>{c}</option>)}
+          </select>
+          <button className="btn btn-primary" style={{fontSize:11}} onClick={onAddExpense}>
+            <Plus size={11}/> Aggiungi spesa
+          </button>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13,
+          border:'1px solid var(--border)',borderTop:'none',borderRadius:'0 0 var(--radius) var(--radius)',
+          background:'var(--surface)'}}>
+          Nessuna spesa registrata. Usa "+ Aggiungi spesa" o il pulsante Spesa su ogni veicolo.
+        </div>
+      ) : (
+        <div style={{overflow:'hidden',border:'1px solid var(--border)',borderTop:'none',
+          borderRadius:'0 0 var(--radius) var(--radius)',background:'var(--surface)'}}>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'var(--surface2)'}}>
+                  <TH k="date" label="Data"/>
+                  <TH k="desc" label="Descrizione"/>
+                  <TH k="cat" label="Categoria"/>
+                  <TH k="vehicleId" label="Veicolo"/>
+                  <TH k="amount" label="Importo" right/>
+                  <TH k="payMethod" label="Metodo"/>
+                  <th style={{padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
+                    textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',minWidth:110}}>
+                    Riconciliazione
+                  </th>
+                  <th style={{padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
+                    textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',width:40}}>
+                    📎
+                  </th>
+                  <th style={{borderBottom:'1px solid var(--border)',width:36}}/>
+                  <th style={{borderBottom:'1px solid var(--border)',width:36}}/>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(e => {
+                  const veh = vehMap[e.vehicleId]
+                  return (
+                    <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
+                      <td style={{padding:'7px 12px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                        {fmtDate(e.date)}
+                      </td>
+                      <td style={{padding:'7px 12px',fontSize:13,fontWeight:600,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        {e.desc || '—'}
+                      </td>
+                      <td style={{padding:'7px 12px'}}>
+                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:700,
+                          background:(CAT_COLORS[e.cat]||'#888')+'18',color:CAT_COLORS[e.cat]||'#888',
+                          border:`1px solid ${CAT_COLORS[e.cat]||'#888'}44`}}>
+                          {e.cat||'—'}
+                        </span>
+                      </td>
+                      <td style={{padding:'7px 12px',fontSize:12}}>
+                        {veh ? <span style={{display:'flex',alignItems:'center',gap:4}}>{renderIcon(veh.icon,16)} {veh.name}</span> : <span style={{color:'var(--text3)'}}>—</span>}
+                      </td>
+                      <td style={{padding:'7px 12px',textAlign:'right',fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--red)'}}>
+                        € {fmtIT(e.amount||0,2)}
+                      </td>
+                      <td style={{padding:'7px 12px'}}>
+                        {e.payMethod ? (
+                          <span style={{fontSize:10,padding:'2px 7px',borderRadius:8,fontWeight:700,
+                            background: e.payMethod==='cash'?'var(--gold-l)': e.payMethod==='carta'?'var(--blue-l)':'var(--surface2)',
+                            color: e.payMethod==='cash'?'var(--gold)': e.payMethod==='carta'?'var(--blue)':'var(--text3)'}}>
+                            {e.payMethod==='cash'?'💵 Cash': e.payMethod==='carta'?'💳 Carta': e.payMethod==='bonifico'?'🏦 Bonifico':'• Altro'}
+                          </span>
+                        ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>}
+                      </td>
+                      <td style={{padding:'7px 12px'}}>
+                        {e.reconRef ? (
+                          <div style={{display:'flex',alignItems:'center',gap:4}}>
+                            <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,fontWeight:700,
+                              background:e.reconType==='cash'?'var(--gold-l)':'var(--blue-l)',
+                              color:e.reconType==='cash'?'var(--gold)':'var(--blue)'}}>
+                              {e.reconType==='cash'?'💵':'🏦'}
+                            </span>
+                            <span style={{fontSize:10,color:'var(--text3)',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                              title={e.reconRef}>{e.reconRef.slice(0,30)}</span>
+                            <button className="btn btn-ghost" style={{padding:'1px 4px',fontSize:10,color:'var(--text3)'}}
+                              onClick={()=>updateVehExpense(e.id,{reconRef:null,reconType:null})}>×</button>
+                          </div>
+                        ) : (
+                          <button className="btn btn-ghost"
+                            style={{fontSize:10,padding:'2px 7px',border:'1px solid var(--gold)',color:'var(--gold)',borderRadius:4}}
+                            onClick={()=>setReconExp(e)}>
+                            <Link size={9}/> Collega
+                          </button>
+                        )}
+                      </td>
+                      <td style={{padding:'5px 8px',textAlign:'center'}}>
+                        <button className="btn btn-ghost"
+                          style={{fontSize:11,padding:'2px 6px',color:(e.attachments?.length>0)?'var(--accent)':'var(--text3)',
+                            position:'relative'}}
+                          onClick={()=>setAttExp(e)}
+                          title={e.attachments?.length>0 ? `${e.attachments.length} allegato/i` : 'Aggiungi allegati'}>
+                          📎{e.attachments?.length>0 && <span style={{
+                            position:'absolute',top:-4,right:-4,fontSize:9,background:'var(--accent)',
+                            color:'#fff',borderRadius:8,padding:'0 4px',fontWeight:700,minWidth:14,textAlign:'center'}}>
+                            {e.attachments.length}
+                          </span>}
+                        </button>
+                      </td>
+                      <td style={{padding:'5px 6px'}}>
+                        <button className="btn btn-ghost" style={{color:'var(--text3)',padding:'2px 5px'}}
+                          title="Modifica" onClick={()=>setEditExp(e)}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
+                      </td>
+                      <td style={{padding:'5px 6px'}}>
+                        <button className="btn btn-ghost" style={{color:'var(--red)',padding:'2px 5px'}}
+                          onClick={()=>{if(confirm('Eliminare spesa?'))deleteVehExpense(e.id)}}>
+                          <Trash2 size={11}/>
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+                <tr style={{background:'var(--surface2)',fontWeight:700}}>
+                  <td colSpan={4} style={{padding:'8px 12px',fontSize:12}}>Totale ({rows.length})</td>
+                  <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)'}}>
+                    € {fmtIT(total,2)}
+                  </td>
+                  <td colSpan={4}/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {reconExp && (
+        <VehReconModal
+          expense={reconExp}
+          transactions={transactions}
+          cashEntries={cashEntries}
+          payMethod={reconExp.payMethod}
+          allVehExpenses={allExpenses}
+          onSave={ref=>{updateVehExpense(reconExp.id,{reconRef:ref.label.slice(0,80),reconType:ref.type,reconPartial:ref.partial||false,reconUsedAmount:ref.usedAmount||null});setReconExp(null)}}
+          onClose={()=>setReconExp(null)}
+        />
+      )}
+
+      {attExp && (
+        <AttachmentsModal
+          expense={attExp}
+          onClose={()=>setAttExp(null)}
+          onDelete={async (att,i)=>{
+            if(!confirm(`Eliminare "${att.name}"?`)) return
+            if(att.path) await deleteExpenseFile(att.path)
+            const newAtts = (attExp.attachments||[]).filter((_,j)=>j!==i)
+            updateVehExpense(attExp.id, {attachments: newAtts})
+            setAttExp({...attExp, attachments: newAtts})
+          }}
+        />
+      )}
+
+      {editExp && (
+        <AddExpenseModal
+          vehicles={vehicles}
+          expense={editExp}
+          onClose={()=>setEditExp(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── KPI strip ─────────────────────────────────────────────
+function KPIStrip({ vehicles, allExpenses }) {
+  const now = new Date()
+  const totalYTD = allExpenses.filter(e=>(e.date||'').startsWith(now.getFullYear().toString())).reduce((s,e)=>s+(e.amount||0),0)
+  const totalAll = allExpenses.reduce((s,e)=>s+(e.amount||0),0)
+  const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+  const totalThisM = allExpenses.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
+  const topCat = (() => {
+    const byCat = {}
+    allExpenses.filter(e=>(e.date||'').startsWith(now.getFullYear().toString())).forEach(e=>{ byCat[e.cat]=(byCat[e.cat]||0)+(e.amount||0) })
+    const sorted = Object.entries(byCat).sort((a,b)=>b[1]-a[1])
+    return sorted[0] ? `${sorted[0][0]} (€${fmtIT(Math.round(sorted[0][1]),0)})` : '—'
+  })()
+
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}}>
+      {[
+        ['Spesa mese corrente', `€ ${fmtIT(Math.round(totalThisM),0)}`, 'var(--text)'],
+        ['Spesa YTD', `€ ${fmtIT(Math.round(totalYTD),0)}`, 'var(--accent)'],
+        ['Spesa totale storico', `€ ${fmtIT(Math.round(totalAll),0)}`, 'var(--text2)'],
+        ['Top categoria YTD', topCat, 'var(--blue)'],
+      ].map(([l,v,c])=>(
+        <div key={String(l)} className="card" style={{padding:'12px 16px'}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:4}}>{l}</div>
+          <div style={{fontSize:16,fontWeight:800,color:String(c),fontFamily:'var(--font-mono)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────
+export default function VeicoliRegistroPage() {
+  const { vehicles, vehExpenses, transactions, cashEntries, deleteVehicle } = useStore()
+  const [showAddVeh,  setShowAddVeh]  = useState(false)
+  const [editVeh,     setEditVeh]     = useState(null)
+  const [showAddExp,  setShowAddExp]  = useState(false)
+  const [preVehId,    setPreVehId]    = useState('')
+
+  function openAddExpense(vehicleId = '') {
+    setPreVehId(vehicleId)
+    setShowAddExp(true)
+  }
+
+  if (vehicles.length === 0) return (
+    <div style={{textAlign:'center',padding:'48px 32px'}}>
+      <div style={{fontSize:48,marginBottom:16}}>🚗</div>
+      <div style={{fontSize:18,fontWeight:700,marginBottom:8}}>Nessun veicolo</div>
+      <div style={{fontSize:13,color:'var(--text3)',marginBottom:20}}>Aggiungi i tuoi veicoli per tracciare spese e manutenzione.</div>
+      <button className="btn btn-primary" onClick={()=>setShowAddVeh(true)}><Plus size={14}/> Aggiungi Veicolo</button>
+      {showAddVeh && <VehicleModal onClose={()=>setShowAddVeh(false)}/>}
+    </div>
+  )
+
+  return (
+    <div>
+      {/* Page header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+        <div>
+          <h1 style={{fontFamily:'var(--font-serif)',fontSize:24,fontWeight:600,margin:0}}>🚗 Registro Veicoli</h1>
+          <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Gestisci spese, manutenzioni e scadenze</div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-secondary" style={{fontSize:12}} onClick={()=>openAddExpense()}>
+            <Plus size={12}/> Spesa
+          </button>
+          <button className="btn btn-primary" style={{fontSize:12}} onClick={()=>setShowAddVeh(true)}>
+            <Plus size={12}/> Veicolo
+          </button>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      {vehExpenses.length > 0 && <KPIStrip vehicles={vehicles} allExpenses={vehExpenses}/>}
+
+      {/* Vehicle chips */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:24}}>
+        {vehicles.map(v=>(
+          <VehicleChip key={v.id} vehicle={v}
+            onEdit={()=>setEditVeh(v)}
+            onDelete={deleteVehicle}
+          />
+        ))}
+      </div>
+
+      {/* Charts */}
+      {vehExpenses.length > 0 && (
+        <VehicleCharts vehicles={vehicles} allExpenses={vehExpenses}/>
+      )}
+
+      {/* All expenses table */}
+      <AllExpensesTable
+        vehicles={vehicles}
+        allExpenses={vehExpenses}
+        transactions={transactions}
+        cashEntries={cashEntries}
+        onAddExpense={()=>openAddExpense()}
+      />
+
+      {showAddVeh && <VehicleModal onClose={()=>setShowAddVeh(false)}/>}
+      {editVeh && <VehicleModal vehicle={editVeh} onClose={()=>setEditVeh(null)}/>}
+      {showAddExp && <AddExpenseModal vehicles={vehicles} preVehicleId={preVehId} onClose={()=>setShowAddExp(false)}/>}
+    </div>
+  )
+}

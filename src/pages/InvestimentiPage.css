@@ -1,0 +1,11 @@
+.inv-page  { display:flex; flex-direction:column; gap:16px; }
+.inv-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.inv-title { font-size:22px; font-weight:800; margin:0 0 2px; }
+.inv-kpis  { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.inv-kpi   { padding:14px 18px; }
+.inv-kpi-label { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text3); margin-bottom:5px; }
+.inv-kpi-value { font-size:20px; font-weight:800; font-family:var(--font-serif); }
+.inv-kpi-sub   { font-size:11px; color:var(--text3); margin-top:3px; }
+.inv-charts-row{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.inv-row:hover { background:var(--surface2); }
+@media(max-width:900px){ .inv-kpis{grid-template-columns:repeat(2,1fr);} .inv-charts-row{grid-template-columns:1fr;} }

@@ -1,0 +1,40 @@
+.scd-page { padding: 28px 32px; max-width: 900px; }
+.scd-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; }
+.scd-title  { font-family:var(--font-serif); font-size:26px; font-weight:600; }
+.scd-sub    { font-size:13px; color:var(--text3); margin-top:3px; }
+
+.scd-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px; }
+.scd-kpi  { padding:14px 16px; display:flex; align-items:center; gap:12px; }
+.scd-kpi-label { font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text3); margin-bottom:3px; }
+.scd-kpi-val   { font-size:22px; font-weight:700; font-family:var(--font-mono); }
+.scd-kpi-dot   { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+.scd-kpi-dot.overdue { background:var(--red); }
+.scd-kpi-dot.ok      { background:var(--green); }
+
+.scd-filters { display:flex; gap:6px; margin-bottom:16px; }
+.scd-filter  { padding:6px 14px; border:1px solid var(--border); border-radius:20px; background:var(--surface); font-size:12px; font-weight:600; cursor:pointer; color:var(--text3); font-family:var(--font-sans); transition:all .12s; }
+.scd-filter.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+.scd-list { padding:0; overflow:hidden; }
+
+.scd-row { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--border); transition:background .1s; }
+.scd-row:last-child { border-bottom:none; }
+.scd-row:hover { background:var(--surface2); }
+
+.scd-check { background:none; border:none; cursor:pointer; padding:2px; display:flex; align-items:center; }
+.scd-info  { flex:1; min-width:0; }
+.scd-name  { font-size:14px; font-weight:600; }
+.scd-meta  { font-size:11px; color:var(--text3); margin-top:2px; }
+.scd-right { display:flex; align-items:center; gap:10px; }
+.scd-amount { font-family:var(--font-mono); font-size:14px; font-weight:700; }
+
+.scd-badge { padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }
+.scd-badge-paid    { background:var(--green-l); color:var(--green); }
+.scd-badge-ok      { background:var(--blue-l);  color:var(--blue); }
+.scd-badge-soon    { background:var(--gold-l);  color:var(--gold); }
+.scd-badge-urgent  { background:var(--red-l);   color:var(--red); }
+.scd-badge-overdue { background:var(--red); color:#fff; }
+
+.scd-row.paid { opacity:.55; }
+
+.scd-empty { text-align:center; padding:60px 24px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); }

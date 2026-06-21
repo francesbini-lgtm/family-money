@@ -1,0 +1,60 @@
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000; backdrop-filter: blur(3px);
+  animation: fadein .15s ease;
+}
+
+@keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
+
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  animation: slidein .15s ease;
+  overflow: hidden;
+}
+
+@keyframes slidein { from { transform: translateY(12px); opacity:.6 } to { transform: none; opacity:1 } }
+
+.modal-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-family: var(--font-serif); font-size: 17px; font-weight: 600;
+}
+
+.modal-close { padding: 4px 6px; }
+
+.modal-body { padding: 18px 22px; }
+
+.modal-ftr {
+  display: flex; gap: 8px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+}
+
+/* Form helpers */
+.form-row { margin-bottom: 14px; }
+
+.form-lbl {
+  display: block; font-size: 11px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text3); margin-bottom: 5px;
+}
+
+.form-inp {
+  width: 100%; padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px; background: var(--surface); color: var(--text);
+  outline: none; font-family: var(--font-sans);
+  transition: border-color .15s;
+}
+
+.form-inp:focus { border-color: var(--accent); }

@@ -1,0 +1,741 @@
+import { useStore } from '../store/useStore'
+import { useFinancials } from '../hooks/useFinancials'
+import { IncomeExpenseChart, SavingsChart, CategoryDonut } from '../components/Charts'
+import { TrendingUp, TrendingDown, PiggyBank, Percent, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import './DashboardPage.css'
+import { fmtIT } from '../utils/format'
+import { useMemo, useState } from 'react'
+import { CATS } from '../data/categories'
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
+  CartesianGrid, Tooltip, BarChart, Bar,
+  PieChart, Pie, Cell, Legend
+} from 'recharts'
+
+const MONTHS_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+// ── Saldo Chart ───────────────────────────────────────────
+function SaldoChart({ transactions }) {
+  const [view, setView] = useState('M')
+  const [year, setYear] = useState('all')
+
+  // Excluded transactions don't count — except _forcedBalance (tappo) which must always be included
+  const activeTxs = useMemo(() =>
+    transactions.filter(t => !t.excluded || t._forcedBalance)
+  , [transactions])
+
+  const sorted = useMemo(() =>
+    [...activeTxs].sort((a,b)=>(a._effDate||a.date||'').localeCompare(b._effDate||b.date||''))
+  , [activeTxs])
+
+  const allYears = useMemo(() => {
+    const yrs = new Set(sorted.map(t=>(t._effDate||(t._effDate||t.date||'')).slice(0,4)).filter(Boolean))
+    return [...yrs].sort()
+  }, [sorted])
+
+  const chartData = useMemo(() => {
+    const buckets = {}
+    sorted.forEach(tx => {
+      const d = (tx._effDate||tx.date||''); if (!d) return
+      const yr=d.slice(0,4), mo=d.slice(5,7), q=Math.ceil(parseInt(mo)/3)
+      const key = view==='M' ? `${yr}-${mo}` : view==='Q' ? `${yr}-Q${q}` : yr
+      if (!buckets[key]) buckets[key]={net:0}
+      buckets[key].net += tx.amount
+    })
+    const keys = Object.keys(buckets).sort()
+    let running = 0
+    const full = keys.map(k => {
+      running += buckets[k].net
+      const label = view==='M'
+        ? MONTHS_SHORT[parseInt(k.slice(5,7))-1]+' '+k.slice(2,4)
+        : view==='Q' ? k.replace(/(\d{4})-/,'$1 ') : k
+      return { label, saldo: Math.round(running*100)/100, key:k }
+    })
+    return year==='all' ? full : full.filter(d=>d.key.startsWith(year))
+  }, [sorted, view, year])
+
+  const minVal = Math.min(...chartData.map(d=>d.saldo), 0)
+  const maxVal = Math.max(...chartData.map(d=>d.saldo), 0)
+  const pad = (maxVal - minVal) * 0.08
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
+        <div style={{display:'flex',gap:4}}>
+          {[['M','Mensile'],['Q','Trimestrale'],['A','Annuale']].map(([v,l])=>(
+            <button key={v} onClick={()=>setView(v)} style={{
+              padding:'3px 10px',borderRadius:14,border:`1px solid ${view===v?'var(--accent)':'var(--border)'}`,
+              background:view===v?'var(--accent-l)':'var(--surface)',
+              color:view===v?'var(--accent)':'var(--text3)',
+              fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',
+            }}>{l}</button>
+          ))}
+        </div>
+        <div style={{display:'flex',gap:4,marginLeft:8}}>
+          {['all',...allYears].map(y=>(
+            <button key={y} onClick={()=>setYear(y)} style={{
+              padding:'3px 10px',borderRadius:14,
+              border:`1px solid ${year===y?'var(--blue)':'var(--border)'}`,
+              background:year===y?'rgba(59,130,246,.1)':'var(--surface)',
+              color:year===y?'var(--blue)':'var(--text3)',
+              fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',
+            }}>{y==='all'?'Tutti':y}</button>
+          ))}
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <AreaChart data={chartData} margin={{top:8,right:4,bottom:0,left:4}}>
+          <defs>
+            <linearGradient id="saldoGradDB" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.2}/>
+              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+          <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}
+            interval={chartData.length>24?Math.floor(chartData.length/12):0}/>
+          <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={58}
+            tickFormatter={v=>Math.abs(v)>=1000?`€${(v/1000).toFixed(0)}K`:`€${v}`}
+            domain={[minVal-pad, maxVal+pad]}/>
+          <Tooltip formatter={v=>[`€ ${fmtIT(v,2)}`,'Saldo']}
+            contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
+          <Area type="monotone" dataKey="saldo" stroke="#3b82f6" strokeWidth={2}
+            fill="url(#saldoGradDB)" dot={false} activeDot={{r:4,fill:'#3b82f6'}}/>
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ── Custom Pie label ─────────────────────────────────────
+function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) {
+  if (percent < 0.04) return null
+  const RADIAN = Math.PI / 180
+  const r  = innerRadius + (outerRadius - innerRadius) * 0.55
+  const x  = cx + r * Math.cos(-midAngle * RADIAN)
+  const y  = cy + r * Math.sin(-midAngle * RADIAN)
+  return (
+    <text x={x} y={y} fill="#fff" textAnchor="middle" dominantBaseline="central"
+      style={{fontSize:10,fontWeight:700,pointerEvents:'none'}}>
+      {percent>=0.08 ? name.split(' ')[0] : ''}
+    </text>
+  )
+}
+
+// ── Spese per categoria — Pie Chart, L1+L2 toggle, no Entrate ──
+function SpeseCatChart({ transactions }) {
+  const [showL2, setShowL2]     = useState(false)
+  const [period, setPeriod]     = useState('M')
+  const [activeIdx, setActiveIdx] = useState(null)
+  const now = new Date()
+
+  const getMonths = () => {
+    const months = []
+    for (let i=5;i>=0;i--) {
+      const d=new Date(now.getFullYear(),now.getMonth()-i,1)
+      months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
+    }
+    return months
+  }
+
+  const catData = useMemo(() => {
+    const months = getMonths()
+    return Object.entries(CATS)
+      .filter(([name]) => name!=='Entrate' && name!=='Non Categorizzato')
+      .map(([name, info]) => {
+        const txs = transactions.filter(t=>!t.excluded&&t.amount<0&&t.cat1===name)
+        const periodTxs = period==='M'
+          ? txs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(months[5]))
+          : period==='Q'
+            ? txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=months[months.length-3])
+            : txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=months[0])
+        const total = Math.abs(periodTxs.reduce((s,t)=>s+t.amount,0))
+        const l2 = {}
+        periodTxs.forEach(t=>{ const k=t.cat2||'Altro'; l2[k]=(l2[k]||0)+Math.abs(t.amount) })
+        const l2list = Object.entries(l2).sort((a,b)=>b[1]-a[1])
+        return { name, color:info.color, total, l2list }
+      })
+      .filter(d=>d.total>0)
+      .sort((a,b)=>b.total-a.total)
+  }, [transactions, period])
+
+  // When L2 is on, expand each L1 slice into its L2 children
+  const pieData = useMemo(() => {
+    if (!showL2) return catData.map(d=>({ name:d.name, value:d.total, color:d.color, parent:null }))
+    const out = []
+    catData.forEach(d => {
+      if (d.l2list.length === 0) {
+        out.push({ name:d.name, value:d.total, color:d.color, parent:d.name })
+      } else {
+        d.l2list.forEach(([s,v], i) => {
+          // Shade the color slightly per L2 entry
+          out.push({ name:s, value:v, color:d.color, parent:d.name })
+        })
+      }
+    })
+    return out
+  }, [catData, showL2])
+
+  const totalSpese = catData.reduce((s,d)=>s+d.total,0)
+  const activeCat  = activeIdx !== null ? pieData[activeIdx] : null
+
+  const periodLabel = period==='M' ? MONTHS_SHORT[now.getMonth()]+' '+String(now.getFullYear()).slice(2)
+    : period==='Q' ? 'Ultimi 3 mesi' : 'Ultimi 6 mesi'
+
+  const btnStyle = (active) => ({
+    padding:'3px 10px',borderRadius:14,
+    border:`1px solid ${active?'var(--accent)':'var(--border)'}`,
+    background:active?'var(--accent-l)':'var(--surface)',
+    color:active?'var(--accent)':'var(--text3)',
+    fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',
+  })
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div style={{display:'flex',gap:6,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        {[['M','Mese'],['Q','Trimestre'],['A','6 Mesi']].map(([v,l])=>(
+          <button key={v} onClick={()=>{setPeriod(v);setActiveIdx(null)}} style={btnStyle(period===v)}>{l}</button>
+        ))}
+        <button onClick={()=>{setShowL2(s=>!s);setActiveIdx(null)}} style={{...btnStyle(showL2),marginLeft:'auto'}}>
+          {showL2?'▾ L2':'▸ L2'}
+        </button>
+      </div>
+
+      {/* Pie + legend layout */}
+      <div style={{display:'flex',gap:24,alignItems:'flex-start',flexWrap:'wrap'}}>
+
+        {/* Pie */}
+        <div style={{position:'relative',flexShrink:0}}>
+          <ResponsiveContainer width={240} height={240}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%" cy="50%"
+                innerRadius={showL2?55:65}
+                outerRadius={showL2?110:110}
+                dataKey="value"
+                labelLine={false}
+                label={!showL2 ? PieLabel : false}
+                onMouseEnter={(_,idx)=>setActiveIdx(idx)}
+                onMouseLeave={()=>setActiveIdx(null)}
+                onClick={(_,idx)=>setActiveIdx(activeIdx===idx?null:idx)}
+                strokeWidth={1}
+                stroke="var(--surface)"
+              >
+                {pieData.map((entry,idx)=>(
+                  <Cell key={idx} fill={entry.color}
+                    opacity={activeIdx===null||activeIdx===idx?1:0.45}
+                    style={{cursor:'pointer',transition:'opacity .15s'}}
+                  />
+                ))}
+              </Pie>
+              <Tooltip
+                formatter={(value, name) => [`€ ${fmtIT(value,0)}`, name]}
+                contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8,background:'var(--surface)'}}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+          {/* Center label */}
+          <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
+            textAlign:'center',pointerEvents:'none'}}>
+            {activeCat ? (
+              <>
+                <div style={{fontSize:11,color:'var(--text3)',fontWeight:600,lineHeight:1.2}}>{activeCat.name}</div>
+                <div style={{fontSize:15,fontWeight:800,color:activeCat.color}}>€ {fmtIT(activeCat.value,0)}</div>
+                {activeCat.parent && activeCat.parent!==activeCat.name &&
+                  <div style={{fontSize:9,color:'var(--text3)'}}>{activeCat.parent}</div>}
+              </>
+            ) : (
+              <>
+                <div style={{fontSize:10,color:'var(--text3)',fontWeight:600}}>{periodLabel}</div>
+                <div style={{fontSize:15,fontWeight:800,color:'var(--text)'}}>€ {fmtIT(totalSpese,0)}</div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Legend list */}
+        <div style={{flex:1,minWidth:180,display:'flex',flexDirection:'column',gap:0,maxHeight:240,overflowY:'auto'}}>
+          {(showL2 ? catData : catData).map((d,i)=>(
+            <div key={d.name}>
+              <div style={{display:'flex',alignItems:'center',gap:7,padding:'5px 4px',borderRadius:6,
+                cursor:'pointer',background:activeIdx!==null&&pieData[activeIdx]?.parent===d.name?d.color+'12':'transparent',
+                transition:'background .12s'}}
+                onMouseEnter={()=>{
+                  const idx = pieData.findIndex(p=>p.name===d.name||(p.parent===d.name&&!showL2))
+                  setActiveIdx(idx>=0?idx:null)
+                }}
+                onMouseLeave={()=>setActiveIdx(null)}
+              >
+                <span style={{width:9,height:9,borderRadius:'50%',background:d.color,flexShrink:0}}/>
+                <span style={{fontSize:12,flex:1,color:'var(--text2)',fontWeight:600}}>{d.name}</span>
+                <span style={{fontSize:12,fontWeight:800,color:d.color,fontFamily:'var(--font-mono)'}}>
+                  € {fmtIT(d.total,0)}
+                </span>
+                <span style={{fontSize:10,color:'var(--text3)',marginLeft:4,minWidth:30,textAlign:'right'}}>
+                  {totalSpese>0?Math.round(d.total/totalSpese*100):0}%
+                </span>
+              </div>
+              {showL2 && d.l2list.length>0 && (
+                <div style={{marginLeft:16,marginBottom:2}}>
+                  {d.l2list.map(([s,v])=>(
+                    <div key={s} style={{display:'flex',alignItems:'center',gap:7,padding:'2px 4px'}}>
+                      <span style={{width:5,height:5,borderRadius:'50%',background:d.color+'99',flexShrink:0}}/>
+                      <span style={{fontSize:11,flex:1,color:'var(--text3)'}}>{s}</span>
+                      <span style={{fontSize:11,color:d.color,fontFamily:'var(--font-mono)'}}>€ {fmtIT(v,0)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── KPI card ──────────────────────────────────────────────
+function KPICard({ icon, label, value, sub, color, delta, deltaLabel }) {
+  const isPos = delta > 0
+  const isNeg = delta < 0
+  return (
+    <div className="kpi-card">
+      <div className="kpi-icon" style={{ background: `${color}18`, color }}>{icon}</div>
+      <div className="kpi-body">
+        <div className="kpi-label">{label}</div>
+        <div className="kpi-value" style={{ color }}>{value}</div>
+        <div className="kpi-sub">
+          {delta !== null && delta !== undefined ? (
+            <span className={'kpi-delta ' + (isPos ? 'pos' : isNeg ? 'neg' : 'neu')}>
+              {isPos ? <ArrowUpRight size={11}/> : isNeg ? <ArrowDownRight size={11}/> : null}
+              {Math.abs(delta)}% {deltaLabel || 'vs mese scorso'}
+            </span>
+          ) : (
+            <span style={{ color: 'var(--text3)' }}>{sub}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── AI Insights ──────────────────────────────────────────
+function AIInsights({ transactions, catList, monthly }) {
+  const now    = new Date()
+  const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+  const prevYM = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
+  const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
+
+  if (!transactions.length) return null
+
+  const thisTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM))
+  const prevTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM))
+  const thisInc  = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const thisExp  = Math.abs(thisTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  const prevInc  = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const prevExp  = Math.abs(prevTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  const thisSav  = thisInc - thisExp
+  const prevSav  = prevInc - prevExp
+  const thisSavRate = thisInc > 0 ? Math.round(thisSav/thisInc*100) : null
+  const prevSavRate = prevInc > 0 ? Math.round(prevSav/prevInc*100) : null
+
+  // Avg monthly savings last 6 months
+  const avg6m = (() => {
+    let total=0, count=0
+    for (let i=1; i<=6; i++) {
+      const d  = new Date(now.getFullYear(), now.getMonth()-i, 1)
+      const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+      const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
+      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      if (inc>0) { total += inc-exp; count++ }
+    }
+    return count>0 ? total/count : null
+  })()
+
+  // Category growth vs prev month
+  const catSpendThis={}, catSpendPrev={}
+  thisTxs.filter(t=>t.amount<0).forEach(t=>{ catSpendThis[t.cat1]=(catSpendThis[t.cat1]||0)+Math.abs(t.amount) })
+  prevTxs.filter(t=>t.amount<0).forEach(t=>{ catSpendPrev[t.cat1]=(catSpendPrev[t.cat1]||0)+Math.abs(t.amount) })
+  const catGrowth = Object.entries(catSpendThis)
+    .map(([cat,amt])=>({ cat, amt, prev: catSpendPrev[cat]||0, delta: catSpendPrev[cat]?Math.round((amt-catSpendPrev[cat])/catSpendPrev[cat]*100):null }))
+    .filter(c=>c.prev>0&&c.delta!==null)
+    .sort((a,b)=>b.delta-a.delta)
+  const fastestGrowing   = catGrowth[0]
+  const fastestShrinking = catGrowth[catGrowth.length-1]
+
+  // Largest single expense this month
+  const largestExp = [...thisTxs].filter(t=>t.amount<0).sort((a,b)=>a.amount-b.amount)[0]
+
+  // Projection to end of month
+  const dayOfMonth  = now.getDate()
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()
+  const dailyRate   = dayOfMonth > 3 ? thisExp/dayOfMonth : 0
+  const projectedExp = Math.round(dailyRate * daysInMonth)
+  const projectedSav = Math.round(thisInc - projectedExp)
+
+  // Negative cashflow months this year
+  const negMonths = (() => {
+    let count=0
+    for (let m=0; m<now.getMonth(); m++) {
+      const ym = `${now.getFullYear()}-${String(m+1).padStart(2,'0')}`
+      const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
+      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      if (inc>0 && inc<exp) count++
+    }
+    return count
+  })()
+
+  // Best savings month this year
+  const bestMonth = (() => {
+    let best=null, bestAmt=-Infinity
+    for (let m=0; m<now.getMonth(); m++) {
+      const ym = `${now.getFullYear()}-${String(m+1).padStart(2,'0')}`
+      const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
+      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const sav = inc-exp
+      if (inc>0 && sav>bestAmt) { bestAmt=sav; best=MONTHS_IT[m] }
+    }
+    return { name:best, amt:bestAmt }
+  })()
+
+  // Dining/ristoranti trend
+  const diningThis = thisTxs.filter(t=>t.amount<0&&(t.cat1==='Tempo Libero'||(t.cat2||'').toLowerCase().includes('ristoran')||(t.cat2||'').toLowerCase().includes('bar')||(t.cat2||'').toLowerCase().includes('cena'))).reduce((s,t)=>s+Math.abs(t.amount),0)
+  const diningPrev = prevTxs.filter(t=>t.amount<0&&(t.cat1==='Tempo Libero'||(t.cat2||'').toLowerCase().includes('ristoran')||(t.cat2||'').toLowerCase().includes('bar')||(t.cat2||'').toLowerCase().includes('cena'))).reduce((s,t)=>s+Math.abs(t.amount),0)
+  const diningDelta = diningPrev>0 ? Math.round((diningThis-diningPrev)/diningPrev*100) : null
+
+  // Savings rate change
+  const savRateDelta = thisSavRate!==null && prevSavRate!==null ? thisSavRate-prevSavRate : null
+
+  const insights = []
+
+  // 1. Risparmio vs media
+  if (avg6m!==null) {
+    const vsAvg = Math.round((thisSav-avg6m)/Math.abs(avg6m||1)*100)
+    insights.push({ icon:'🐷', title:'Risparmio vs media 6 mesi',
+      text: vsAvg>=0 ? `+${vsAvg}% sopra la media` : `${vsAvg}% sotto la media`,
+      sub: `Media: € ${fmtIT(Math.round(avg6m),0)} · Questo mese: ${thisSav>=0?'+':''}€ ${fmtIT(Math.round(thisSav),0)}`,
+      color: vsAvg>=5?'var(--green)':vsAvg>=-10?'var(--gold)':'var(--red)' })
+  }
+
+  // 2. Tasso risparmio
+  if (thisSavRate!==null) {
+    const msg = thisSavRate>=20?'Eccellente — sopra soglia 20%':thisSavRate>=10?'Accettabile — obiettivo 20%':'Sotto il livello consigliato'
+    const color = thisSavRate>=20?'var(--green)':thisSavRate>=10?'var(--gold)':'var(--red)'
+    insights.push({ icon:'💰', title:'Tasso risparmio mese',
+      text:`${thisSavRate}% del reddito risparmiato`,
+      sub: savRateDelta!==null ? `${savRateDelta>=0?'+':''}${savRateDelta}pp vs mese scorso · ${msg}` : msg,
+      color })
+  }
+
+  // 3. Proiezione fine mese
+  if (thisInc>0 && dayOfMonth>5) {
+    insights.push({ icon:'📈', title:'Proiezione fine mese',
+      text: projectedSav>=0 ? `Risparmio previsto: +€ ${fmtIT(projectedSav,0)}` : `Rischio deficit: −€ ${fmtIT(Math.abs(projectedSav),0)}`,
+      sub: `Ritmo attuale: € ${fmtIT(Math.round(dailyRate),0)}/giorno · ${daysInMonth-dayOfMonth} giorni rimanenti`,
+      color: projectedSav>=0?'var(--blue)':'var(--red)' })
+  }
+
+  // 4. Categoria in maggiore crescita
+  if (fastestGrowing && fastestGrowing.delta>15) {
+    insights.push({ icon:'⚠️', title:'Categoria in crescita',
+      text:`${fastestGrowing.cat} +${fastestGrowing.delta}% vs mese scorso`,
+      sub:`€ ${fmtIT(Math.round(fastestGrowing.prev),0)} → € ${fmtIT(Math.round(fastestGrowing.amt),0)}`,
+      color: fastestGrowing.delta>40?'var(--red)':'var(--gold)' })
+  }
+
+  // 5. Categoria in calo
+  if (fastestShrinking && fastestShrinking.delta<-15) {
+    insights.push({ icon:'✂️', title:'Categoria in calo',
+      text:`${fastestShrinking.cat} ${fastestShrinking.delta}% vs mese scorso`,
+      sub:`€ ${fmtIT(Math.round(fastestShrinking.prev),0)} → € ${fmtIT(Math.round(fastestShrinking.amt),0)}`,
+      color:'var(--green)' })
+  }
+
+  // 6. Spesa più alta del mese
+  if (largestExp) {
+    insights.push({ icon:'💸', title:'Spesa più alta del mese',
+      text: largestExp.descAI||(largestExp.description||'').slice(0,40)||'—',
+      sub:`€ ${fmtIT(Math.abs(largestExp.amount),2)} · ${largestExp.cat1}${largestExp.cat2?' › '+largestExp.cat2:''}`,
+      color:'var(--text2)' })
+  }
+
+  // 7. Ristoranti/Cene trend
+  if (diningThis>0||diningPrev>0) {
+    insights.push({ icon:'🍽️', title:'Cene & Ristoranti',
+      text: diningDelta!==null ? `${diningDelta>=0?'+':''}${diningDelta}% vs mese scorso` : `€ ${fmtIT(Math.round(diningThis),0)} questo mese`,
+      sub: diningThis>0 ? `Totale: € ${fmtIT(Math.round(diningThis),0)}` : null,
+      color: diningDelta===null||diningDelta<=0?'var(--green)':diningDelta>20?'var(--red)':'var(--gold)' })
+  }
+
+  // 8. Mesi negativi
+  if (now.getMonth()>0) {
+    insights.push({ icon: negMonths===0?'🏅':'📉', title:`Mesi in deficit — ${now.getFullYear()}`,
+      text: negMonths===0 ? 'Nessun mese in rosso quest\'anno!' : `${negMonths} ${negMonths===1?'mese':' mesi'} in rosso su ${now.getMonth()} chiusi`,
+      sub: negMonths===0?'Ottima gestione annuale':'Mesi in cui uscite > entrate',
+      color: negMonths===0?'var(--green)':negMonths>=3?'var(--red)':'var(--gold)' })
+  }
+
+  // 9. Miglior mese anno
+  if (bestMonth.name && bestMonth.amt>0) {
+    insights.push({ icon:'🏆', title:`Miglior mese — ${now.getFullYear()}`,
+      text:`${bestMonth.name}: +€ ${fmtIT(bestMonth.amt,0)} risparmiati`,
+      sub:'Il mese con il risparmio più alto dell\'anno',
+      color:'var(--green)' })
+  }
+
+  if (!insights.length) return null
+
+  return (
+    <div style={{marginBottom:20}}>
+      <div style={{fontSize:14,fontWeight:700,marginBottom:12,display:'flex',alignItems:'center',gap:7}}>
+        <span style={{fontSize:16}}>✨</span> AI Insights
+        <span style={{fontSize:11,color:'var(--text3)',fontWeight:500}}>· {new Date().toLocaleDateString('it-IT')}</span>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(270px,1fr))',gap:12}}>
+        {insights.map((ins,i)=>(
+          <div key={i} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 16px',borderLeft:`3px solid ${ins.color}`}}>
+            <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+              <span style={{fontSize:20,lineHeight:1}}>{ins.icon}</span>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:2}}>{ins.title}</div>
+                <div style={{fontSize:13,fontWeight:600,lineHeight:1.4,color:'var(--text)'}}>{ins.text}</div>
+                {ins.sub && <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>{ins.sub}</div>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Empty state ───────────────────────────────────────────
+function EmptyState() {
+  return (
+    <div className="dash-empty">
+      <div className="dash-empty-icon">💎</div>
+      <div className="dash-empty-title">Benvenuto in Family Money</div>
+      <div className="dash-empty-sub">
+        Importa il tuo primo CSV dalla sezione <strong>Transazioni</strong> per vedere
+        la dashboard popolata con i tuoi dati reali.
+      </div>
+      <div className="dash-empty-steps">
+        <div className="dash-empty-step">
+          <span className="step-num">1</span>
+          Vai in <strong>Transazioni</strong>
+        </div>
+        <div className="dash-empty-step">
+          <span className="step-num">2</span>
+          Clicca <strong>Importa CSV</strong>
+        </div>
+        <div className="dash-empty-step">
+          <span className="step-num">3</span>
+          Carica il file della tua banca
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Dashboard ─────────────────────────────────────────────
+export default function DashboardPage() {
+  const {
+    thisIncome, thisExpense, savingsRate, cashflow,
+    deltaIncome, deltaExpense,
+    monthly, catList,
+    ytdIncome, ytdExpense,
+    ytdCatList,
+    fmt, fmtK,
+    isEmpty,
+  } = useFinancials()
+  const { transactions } = useStore()
+
+  if (isEmpty) return (
+    <div className="dash-page"><EmptyState /></div>
+  )
+
+  const now = new Date()
+  const monthName = now.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
+
+  return (
+    <div className="dash-page">
+
+      {/* Header */}
+      <div className="dash-header">
+        <div>
+          <h1 className="dash-title">🏠 Summary</h1>
+          <div className="dash-sub">
+            {monthName.charAt(0).toUpperCase() + monthName.slice(1)}
+          </div>
+        </div>
+      </div>
+
+            {/* YTD bar */}
+      <div className="ytd-bar">
+        <div className="ytd-item">
+          <span className="ytd-label">YTD Entrate</span>
+          <span className="ytd-value" style={{ color: 'var(--green)' }}>{fmtK(ytdIncome)}</span>
+        </div>
+        <div className="ytd-divider" />
+        <div className="ytd-item">
+          <span className="ytd-label">YTD Uscite</span>
+          <span className="ytd-value" style={{ color: 'var(--red)' }}>{fmtK(ytdExpense)}</span>
+        </div>
+        <div className="ytd-divider" />
+        <div className="ytd-item">
+          <span className="ytd-label">YTD Risparmio</span>
+          <span className="ytd-value" style={{ color: 'var(--blue)' }}>{fmtK(ytdIncome - ytdExpense)}</span>
+        </div>
+      </div>
+
+      {/* ── KPI block ── */}
+      {(() => {
+        const now2 = new Date()
+        // Previous month
+        const prevD  = new Date(now2.getFullYear(), now2.getMonth()-1, 1)
+        const prevYM = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}`
+        const prevName = prevD.toLocaleDateString('it-IT',{month:'long',year:'numeric'})
+        const prevInc  = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
+        const prevExp  = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)).reduce((s,t)=>s+t.amount,0))
+        const prevSav  = prevInc - prevExp
+        const prevRate = prevInc>0?Math.round(prevSav/prevInc*100):0
+
+        // Savings averages
+        const savgMonths = (n) => {
+          let total = 0, count = 0
+          for (let i=1;i<=n;i++){
+            const d = new Date(now2.getFullYear(),now2.getMonth()-i,1)
+            const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+            const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
+            const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+            if (inc>0) { total += (inc-exp); count++ }
+          }
+          return count>0?Math.round(total/count):null
+        }
+        const savgYear = (yr) => {
+          let total=0,count=0
+          for(let m=0;m<12;m++){
+            const ym=`${yr}-${String(m+1).padStart(2,'0')}`
+            const inc=transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
+            const exp=Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+            if(inc>0){total+=inc-exp;count++}
+          }
+          return count>0?Math.round(total/count):null
+        }
+        const avg3m  = savgMonths(3)
+        const avg6m  = savgMonths(6)
+        const avg12m = savgMonths(12)
+        const yr = now2.getFullYear()
+
+        const fmtSav = n => n===null?'—':(n>=0?'+':'-')+'€ '+Math.abs(n).toLocaleString('it-IT')
+        const savColor = n => n===null?'var(--text3)':n>=0?'var(--green)':'var(--red)'
+
+        return (
+          <>
+            {/* Row 1 — mese corrente */}
+            <div style={{marginBottom:6}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
+                📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE
+              </div>
+              <div className="kpi-grid">
+                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(thisIncome)} color="var(--green)" delta={deltaIncome}/>
+                <KPICard icon={<TrendingDown size={18}/>} label="Uscite" value={fmt(thisExpense)} color="var(--red)" delta={deltaExpense} deltaLabel="vs mese scorso"/>
+                <KPICard icon={<PiggyBank size={18}/>} label="Risparmio"
+                  value={(cashflow>=0?'+':'')+fmt(cashflow)}
+                  color={cashflow>=0?'var(--green)':'var(--red)'}
+                  sub="Entrate − Uscite"/>
+                <KPICard icon={<Percent size={18}/>} label="Tasso Risparmio"
+                  value={savingsRate+'%'}
+                  color={savingsRate>=20?'var(--green)':savingsRate>=10?'var(--gold)':'var(--red)'}
+                  sub="del reddito mensile"/>
+              </div>
+            </div>
+
+            {/* Row 2 — mese precedente */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
+                📅 {prevName.toUpperCase()} — MESE CHIUSO
+              </div>
+              <div className="kpi-grid">
+                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(prevInc)} color="var(--green)"/>
+                <KPICard icon={<TrendingDown size={18}/>} label="Uscite" value={fmt(prevExp)} color="var(--red)"/>
+                <KPICard icon={<PiggyBank size={18}/>} label="Risparmio"
+                  value={(prevSav>=0?'+':'')+fmt(prevSav)}
+                  color={prevSav>=0?'var(--green)':'var(--red)'}
+                  sub="Entrate − Uscite"/>
+                <KPICard icon={<Percent size={18}/>} label="Tasso Risparmio"
+                  value={prevRate+'%'}
+                  color={prevRate>=20?'var(--green)':prevRate>=10?'var(--gold)':'var(--red)'}
+                  sub="del reddito mensile"/>
+              </div>
+            </div>
+
+          </>
+        )
+      })()}
+
+      {/* ── Saldo Conto ── */}
+      <div className="card" style={{ marginBottom: 20, padding: '18px 20px' }}>
+        <div className="card-title-row" style={{ marginBottom: 14 }}>
+          <span className="card-title">Andamento Saldo</span>
+        </div>
+        <SaldoChart transactions={transactions} />
+      </div>
+
+      {/* Charts row */}
+      <div className="dash-charts">
+        <div className="card dash-chart-card">
+          <div className="card-title-row">
+            <span className="card-title">Entrate vs Uscite</span>
+            <span className="card-sub-label">Ultimi 6 mesi</span>
+          </div>
+          <IncomeExpenseChart data={monthly} />
+        </div>
+
+        <div className="card dash-chart-card">
+          <div className="card-title-row">
+            <span className="card-title">Risparmio</span>
+            <span className="card-sub-label">Trend mensile</span>
+          </div>
+          <SavingsChart data={monthly} />
+        </div>
+      </div>
+
+      {/* Top Categorie Anno — between charts and dash-bottom */}
+      {ytdCatList.length > 0 && (
+        <div className="card" style={{ marginBottom: 20, padding: '18px 20px' }}>
+          <div className="card-title-row" style={{ marginBottom: 14 }}>
+            <span className="card-title">Top Categorie Anno</span>
+            <span className="card-sub-label">{new Date().getFullYear()}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+            {ytdCatList.slice(0, 6).map(c => (
+              <div key={c.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--surface2)', borderRadius: 8 }}>
+                <span style={{ fontSize: 13, color: 'var(--text2)' }}>{c.name}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>€ {fmtIT(c.total, 0)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Spese per Categoria + AI Insights (50/50) ── */}
+      <div style={{display:'flex',gap:16,marginBottom:20,alignItems:'stretch'}}>
+        <div className="card" style={{flex:'1 1 0',minWidth:0,padding:'18px 20px'}}>
+          <div className="card-title-row" style={{marginBottom:4}}>
+            <span className="card-title">Spese per Categoria</span>
+          </div>
+          <SpeseCatChart transactions={transactions} />
+        </div>
+        <div className="card" style={{flex:'1 1 0',minWidth:0,overflow:'hidden'}}>
+          <AIInsights transactions={transactions} catList={catList} monthly={monthly}/>
+        </div>
+      </div>
+
+
+
+    </div>
+  )
+}

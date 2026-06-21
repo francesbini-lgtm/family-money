@@ -1,0 +1,229 @@
+.import-modal { width: 520px; }
+
+.file-list {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px;
+}
+
+.file-chip {
+  font-size: 11px;
+  padding: 3px 9px;
+  background: var(--blue-l);
+  color: var(--blue);
+  border-radius: 20px;
+  font-weight: 600;
+}
+
+/* AI toggle */
+.ai-toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--gold-l);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius-sm);
+}
+
+.ai-toggle-info {
+  display: flex; align-items: flex-start; gap: 10px; flex: 1;
+}
+
+.ai-toggle-title {
+  font-size: 13px; font-weight: 700; color: var(--text);
+}
+
+.ai-toggle-sub {
+  font-size: 11px; color: var(--text3); margin-top: 2px; line-height: 1.4;
+}
+
+/* Toggle switch */
+.toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--border); border-radius: 22px; cursor: pointer;
+  transition: background .2s;
+}
+.toggle-slider::before {
+  content: ''; position: absolute;
+  width: 16px; height: 16px; border-radius: 50%;
+  left: 3px; bottom: 3px;
+  background: #fff; transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.toggle input:checked + .toggle-slider { background: var(--gold); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
+.toggle input:disabled + .toggle-slider { opacity: .5; cursor: not-allowed; }
+
+/* Progress */
+.import-progress {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+}
+
+.progress-label {
+  font-size: 12px; color: var(--text2); margin-bottom: 8px; font-weight: 500;
+}
+
+.progress-bar-wrap {
+  height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  height: 100%; background: var(--gold);
+  border-radius: 3px; transition: width .3s;
+}
+
+.progress-detail {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--text3);
+}
+
+/* Boxes */
+.warning-box {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px; padding: 8px 12px;
+  background: var(--gold-l); border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--gold);
+}
+
+.error-box {
+  margin-top: 12px; padding: 10px 14px;
+  background: var(--red-l); border: 1px solid var(--red);
+  border-radius: var(--radius-sm); font-size: 13px; color: var(--red);
+}
+
+.success-box {
+  margin-top: 12px; padding: 12px 14px;
+  background: var(--green-l); border: 1px solid var(--green);
+  border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; color: var(--green);
+}
+
+.success-ai {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--gold); margin-top: 4px; font-weight: 500;
+}
+
+/* ── Full progress UI ───────────────────────────────────── */
+.import-progress-full {
+  padding: 8px 0 4px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+/* Phase indicators */
+.import-phases {
+  display: flex; justify-content: space-between; align-items: center;
+  position: relative; padding: 0 8px;
+}
+.import-phases::before {
+  content: ''; position: absolute; top: 16px; left: 32px; right: 32px;
+  height: 2px; background: var(--border); z-index: 0;
+}
+.import-phase {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  z-index: 1; opacity: .4; transition: all .3s;
+}
+.import-phase.active { opacity: 1; }
+.import-phase.done   { opacity: .7; }
+
+.import-phase-dot {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; transition: all .3s;
+}
+.import-phase.active .import-phase-dot {
+  background: var(--accent-l); border-color: var(--accent);
+}
+.import-phase.done .import-phase-dot {
+  background: var(--green); border-color: var(--green);
+  color: #fff; font-size: 13px; font-weight: 700;
+}
+.import-phase span {
+  font-size: 11px; font-weight: 600; color: var(--text3); white-space: nowrap;
+}
+.import-phase.active span { color: var(--accent); }
+
+/* Big % */
+.import-pct-big {
+  text-align: center;
+  font-size: 52px; font-weight: 700; font-family: var(--font-mono);
+  color: var(--accent); line-height: 1;
+}
+
+/* Bar */
+.import-bar-outer {
+  height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;
+}
+.import-bar-inner {
+  height: 100%; background: var(--accent); border-radius: 4px;
+  transition: width .4s ease;
+}
+
+/* Stats row */
+.import-stats-row {
+  display: flex; justify-content: center; gap: 24px; flex-wrap: wrap;
+}
+.import-stat {
+  display: flex; align-items: center; gap: 5px; font-size: 12px;
+}
+.import-stat-label { color: var(--text3); }
+.import-stat-val   { font-weight: 700; font-family: var(--font-mono); }
+
+/* Message */
+.import-message {
+  text-align: center; font-size: 12px; color: var(--text3);
+}
+
+/* AI indicator */
+.import-ai-indicator {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 12px; color: var(--gold); font-weight: 600;
+}
+.import-dots {
+  display: flex; gap: 3px; align-items: center;
+}
+.import-dots span {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--gold);
+  animation: dot-bounce 1.2s infinite;
+}
+.import-dots span:nth-child(2) { animation-delay: .2s; }
+.import-dots span:nth-child(3) { animation-delay: .4s; }
+
+/* Success */
+.import-success {
+  text-align: center; padding: 16px 0 8px;
+}
+.import-success-icon  { font-size: 40px; font-weight: 700; color: var(--green); margin-bottom: 8px; }
+.import-success-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+.import-success-details {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 12px; align-items: center; color: var(--text2);
+}
+
+/* ── Cancel button ──────────────────────────────────────── */
+.import-cancel-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; padding: 10px;
+  border: 1px solid var(--red); border-radius: var(--radius-sm);
+  background: none; color: var(--red);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  font-family: var(--font-sans); transition: all .15s;
+  margin-top: 4px;
+}
+.import-cancel-btn:hover {
+  background: var(--red-l);
+}
+
+.import-cancel-hint {
+  text-align: center; font-size: 11px; color: var(--text3);
+  line-height: 1.4;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

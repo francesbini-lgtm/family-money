@@ -1,0 +1,20 @@
+.cash-page  { padding:28px 32px; max-width:1000px; }
+.cash-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; }
+.cash-title  { font-family:var(--font-serif); font-size:26px; font-weight:600; }
+.cash-sub    { font-size:13px; color:var(--text3); margin-top:3px; }
+
+.cash-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px; }
+.cash-kpi  { padding:14px 18px; }
+.cash-kpi-label { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text3); margin-bottom:5px; }
+.cash-kpi-val   { font-size:20px; font-weight:700; font-family:var(--font-mono); }
+
+.cash-charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+.cash-chart  { padding:18px 20px; }
+
+.cash-cat-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.cash-cat-name { font-size:12px; color:var(--text2); min-width:80px; }
+.cash-cat-bar-wrap { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
+.cash-cat-bar { height:100%; background:var(--accent); border-radius:3px; transition:width .3s; }
+.cash-cat-val { font-size:12px; font-weight:700; font-family:var(--font-mono); min-width:70px; text-align:right; }
+
+.cash-empty { text-align:center; padding:50px 24px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); }

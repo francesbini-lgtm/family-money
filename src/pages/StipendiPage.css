@@ -1,0 +1,25 @@
+.stip-page { display: flex; flex-direction: column; gap: 16px; }
+.stip-header { display: flex; align-items: center; justify-content: space-between; }
+.stip-title { font-size: 22px; font-weight: 800; margin: 0; }
+
+.stip-kpi-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+}
+.stip-kpi-label { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text3); margin-bottom: 6px; }
+.stip-kpi-val   { font-size: 22px; font-weight: 800; font-family: var(--font-serif); color: var(--text); }
+.stip-kpi-sub   { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+.stip-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+.stip-member-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.stip-member-btn {
+  padding: 8px 20px; border-radius: 20px; cursor: pointer;
+  border: 1.5px solid var(--border); background: var(--surface);
+  font-size: 13px; font-weight: 600; color: var(--text2);
+  font-family: var(--font-sans); transition: all .12s;
+}
+.stip-member-btn.active {
+  border-color: var(--member-color, var(--accent));
+  background: color-mix(in srgb, var(--member-color, var(--accent)) 10%, transparent);
+  color: var(--member-color, var(--accent));
+}

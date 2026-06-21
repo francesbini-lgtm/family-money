@@ -1,0 +1,195 @@
+/* ── Overlay ─────────────────────────────────────────────── */
+.ob-overlay {
+  position: fixed; inset: 0; z-index: 3000;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+  animation: fadein .2s ease;
+}
+
+.ob-wizard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  width: 520px; max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 32px 36px 28px;
+  position: relative;
+  box-shadow: 0 24px 64px rgba(0,0,0,.25);
+  animation: slidein .2s ease;
+}
+
+/* ── Progress bar ─────────────────────────────────────────── */
+.ob-progress-bar {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0; margin-bottom: 28px; position: relative;
+}
+
+.ob-progress-line {
+  position: absolute; top: 50%; left: 24px; right: 24px;
+  height: 2px; background: var(--border); transform: translateY(-50%);
+  z-index: 0;
+}
+.ob-progress-fill {
+  height: 100%; background: var(--accent); transition: width .4s ease;
+}
+
+.ob-progress-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--text3);
+  z-index: 1; flex-shrink: 0; margin: 0 18px;
+  transition: all .2s;
+}
+
+.ob-progress-dot.active {
+  border-color: var(--accent); color: var(--accent);
+  background: var(--accent-l);
+}
+.ob-progress-dot.done {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Close ───────────────────────────────────────────────── */
+.ob-close {
+  position: absolute; top: 14px; right: 14px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text3); padding: 6px; border-radius: 6px;
+  display: flex; align-items: center;
+}
+.ob-close:hover { background: var(--surface2); color: var(--text); }
+
+/* ── Step ────────────────────────────────────────────────── */
+.ob-step { text-align: center; }
+
+.ob-step-icon {
+  font-size: 52px; margin-bottom: 14px; display: block;
+  animation: popIn .3s ease;
+}
+
+@keyframes popIn {
+  from { transform: scale(.6); opacity: 0; }
+  to   { transform: scale(1);  opacity: 1; }
+}
+
+.ob-step-title {
+  font-family: var(--font-serif); font-size: 22px; font-weight: 600;
+  margin-bottom: 10px; color: var(--text);
+}
+
+.ob-step-desc {
+  font-size: 14px; color: var(--text3); line-height: 1.6;
+  margin-bottom: 24px; max-width: 380px; margin-left: auto; margin-right: auto;
+}
+
+/* ── Welcome features ────────────────────────────────────── */
+.ob-feature-list {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 28px; text-align: left;
+  max-width: 320px; margin-left: auto; margin-right: auto;
+}
+
+.ob-feature {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--surface2);
+  border-radius: var(--radius-sm); font-size: 13px; color: var(--text2);
+}
+
+.ob-feature-icon { font-size: 18px; flex-shrink: 0; }
+
+/* ── Form ────────────────────────────────────────────────── */
+.ob-form { text-align: left; margin-bottom: 24px; }
+.ob-field { margin-bottom: 14px; }
+.ob-label {
+  display: block; font-size: 11px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text3); margin-bottom: 5px;
+}
+.ob-input {
+  width: 100%; padding: 9px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px; background: var(--surface); color: var(--text);
+  outline: none; font-family: var(--font-sans); transition: border-color .15s;
+}
+.ob-input:focus { border-color: var(--accent); }
+
+/* ── Upload ──────────────────────────────────────────────── */
+.ob-upload-area {
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 28px 20px; cursor: pointer; transition: all .15s;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  margin-bottom: 16px;
+}
+.ob-upload-area:hover { border-color: var(--accent); background: var(--accent-l); }
+.ob-upload-text  { font-size: 13px; font-weight: 600; color: var(--text2); }
+.ob-upload-hint  { font-size: 11px; color: var(--text3); }
+
+/* ── AI toggle ───────────────────────────────────────────── */
+.ob-ai-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; background: var(--gold-l); border: 1px solid var(--gold);
+  border-radius: var(--radius-sm); cursor: pointer; margin-bottom: 18px;
+  text-align: left;
+}
+.ob-ai-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+.ob-ai-sub   { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+.ob-toggle {
+  width: 36px; height: 20px; border-radius: 10px;
+  background: var(--border); position: relative; flex-shrink: 0; transition: background .2s;
+}
+.ob-toggle::after {
+  content: ''; position: absolute; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; top: 3px; left: 3px;
+  transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.ob-toggle.on { background: var(--gold); }
+.ob-toggle.on::after { transform: translateX(16px); }
+
+/* ── Progress text ───────────────────────────────────────── */
+.ob-progress {
+  padding: 10px 14px; background: var(--blue-l); border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--blue); margin-bottom: 16px;
+}
+
+/* ── Actions ─────────────────────────────────────────────── */
+.ob-actions {
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.ob-btn-main { width: 100%; justify-content: center; padding: 12px; font-size: 14px; }
+.ob-btn-skip { font-size: 13px; color: var(--text3); }
+.ob-back     { display: block; margin: 10px auto 0; font-size: 13px; }
+
+/* ── Success ─────────────────────────────────────────────── */
+.ob-success { padding: 20px 0; }
+.ob-success-icon  { font-size: 40px; margin-bottom: 10px; color: var(--green); font-weight: 700; }
+.ob-success-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+.ob-success-sub   { font-size: 13px; color: var(--text3); margin-bottom: 20px; }
+
+/* ── Done step ───────────────────────────────────────────── */
+.ob-step-done { }
+.ob-done-confetti { font-size: 64px; margin-bottom: 10px; animation: popIn .5s ease; }
+.ob-done-stats {
+  display: flex; gap: 24px; justify-content: center;
+  margin: 20px 0; flex-wrap: wrap;
+}
+.ob-done-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.ob-done-stat-icon  { font-size: 24px; }
+.ob-done-stat-val   { font-size: 28px; font-weight: 700; font-family: var(--font-mono); color: var(--accent); }
+.ob-done-stat-label { font-size: 12px; color: var(--text3); }
+
+.ob-done-tips {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 24px; text-align: left;
+  max-width: 300px; margin-left: auto; margin-right: auto;
+}
+.ob-tip {
+  font-size: 13px; color: var(--text2);
+  padding: 8px 12px; background: var(--surface2);
+  border-radius: var(--radius-sm);
+}

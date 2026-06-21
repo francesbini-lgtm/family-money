@@ -1,0 +1,44 @@
+.cec-page  { padding:28px 32px; max-width:1100px; }
+.cec-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; }
+.cec-title  { font-family:var(--font-serif); font-size:26px; font-weight:600; }
+.cec-sub    { font-size:13px; color:var(--text3); margin-top:3px; }
+
+.cec-kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:20px; }
+.cec-kpi  { padding:14px 18px; display:flex; align-items:center; gap:12px; }
+.cec-kpi-label { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text3); margin-bottom:4px; }
+.cec-kpi-val   { font-size:20px; font-weight:700; font-family:var(--font-mono); }
+
+.cec-chart-card { padding:18px 20px; margin-bottom:20px; }
+
+.cec-section-title { font-size:15px; font-weight:700; margin-bottom:12px; }
+
+.cec-goals-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; margin-bottom:20px; }
+
+/* Goal card */
+.cec-goal { padding:18px 20px; transition:box-shadow .15s; }
+.cec-goal:hover { box-shadow:0 4px 16px rgba(0,0,0,.07); }
+.cec-goal.reached { border-color:var(--green); }
+
+.cec-goal-header { display:flex; align-items:flex-start; gap:12px; margin-bottom:14px; }
+.cec-goal-icon   { font-size:28px; flex-shrink:0; }
+.cec-goal-info   { flex:1; min-width:0; }
+.cec-goal-name   { font-size:15px; font-weight:700; margin-bottom:3px; }
+.cec-goal-date   { font-size:11px; color:var(--text3); }
+.cec-goal-note   { font-size:11px; color:var(--text3); margin-top:2px; }
+.cec-goal-actions { display:flex; gap:4px; }
+
+.cec-progress-row { display:flex; align-items:baseline; gap:4px; margin-bottom:6px; }
+.cec-saved  { font-size:18px; font-weight:700; font-family:var(--font-mono); color:var(--accent); }
+.cec-target { font-size:13px; color:var(--text3); font-family:var(--font-mono); }
+.cec-pct    { margin-left:auto; font-size:13px; font-weight:700; color:var(--text3); }
+.cec-pct.reached { color:var(--green); }
+
+.cec-progress-bar  { height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; margin-bottom:8px; }
+.cec-progress-fill { height:100%; border-radius:4px; transition:width .4s; }
+
+.cec-reached-badge { text-align:center; font-size:12px; font-weight:700; color:var(--green); padding:6px; background:var(--green-l); border-radius:6px; margin-bottom:10px; }
+.cec-missing { font-size:11px; color:var(--text3); margin-bottom:10px; }
+
+.cec-deposit-btn { width:100%; justify-content:center; font-size:12px; }
+
+.cec-empty { text-align:center; padding:50px 24px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); }
