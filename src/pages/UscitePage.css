@@ -5,6 +5,11 @@
 
 .uscite-header {
   margin-bottom: 22px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .uscite-title {
@@ -18,6 +23,48 @@
   font-size: 13px;
   color: var(--text3);
   margin: 0;
+}
+
+/* Toggle accantonamenti */
+.uscite-sati-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.uscite-sati-toggle:hover {
+  border-color: var(--accent, #b8942a);
+  color: var(--text1);
+}
+
+.uscite-sati-toggle.active {
+  border-color: var(--accent, #b8942a);
+  background: var(--accent-l, rgba(184,148,42,.1));
+  color: var(--accent, #b8942a);
+}
+
+.uscite-sati-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text3);
+  flex-shrink: 0;
+  transition: background .15s;
+}
+
+.uscite-sati-toggle.active .uscite-sati-dot {
+  background: var(--accent, #b8942a);
 }
 
 /* ── Chart card ─────────────────────────────────────────── */
@@ -168,10 +215,11 @@
   min-width: 80px;
 }
 
-/* Grand total row */
+/* Grand total row — last row */
 .uscite-tr-grand td {
   background: var(--bg, #f7f4f0);
-  border-bottom: 2px solid var(--border);
+  border-top: 2px solid var(--border);
+  border-bottom: none;
 }
 
 .uscite-td-cat {

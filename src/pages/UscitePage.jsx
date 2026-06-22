@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
-  ResponsiveContainer, Cell
+  BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, Customized
 } from 'recharts'
 import { CATS } from '../data/categories'
+import { fmtIT } from '../utils/format'
 import './UscitePage.css'
 
 // ── Months ────────────────────────────────────────────────────────────────────
@@ -16,23 +17,17 @@ function getLast6Months() {
     const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
     const label = MONTH_LABELS[d.getMonth()]
-    return { key, label, year: d.getFullYear(), month: d.getMonth() }
+    return { key, label }
   })
 }
 
-// ── Category colors ───────────────────────────────────────────────────────────
-function catColor(cat1) {
-  return CATS[cat1]?.color || '#888888'
-}
+// ── Colors ────────────────────────────────────────────────────────────────────
+function catColor(cat1) { return CATS[cat1]?.color || '#888888' }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-function fmtEur(n) {
-  if (!n) return '—'
-  return new Intl.NumberFormat('it-IT', { style:'currency', currency:'EUR', maximumFractionDigits:0 }).format(n)
-}
-function fmtEurSmall(n) {
-  if (!n || n < 1) return ''
-  return new Intl.NumberFormat('it-IT', { style:'currency', currency:'EUR', maximumFractionDigits:0 }).format(n)
+function eur(n) {
+  if (!n || n < 1) return '—'
+  return fmtIT(Math.round(n)) + ' €'
 }
 function fmtDate(dateStr) {
   const m = (dateStr||'').match(/\d{4}-(\d{2})-(\d{2})/)
@@ -40,23 +35,23 @@ function fmtDate(dateStr) {
   return `${parseInt(m[2])} ${MONTH_LABELS[parseInt(m[1])-1]}`
 }
 
-// ── isComm ────────────────────────────────────────────────────────────────────
 const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
+const isSatiLinked = t => !!(t._satiLinked && t.splits?.length > 0)
 
-// ── Custom tooltip for chart ──────────────────────────────────────────────────
+// ── Custom tooltip ────────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   const total = payload.reduce((s, p) => s + (p.value || 0), 0)
   return (
     <div className="uscite-tooltip">
       <div className="uscite-tooltip-title">{label}</div>
-      <div className="uscite-tooltip-total">{fmtEur(total)}</div>
+      <div className="uscite-tooltip-total">{fmtIT(Math.round(total))} €</div>
       <div className="uscite-tooltip-rows">
         {[...payload].reverse().map(p => p.value > 0 ? (
           <div key={p.dataKey} className="uscite-tooltip-row">
             <span className="uscite-tooltip-dot" style={{ background: p.fill }}/>
             <span className="uscite-tooltip-cat">{p.dataKey}</span>
-            <span className="uscite-tooltip-val">{fmtEur(p.value)}</span>
+            <span className="uscite-tooltip-val">{fmtIT(Math.round(p.value))} €</span>
           </div>
         ) : null)}
       </div>
@@ -64,29 +59,82 @@ function CustomTooltip({ active, payload, label }) {
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Bar total labels (rendered on top of each stacked column) ─────────────────
+function BarTotalLabels({ formattedGraphicalItems, chartData }) {
+  if (!formattedGraphicalItems?.length || !chartData?.length) return null
+  return chartData.map((d, i) => {
+    const total = Object.keys(d).filter(k => k !== 'month').reduce((s, k) => s + (d[k] || 0), 0)
+    if (!total) return null
+
+    let topY = Infinity
+    let x0 = 0, w0 = 40
+    formattedGraphicalItems.forEach(item => {
+      const entry = item.props.data?.[i]
+      if (!entry) return
+      if (entry.y !== undefined && entry.y < topY) topY = entry.y
+      if (entry.x !== undefined) { x0 = entry.x; w0 = entry.width || 40 }
+    })
+    if (!isFinite(topY)) return null
+
+    return (
+      <text key={i} x={x0 + w0 / 2} y={topY - 5}
+        textAnchor="middle" fontSize={10} fontWeight={600}
+        fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+        {fmtIT(Math.round(total))}
+      </text>
+    )
+  })
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function UscitePage() {
   const transactions = useStore(s => s.transactions)
   const months = useMemo(() => getLast6Months(), [])
   const [expandedCats, setExpandedCats] = useState(new Set())
   const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey }
+  const [withSati, setWithSati] = useState(false) // toggle accantonamenti
 
-  // ── Filter expenses ───────────────────────────────────────────────────────
-  const expenses = useMemo(() => transactions.filter(t =>
-    !t.excluded &&
-    t.amount < 0 &&
-    !isComm(t) &&
-    t.cat1 !== 'Entrate' &&
-    t.cat1 !== 'Non Categorizzato' || (t.cat1 === 'Non Categorizzato' && !isComm(t) && t.amount < 0)
-  ), [transactions])
+  // ── Build expense list ────────────────────────────────────────────────────
+  const expenses = useMemo(() => {
+    const monthKeys = new Set(months.map(m => m.key))
+    const result = []
+
+    transactions.forEach(t => {
+      if (t.excluded || t.amount >= 0 || isComm(t) || t.cat1 === 'Entrate') return
+      const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
+      if (!monthKeys.has(ym)) return
+
+      if (isSatiLinked(t)) {
+        if (!withSati) return // senza accantonamenti: escludi
+        // con accantonamenti: esplodi negli splits
+        t.splits.forEach(sp => {
+          if (sp.amount > 0) {
+            result.push({
+              _virtual: true,
+              _parentId: t.txId,
+              txId: `${t.txId}_${sp.cat1}_${sp.cat2}`,
+              date: t._effDate || t.competenza || t.date,
+              _effDate: t._effDate || t.competenza || t.date,
+              amount: -sp.amount,
+              cat1: sp.cat1 || 'Non Categorizzato',
+              cat2: sp.cat2 || '(altro)',
+              descAI: sp.cat2 || sp.cat1,
+            })
+          }
+        })
+        return
+      }
+
+      result.push(t)
+    })
+    return result
+  }, [transactions, months, withSati])
 
   // ── Build data map: cat1 → monthKey → { total, l2Map, txs } ──────────────
   const dataMap = useMemo(() => {
-    const monthKeys = new Set(months.map(m => m.key))
     const map = {}
     expenses.forEach(t => {
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
-      if (!monthKeys.has(ym)) return
       const cat1 = t.cat1 || 'Non Categorizzato'
       const cat2 = t.cat2 || '(altro)'
       const val = Math.abs(t.amount)
@@ -94,47 +142,51 @@ export default function UscitePage() {
       if (!map[cat1]) map[cat1] = {}
       if (!map[cat1][ym]) map[cat1][ym] = { total: 0, l2: {}, txs: [] }
       map[cat1][ym].total += val
-      map[cat1][ym].txs.push(t)
+      if (!t._virtual) map[cat1][ym].txs.push(t)
 
       if (!map[cat1][ym].l2[cat2]) map[cat1][ym].l2[cat2] = { total: 0, txs: [] }
       map[cat1][ym].l2[cat2].total += val
-      map[cat1][ym].l2[cat2].txs.push(t)
+      if (!t._virtual) map[cat1][ym].l2[cat2].txs.push(t)
     })
     return map
   }, [expenses, months])
 
-  // ── L1 categories sorted by total spend (all months) ─────────────────────
+  // ── cat1 list: sorted by total desc, "Altro" penultimate ─────────────────
   const cat1List = useMemo(() => {
-    return Object.keys(dataMap).sort((a, b) => {
-      const totalA = months.reduce((s, m) => s + (dataMap[a][m.key]?.total || 0), 0)
-      const totalB = months.reduce((s, m) => s + (dataMap[b][m.key]?.total || 0), 0)
-      return totalB - totalA
+    const all = Object.keys(dataMap).sort((a, b) => {
+      const tA = months.reduce((s, m) => s + (dataMap[a][m.key]?.total || 0), 0)
+      const tB = months.reduce((s, m) => s + (dataMap[b][m.key]?.total || 0), 0)
+      return tB - tA
     })
+    // Move "Altro" to second-to-last
+    const altroIdx = all.indexOf('Altro')
+    if (altroIdx > -1 && altroIdx < all.length - 1) {
+      all.splice(altroIdx, 1)
+      all.push('Altro')
+    }
+    return all
   }, [dataMap, months])
 
-  // ── Bar chart data ────────────────────────────────────────────────────────
+  // ── Chart data ────────────────────────────────────────────────────────────
   const chartData = useMemo(() => months.map(m => {
     const row = { month: m.label }
     cat1List.forEach(cat1 => {
-      row[cat1] = Math.round((dataMap[cat1]?.[m.key]?.total || 0))
+      row[cat1] = Math.round(dataMap[cat1]?.[m.key]?.total || 0)
     })
     return row
   }), [months, cat1List, dataMap])
 
-  // ── Detail panel transactions ─────────────────────────────────────────────
+  // ── Detail transactions ───────────────────────────────────────────────────
   const detailTxs = useMemo(() => {
     if (!selected) return []
     const { cat1, cat2, monthKey } = selected
-    let txs
-    if (cat2) {
-      txs = dataMap[cat1]?.[monthKey]?.l2[cat2]?.txs || []
-    } else {
-      txs = dataMap[cat1]?.[monthKey]?.txs || []
-    }
+    let txs = cat2
+      ? (dataMap[cat1]?.[monthKey]?.l2[cat2]?.txs || [])
+      : (dataMap[cat1]?.[monthKey]?.txs || [])
     return [...txs].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
   }, [selected, dataMap])
 
-  // ── Toggle expand ─────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
   function toggleCat(cat1) {
     setExpandedCats(prev => {
       const next = new Set(prev)
@@ -151,36 +203,59 @@ export default function UscitePage() {
     }
   }
 
-  // ── Grand totals per month ────────────────────────────────────────────────
-  const monthTotals = useMemo(() => {
-    const totals = {}
-    months.forEach(m => {
-      totals[m.key] = cat1List.reduce((s, cat1) => s + (dataMap[cat1]?.[m.key]?.total || 0), 0)
-    })
-    return totals
-  }, [months, cat1List, dataMap])
-
-  // ── Row total (all months) for a cat1 ────────────────────────────────────
-  function rowTotal(cat1, cat2=null) {
+  function rowTotal(cat1, cat2 = null) {
     return months.reduce((s, m) => {
-      const base = cat2
+      return s + (cat2
         ? (dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0)
-        : (dataMap[cat1]?.[m.key]?.total || 0)
-      return s + base
+        : (dataMap[cat1]?.[m.key]?.total || 0))
     }, 0)
   }
 
+  function rowAvg(cat1, cat2 = null) {
+    const total = rowTotal(cat1, cat2)
+    const activeMonths = months.filter(m =>
+      cat2 ? (dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0) > 0
+            : (dataMap[cat1]?.[m.key]?.total || 0) > 0
+    ).length
+    return activeMonths > 0 ? total / activeMonths : 0
+  }
+
+  const monthTotals = useMemo(() => {
+    const t = {}
+    months.forEach(m => {
+      t[m.key] = cat1List.reduce((s, cat1) => s + (dataMap[cat1]?.[m.key]?.total || 0), 0)
+    })
+    return t
+  }, [months, cat1List, dataMap])
+
+  const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0)
+  const grandAvg = (() => {
+    const active = months.filter(m => monthTotals[m.key] > 0).length
+    return active > 0 ? grandTotal / active : 0
+  })()
+
   return (
     <div className="uscite-page">
+      {/* Header */}
       <div className="uscite-header">
-        <h1 className="uscite-title">📉 Uscite</h1>
-        <p className="uscite-subtitle">Ultimi 6 mesi per categoria di spesa</p>
+        <div>
+          <h1 className="uscite-title">📉 Uscite</h1>
+          <p className="uscite-subtitle">Ultimi 6 mesi per categoria di spesa</p>
+        </div>
+        <button
+          className={'uscite-sati-toggle' + (withSati ? ' active' : '')}
+          onClick={() => setWithSati(v => !v)}
+          title="Includi/escludi accantonamenti Satispay spalmate per categoria"
+        >
+          <span className="uscite-sati-dot"/>
+          {withSati ? 'Con accantonamenti' : 'Senza accantonamenti'}
+        </button>
       </div>
 
-      {/* ── Chart ─────────────────────────────────────────────────────────── */}
+      {/* Chart */}
       <div className="uscite-chart-card">
         <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+          <BarChart data={chartData} margin={{ top: 22, right: 16, left: 0, bottom: 0 }}
             barCategoryGap="28%">
             <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--text2)' }} axisLine={false} tickLine={false}/>
             <YAxis tick={{ fontSize: 11, fill: 'var(--text3)' }} axisLine={false} tickLine={false}
@@ -188,54 +263,38 @@ export default function UscitePage() {
               width={38}
             />
             <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(255,255,255,.04)' }}/>
-            {cat1List.map(cat1 => (
+            {cat1List.map((cat1, idx) => (
               <Bar key={cat1} dataKey={cat1} stackId="a"
-                fill={catColor(cat1)} radius={cat1List.indexOf(cat1) === cat1List.length-1 ? [4,4,0,0] : [0,0,0,0]}/>
+                fill={catColor(cat1)}
+                radius={idx === cat1List.length-1 ? [4,4,0,0] : [0,0,0,0]}
+              />
             ))}
+            <Customized component={(props) => <BarTotalLabels {...props} chartData={chartData}/>}/>
           </BarChart>
         </ResponsiveContainer>
       </div>
 
-      {/* ── Table + Detail ─────────────────────────────────────────────────── */}
+      {/* Table + Detail */}
       <div className="uscite-body">
-        {/* Table */}
         <div className="uscite-table-wrap">
           <table className="uscite-table">
             <thead>
               <tr>
                 <th className="uscite-th-cat">Categoria</th>
-                {months.map(m => (
-                  <th key={m.key} className="uscite-th-month">{m.label}</th>
-                ))}
-                <th className="uscite-th-total">Totale</th>
+                {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
+                <th className="uscite-th-total">Media/mese</th>
               </tr>
             </thead>
             <tbody>
-              {/* Grand total row */}
-              <tr className="uscite-tr-grand">
-                <td className="uscite-td-cat">Totale uscite</td>
-                {months.map(m => (
-                  <td key={m.key} className="uscite-td-val grand">
-                    {monthTotals[m.key] > 0 ? fmtEurSmall(monthTotals[m.key]) : '—'}
-                  </td>
-                ))}
-                <td className="uscite-td-val grand">
-                  {fmtEurSmall(Object.values(monthTotals).reduce((s, v) => s + v, 0))}
-                </td>
-              </tr>
-
               {/* Category rows */}
               {cat1List.map(cat1 => {
                 const expanded = expandedCats.has(cat1)
                 const allL2 = new Set()
-                months.forEach(m => {
-                  Object.keys(dataMap[cat1]?.[m.key]?.l2 || {}).forEach(l2 => allL2.add(l2))
-                })
+                months.forEach(m => Object.keys(dataMap[cat1]?.[m.key]?.l2 || {}).forEach(l2 => allL2.add(l2)))
                 const l2List = [...allL2].sort((a, b) => rowTotal(cat1, b) - rowTotal(cat1, a))
                 const hasL2 = l2List.length > 1 || (l2List.length === 1 && l2List[0] !== '(altro)')
 
                 return [
-                  /* L1 row */
                   <tr key={cat1} className={'uscite-tr-l1' + (expanded ? ' expanded' : '')}>
                     <td className="uscite-td-cat l1" onClick={() => hasL2 && toggleCat(cat1)}>
                       <span className="uscite-cat-dot" style={{ background: catColor(cat1) }}/>
@@ -244,20 +303,19 @@ export default function UscitePage() {
                     </td>
                     {months.map(m => {
                       const val = dataMap[cat1]?.[m.key]?.total || 0
-                      const isSelected = selected?.cat1 === cat1 && !selected?.cat2 && selected?.monthKey === m.key
+                      const isSel = selected?.cat1 === cat1 && !selected?.cat2 && selected?.monthKey === m.key
                       return (
                         <td key={m.key}
-                          className={'uscite-td-val l1' + (val > 0 ? ' clickable' : '') + (isSelected ? ' selected' : '')}
+                          className={'uscite-td-val l1' + (val > 0 ? ' clickable' : '') + (isSel ? ' selected' : '')}
                           onClick={() => val > 0 && selectCell(cat1, null, m.key)}
                         >
-                          {val > 0 ? fmtEurSmall(val) : '—'}
+                          {eur(val)}
                         </td>
                       )
                     })}
-                    <td className="uscite-td-val l1 row-total">{fmtEurSmall(rowTotal(cat1))}</td>
+                    <td className="uscite-td-val l1 row-total">{eur(rowAvg(cat1))}</td>
                   </tr>,
 
-                  /* L2 rows (when expanded) */
                   ...(expanded ? l2List.map(cat2 => (
                     <tr key={`${cat1}/${cat2}`} className="uscite-tr-l2">
                       <td className="uscite-td-cat l2">
@@ -265,21 +323,32 @@ export default function UscitePage() {
                       </td>
                       {months.map(m => {
                         const val = dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0
-                        const isSelected = selected?.cat1 === cat1 && selected?.cat2 === cat2 && selected?.monthKey === m.key
+                        const isSel = selected?.cat1 === cat1 && selected?.cat2 === cat2 && selected?.monthKey === m.key
                         return (
                           <td key={m.key}
-                            className={'uscite-td-val l2' + (val > 0 ? ' clickable' : '') + (isSelected ? ' selected' : '')}
+                            className={'uscite-td-val l2' + (val > 0 ? ' clickable' : '') + (isSel ? ' selected' : '')}
                             onClick={() => val > 0 && selectCell(cat1, cat2, m.key)}
                           >
-                            {val > 0 ? fmtEurSmall(val) : '—'}
+                            {eur(val)}
                           </td>
                         )
                       })}
-                      <td className="uscite-td-val l2 row-total">{fmtEurSmall(rowTotal(cat1, cat2)) || '—'}</td>
+                      <td className="uscite-td-val l2 row-total">{eur(rowAvg(cat1, cat2))}</td>
                     </tr>
                   )) : [])
                 ]
               })}
+
+              {/* Grand total — last row */}
+              <tr className="uscite-tr-grand">
+                <td className="uscite-td-cat">Totale uscite</td>
+                {months.map(m => (
+                  <td key={m.key} className="uscite-td-val grand">
+                    {eur(monthTotals[m.key])}
+                  </td>
+                ))}
+                <td className="uscite-td-val grand">{eur(grandAvg)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -306,15 +375,15 @@ export default function UscitePage() {
                 <button className="uscite-detail-close" onClick={() => setSelected(null)}>✕</button>
               </div>
               <div className="uscite-detail-total">
-                {fmtEur(detailTxs.reduce((s, t) => s + Math.abs(t.amount), 0))}
+                {fmtIT(Math.round(detailTxs.reduce((s, t) => s + Math.abs(t.amount), 0)))} €
                 <span className="uscite-detail-count">{detailTxs.length} transazioni</span>
               </div>
               <div className="uscite-detail-list">
                 {detailTxs.map((t, i) => (
-                  <div key={t.id || i} className="uscite-detail-row">
+                  <div key={t.id || t.txId || i} className="uscite-detail-row">
                     <div className="uscite-detail-date">{fmtDate(t._effDate || t.competenza || t.date)}</div>
                     <div className="uscite-detail-desc">{t.descAI || t.description || t.desc || '—'}</div>
-                    <div className="uscite-detail-amount">{fmtEur(Math.abs(t.amount))}</div>
+                    <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(t.amount)))} €</div>
                   </div>
                 ))}
               </div>
