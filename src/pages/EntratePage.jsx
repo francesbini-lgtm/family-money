@@ -291,8 +291,7 @@ export default function EntratePage() {
 
   // RAL / Netto chart state
   const [ralData, setRalData]         = useState(() => appPrefs?.ralData || DEFAULT_RAL_DATA)
-  const [showRAL, setShowRAL]         = useState(true)
-  const [showNetto, setShowNetto]     = useState(true)
+  const [ralView, setRalView]         = useState('netto') // 'ral' | 'netto'
   const [ralEditPerson, setRalEditPerson] = useState(null) // 'Fra' | 'Sofi' | null
 
   function saveRalData(newData) { setRalData(newData); setAppPref('ralData', newData) }
@@ -480,10 +479,9 @@ export default function EntratePage() {
               'Sofi RAL':  sofiRows.find(d=>d.year===yr)?.ral,
               'Sofi Netto':sofiRows.find(d=>d.year===yr)?.netto,
             }))
-            const ralLines = [
-              ...(showRAL   ? [{ key:'Fra RAL',   color:'#1e4a75', dash:'5 3' }, { key:'Sofi RAL',   color:'#a84070', dash:'5 3' }] : []),
-              ...(showNetto ? [{ key:'Fra Netto', color:COLORS.Fra, dash:'0' }, { key:'Sofi Netto', color:COLORS.Sofi, dash:'0' }] : []),
-            ]
+            const ralLines = ralView === 'ral'
+              ? [{ key:'Fra RAL',   color:COLORS.Fra,  dash:'5 3' }, { key:'Sofi RAL',   color:COLORS.Sofi, dash:'5 3' }]
+              : [{ key:'Fra Netto', color:COLORS.Fra,  dash:'0'   }, { key:'Sofi Netto', color:COLORS.Sofi, dash:'0'   }]
             return (
               <div className="en-charts">
                 {/* Chart 1 — Entrate per fonte */}
@@ -513,26 +511,19 @@ export default function EntratePage() {
 
                 {/* Chart 2 — Stipendio RAL vs Netto */}
                 <div className="card en-chart-card" style={{position:'relative'}}>
-                  {/* Top-right toggles */}
+                  {/* Top-right toggles — radio: RAL | Netto */}
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                     <span className="en-chart-title">Stipendio (RAL vs Netto)</span>
-                    <div style={{display:'flex',gap:5}}>
-                      <button
-                        onClick={() => setShowRAL(v => !v)}
-                        style={{
-                          padding:'3px 10px',border:'1px solid',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,
-                          borderColor: showRAL ? '#64748b' : 'var(--border)',
-                          background: showRAL ? '#64748b' : 'transparent',
-                          color: showRAL ? '#fff' : 'var(--text3)',
-                        }}>RAL</button>
-                      <button
-                        onClick={() => setShowNetto(v => !v)}
-                        style={{
-                          padding:'3px 10px',border:'1px solid',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,
-                          borderColor: showNetto ? 'var(--green)' : 'var(--border)',
-                          background: showNetto ? 'var(--green)' : 'transparent',
-                          color: showNetto ? '#fff' : 'var(--text3)',
-                        }}>Netto</button>
+                    <div style={{display:'flex',background:'var(--surface2,rgba(0,0,0,.04))',borderRadius:7,padding:2,border:'1px solid var(--border)',gap:0}}>
+                      {[['ral','RAL'],['netto','Netto']].map(([v,label]) => (
+                        <button key={v} onClick={() => setRalView(v)}
+                          style={{
+                            padding:'3px 12px',border:'none',borderRadius:5,cursor:'pointer',
+                            fontSize:11,fontWeight:700,transition:'all .15s',
+                            background: ralView===v ? 'var(--accent,#b8942a)' : 'transparent',
+                            color: ralView===v ? '#fff' : 'var(--text3)',
+                          }}>{label}</button>
+                      ))}
                     </div>
                   </div>
                   <ResponsiveContainer width="100%" height={200}>
