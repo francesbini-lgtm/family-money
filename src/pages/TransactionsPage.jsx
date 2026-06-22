@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../store/useStore'
+import { useAuth } from '../auth/AuthContext'
 import { CATS, CAT_NAMES, getMergedCats, getMergedCatNames } from '../data/categories'
 import { Upload, Search, X, TrendingUp, TrendingDown, Banknote, Tag, ChevronDown, Filter, Plus } from 'lucide-react'
 import ImportModal from '../components/ImportModal'
@@ -2209,6 +2210,9 @@ export default function TransactionsPage() {
   const { updateTransaction, deleteTransaction } = store
   const txUndoStack  = useStore(s => s.txUndoStack)
   const undoLastTx   = useStore(s => s.undoLastTx)
+  const { user, householdId } = useAuth()
+  // Admin = chi ha creato l'household (householdId = 'hh_<uid>')
+  const isAdmin = householdId === `hh_${user?.uid}`
 
   const [importOpen,     setImportOpen]     = useState(false)
   const [addManualOpen,  setAddManualOpen]  = useState(false)
@@ -2355,19 +2359,24 @@ export default function TransactionsPage() {
               ✓ {enriched} arricchite
             </button>
           )}
-          {/* AI Enrichment button */}
-          {unenriched > 0 && (
-            <button className="btn btn-secondary" style={{background:'var(--gold-l)',borderColor:'var(--gold)',color:'var(--gold)',fontWeight:700}}
-              onClick={()=>setEnriching(true)}>
-              ✨ AI ({unenriched})
+          {/* AI Enrichment — solo Admin */}
+          {isAdmin && (
+            <button className="btn btn-secondary"
+              style={{background:'var(--gold-l)',borderColor:'var(--gold)',color:'var(--gold)',fontWeight:700,
+                opacity: unenriched > 0 ? 1 : 0.45}}
+              onClick={()=>setEnriching(true)}
+              title={unenriched === 0 ? 'Tutte le transazioni sono già elaborate' : `${unenriched} transazioni da elaborare`}>
+              ✨ AI {unenriched > 0 ? `(${unenriched})` : ''}
             </button>
           )}
-          {/* Re-enrich */}
-          <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)'}}
-            title="Forza ri-processamento AI su tutte le transazioni"
-            onClick={()=>{if(confirm('Ri-processare con AI TUTTE le transazioni?'))setReenriching(true)}}>
-            🔄 Re-enrich
-          </button>
+          {/* Re-enrich — solo Admin */}
+          {isAdmin && (
+            <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)'}}
+              title="Forza ri-processamento AI su tutte le transazioni"
+              onClick={()=>{if(confirm('Ri-processare con AI TUTTE le transazioni?'))setReenriching(true)}}>
+              🔄 Re-enrich
+            </button>
+          )}
           {/* Edit colonne */}
           <button className="btn btn-ghost" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px'}}
             onClick={()=>setColsOpen(true)}>
@@ -2409,10 +2418,12 @@ export default function TransactionsPage() {
       {selected.size > 0 && (
         <div style={{display:'flex',gap:8,alignItems:'center',padding:'10px 14px',background:'var(--accent-l)',borderRadius:'var(--radius-sm)',marginBottom:12,flexWrap:'wrap'}}>
           <span style={{fontSize:13,fontWeight:600,color:'var(--accent)'}}>{selected.size} selezionate</span>
-          <button className="btn btn-ghost" style={{fontSize:12,color:'var(--gold)',fontWeight:700,border:'1px solid var(--gold)',borderRadius:6,padding:'4px 10px'}}
-            onClick={()=>setEnrichingSelected(true)}>
-            ✨ AI Enrichment ({selected.size})
-          </button>
+          {isAdmin && (
+            <button className="btn btn-ghost" style={{fontSize:12,color:'var(--gold)',fontWeight:700,border:'1px solid var(--gold)',borderRadius:6,padding:'4px 10px'}}
+              onClick={()=>setEnrichingSelected(true)}>
+              ✨ AI Enrichment ({selected.size})
+            </button>
+          )}
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)',border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px'}}
             onClick={()=>{const txList=store.transactions.filter(t=>selected.has(t.txId));if(txList.length===1)setFeedbackTx(txList[0])}}>
             💬 Feedback
