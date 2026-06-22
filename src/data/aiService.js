@@ -529,13 +529,10 @@ export async function enrichCitiesBatch(transactions, { onProgress, skipCache = 
 // ── AI Enrichment ─────────────────────────────────────────
 // Step 1: regex (instant) → Step 2: Gemini batch
 
-// ── PayPal Vision — extract transactions from screenshots ─
-export async function callPaypalVision(imagesBase64, key) {
-  const prompt = `Sei un assistente finanziario. Analizza questi screenshot dell'app PayPal italiana e estrai TUTTE le transazioni visibili.
-
-Per ogni transazione restituisci:
+// ── Shared PayPal AI prompt ───────────────────────────────
+const PAYPAL_PROMPT_SUFFIX = `Per ogni transazione restituisci:
 - merchant: nome esatto del merchant/negozio/servizio (stringa)
-- date: data nel formato YYYY-MM-DD. Se l'anno non è indicato usa 2026. Mesi italiani: gen=01 feb=02 mar=03 apr=04 mag=05 giu=06 lug=07 ago=08 set=09 ott=10 nov=11 dic=12
+- date: data nel formato YYYY-MM-DD. Se l'anno non è indicato usa ${new Date().getFullYear()}. Mesi italiani: gen=01 feb=02 mar=03 apr=04 mag=05 giu=06 lug=07 ago=08 set=09 ott=10 nov=11 dic=12
 - amount: importo come numero (negativo per uscite, positivo per entrate/rimborsi)
 - type: tipo operazione originale (es. "Pagamento", "Pagamento automatico", "Rimborso", "Trasferimento")
 - cat1_suggestion: categoria L1 suggerita tra: Casa, Veicoli, Spesa e Alimentari, Tempo Libero, Weekend e Vacanze, Shopping, Salute e Cura, Figli, Altro
@@ -544,15 +541,37 @@ Per ogni transazione restituisci:
 Rispondi SOLO con un array JSON valido, nessun testo aggiuntivo. Esempio:
 [{"merchant":"Netflix","date":"2026-06-15","amount":-15.99,"type":"Pagamento automatico","cat1_suggestion":"Tempo Libero","cat2_suggestion":"Altro"}]`
 
+async function parsePaypalResponse(res) {
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`API error ${res.status}: ${errBody.slice(0,200)}`)
+  }
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+  const text = data.choices?.[0]?.message?.content || data.text || ''
+  const match = text.match(/\[[\s\S]*\]/)
+  if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+  return JSON.parse(match[0])
+}
+
+// ── PayPal Vision — screenshots (images) ─────────────────
+export async function callPaypalVision(imagesBase64, key) {
+  const prompt = `Sei un assistente finanziario. Analizza questi screenshot dell'app PayPal italiana e estrai TUTTE le transazioni visibili.\n\n${PAYPAL_PROMPT_SUFFIX}`
   const res = await fetch(proxyUrl('/gemini'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, key, images: imagesBase64 })
   })
-  if (!res.ok) throw new Error('Vision API error')
-  const data = await res.json()
-  const text = data.choices?.[0]?.message?.content || data.text || ''
-  const match = text.match(/\[[\s\S]*\]/)
-  if (!match) throw new Error('No JSON array in response')
-  return JSON.parse(match[0])
+  return parsePaypalResponse(res)
+}
+
+// ── PayPal Text — PDF/CSV text extraction ─────────────────
+export async function callPaypalText(pdfText, key) {
+  const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF/export di cronologia PayPal italiana ed estrai TUTTE le transazioni.\n\nTESTO:\n${pdfText.slice(0, 12000)}\n\n${PAYPAL_PROMPT_SUFFIX}`
+  const res = await fetch(proxyUrl('/gemini'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, key })
+  })
+  return parsePaypalResponse(res)
 }

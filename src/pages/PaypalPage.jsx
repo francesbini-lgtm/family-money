@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { CATS } from '../data/categories'
-import { callPaypalVision } from '../data/aiService'
+import { callPaypalVision, callPaypalText } from '../data/aiService'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
@@ -174,17 +174,44 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
     setProc(true)
     setResults(null)
     try {
-      const base64List = await Promise.all(files.map(file => {
-        return new Promise((resolve, reject) => {
+      const pdfs   = files.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf')
+      const images = files.filter(f => !f.name.toLowerCase().endsWith('.pdf') && f.type !== 'application/pdf')
+
+      let allResults = []
+
+      // ── Handle PDFs: extract text → gpt-4o-mini ──────────
+      if (pdfs.length > 0) {
+        const { GlobalWorkerOptions, getDocument } = await import('pdfjs-dist')
+        GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
+
+        for (const pdf of pdfs) {
+          const arrayBuffer = await pdf.arrayBuffer()
+          const doc  = await getDocument({ data: arrayBuffer }).promise
+          let fullText = ''
+          for (let i = 1; i <= doc.numPages; i++) {
+            const page = await doc.getPage(i)
+            const content = await page.getTextContent()
+            fullText += content.items.map(item => item.str).join(' ') + '\n'
+          }
+          const parsed = await callPaypalText(fullText, apiKey)
+          allResults = allResults.concat(parsed)
+        }
+      }
+
+      // ── Handle images: base64 → gpt-4o vision ────────────
+      if (images.length > 0) {
+        const base64List = await Promise.all(images.map(file => new Promise((resolve, reject) => {
           const reader = new FileReader()
-          reader.onload = e => { resolve(e.target.result.split(',')[1]) }
+          reader.onload = e => resolve(e.target.result.split(',')[1])
           reader.onerror = reject
           reader.readAsDataURL(file)
-        })
-      }))
-      const parsed = await callPaypalVision(base64List, apiKey)
-      setResults(parsed)
-      setSelected(new Set(parsed.map((_,i) => i)))
+        })))
+        const parsed = await callPaypalVision(base64List, apiKey)
+        allResults = allResults.concat(parsed)
+      }
+
+      setResults(allResults)
+      setSelected(new Set(allResults.map((_,i) => i)))
     } catch(e) {
       alert('Errore analisi AI: ' + e.message)
     } finally {
