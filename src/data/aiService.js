@@ -565,28 +565,33 @@ export async function callPaypalVision(imagesBase64, key) {
   return parsePaypalResponse(res)
 }
 
-// ── PayPal Text — PDF/CSV text extraction ─────────────────
-// Splits large PDFs into chunks and merges results
+// ── PayPal Text — PDF text extraction (direct OpenAI call, no proxy) ───
+// Calls OpenAI directly from the browser — avoids Vercel proxy timeout/crash
 export async function callPaypalText(pdfText, key) {
-  const CHUNK = 10000  // chars per call (~3k tokens input, leaves room for output)
+  const CHUNK = 10000
   const chunks = []
-  for (let i = 0; i < pdfText.length; i += CHUNK) {
-    chunks.push(pdfText.slice(i, i + CHUNK))
-  }
-  // Cap at 4 chunks (~40k chars) to avoid excessive API calls
+  for (let i = 0; i < pdfText.length; i += CHUNK) chunks.push(pdfText.slice(i, i + CHUNK))
   const limited = chunks.slice(0, 4)
   const allResults = []
   for (const chunk of limited) {
     const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF di cronologia PayPal italiana ed estrai TUTTE le transazioni presenti in questo estratto.\n\nTESTO:\n${chunk}\n\n${PAYPAL_PROMPT_SUFFIX}`
-    const res = await fetch(proxyUrl('/gemini'), {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, key })
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 8192 })
     })
-    const parsed = await parsePaypalResponse(res)
-    allResults.push(...parsed)
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '')
+      throw new Error(`OpenAI error ${res.status}: ${errBody.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+    const text = data.choices?.[0]?.message?.content || ''
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+    allResults.push(...JSON.parse(match[0]))
   }
-  // Deduplicate by date+amount (same tx can appear at chunk boundary)
+  // Deduplicate at chunk boundaries
   const seen = new Set()
   return allResults.filter(t => {
     const k = `${t.date}|${t.amount}|${t.merchant}`

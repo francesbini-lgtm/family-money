@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { CATS } from '../data/categories'
@@ -161,6 +161,17 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
     setResults(null)
   }
 
+  // Ctrl+V paste support
+  useEffect(() => {
+    function onPaste(e) {
+      const items = Array.from(e.clipboardData?.items || [])
+      const imgs = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean)
+      if (imgs.length > 0) handleFiles(imgs)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [])
+
   function removeFile(i) {
     setFiles(prev => prev.filter((_,idx) => idx !== i))
     setResults(null)
@@ -181,8 +192,10 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
 
       // ── Handle PDFs: extract text → gpt-4o-mini ──────────
       if (pdfs.length > 0) {
-        const { GlobalWorkerOptions, getDocument } = await import('pdfjs-dist')
-        GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
+        const pdfjsLib = await import('pdfjs-dist')
+        const { GlobalWorkerOptions, getDocument } = pdfjsLib
+        // Use CDN worker — most reliable in Vite/browser env
+        GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
         for (const pdf of pdfs) {
           const arrayBuffer = await pdf.arrayBuffer()
@@ -264,7 +277,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
           <div style={{ pointerEvents:'none' }}>
             <div style={{ fontSize:28, marginBottom:6 }}>🖼️</div>
             <div>Trascina screenshot PayPal o clicca per selezionare</div>
-            <div style={{ fontSize:11, marginTop:4, opacity:.7 }}>JPG, PNG, PDF</div>
+            <div style={{ fontSize:11, marginTop:4, opacity:.7 }}>JPG, PNG, PDF · oppure incolla con ⌘V / Ctrl+V</div>
           </div>
         </div>
 
