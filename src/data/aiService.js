@@ -554,15 +554,31 @@ async function parsePaypalResponse(res) {
   return JSON.parse(match[0])
 }
 
-// ── PayPal Vision — screenshots (images) ─────────────────
+// ── PayPal Vision — screenshots (images, direct OpenAI call) ─────────
 export async function callPaypalVision(imagesBase64, key) {
   const prompt = `Sei un assistente finanziario. Analizza questi screenshot dell'app PayPal italiana e estrai TUTTE le transazioni visibili.\n\n${PAYPAL_PROMPT_SUFFIX}`
-  const res = await fetch(proxyUrl('/gemini'), {
+  const content = [
+    { type: 'text', text: prompt },
+    ...imagesBase64.map(b64 => ({
+      type: 'image_url',
+      image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' }
+    }))
+  ]
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, key, images: imagesBase64 })
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content }], temperature: 0.1, max_tokens: 4096 })
   })
-  return parsePaypalResponse(res)
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`OpenAI error ${res.status}: ${errBody.slice(0, 300)}`)
+  }
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+  const text = data.choices?.[0]?.message?.content || ''
+  const match = text.match(/\[[\s\S]*\]/)
+  if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+  return JSON.parse(match[0])
 }
 
 // ── PayPal Text — PDF text extraction (direct OpenAI call, no proxy) ───
