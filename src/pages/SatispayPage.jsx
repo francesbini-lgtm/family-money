@@ -1572,7 +1572,7 @@ function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
 }
 
 // ── Sati pending approval modal ───────────────────────────
-function SatiPendingModal({ expense, incomeEntry, onApprove, onReject, onClose }) {
+function SatiPendingModal({ expense, incomeEntry, onApprove, onReject, onClose, current, total }) {
   if (!expense || !incomeEntry) return null
   const diff = Math.round(Math.abs(new Date(expense._effDate||expense.date) - new Date(incomeEntry._effDate||incomeEntry.date)) / 86400000)
   const amtDiff = Math.abs(Math.abs(expense.amount) - Math.abs(incomeEntry.amount))
@@ -1583,7 +1583,15 @@ function SatiPendingModal({ expense, incomeEntry, onApprove, onReject, onClose }
       <div style={{background:'var(--surface)',borderRadius:16,padding:'26px 28px',width:'100%',maxWidth:680,
         maxHeight:'90vh',overflowY:'auto',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.28)'}}>
         <button onClick={onClose} style={{position:'absolute',top:14,right:16,background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
-        <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>⏳ Abbinamento da confermare</div>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+          <div style={{fontSize:16,fontWeight:800}}>⏳ Abbinamento da confermare</div>
+          {total > 1 && (
+            <span style={{fontSize:12,fontWeight:700,padding:'2px 9px',borderRadius:12,
+              background:'var(--surface2)',color:'var(--text3)',border:'1px solid var(--border)'}}>
+              {current} / {total}
+            </span>
+          )}
+        </div>
         <div style={{fontSize:12,color:'var(--text3)',marginBottom:20}}>
           {diff} {diff===1?'giorno':'giorni'} di distanza{amtDiff > 0.01 ? ` · differenza €${fmtIT(amtDiff,2)}` : ''}. Conferma se si tratta della stessa operazione.
         </div>
@@ -1921,6 +1929,14 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     updateTransaction(expTxId, { excluded: false, _compensatedAmt: undefined, _compensatedBy: undefined })
   }
 
+  function advanceToNextPending(currentExpTxId, updatedMatches) {
+    const pendingList = speseDaComp.filter(t =>
+      t.txId !== currentExpTxId &&
+      (updatedMatches[t.txId]?.status === 'pending_approval')
+    )
+    setPendingModal(pendingList.length > 0 ? pendingList[0].txId : null)
+  }
+
   function handleApprove(expTxId) {
     const m = satiMatches[expTxId]
     if (!m?.pendingIncomeTxId) return
@@ -1928,14 +1944,14 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
     saveMatches(newMatches)
     applyMatch(expTxId, m.pendingIncomeTxId)
-    setPendingModal(null)
-    showToast('Abbinamento approvato', 'success')
+    advanceToNextPending(expTxId, newMatches)
+    showToast('Abbinamento approvato ✅', 'success')
   }
 
   function handleReject(expTxId) {
     const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
     saveMatches(newMatches)
-    setPendingModal(null)
+    advanceToNextPending(expTxId, newMatches)
     showToast('Abbinamento rifiutato', 'info')
   }
 
@@ -2208,12 +2224,15 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         const m   = exp && satiMatches[exp.txId]
         const inc = m?.pendingIncomeTxId ? satiIncome.find(t => t.txId === m.pendingIncomeTxId) : null
         if (!exp || !inc) return null
+        const allPending = speseDaComp.filter(t => satiMatches[t.txId]?.status === 'pending_approval')
+        const currentIdx = allPending.findIndex(t => t.txId === pendingModal) + 1
         return (
           <SatiPendingModal
             expense={exp} incomeEntry={inc}
             onApprove={() => handleApprove(exp.txId)}
             onReject={() => handleReject(exp.txId)}
             onClose={() => setPendingModal(null)}
+            current={currentIdx} total={allPending.length}
           />
         )
       })()}
