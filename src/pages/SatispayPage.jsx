@@ -2223,14 +2223,24 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
 
   const displayAcc = satiNetOverride !== null ? satiNetOverride : totalAcc
 
-  // Chart: all months from 2022-01 to now, per fund line
+  // Chart: all months from 2022-01 to now, per fund line (net of cumulative releases)
   const allChartMonths = []
   let chartCur = '2022-01'
   while (chartCur <= now) { allChartMonths.push(chartCur); chartCur = addMonth(chartCur) }
   const chartData = allChartMonths.map(ym => {
     const entry = { label: ymLabel(ym), ym }
-    satiPots.forEach(p => { entry[p.name] = potAcc(p,ym) })
-    entry.total = satiPots.reduce((s,p)=>s+potAcc(p,ym),0)
+    // Cumulative releases up to this month
+    const cumReleases = satiIncome.reduce((s, t) => {
+      const tYM = (t._effDate || t.date || '').slice(0, 7)
+      return tYM <= ym ? s + t.amount : s
+    }, 0)
+    // Total gross for proportional distribution of releases
+    const totalGross = satiPots.reduce((s, p) => s + potAcc(p, ym), 0)
+    const scale = totalGross > 0 ? Math.max(0, totalGross - cumReleases) / totalGross : 1
+    satiPots.forEach(p => {
+      entry[p.name] = Math.round(potAcc(p, ym) * scale)
+    })
+    entry.total = Math.max(0, Math.round(totalGross - cumReleases))
     return entry
   })
 
