@@ -158,19 +158,27 @@ export default function PatrimonioPage() {
     }).reduce((s, t) => s + t.amount, 0)
   , [transactions])
 
-  const satiNetto = Math.max(0, satiGross - satiReleases)
-
-  const satiAssets = satiNetto > 0
-    ? [{
-        id: 'sati_all',
-        name: 'Satispay (fondi)',
-        cat: 'Liquidità',
-        value: satiNetto,
-        type: 'asset',
-        updatedAt: new Date().toISOString().slice(0,10),
-        readonly: true
-      }]
-    : []
+  // Per-pot entries with proportional netto reduction
+  const satiAssets = useMemo(() => {
+    const pots = satiPots || []
+    const grossTotal = pots.reduce((s, p) => s + potTotal(p), 0)
+    const scale = grossTotal > 0 ? Math.max(0, grossTotal - satiReleases) / grossTotal : 1
+    return pots
+      .map(p => {
+        const gross = potTotal(p)
+        const netto = Math.round(gross * scale)
+        return {
+          id: 'sati_' + p.id,
+          name: `Satispay – ${p.name}`,
+          cat: 'Liquidità',
+          value: netto,
+          type: 'asset',
+          updatedAt: new Date().toISOString().slice(0,10),
+          readonly: true
+        }
+      })
+      .filter(a => a.value > 0)
+  }, [satiPots, satiReleases])
 
   const allAssets      = [...ccAsset, ...satiAssets, ...portfolioAssets, ...assets]
   const allLiabilities = [...loanLiabilities, ...liabilities]

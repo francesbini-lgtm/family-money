@@ -2234,6 +2234,9 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
     return entry
   })
 
+  // Last 12 months for bar chart (monthly deposits)
+  const last12 = Array.from({length:12},(_,i)=>addMonth(now,i-11))
+
   // Monthly deposit bar chart (last 12 months)
   const barData = last12.map(ym => {
     const entry = { label: ymLabel(ym) }
@@ -2396,6 +2399,11 @@ function AltreSpesePot({ altreSpeseTxs }) {
   const satiUscite = altreSpeseTxs   // alias for readability below
   const now    = nowYM()
   const last12 = Array.from({length:12},(_,i)=>addMonth(now,i-11))
+  const [hideComm, setHideComm] = useState(true)  // default: commissioni hidden
+  const [search, setSearch] = useState('')
+  const [selectedTx, setSelectedTx] = useState(null)
+  const { updateTransaction, customCats } = useStore()
+  const allCats = getMergedCats(customCats)
 
   // Group uscite by month
   const byMonth = useMemo(() => {
@@ -2428,6 +2436,24 @@ function AltreSpesePot({ altreSpeseTxs }) {
   })
   const topCats = Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([c])=>c)
   const topCat  = topCats[0]
+
+  const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
+
+  const filteredTxs = useMemo(() => {
+    let rows = satiUscite
+    if (hideComm) rows = rows.filter(t => !isComm(t))
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      rows = rows.filter(t =>
+        (t.descAI||'').toLowerCase().includes(q) ||
+        (t.description||'').toLowerCase().includes(q) ||
+        (t.merchant||'').toLowerCase().includes(q) ||
+        (t.cat1||'').toLowerCase().includes(q) ||
+        (t.cat2||'').toLowerCase().includes(q)
+      )
+    }
+    return rows
+  }, [satiUscite, hideComm, search])
 
   // Bar chart data: monthly totals
   const chartData = last12.map(ym => ({
@@ -2519,18 +2545,33 @@ function AltreSpesePot({ altreSpeseTxs }) {
         </div>
       )}
 
-      {/* Recent transactions table */}
+      {/* Transactions table */}
       <div className="card" style={{padding:0,overflow:'hidden',marginBottom:16}}>
-        <div style={{padding:'14px 18px',borderBottom:'1px solid var(--border)',
-          display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',
+          display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:14,fontWeight:700}}>📋 Ultime transazioni Satispay</div>
-            <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>Uscite più recenti collegate a Satispay</div>
+            <div style={{fontSize:14,fontWeight:700}}>📋 Transazioni — Altro</div>
+            <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
+              {filteredTxs.length}{(hideComm||search)?`/${satiUscite.length}`:''} transazioni
+            </div>
           </div>
-          <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,
-            background:'var(--surface2)',color:'var(--text3)',fontWeight:600}}>
-            {satiUscite.length} totali
-          </span>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <button
+              onClick={() => setHideComm(v => !v)}
+              style={{fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:16,cursor:'pointer',
+                fontFamily:'var(--font-sans)',border: hideComm ? '1px solid var(--gold)' : '1px solid var(--border)',
+                background: hideComm ? 'rgba(200,160,0,.1)' : 'var(--surface)',
+                color: hideComm ? 'var(--gold)' : 'var(--text3)'}}>
+              🚫 Commissioni
+            </button>
+            <input
+              value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Cerca…"
+              style={{padding:'5px 10px',borderRadius:7,border:'1px solid var(--border)',
+                background:'var(--surface2)',fontSize:12,fontFamily:'var(--font-sans)',
+                color:'var(--text)',outline:'none',width:160}}
+            />
+          </div>
         </div>
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
@@ -2543,11 +2584,16 @@ function AltreSpesePot({ altreSpeseTxs }) {
             </tr>
           </thead>
           <tbody>
-            {satiUscite.length === 0 && (
-              <tr><td colSpan={4} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>Nessuna uscita Satispay trovata</td></tr>
+            {filteredTxs.length === 0 && (
+              <tr><td colSpan={4} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
+                {satiUscite.length === 0 ? 'Nessuna uscita trovata' : 'Nessun risultato per la ricerca'}
+              </td></tr>
             )}
-            {satiUscite.slice(0,30).map((t,i)=>(
-              <tr key={t.txId||i} style={{borderBottom:'1px solid var(--border)'}}>
+            {filteredTxs.map((t,i)=>(
+              <tr key={t.txId||i} onClick={() => setSelectedTx(t)}
+                style={{borderBottom:'1px solid var(--border)',cursor:'pointer',transition:'background .1s'}}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--surface2)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                 <td style={{padding:'8px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                   {fmtDate(t._effDate||t.date)}
                 </td>
@@ -2573,6 +2619,77 @@ function AltreSpesePot({ altreSpeseTxs }) {
           </tbody>
         </table>
       </div>
+
+      {/* Detail modal */}
+      {selectedTx && (
+        <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.45)',
+          display:'flex',alignItems:'center',justifyContent:'center'}}
+          onClick={e=>{ if(e.target===e.currentTarget) setSelectedTx(null) }}>
+          <div style={{background:'var(--surface)',borderRadius:14,padding:'24px 28px',
+            width:480,maxHeight:'88vh',overflowY:'auto',
+            boxShadow:'0 16px 48px rgba(0,0,0,.2)'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18}}>
+              <div style={{fontSize:16,fontWeight:800}}>{selectedTx.descAI||selectedTx.description?.slice(0,40)}</div>
+              <button onClick={()=>setSelectedTx(null)} style={{border:'none',background:'transparent',
+                cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
+            </div>
+            {/* Fields */}
+            {[
+              ['Data',        fmtDate(selectedTx._effDate||selectedTx.date)],
+              ['Importo',     `−€ ${fmtIT(Math.abs(selectedTx.amount),2)}`],
+              ['Descrizione', selectedTx.description||'—'],
+              ['Merchant',    selectedTx.merchant||'—'],
+              ['Account',     selectedTx.account||'—'],
+              ['Note AI',     selectedTx.descAI||'—'],
+            ].map(([label, val]) => (
+              <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',
+                padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+                <span style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',
+                  color:'var(--text3)',minWidth:90}}>{label}</span>
+                <span style={{fontSize:13,color:'var(--text)',textAlign:'right',flex:1,marginLeft:12}}>
+                  {label==='Importo'?<strong style={{color:'var(--red)'}}>{val}</strong>:val}
+                </span>
+              </div>
+            ))}
+            {/* Category edit */}
+            <div style={{marginTop:16}}>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',
+                color:'var(--text3)',marginBottom:8}}>Categoria</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                <select
+                  value={selectedTx.cat1||''}
+                  onChange={e => {
+                    const c1 = e.target.value
+                    updateTransaction(selectedTx.txId, { cat1: c1, cat2: '' })
+                    setSelectedTx(prev => ({ ...prev, cat1: c1, cat2: '' }))
+                  }}
+                  style={{padding:'7px 10px',borderRadius:7,border:'1px solid var(--border)',
+                    background:'var(--surface2)',color:'var(--text)',fontSize:13,outline:'none',
+                    fontFamily:'var(--font-sans)'}}>
+                  <option value="">— L1 —</option>
+                  {Object.keys(allCats).map(c1 => <option key={c1} value={c1}>{c1}</option>)}
+                </select>
+                <select
+                  value={selectedTx.cat2||''}
+                  onChange={e => {
+                    const c2 = e.target.value
+                    updateTransaction(selectedTx.txId, { cat2: c2 })
+                    setSelectedTx(prev => ({ ...prev, cat2: c2 }))
+                  }}
+                  style={{padding:'7px 10px',borderRadius:7,border:'1px solid var(--border)',
+                    background:'var(--surface2)',color:'var(--text)',fontSize:13,outline:'none',
+                    fontFamily:'var(--font-sans)'}}>
+                  <option value="">— L2 —</option>
+                  {(allCats[selectedTx.cat1]?.sub||[]).map(c2 => <option key={c2} value={c2}>{c2}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{marginTop:18,display:'flex',justifyContent:'flex-end'}}>
+              <button className="btn btn-secondary" onClick={()=>setSelectedTx(null)}>Chiudi</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
