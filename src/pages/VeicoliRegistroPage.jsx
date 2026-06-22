@@ -418,8 +418,8 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
   const [search, setSearch] = useState('')
   const isCash = (payMethod || expense.payMethod) === 'cash'
 
-  // IDs of cashEntries already linked to other veh expenses
-  const usedCashIds = new Set(
+  // IDs already linked to other veh expenses
+  const usedReconRefs = new Set(
     (allVehExpenses||[]).filter(e=>e.id!==expense.id && e.reconType==='cash' && e.reconRef)
       .map(e=>e.reconRef)
   )
@@ -427,18 +427,26 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
   // Build candidate list based on payment method
   let candidates = []
   if (isCash) {
-    // Cash mode: show only ATM withdrawals (prelievi) before the expense date, not yet assigned
-    candidates = (cashEntries||[])
-      .filter(e => {
-        const notUsed = !usedCashIds.has(`💵 ${e.note||e.cat1||'Contanti'} · ${e.date} · €${fmtIT(e.amount||0,2)}`)
-        const beforeDate = !expense.date || (e.date||'') <= expense.date
-        return beforeDate && notUsed && (e.amount||0) > 0
+    // Cash mode: ATM prelievi (cat1=Contanti, amount<0) within 60 days before expense date
+    const expDate = expense.date || ''
+    const cutoff = expDate ? new Date(new Date(expDate).getTime() - 60*24*60*60*1000).toISOString().slice(0,10) : ''
+    candidates = (transactions||[])
+      .filter(t => {
+        if (t.excluded || t.amount >= 0 || t.cat1 !== 'Contanti') return false
+        const tDate = t._effDate || t.date || ''
+        const beforeDate = !expDate || tDate <= expDate
+        const withinWindow = !cutoff || tDate >= cutoff
+        const label = `💵 ${t.descAI||(t.description||'').slice(0,30)} · ${tDate} · €${fmtIT(Math.abs(t.amount),2)}`
+        return beforeDate && withinWindow && !usedReconRefs.has(label)
       })
-      .map(e => ({
-        id:`cash-${e.id}`,
-        label:`💵 ${e.note||e.cat1||'Contanti'} · ${e.date} · €${fmtIT(e.amount||0,2)}`,
-        amount: e.amount||0, type:'cash', rawEntry: e
-      }))
+      .map(t => {
+        const tDate = t._effDate || t.date || ''
+        return {
+          id:`atm-${t.txId}`,
+          label:`💵 ${t.descAI||(t.description||'').slice(0,30)} · ${tDate} · €${fmtIT(Math.abs(t.amount),2)}`,
+          amount: Math.abs(t.amount), type:'cash'
+        }
+      })
   } else {
     // Bank/other: show transactions before expense date
     candidates = transactions
@@ -470,13 +478,13 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
     <Modal title={`🔗 Collega — ${expense.desc || 'Spesa'}`} onClose={onClose} width={540}>
       <div style={{marginBottom:10,padding:'8px 12px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--blue)'}}>
         <strong>{expense.desc||'—'}</strong> · € {fmtIT(expense.amount,2)} · {expense.date}
-        {isCash && <span style={{marginLeft:8,fontSize:11,background:'var(--gold-l)',color:'var(--gold)',padding:'1px 7px',borderRadius:8,fontWeight:700}}>💵 Cash — mostra prelievi prima di questa data</span>}
+        {isCash && <span style={{marginLeft:8,fontSize:11,background:'var(--gold-l)',color:'var(--gold)',padding:'1px 7px',borderRadius:8,fontWeight:700}}>💵 Cash — prelievi ATM ultimi 60gg</span>}
       </div>
       <FormRow label="Cerca"><Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cerca…" autoFocus/></FormRow>
       <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:300,overflowY:'auto',marginBottom:4}}>
         {filtered.length===0
           ? <div style={{textAlign:'center',fontSize:12,color:'var(--text3)',padding:16}}>
-              {isCash ? 'Nessun prelievo disponibile prima di questa data.' : 'Nessuna transazione trovata.'}
+              {isCash ? 'Nessun prelievo ATM trovato (cat. Contanti, ultimi 60gg).' : 'Nessuna transazione trovata.'}
             </div>
           : filtered.map(c=>{
               const isPartial = isCash && c.amount > expense.amount * 1.05
