@@ -391,19 +391,34 @@ export default function UscitePage() {
       <div className="uscite-chart-card">
         {/* Pie chart */}
         <div className="uscite-pie-wrap">
-          <PieChart width={250} height={240}>
+          <div className="uscite-chart-title">Per categoria</div>
+          <PieChart width={240} height={220}>
             <Pie
               data={pieData}
               dataKey="value"
               nameKey="name"
-              cx={125}
-              cy={120}
-              innerRadius={55}
-              outerRadius={95}
-              label={({ name, percent }) => percent > 0.05 ? name.split(' ')[0] : ''}
+              cx={120}
+              cy={110}
+              innerRadius={52}
+              outerRadius={88}
+              isAnimationActive={false}
+              label={({ cx, cy, midAngle, innerRadius, outerRadius, name, percent }) => {
+                if (percent < 0.05) return null
+                const RADIAN = Math.PI / 180
+                const r = (innerRadius + outerRadius) / 2
+                const x = cx + r * Math.cos(-midAngle * RADIAN)
+                const y = cy + r * Math.sin(-midAngle * RADIAN)
+                const short = name.split(' ')[0].slice(0, 7)
+                return (
+                  <text x={x} y={y} fill="rgba(255,255,255,.9)" textAnchor="middle"
+                    dominantBaseline="central" fontSize={8} fontWeight={700}>
+                    {short}
+                  </text>
+                )
+              }}
               labelLine={false}
             >
-              {pieData.map((entry, idx) => (
+              {pieData.map((entry) => (
                 <Cell key={entry.name} fill={catColor(entry.name)} />
               ))}
             </Pie>
@@ -412,22 +427,24 @@ export default function UscitePage() {
         </div>
         {/* Bar chart */}
         <div className="uscite-bar-wrap">
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={chartData} margin={{ top: 22, right: 16, left: 0, bottom: 0 }}
-              barCategoryGap="28%"
-              background={{ fill: '#fff' }}>
-              <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--text2)' }} axisLine={false} tickLine={false}/>
+          <div className="uscite-chart-title">Andamento mensile</div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={chartData} margin={{ top: 20, right: 16, left: 0, bottom: 0 }}
+              barCategoryGap="28%">
+              <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--text2)' }}
+                axisLine={{ stroke: '#e0dcd8' }} tickLine={false}/>
               <YAxis tick={{ fontSize: 11, fill: 'var(--text3)' }} axisLine={false} tickLine={false}
                 tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
                 width={38}
               />
-              <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(255,255,255,.04)' }}/>
+              <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(0,0,0,.04)' }}/>
               {cat1List.map((cat1, idx) => {
                 const isLast = idx === cat1List.length - 1
                 return (
                   <Bar key={cat1} dataKey={cat1} stackId="a"
                     fill={catColor(cat1)}
                     radius={isLast ? [4,4,0,0] : [0,0,0,0]}
+                    isAnimationActive={false}
                   >
                     <LabelList content={<SegmentLabel />} />
                     {isLast && <LabelList content={<BarTotalLabel />} />}
