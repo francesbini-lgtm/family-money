@@ -330,6 +330,27 @@ export default function ForecastPage() {
     ? Math.round(effectiveIncomeMths.reduce((s, m) => s + m.fra + m.sofi + m.other, 0) / effectiveIncomeMths.length)
     : avgIncome
 
+  // ── Historical yearly data for proiezione table ──────────
+  const historicalTableData = useMemo(() => {
+    const now = new Date()
+    const activeTxs = transactions.filter(t => !t.excluded)
+    const rows = []
+    for (let y = 3; y >= 1; y--) {
+      const year = now.getFullYear() - y
+      if (year < 2020) continue
+      const yStr = String(year)
+      const inc = activeTxs.filter(t => t.amount > 0 && (t._effDate||(t.date||'')).startsWith(yStr))
+        .reduce((s,t) => s+t.amount, 0)
+      const exp = Math.abs(activeTxs.filter(t => t.amount < 0 && (t._effDate||(t.date||'')).startsWith(yStr))
+        .reduce((s,t) => s+t.amount, 0))
+      const saldo = activeTxs.filter(t => (t._effDate||(t.date||'')) <= `${yStr}-12-31`)
+        .reduce((s,t) => s+t.amount, 0)
+      if (inc === 0 && exp === 0) continue
+      rows.push({ label: yStr, inc: Math.round(inc), exp: Math.round(exp), saldo: Math.round(saldo) })
+    }
+    return rows
+  }, [transactions])
+
   // ── What If: saved per month from excluded cats ───────────
   const savedPerMonth = useMemo(() => {
     if (excludedCats.size === 0) return 0
@@ -483,9 +504,9 @@ export default function ForecastPage() {
                   borderRadius:8,border:`1px solid ${detailPopup==='income'?'var(--green)':'var(--border)'}`,
                   cursor:'pointer',userSelect:'none'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
-                  <span>Entrate / mese</span><span style={{opacity:.5}}>▼</span>
+                  <span>Entrate (totale / 12)</span><span style={{opacity:.5}}>▼</span>
                 </div>
-                <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncomeEffective)}</div>
+                <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncome)}</div>
               </div>
               {/* Spese — clickable */}
               <div onClick={()=>setDetailPopup(detailPopup==='expense'?null:'expense')}
@@ -493,13 +514,13 @@ export default function ForecastPage() {
                   borderRadius:8,border:`1px solid ${detailPopup==='expense'?'var(--red)':'var(--border)'}`,
                   cursor:'pointer',userSelect:'none'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
-                  <span>Spese / mese</span><span style={{opacity:.5}}>▼</span>
+                  <span>Spese (totale / 12)</span><span style={{opacity:.5}}>▼</span>
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgExpense)}</div>
               </div>
               {[
                 ['Saldo attuale',    fmtFull(currentSaldo),  currentSaldo >= 0 ? 'var(--blue)' : 'var(--red)'],
-                ['Risparmio netto',  fmtFull(avgIncomeEffective - avgExpense), (avgIncomeEffective - avgExpense) >= 0 ? 'var(--green)' : 'var(--red)'],
+                ['Risparmio netto',  fmtFull(avgIncome - avgExpense), (avgIncome - avgExpense) >= 0 ? 'var(--green)' : 'var(--red)'],
               ].map(([l, v, c]) => (
                 <div key={l} style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
                   <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3}}>{l}</div>
@@ -546,7 +567,7 @@ export default function ForecastPage() {
                         <td style={{padding:'6px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color}}>{fmtFull(Math.round(total))}</td>
                       </tr>
                       <tr>
-                        <td style={{padding:'2px 0',fontWeight:700,fontSize:11,color:'var(--text3)'}}>Media / mese</td>
+                        <td style={{padding:'2px 0',fontWeight:700,fontSize:11,color:'var(--text3)'}}>Totale / 12</td>
                         <td style={{padding:'2px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color}}>{fmtFull(avg)}</td>
                       </tr>
                     </tfoot>
@@ -850,6 +871,34 @@ export default function ForecastPage() {
                 </tr>
               </thead>
               <tbody>
+                {/* Historical years (real data) */}
+                {historicalTableData.map(d => {
+                  const cf = d.inc - d.exp
+                  return (
+                    <tr key={d.label} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
+                      <td style={{padding:'8px 12px',fontWeight:700,color:'var(--text3)'}}>
+                        {d.label} <span style={{fontSize:9,fontWeight:500,background:'var(--border)',padding:'1px 5px',borderRadius:4,marginLeft:4}}>storico</span>
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
+                        € {fmtIT(d.inc, 0)}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                        € {fmtIT(d.exp, 0)}
+                      </td>
+                      {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
+                        {cf>=0?'+':''}€ {fmtIT(Math.abs(cf), 0)}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        fontWeight:700,color:'var(--text2)',fontSize:12}}>
+                        € {fmtIT(d.saldo, 0)}
+                      </td>
+                      {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                    </tr>
+                  )
+                })}
+                {/* Forecast rows */}
                 {forecastData
                   .filter((_,i) => i % Math.max(1, Math.floor(years / 8)) === 0 || i === forecastData.length - 1)
                   .map((d) => {
