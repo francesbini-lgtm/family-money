@@ -157,6 +157,8 @@ export default function ForecastPage() {
   const { transactions, customCats, appPrefs, setAppPref } = useStore()
   const excludedMonths = appPrefs?.forecastExcludedMonths || []
 
+  const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
+
   // Adjustable parameters
   const [growth,    setGrowth]    = useState(2)
   const [inflation, setInflation] = useState(2)
@@ -198,7 +200,7 @@ export default function ForecastPage() {
   }
 
   // ── Real data: last 6 FULL months (excluding current month) ──
-  const { avgIncome, avgExpense, currentSaldo, historicalPoints, catStats, last6, incomeByMonth } = useMemo(() => {
+  const { avgIncome, avgExpense, currentSaldo, historicalPoints, historicalYearPoints, catStats, last6, incomeByMonth, expenseByMonth } = useMemo(() => {
     const now = new Date()
     const active = transactions.filter(t => !t.excluded || t._forcedBalance)
 
@@ -258,6 +260,33 @@ export default function ForecastPage() {
       other: incomeTxs.filter(t => t.cat2 !== 'Fra' && t.cat2 !== 'Sofi' && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0),
     }))
 
+    // Monthly expense breakdown (last 12 months)
+    const expenseByMonth = last6.map(ym => ({
+      ym,
+      label: ymToLabel(ym),
+      total: Math.abs(
+        transactions.filter(t =>
+          !t.excluded && t.amount < 0 &&
+          (t._effDate||(t._effDate||t.date||'')).startsWith(ym)
+        ).reduce((s,t) => s + t.amount, 0)
+      ),
+    }))
+
+    // Historical saldo by year (for chart coherence when showing multi-year forecast)
+    const historicalYearPoints = []
+    for (let y = 3; y >= 1; y--) {
+      const year = now.getFullYear() - y
+      if (year < 2020) continue
+      const endYm = `${year}-12`
+      const saldo = active.filter(t => (t._effDate||(t._effDate||t.date||'')) <= endYm + '-31')
+        .reduce((s, t) => s + t.amount, 0)
+      historicalYearPoints.push({ ym: endYm, label: String(year), saldo: Math.round(saldo) })
+    }
+    // Also add current year so far
+    const curYmLabel = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+    const saldoNow = active.reduce((s,t) => s + t.amount, 0)
+    historicalYearPoints.push({ ym: curYmLabel, label: String(now.getFullYear()), saldo: Math.round(saldoNow) })
+
     // Always divide by 12 — fixed window of 12 closed months
 
     // Cat stats for What If panel — avg monthly per cat1 and cat2
@@ -287,9 +316,11 @@ export default function ForecastPage() {
       avgExpense: Math.round(totalExpense / 12),
       currentSaldo,
       historicalPoints,
+      historicalYearPoints,
       catStats,
       last6,
       incomeByMonth,
+      expenseByMonth,
     }
   }, [transactions, customCats])
 
@@ -369,7 +400,9 @@ export default function ForecastPage() {
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
-    const histPts = historicalPoints.map(p => ({
+    // Use yearly historical when forecast horizon > 1 year (for label coherence)
+    const srcHist = years > 1 ? historicalYearPoints : historicalPoints
+    const histPts = srcHist.map(p => ({
       label:      p.label,
       historical: p.saldo,
       forecast:   null,
@@ -386,7 +419,7 @@ export default function ForecastPage() {
       residual:   d.residual ?? null,
     }))
     return [...histPts, ...fcPts]
-  }, [historicalPoints, forecastData])
+  }, [historicalPoints, historicalYearPoints, forecastData, years])
 
   const finalPoint    = forecastData[forecastData.length - 1]
   const finalSaldo    = finalPoint?.forecast || 0
@@ -438,20 +471,33 @@ export default function ForecastPage() {
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
 
           {/* Real data summary */}
-          <div className="card fc-controls">
+          <div className="card fc-controls" style={{position:'relative'}}>
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:14,fontWeight:700}}>📈 Dati Reali (Media 1 anno)</div>
-              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>entrate cumulate − spese cumulate</div>
+              <div style={{fontSize:14,fontWeight:700}}>📈 Dati Reali (Ultimi 12 mesi)</div>
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>somma ultimi 12 mesi ÷ 12</div>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
-              <div style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3}}>
-                  Entrate / mese
+              {/* Entrate — clickable */}
+              <div onClick={()=>setDetailPopup(detailPopup==='income'?null:'income')}
+                style={{padding:'10px 12px',background: detailPopup==='income'?'rgba(50,180,100,.08)':'var(--surface2)',
+                  borderRadius:8,border:`1px solid ${detailPopup==='income'?'var(--green)':'var(--border)'}`,
+                  cursor:'pointer',userSelect:'none'}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
+                  <span>Entrate / mese</span><span style={{opacity:.5}}>▼</span>
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncomeEffective)}</div>
               </div>
+              {/* Spese — clickable */}
+              <div onClick={()=>setDetailPopup(detailPopup==='expense'?null:'expense')}
+                style={{padding:'10px 12px',background: detailPopup==='expense'?'rgba(220,50,50,.08)':'var(--surface2)',
+                  borderRadius:8,border:`1px solid ${detailPopup==='expense'?'var(--red)':'var(--border)'}`,
+                  cursor:'pointer',userSelect:'none'}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
+                  <span>Spese / mese</span><span style={{opacity:.5}}>▼</span>
+                </div>
+                <div style={{fontSize:16,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgExpense)}</div>
+              </div>
               {[
-                ['Spese / mese',     fmtFull(avgExpense),                                       'var(--red)'],
                 ['Saldo attuale',    fmtFull(currentSaldo),  currentSaldo >= 0 ? 'var(--blue)' : 'var(--red)'],
                 ['Risparmio netto',  fmtFull(avgIncomeEffective - avgExpense), (avgIncomeEffective - avgExpense) >= 0 ? 'var(--green)' : 'var(--red)'],
               ].map(([l, v, c]) => (
@@ -461,6 +507,53 @@ export default function ForecastPage() {
                 </div>
               ))}
             </div>
+
+            {/* Monthly detail popup */}
+            {detailPopup && (()=>{
+              const isInc = detailPopup === 'income'
+              const rows = isInc
+                ? incomeByMonth.map(m=>({ label: m.label, val: m.fra+m.sofi+m.other }))
+                : expenseByMonth.map(m=>({ label: m.label, val: m.total }))
+              const total = rows.reduce((s,r)=>s+r.val,0)
+              const avg   = Math.round(total/12)
+              const color = isInc ? 'var(--green)' : 'var(--red)'
+              return (
+                <div style={{position:'absolute',top:0,left:0,right:0,zIndex:50,
+                  background:'var(--surface)',border:'1px solid var(--border)',
+                  borderRadius:12,padding:'14px 16px',
+                  boxShadow:'0 8px 32px rgba(0,0,0,.18)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                    <div style={{fontSize:13,fontWeight:700,color}}>
+                      {isInc ? '📥 Entrate' : '📤 Spese'} — ultimi 12 mesi
+                    </div>
+                    <button onClick={()=>setDetailPopup(null)}
+                      style={{border:'none',background:'none',cursor:'pointer',fontSize:16,color:'var(--text3)',lineHeight:1}}>✕</button>
+                  </div>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <tbody>
+                      {rows.map(r=>(
+                        <tr key={r.label} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'4px 0',color:'var(--text2)'}}>{r.label}</td>
+                          <td style={{padding:'4px 0',textAlign:'right',fontFamily:'var(--font-mono)',color,fontWeight:600}}>
+                            {fmtFull(Math.round(r.val))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{borderTop:'2px solid var(--border)'}}>
+                        <td style={{padding:'6px 0',fontWeight:700,fontSize:11,color:'var(--text3)'}}>Totale</td>
+                        <td style={{padding:'6px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color}}>{fmtFull(Math.round(total))}</td>
+                      </tr>
+                      <tr>
+                        <td style={{padding:'2px 0',fontWeight:700,fontSize:11,color:'var(--text3)'}}>Media / mese</td>
+                        <td style={{padding:'2px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color}}>{fmtFull(avg)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )
+            })()}
 
             {/* What If toggle button */}
             <button className={`fc-whatif-btn ${whatIfOpen ? 'open' : ''}`}
