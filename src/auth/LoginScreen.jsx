@@ -128,41 +128,27 @@ function GoogleStep() {
   )
 }
 
-// ── Combined verify step: PIN + TOTP (desktop) / PIN-only (mobile) ────────────
+// ── Combined verify step: PIN + TOTP insieme, un solo tasto ──────────────────
 function VerifyStep() {
   const { user, totpSecret, isMobile, verifyAndLogin } = useAuth()
-  const [pin,      setPin]      = useState('')
-  const [totp,     setTotp]     = useState('')
-  const [error,    setError]    = useState(null)
-  const [loading,  setLoading]  = useState(false)
-  const [pinDone,  setPinDone]  = useState(false)
+  const [pin,     setPin]     = useState('')
+  const [totp,    setTotp]    = useState('')
+  const [error,   setError]   = useState(null)
+  const [loading, setLoading] = useState(false)
 
-  const needTotp = !!(totpSecret && !isMobile)
+  const needTotp  = !!(totpSecret && !isMobile)
+  const canSubmit = pin.length === 6 && (!needTotp || totp.length === 6)
 
-  async function submit(pinVal, totpVal) {
+  async function handleSubmit() {
+    if (!canSubmit || loading) return
     setError(null); setLoading(true)
     try {
-      await verifyAndLogin(pinVal, totpVal)
+      await verifyAndLogin(pin, totp)
     } catch(e) {
       setError(e.message)
-      setPin(''); setTotp(''); setPinDone(false)
+      setPin(''); setTotp('')
     }
     setLoading(false)
-  }
-
-  function handlePinComplete(val) {
-    setPin(val)
-    if (!needTotp) {
-      submit(val, '')
-    } else {
-      setPinDone(true)
-    }
-  }
-
-  function handleTotpComplete(val) {
-    setTotp(val)
-    // auto-submit when TOTP is complete
-    submit(pin, val)
   }
 
   return (
@@ -170,43 +156,43 @@ function VerifyStep() {
       <UserRow user={user}/>
       <div className="verify-divider"/>
 
-      {!pinDone ? (
-        <CodeInput
-          label="Codice accesso"
-          onComplete={handlePinComplete}
-          disabled={loading}
-          error={error}
-          autoFocus
-        />
-      ) : (
-        <CodeInput
-          label="Codice Authenticator"
-          onComplete={handleTotpComplete}
-          disabled={loading}
-          error={error}
-          autoFocus
-        />
-      )}
+      <CodeInput
+        label="Codice accesso"
+        onComplete={val => setPin(val)}
+        disabled={loading}
+        error={error && !needTotp ? error : null}
+        autoFocus
+      />
 
-      {loading && (
-        <div style={{ display:'flex', justifyContent:'center', marginTop:16 }}>
-          <div className="spinner"/>
+      {needTotp && (
+        <div style={{ marginTop: 20 }}>
+          <CodeInput
+            label="Codice Authenticator"
+            onComplete={val => setTotp(val)}
+            disabled={loading}
+            error={null}
+          />
         </div>
       )}
+
+      <button
+        className="login-btn"
+        onClick={handleSubmit}
+        disabled={!canSubmit || loading}
+        style={{ marginTop: 20 }}
+      >
+        {loading
+          ? <span className="spinner" style={{width:16,height:16,borderWidth:2,display:'inline-block'}}/>
+          : 'Accedi'}
+      </button>
 
       {error && (
         <div className="code-error" style={{ marginTop: 10 }}>
           {error}
-          <button className="code-retry" onClick={() => { setError(null); setPin(''); setTotp(''); setPinDone(false) }}>
+          <button className="code-retry" onClick={() => { setError(null); setPin(''); setTotp('') }}>
             Riprova
           </button>
         </div>
-      )}
-
-      {pinDone && !loading && (
-        <button className="setup-link" onClick={() => { setPin(''); setPinDone(false); setError(null) }} style={{ marginTop:10 }}>
-          ← Cambia codice accesso
-        </button>
       )}
 
       <VerifyFooter/>
