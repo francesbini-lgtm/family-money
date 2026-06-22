@@ -15,6 +15,107 @@ const COLORS = {
   'Fra-Bonus': '#6a9cca', 'Sofi-Bonus': '#e892b8',
 }
 
+// ── RAL default data (representative, from Jan 2022) ─────
+const DEFAULT_RAL_DATA = {
+  Fra: [
+    { year: 2022, ral: 64000, netto: 42000 },
+    { year: 2023, ral: 66000, netto: 43500 },
+    { year: 2024, ral: 68500, netto: 45000 },
+    { year: 2025, ral: 71000, netto: 46500 },
+    { year: 2026, ral: 73000, netto: 48000 },
+  ],
+  Sofi: [
+    { year: 2022, ral: 52000, netto: 34500 },
+    { year: 2023, ral: 54000, netto: 35800 },
+    { year: 2024, ral: 56000, netto: 37200 },
+    { year: 2025, ral: 58500, netto: 38800 },
+    { year: 2026, ral: 60000, netto: 40000 },
+  ],
+}
+
+// ── RAL edit modal ────────────────────────────────────────
+function RalEditModal({ person, data, onSave, onClose }) {
+  const [rows, setRows] = useState(() =>
+    [...(data[person] || [])].sort((a, b) => a.year - b.year)
+  )
+  const [newYear, setNewYear] = useState('')
+  const [newRal, setNewRal]   = useState('')
+  const [newNetto, setNewNetto] = useState('')
+
+  function updateRow(i, field, val) {
+    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: parseFloat(val)||0 } : r))
+  }
+  function deleteRow(i) {
+    setRows(prev => prev.filter((_, idx) => idx !== i))
+  }
+  function addRow() {
+    const yr = parseInt(newYear)
+    if (!yr || yr < 2000 || yr > 2040) return
+    if (rows.find(r => r.year === yr)) return
+    setRows(prev => [...prev, { year: yr, ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0 }].sort((a,b)=>a.year-b.year))
+    setNewYear(''); setNewRal(''); setNewNetto('')
+  }
+  function handleSave() {
+    onSave({ ...data, [person]: rows })
+    onClose()
+  }
+  const color = COLORS[person] || '#888'
+  return (
+    <div className="en-ral-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="en-ral-modal">
+        <button className="en-ral-close" onClick={onClose}>✕</button>
+        <div className="en-ral-title" style={{ color }}>📊 RAL / Netto — {person}</div>
+        <table className="en-ral-table">
+          <thead>
+            <tr>
+              <th>Anno</th>
+              <th>RAL (€)</th>
+              <th>Netto annuo (€)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.year}>
+                <td><strong>{r.year}</strong></td>
+                <td>
+                  <input className="en-ral-input" type="number" value={r.ral}
+                    onChange={e => updateRow(i, 'ral', e.target.value)} />
+                </td>
+                <td>
+                  <input className="en-ral-input" type="number" value={r.netto}
+                    onChange={e => updateRow(i, 'netto', e.target.value)} />
+                </td>
+                <td>
+                  <button className="en-ral-del" onClick={() => deleteRow(i)} title="Elimina">✕</button>
+                </td>
+              </tr>
+            ))}
+            <tr className="en-ral-add-row">
+              <td>
+                <input className="en-ral-input" type="number" placeholder="Anno" value={newYear}
+                  onChange={e => setNewYear(e.target.value)} />
+              </td>
+              <td>
+                <input className="en-ral-input" type="number" placeholder="RAL" value={newRal}
+                  onChange={e => setNewRal(e.target.value)} />
+              </td>
+              <td>
+                <input className="en-ral-input" type="number" placeholder="Netto" value={newNetto}
+                  onChange={e => setNewNetto(e.target.value)} />
+              </td>
+              <td>
+                <button className="en-ral-add-btn" onClick={addRow} disabled={!newYear}>+</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <button className="en-ral-save-btn" onClick={handleSave}>✓ Salva</button>
+      </div>
+    </div>
+  )
+}
+
 // ── Date helpers ──────────────────────────────────────────
 function getLastNMonths(n, now = new Date()) {
   const months = []
@@ -188,6 +289,14 @@ export default function EntratePage() {
   const [period, setPeriod] = useState('month')
   const [tab, setTab]       = useState('stipendi')
 
+  // RAL / Netto chart state
+  const [ralData, setRalData]         = useState(() => appPrefs?.ralData || DEFAULT_RAL_DATA)
+  const [showRAL, setShowRAL]         = useState(true)
+  const [showNetto, setShowNetto]     = useState(true)
+  const [ralEditPerson, setRalEditPerson] = useState(null) // 'Fra' | 'Sofi' | null
+
+  function saveRalData(newData) { setRalData(newData); setAppPref('ralData', newData) }
+
   const now    = new Date()
   const thisYM = getYM(now)
 
@@ -359,51 +468,117 @@ export default function EntratePage() {
           </div>
 
           {/* Charts — respond to toggle */}
-          <div className="en-charts">
-            <div className="card en-chart-card">
-              <div className="en-chart-header">
-                <span className="en-chart-title">Entrate per fonte</span>
-                <span style={{fontSize:11,color:'var(--text3)'}}>{chartSubLabel(period)}</span>
-              </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={chartData} barCategoryGap="35%" margin={{bottom:20}}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-                  <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
-                    interval={0} angle={-35} textAnchor="end" height={44}/>
-                  <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={52}
-                    tickFormatter={v => v>=1000 ? `€${(v/1000).toFixed(0)}K` : `€${v}`}/>
-                  <Tooltip formatter={(v,n) => [`€ ${fmtIT(v,0)}`, n]}
-                    contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
-                  <Legend iconType="circle" iconSize={8}
-                    formatter={v => <span style={{fontSize:11,color:'var(--text2)'}}>{v}</span>}/>
-                  {activeCats.map(cat => (
-                    <Bar key={cat} dataKey={cat} name={cat} fill={COLORS[cat]} stackId="a"
-                      radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}/>
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          {(() => {
+            // Build RAL chart data
+            const fraRows  = ralData.Fra  || []
+            const sofiRows = ralData.Sofi || []
+            const ralYears = [...new Set([...fraRows.map(d=>d.year), ...sofiRows.map(d=>d.year)])].sort((a,b)=>a-b)
+            const ralChartData = ralYears.map(yr => ({
+              year: String(yr),
+              'Fra RAL':   fraRows.find(d=>d.year===yr)?.ral,
+              'Fra Netto': fraRows.find(d=>d.year===yr)?.netto,
+              'Sofi RAL':  sofiRows.find(d=>d.year===yr)?.ral,
+              'Sofi Netto':sofiRows.find(d=>d.year===yr)?.netto,
+            }))
+            const ralLines = [
+              ...(showRAL   ? [{ key:'Fra RAL',   color:'#1e4a75', dash:'5 3' }, { key:'Sofi RAL',   color:'#a84070', dash:'5 3' }] : []),
+              ...(showNetto ? [{ key:'Fra Netto', color:COLORS.Fra, dash:'0' }, { key:'Sofi Netto', color:COLORS.Sofi, dash:'0' }] : []),
+            ]
+            return (
+              <div className="en-charts">
+                {/* Chart 1 — Entrate per fonte */}
+                <div className="card en-chart-card">
+                  <div className="en-chart-header">
+                    <span className="en-chart-title">Entrate per fonte (Fra + Sofi)</span>
+                    <span style={{fontSize:11,color:'var(--text3)'}}>{chartSubLabel(period)}</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={chartData} barCategoryGap="35%" margin={{bottom:20}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                      <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
+                        interval={0} angle={-35} textAnchor="end" height={44}/>
+                      <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={52}
+                        tickFormatter={v => v>=1000 ? `€${(v/1000).toFixed(0)}K` : `€${v}`}/>
+                      <Tooltip formatter={(v,n) => [`€ ${fmtIT(v,0)}`, n]}
+                        contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
+                      <Legend iconType="circle" iconSize={8}
+                        formatter={v => <span style={{fontSize:11,color:'var(--text2)'}}>{v}</span>}/>
+                      {activeCats.map(cat => (
+                        <Bar key={cat} dataKey={cat} name={cat} fill={COLORS[cat]} stackId="a"
+                          radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}/>
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
 
-            <div className="card en-chart-card">
-              <div className="en-chart-header">
-                <span className="en-chart-title">Trend entrate totali</span>
-                <span style={{fontSize:11,color:'var(--text3)'}}>{chartSubLabel(period)}</span>
+                {/* Chart 2 — Stipendio RAL vs Netto */}
+                <div className="card en-chart-card" style={{position:'relative'}}>
+                  {/* Top-right toggles */}
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <span className="en-chart-title">Stipendio (RAL vs Netto)</span>
+                    <div style={{display:'flex',gap:5}}>
+                      <button
+                        onClick={() => setShowRAL(v => !v)}
+                        style={{
+                          padding:'3px 10px',border:'1px solid',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,
+                          borderColor: showRAL ? '#64748b' : 'var(--border)',
+                          background: showRAL ? '#64748b' : 'transparent',
+                          color: showRAL ? '#fff' : 'var(--text3)',
+                        }}>RAL</button>
+                      <button
+                        onClick={() => setShowNetto(v => !v)}
+                        style={{
+                          padding:'3px 10px',border:'1px solid',borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,
+                          borderColor: showNetto ? 'var(--green)' : 'var(--border)',
+                          background: showNetto ? 'var(--green)' : 'transparent',
+                          color: showNetto ? '#fff' : 'var(--text3)',
+                        }}>Netto</button>
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={ralChartData} margin={{top:8,bottom:4,left:0,right:4}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                      <XAxis dataKey="year" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                      <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={56}
+                        tickFormatter={v => v>=1000 ? `€${(v/1000).toFixed(0)}K` : `€${v}`}/>
+                      <Tooltip formatter={(v,n) => [`€ ${fmtIT(v,0)}`, n]}
+                        contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
+                      {ralLines.map(l => (
+                        <Line key={l.key} type="monotone" dataKey={l.key}
+                          stroke={l.color} strokeWidth={2} strokeDasharray={l.dash}
+                          dot={{r:4,fill:l.color}} activeDot={{r:6}} connectNulls />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                  {/* Bottom-right edit buttons */}
+                  <div style={{display:'flex',gap:6,justifyContent:'flex-end',marginTop:6}}>
+                    {['Fra','Sofi'].map(p => (
+                      <button key={p} onClick={() => setRalEditPerson(p)}
+                        title={`Modifica dati RAL/Netto ${p}`}
+                        style={{
+                          display:'flex',alignItems:'center',gap:5,
+                          padding:'4px 10px',border:'1px solid var(--border)',borderRadius:6,
+                          background:'var(--bg)',cursor:'pointer',fontSize:11,fontWeight:600,
+                          color:COLORS[p]||'var(--text2)',transition:'background .12s',
+                        }}>
+                        <span style={{fontSize:12}}>🗒️</span>{p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{bottom:20}}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-                  <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
-                    interval={0} angle={-35} textAnchor="end" height={44}/>
-                  <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={52}
-                    tickFormatter={v => v>=1000 ? `€${(v/1000).toFixed(0)}K` : `€${v}`}/>
-                  <Tooltip formatter={v => [`€ ${fmtIT(v,0)}`, 'Totale']}
-                    contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
-                  <Line type="monotone" dataKey="total" stroke="var(--green)" strokeWidth={2.5}
-                    dot={{r:4,fill:'var(--green)'}} activeDot={{r:6}}/>
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+            )
+          })()}
+
+          {/* RAL Edit Modal */}
+          {ralEditPerson && (
+            <RalEditModal
+              person={ralEditPerson}
+              data={ralData}
+              onSave={saveRalData}
+              onClose={() => setRalEditPerson(null)}
+            />
+          )}
 
           {/* Insights */}
           <InsightsBox insights={insights}/>
