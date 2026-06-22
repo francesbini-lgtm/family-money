@@ -1730,7 +1730,7 @@ function AddManualTxModal({ onClose }) {
 }
 
 // ── Quick filters ─────────────────────────────────────────
-function QuickFilters({ transactions, hideComm, setHideComm }) {
+function QuickFilters({ transactions, hideComm, setHideComm, selected }) {
   const store   = useStore()
   const filters = store.filters
   const today   = new Date()
@@ -1761,8 +1761,18 @@ function QuickFilters({ transactions, hideComm, setHideComm }) {
     {id:'hidecomm', label:'Nascondi commissioni', active:hideComm, action:()=>setHideComm(v=>!v)},
   ]
 
+  const selTxs = selected?.size > 0
+    ? transactions.filter(t => selected.has(t.txId))
+    : []
+  const selSum = selTxs.reduce((s, t) => s + (t.amount || 0), 0)
+  const fmtSel = v => {
+    const abs = Math.abs(v)
+    const str = abs.toLocaleString('it-IT', {minimumFractionDigits:2,maximumFractionDigits:2})
+    return v >= 0 ? `+€ ${str}` : `−€ ${str}`
+  }
+
   return (
-    <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+    <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
       {pills.map(p => (
         <button key={p.id} onClick={p.action} style={{
           display:'inline-flex',alignItems:'center',gap:5,padding:'5px 12px',
@@ -1780,6 +1790,18 @@ function QuickFilters({ transactions, hideComm, setHideComm }) {
           </span>
         </button>
       ))}
+      {selTxs.length > 0 && (
+        <div style={{marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:8,
+          padding:'5px 14px',borderRadius:20,
+          border:'1px solid var(--accent)',background:'var(--accent-l)',
+          fontSize:13,color:'var(--accent)',fontWeight:700}}>
+          <span>{selTxs.length} selezionate</span>
+          <span style={{width:1,height:14,background:'var(--accent)',opacity:.3}}/>
+          <span style={{color:selSum>=0?'var(--green)':'var(--red)',fontFamily:'var(--font-mono)',fontSize:12}}>
+            {fmtSel(selSum)}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -2467,7 +2489,7 @@ export default function TransactionsPage() {
 
       <div style={{position:'sticky',top:0,zIndex:10,background:'var(--bg)',paddingBottom:8,marginBottom:0}}>
         <KPIBar txs={filtered}/>
-        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm}/>
+        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm} selected={selected}/>
         <FilterBar/>
       </div>
 
