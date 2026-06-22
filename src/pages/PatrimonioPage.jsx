@@ -143,10 +143,34 @@ export default function PatrimonioPage() {
   , [transactions])
   const ccAsset = ccBalance > 0 ? [{ id:'auto_cc', name:'Conto Corrente', cat:'Conto Corrente', value: ccBalance, type:'asset', updatedAt: new Date().toISOString().slice(0,10), readonly:true }] : []
 
-  // Auto: each Satispay fund (accantonamento)
-  const satiAssets = (satiPots || [])
-    .map(p => ({ id:'sati_'+p.id, name:`Satispay – ${p.name}`, cat:'Liquidità', value: potTotal(p), type:'asset', updatedAt: new Date().toISOString().slice(0,10), readonly:true }))
-    .filter(a => a.value > 0)
+  // Compute Satispay net value: gross accumulated - income entries (releases)
+  const satiGross = useMemo(() =>
+    (satiPots || []).reduce((s, p) => s + potTotal(p), 0)
+  , [satiPots])
+
+  const satiReleases = useMemo(() =>
+    transactions.filter(t => {
+      if (t.excluded) return false
+      if (t.amount <= 0) return false
+      const desc = (t.description || '').toUpperCase()
+      const merch = (t.merchant || '').toUpperCase()
+      return t.cat1 === 'Satispay' || desc.includes('SATISPAY') || merch.includes('SATISPAY')
+    }).reduce((s, t) => s + t.amount, 0)
+  , [transactions])
+
+  const satiNetto = Math.max(0, satiGross - satiReleases)
+
+  const satiAssets = satiNetto > 0
+    ? [{
+        id: 'sati_all',
+        name: 'Satispay (fondi)',
+        cat: 'Liquidità',
+        value: satiNetto,
+        type: 'asset',
+        updatedAt: new Date().toISOString().slice(0,10),
+        readonly: true
+      }]
+    : []
 
   const allAssets      = [...ccAsset, ...satiAssets, ...portfolioAssets, ...assets]
   const allLiabilities = [...loanLiabilities, ...liabilities]

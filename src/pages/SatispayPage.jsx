@@ -5,7 +5,7 @@ import { showToast } from '../services/notifications'
 import { CATS, getMergedCats } from '../data/categories'
 import { Plus, Trash2, Edit2, Check, X, Link } from 'lucide-react'
 import {
-  AreaChart, Area, BarChart, Bar,
+  AreaChart, Area, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
 
@@ -2190,6 +2190,10 @@ function SatiTabPill({ label, active, onClick }) {
 
 // ── Overview tab ──────────────────────────────────────────
 function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
+  const { appPrefs, setAppPref } = useStore()
+  const satiNetOverride = appPrefs?.satiNetOverride ?? null
+  const [editingNet, setEditingNet] = useState(false)
+  const [netDraft, setNetDraft] = useState('')
   const now = nowYM()
   const lm  = addMonth(now,-1)
   const lm2 = addMonth(now,-2)
@@ -2217,10 +2221,14 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
   // Net total = gross accumulated - released entries
   const totalAcc    = Math.max(0, totalAccLordo - totEntrate)
 
-  // Chart: last 12 months cumulative total
-  const last12 = Array.from({length:12},(_,i)=>addMonth(now,i-11))
-  const chartData = last12.map(ym => {
-    const entry = { label: ymLabel(ym) }
+  const displayAcc = satiNetOverride !== null ? satiNetOverride : totalAcc
+
+  // Chart: all months from 2022-01 to now, per fund line
+  const allChartMonths = []
+  let chartCur = '2022-01'
+  while (chartCur <= now) { allChartMonths.push(chartCur); chartCur = addMonth(chartCur) }
+  const chartData = allChartMonths.map(ym => {
+    const entry = { label: ymLabel(ym), ym }
     satiPots.forEach(p => { entry[p.name] = potAcc(p,ym) })
     entry.total = satiPots.reduce((s,p)=>s+potAcc(p,ym),0)
     return entry
@@ -2240,9 +2248,45 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
     <div>
       {/* KPI grid */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:24}}>
+        {/* Special KPI: Totale accantonato (netto) with override */}
+        <div className="card" style={{padding:'14px 18px',borderLeft:'3px solid var(--green)',gridColumn:'span 1'}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:5}}>
+            💰 Totale accantonato (netto)
+          </div>
+          {editingNet ? (
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <input type="number" autoFocus value={netDraft} onChange={e=>setNetDraft(e.target.value)}
+                style={{width:100,fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',
+                  border:'1px solid var(--accent)',borderRadius:6,padding:'2px 6px',background:'var(--surface)',color:'var(--text)'}}/>
+              <button onClick={()=>{setAppPref('satiNetOverride',Number(netDraft));setEditingNet(false)}}
+                style={{border:'none',background:'var(--green)',color:'#fff',borderRadius:5,padding:'3px 8px',cursor:'pointer',fontWeight:700,fontSize:12}}>✓</button>
+              <button onClick={()=>{setAppPref('satiNetOverride',null);setEditingNet(false)}}
+                style={{border:'1px solid var(--border)',background:'var(--surface)',borderRadius:5,padding:'3px 8px',cursor:'pointer',fontSize:12,color:'var(--text3)'}}>✕ Reset</button>
+            </div>
+          ) : (
+            <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+              <div style={{fontSize:20,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--green)'}}>
+                € {fmtIT(displayAcc,0)}
+              </div>
+              <button onClick={()=>{setNetDraft(String(displayAcc));setEditingNet(true)}}
+                style={{border:'none',background:'none',cursor:'pointer',fontSize:12,color:'var(--text3)',padding:'0 2px'}}
+                title="Rettifica manuale">✏️</button>
+            </div>
+          )}
+          {satiNetOverride !== null && (
+            <div style={{fontSize:10,marginTop:3,color:'var(--gold)'}}>
+              rettifica manuale · calcolato: €{fmtIT(totalAcc,0)}
+            </div>
+          )}
+          {satiNetOverride === null && totEntrate>0 && (
+            <div style={{fontSize:10,marginTop:3,color:'var(--text3)'}}>
+              lordo €{fmtIT(totalAccLordo,0)} − rilasci €{fmtIT(totEntrate,0)}
+            </div>
+          )}
+        </div>
+
+        {/* Remaining KPI cards */}
         {[
-          ['💰 Totale accantonato (netto)', `€ ${fmtIT(totalAcc,0)}`, 'var(--green)',
-            totEntrate>0 ? { _note: `lordo €${fmtIT(totalAccLordo,0)} − rilasci €${fmtIT(totEntrate,0)}` } : null],
           ['📁 Fondi attivi', `${satiPots.length} fond${satiPots.length===1?'o':'i'}`, 'var(--accent)', null],
           ['📅 Mese corrente', meseCorr>0?`€ ${fmtIT(meseCorr,0)}`:'—', 'var(--accent)',
             crescita!==null ? { val: crescita, prev: meseScorso } : null],
@@ -2267,27 +2311,26 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
         ))}
       </div>
 
-      {/* Cumulative area chart */}
+      {/* Cumulative line chart from 2022 */}
       <div className="card" style={{padding:'18px 20px',marginBottom:16}}>
-        <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>📈 Patrimonio accumulato (ultimi 12 mesi)</div>
-        <div style={{fontSize:11,color:'var(--text3)',marginBottom:12}}>Totale cumulativo di tutti i fondi</div>
-        <ResponsiveContainer width="100%" height={180}>
-          <AreaChart data={chartData} margin={{top:4,right:4,bottom:0,left:0}}>
-            <defs>
-              <linearGradient id="satiOverGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--green)" stopOpacity={0.28}/>
-                <stop offset="95%" stopColor="var(--green)" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>📈 Patrimonio accumulato (dal 2022)</div>
+        <div style={{fontSize:11,color:'var(--text3)',marginBottom:12}}>Saldo cumulativo per fondo</div>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={chartData} margin={{top:4,right:4,bottom:0,left:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
+              interval={Math.floor(allChartMonths.length / 8)}/>
             <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={52}
               tickFormatter={v=>v>=1000?`€${(v/1000).toFixed(0)}K`:`€${v}`}/>
-            <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`,'Accantonato']}
+            <Tooltip formatter={(v,n)=>[`€ ${fmtIT(v,0)}`,n]}
               contentStyle={{fontSize:11,border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px'}}/>
-            <Area type="monotone" dataKey="total" stroke="var(--green)" strokeWidth={2}
-              fill="url(#satiOverGrad)" dot={false} activeDot={{r:4}}/>
-          </AreaChart>
+            {satiPots.length > 1 && <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10}}>{v}</span>}/>}
+            {satiPots.map((p,i)=>(
+              <Line key={p.id} type="monotone" dataKey={p.name}
+                stroke={POT_COLORS[i%POT_COLORS.length]} strokeWidth={2}
+                dot={false} activeDot={{r:4}} isAnimationActive={false}/>
+            ))}
+          </LineChart>
         </ResponsiveContainer>
       </div>
 

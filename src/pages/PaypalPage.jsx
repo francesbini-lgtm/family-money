@@ -1012,8 +1012,8 @@ export default function PaypalPage() {
                 <th className="pp-th">Data</th>
                 <th className="pp-th">Merchant</th>
                 <th className="pp-th">Importo</th>
-                <th className="pp-th">Cat L1</th>
-                <th className="pp-th">Cat L2</th>
+                <th className="pp-th">L1</th>
+                <th className="pp-th">L2</th>
                 <th className="pp-th">Stato</th>
               </tr>
             </thead>
@@ -1039,8 +1039,23 @@ export default function PaypalPage() {
                         </span>
                       )}
                     </td>
-                    <td className="pp-td" style={{ color:'var(--text2)', fontSize:12 }}>
-                      {t.cat2 || '—'}
+                    <td className="pp-td">
+                      {(() => {
+                        if (!t.cat2) return <span style={{color:'var(--text3)'}}>—</span>
+                        const allCats = getMergedCats(customCats)
+                        const validSubs = allCats[t.cat1]?.sub || []
+                        const isValid = !t.cat1 || validSubs.includes(t.cat2)
+                        return (
+                          <span style={{
+                            fontSize: 12,
+                            color: isValid ? 'var(--text2)' : 'var(--gold)',
+                            title: isValid ? '' : `"${t.cat2}" non è valido per "${t.cat1}"`,
+                          }}>
+                            {!isValid && '⚠ '}
+                            {t.cat2}
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td className="pp-td">
                       {t._paypalOverride ? (

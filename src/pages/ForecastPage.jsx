@@ -154,7 +154,14 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function ForecastPage() {
-  const { transactions, customCats } = useStore()
+  const { transactions, customCats, appPrefs, setAppPref } = useStore()
+  const excludedMonths = appPrefs?.forecastExcludedMonths || []
+  function toggleExcludedMonth(ym) {
+    const next = excludedMonths.includes(ym)
+      ? excludedMonths.filter(m => m !== ym)
+      : [...excludedMonths, ym]
+    setAppPref('forecastExcludedMonths', next)
+  }
 
   // Adjustable parameters
   const [growth,    setGrowth]    = useState(2)
@@ -294,6 +301,12 @@ export default function ForecastPage() {
     }
   }, [transactions, customCats])
 
+  // Effective income avg excluding deselected months
+  const effectiveIncomeMths = incomeByMonth.filter(m => !excludedMonths.includes(m.ym))
+  const avgIncomeEffective = effectiveIncomeMths.length > 0
+    ? Math.round(effectiveIncomeMths.reduce((s, m) => s + m.fra + m.sofi + m.other, 0) / effectiveIncomeMths.length)
+    : avgIncome
+
   // ── What If: saved per month from excluded cats ───────────
   const savedPerMonth = useMemo(() => {
     if (excludedCats.size === 0) return 0
@@ -323,8 +336,8 @@ export default function ForecastPage() {
   }, [mortgageOn, mortgageAmt, mortgageYears, mortgageTaeg, years])
 
   // ── Forecast data (uses effectiveExpense) ─────────────────
-  const monthlySavings = avgIncome - effectiveExpense - (mortgage ? mortgage.rata : 0)
-  const savingsRate    = avgIncome > 0 ? Math.round(monthlySavings / avgIncome * 100) : 0
+  const monthlySavings = avgIncomeEffective - effectiveExpense - (mortgage ? mortgage.rata : 0)
+  const savingsRate    = avgIncomeEffective > 0 ? Math.round(monthlySavings / avgIncomeEffective * 100) : 0
 
   const mortgageStartYear = useMemo(() => {
     if (!mortgageStart) return new Date().getFullYear()
@@ -335,7 +348,7 @@ export default function ForecastPage() {
     const now = new Date()
     const pts = []
     let saldo = currentSaldo
-    let inc   = avgIncome
+    let inc   = avgIncomeEffective
     let exp   = effectiveExpense
 
     for (let y = 0; y <= years; y++) {
@@ -359,7 +372,7 @@ export default function ForecastPage() {
       exp *= (1 + inflation / 100)
     }
     return pts
-  }, [avgIncome, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -444,12 +457,12 @@ export default function ForecastPage() {
                   <span>Entrate / mese</span>
                   <span style={{color:'var(--accent)',opacity:.7}}>🔍</span>
                 </div>
-                <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncome)}</div>
+                <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncomeEffective)}</div>
               </div>
               {[
                 ['Spese / mese',     fmtFull(avgExpense),                                       'var(--red)'],
                 ['Saldo attuale',    fmtFull(currentSaldo),  currentSaldo >= 0 ? 'var(--blue)' : 'var(--red)'],
-                ['Risparmio netto',  fmtFull(avgIncome - avgExpense), (avgIncome - avgExpense) >= 0 ? 'var(--green)' : 'var(--red)'],
+                ['Risparmio netto',  fmtFull(avgIncomeEffective - avgExpense), (avgIncomeEffective - avgExpense) >= 0 ? 'var(--green)' : 'var(--red)'],
               ].map(([l, v, c]) => (
                 <div key={l} style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
                   <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3}}>{l}</div>
@@ -464,6 +477,9 @@ export default function ForecastPage() {
                 <div style={{padding:'8px 12px',background:'var(--surface2)',fontSize:11,fontWeight:700,color:'var(--text3)',borderBottom:'1px solid var(--border)'}}>
                   Dettaglio entrate per mese
                 </div>
+                <div style={{padding:'6px 12px',fontSize:10,color:'var(--text3)',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+                  Clicca su un mese per escluderlo dalla media · {excludedMonths.length > 0 && <span style={{color:'var(--accent)',cursor:'pointer'}} onClick={()=>setAppPref('forecastExcludedMonths',[])}>Ripristina tutti</span>}
+                </div>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                   <thead>
                     <tr style={{background:'var(--surface2)'}}>
@@ -477,7 +493,16 @@ export default function ForecastPage() {
                       const tot = m.fra + m.sofi + m.other
                       const missing = tot === 0
                       return (
-                        <tr key={m.ym} style={{borderBottom:'1px solid var(--border)',background: missing ? 'rgba(220,50,50,.04)' : 'none'}}>
+                        <tr key={m.ym}
+                          onClick={() => toggleExcludedMonth(m.ym)}
+                          style={{
+                            borderBottom:'1px solid var(--border)',
+                            background: excludedMonths.includes(m.ym) ? 'rgba(180,180,180,.08)' : (missing ? 'rgba(220,50,50,.04)' : 'none'),
+                            cursor: 'pointer',
+                            opacity: excludedMonths.includes(m.ym) ? 0.45 : 1,
+                            transition: 'opacity .15s',
+                          }}
+                        >
                           <td style={{padding:'6px 10px',fontWeight:600,color: missing ? 'var(--red)' : 'var(--text)'}}>{m.label}</td>
                           <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color: m.fra>0?'var(--green)':'var(--text3)'}}>
                             {m.fra > 0 ? fmtFull(m.fra) : '—'}
@@ -490,17 +515,17 @@ export default function ForecastPage() {
                               {m.other > 0 ? fmtFull(m.other) : '—'}
                             </td>
                           )}
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color: missing ? 'var(--red)' : 'var(--text)'}}>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color: missing ? 'var(--red)' : 'var(--text)', textDecoration: excludedMonths.includes(m.ym) ? 'line-through' : 'none'}}>
                             {missing ? '⚠️ 0' : fmtFull(tot)}
                           </td>
                         </tr>
                       )
                     })}
                     <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
-                      <td style={{padding:'6px 10px',fontWeight:700,fontSize:11}}>Media /6</td>
+                      <td style={{padding:'6px 10px',fontWeight:700,fontSize:11}}>Media /{effectiveIncomeMths.length}</td>
                       <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--green)',fontSize:11}} colSpan={incomeByMonth.some(m=>m.other>0)?3:2}/>
                       <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color:'var(--green)'}}>
-                        {fmtFull(avgIncome)}
+                        {fmtFull(avgIncomeEffective)}
                       </td>
                     </tr>
                   </tbody>
@@ -609,10 +634,10 @@ export default function ForecastPage() {
                       onChange={e=>setMortgageYears(Number(e.target.value))} min="1" max="35" placeholder="20"/>
                   </div>
                   <div className="fc-mortgage-field">
-                    <label className="form-lbl-sm">Data inizio</label>
+                    <label className="form-lbl-sm">Inizio</label>
                     <input className="fc-input" type="month" value={mortgageStart}
                       onChange={e=>setMortgageStart(e.target.value)}/>
-                    <div className="fc-input-hint">Mese in cui parte il mutuo</div>
+                    <div className="fc-input-hint">{mortgageStart ? ymToLabel(mortgageStart) : 'Mese di inizio'}</div>
                   </div>
                 </div>
 
