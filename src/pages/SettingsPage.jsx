@@ -112,7 +112,7 @@ function DeleteAllTransactionsButton() {
 
 
 // ── Family members section ────────────────────────────────
-function FamilyMemberRow({ member, isOwner, onRemove, onGenerateInvite }) {
+function FamilyMemberRow({ member, isOwner, onRemove, onGenerateInvite, onMarkRegistered }) {
   const [inviteLink,    setInviteLink]    = useState("")
   const [inviteLoading, setInviteLoading] = useState(false)
   const [copied,        setCopied]        = useState(false)
@@ -136,7 +136,7 @@ function FamilyMemberRow({ member, isOwner, onRemove, onGenerateInvite }) {
   }
 
   const statusColor = member.status==="active"?"var(--green)":member.status==="invited"?"var(--gold)":"var(--text3)"
-  const statusLabel = member.status==="active"?"Attivo":member.status==="invited"?"Invitato":"In attesa"
+  const statusLabel = member.status==="active"?"Registrato":member.status==="invited"?"Invitato":"In attesa"
 
   return (
     <div className="card" style={{padding:"14px 18px",marginBottom:10}}>
@@ -173,6 +173,11 @@ function FamilyMemberRow({ member, isOwner, onRemove, onGenerateInvite }) {
         {/* Actions */}
         {!isOwner && (
           <div style={{display:"flex",gap:6,flexShrink:0}}>
+            {member.status==="invited" && (
+              <button className="btn btn-ghost" style={{fontSize:12,color:'var(--green)',border:'1px solid var(--green)'}} onClick={()=>onMarkRegistered(member.id)}>
+                <Check size={12}/> Registrato
+              </button>
+            )}
             {member.status!=="active" && (
               <button className="btn btn-secondary" style={{fontSize:12}} onClick={handleInvite} disabled={inviteLoading}>
                 <UserPlus size={12}/> {inviteLoading?"…":"Invita"}
@@ -236,6 +241,10 @@ saveMembers([...members, {
     saveMembers(members.filter(m=>m.id!==id))
   }
 
+  function markAsRegistered(id) {
+    saveMembers(members.map(m => m.id===id ? {...m, status:'active'} : m))
+  }
+
   async function generateInviteForMember(name, email) {
     const { createInvite } = await import("../services/invite")
     const link = await createInvite(user?.displayName||"", user?.email||"")
@@ -271,7 +280,8 @@ saveMembers([...members, {
       {members.map(m=>(
         <FamilyMemberRow key={m.id} member={m} isOwner={false}
           onRemove={removeMember}
-          onGenerateInvite={generateInviteForMember}/>
+          onGenerateInvite={generateInviteForMember}
+          onMarkRegistered={markAsRegistered}/>
       ))}
 
       {/* Add member form */}

@@ -36,10 +36,8 @@ export function AuthProvider({ children }) {
           const secret = await loadTotpSecret(fbUser.uid)
           setTotpSecret(secret)
           // Se TOTP non è ancora configurato, salta direttamente al PIN
-          // TOTP temporaneamente disabilitato — riabilitare cambiando in:
-          // const isMobile = window.location.pathname.startsWith('/mobile')
-          // setAuthStep(secret && !isMobile ? 'totp' : 'pin')
-          setAuthStep('pin')
+          const isMobile = window.location.pathname.startsWith('/mobile')
+          setAuthStep(secret && !isMobile ? 'totp' : 'pin')
         }
       } else {
         setUser(null)
@@ -64,10 +62,8 @@ export function AuthProvider({ children }) {
     setUser(fbUser)
     const secret = await loadTotpSecret(fbUser.uid)
     setTotpSecret(secret)
-    // TOTP temporaneamente disabilitato — riabilitare cambiando in:
-    // const isMobile = window.location.pathname.startsWith('/mobile')
-    // setAuthStep(secret && !isMobile ? 'totp' : 'pin')
-    setAuthStep('pin')
+    const isMobile = window.location.pathname.startsWith('/mobile')
+    setAuthStep(secret && !isMobile ? 'totp' : 'pin')
     return fbUser
   }
 

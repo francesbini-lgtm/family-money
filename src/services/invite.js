@@ -1,4 +1,4 @@
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase'
 import { getHouseholdId } from './firestore'
 
@@ -45,6 +45,24 @@ export async function acceptInvite(token, userId, displayName, email) {
 
   // Mark invite as used
   await setDoc(invRef, { used: true, usedBy: userId, usedAt: serverTimestamp() }, { merge: true })
+
+  // Aggiorna status del membro in appPrefs della household
+  try {
+    const prefsRef = doc(db, `households/${inv.householdId}/appPrefs`, 'prefs')
+    const prefsSnap = await getDoc(prefsRef)
+    if (prefsSnap.exists()) {
+      const prefs = prefsSnap.data()
+      const family = prefs.family || []
+      const updated = family.map(m =>
+        m.email?.toLowerCase() === email?.toLowerCase()
+          ? { ...m, status: 'active', uid: userId }
+          : m
+      )
+      await updateDoc(prefsRef, { family: updated })
+    }
+  } catch(e) {
+    console.warn('Could not update family member status:', e.message)
+  }
 
   return inv.householdId
 }
