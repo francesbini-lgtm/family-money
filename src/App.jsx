@@ -33,6 +33,7 @@ import SettingsPage        from './pages/SettingsPage'
 import InvestimentiPage    from './pages/InvestimentiPage'
 import ForecastPage        from './pages/ForecastPage'
 import SatispayPage        from './pages/SatispayPage'
+import PaypalPage           from './pages/PaypalPage'
 import PatrimonioPage      from './pages/PatrimonioPage'
 import PrestitiMutuoPage   from './pages/PrestitiMutuoPage'
 import EntratePage         from './pages/EntratePage'
@@ -80,6 +81,7 @@ const NAV = [
   { id:'prestiti',        icon:'🏦', label:'Prestiti & Mutui',    group:null },
   { id:'investimenti',    icon:'📈', label:'Investimenti',       group:null },
   { id:'satispay',        icon:'💚', label:'Satispay',           group:null },
+  { id:'paypal',          icon:'💙', label:'PayPal',             group:null },
   { id:'carte',          icon:'💳', label:'Carte',               group:null },
   { id:'contanti',        icon:'💵', label:'Contanti',            group:null },
   { id:'mutuo',          icon:'🏠', label:'Mutuo',              group:null },
@@ -100,6 +102,7 @@ const PAGE_MAP = {
   shopping:          ShoppingPage,
   salute:            SalutePage,
   satispay:          SatispayPage,
+  paypal:            PaypalPage,
   figli:             FigliPage,
   altro:             AltroPage,
   nanny:             NannyPage,

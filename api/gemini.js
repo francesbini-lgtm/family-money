@@ -9,13 +9,13 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(404).json({})
 
-  let prompt, key
+  let prompt, key, images
   try {
-    ;({ prompt, key } = req.body)
+    ;({ prompt, key, images } = req.body)
     if (!prompt && !key) {
       // fallback: parse raw body string
       const raw = await getRawBody(req)
-      ;({ prompt, key } = JSON.parse(raw))
+      ;({ prompt, key, images } = JSON.parse(raw))
     }
   } catch(e) {
     return res.status(400).json({ error: 'Invalid JSON' })
@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
   if (!key) return res.status(400).json({ error: 'No key' })
 
   try {
-    const result = key.startsWith('sk-') ? await callOpenAI(prompt, key) : await callGemini(prompt, key)
+    const result = key.startsWith('sk-') ? await callOpenAI(prompt, key, images) : await callGemini(prompt, key)
     return res.status(200).json(result)
   } catch(e) {
     return res.status(500).json({ error: e.message })
@@ -40,13 +40,24 @@ function getRawBody(req) {
   })
 }
 
-function callOpenAI(prompt, key) {
+function callOpenAI(prompt, key, images) {
   return new Promise((resolve, reject) => {
+    const hasImages = Array.isArray(images) && images.length > 0
+    const model = hasImages ? 'gpt-4o' : 'gpt-4o-mini'
+    const messageContent = hasImages
+      ? [
+          { type: 'text', text: prompt },
+          ...images.map(b64 => ({
+            type: 'image_url',
+            image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' }
+          }))
+        ]
+      : prompt
     const postData = JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
+      model,
+      messages: [{ role: 'user', content: messageContent }],
       temperature: 0.1,
-      max_tokens: 2048,
+      max_tokens: hasImages ? 4096 : 2048,
     })
     const req = https.request({
       hostname: 'api.openai.com',
@@ -63,8 +74,8 @@ function callOpenAI(prompt, key) {
       r.on('end', () => {
         try {
           const json = JSON.parse(data)
-          const text = json.choices?.[0]?.message?.content || ''
-          resolve({ candidates: [{ content: { parts: [{ text }] } }] })
+          // Return raw OpenAI format so callers can use choices[0].message.content
+          resolve(json)
         } catch(e) { reject(e) }
       })
     })
