@@ -84,6 +84,8 @@ function TxDetailModal({ tx, onClose, updateTransaction, customCats }) {
   const [cat1, setCat1] = useState(tx.cat1 || '')
   const [cat2, setCat2] = useState(tx.cat2 || '')
   const [saved, setSaved]  = useState(false)
+  const [toReview, setToReview] = useState(tx?._toReview || false)
+  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
 
   const allCats = getMergedCats(customCats)
   const cat1Options = Object.keys(allCats)
@@ -143,6 +145,22 @@ function TxDetailModal({ tx, onClose, updateTransaction, customCats }) {
               <div className="pp-modal-value" style={{ color:'#16a34a', fontWeight:600 }}>✅ Abbinata da screenshot PayPal</div>
             </div>
           )}
+        </div>
+
+        {/* ── To Review flag ── */}
+        <div onClick={toggleReview}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
+            border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:toReview?'#92400e':'var(--text2)'}}>
+            🔍 Da rivedere
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:toReview?'#f59e0b':'var(--border)',
+            color:toReview?'#fff':'var(--text3)'}}>
+            {toReview ? 'Attivo' : 'Off'}
+          </span>
         </div>
 
         <div className="pp-modal-edit">
