@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="110" fill="#000000"/>
+  <!-- Vertical bar of $ -->
+  <rect x="242" y="60" width="28" height="392" rx="14" fill="#ffffff"/>
+  <!-- S-curve top arc -->
+  <path d="M 310 155 Q 310 105 256 105 Q 185 105 185 160 Q 185 210 256 230 Q 330 250 330 310 Q 330 375 256 375 Q 180 375 175 320" stroke="#ffffff" stroke-width="36" fill="none" stroke-linecap="round"/>
+</svg>
