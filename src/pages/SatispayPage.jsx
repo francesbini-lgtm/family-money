@@ -2577,6 +2577,115 @@ function AltreSpesePot({ altreSpeseTxs }) {
   )
 }
 
+// ── Accrediti non abbinati modal ──────────────────────────
+function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
+  const [search, setSearch] = useState('')
+
+  const matchedIds = new Set(
+    Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId)
+  )
+  const rows = satiIncome.filter(t => !matchedIds.has(t.txId))
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return rows
+    const q = search.toLowerCase()
+    return rows.filter(t =>
+      (t.description||'').toLowerCase().includes(q) ||
+      (t.merchant||'').toLowerCase().includes(q) ||
+      (t.descAI||'').toLowerCase().includes(q)
+    )
+  }, [rows, search])
+
+  const total = filtered.reduce((s, t) => s + t.amount, 0)
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.45)',
+      display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={{background:'var(--surface)',borderRadius:14,padding:'24px 28px',
+        width:680,maxHeight:'88vh',display:'flex',flexDirection:'column',
+        boxShadow:'0 16px 48px rgba(0,0,0,.2)'}}>
+
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:800}}>⚠️ Accrediti non abbinati ({rows.length})</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
+              Entrate Satispay (+) non ancora abbinate a una spesa
+            </div>
+          </div>
+          <button onClick={onClose} style={{border:'none',background:'transparent',
+            cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
+        </div>
+
+        <div style={{display:'flex',gap:20,padding:'8px 14px',borderRadius:8,
+          background:'rgba(200,160,0,.07)',border:'1px solid rgba(200,160,0,.25)',
+          marginBottom:12,fontSize:12}}>
+          <span><strong style={{color:'var(--gold)'}}>{filtered.length}</strong> <span style={{color:'var(--text3)'}}>accrediti</span></span>
+          <span><strong style={{color:'var(--green)'}}>+ € {fmtIT(total,2)}</strong> <span style={{color:'var(--text3)'}}>totale</span></span>
+        </div>
+
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Cerca descrizione…"
+          style={{marginBottom:10,padding:'6px 10px',borderRadius:7,
+            border:'1px solid var(--border)',background:'var(--surface2)',
+            fontSize:12,fontFamily:'var(--font-sans)',color:'var(--text)',outline:'none'}}
+        />
+
+        <div style={{overflowY:'auto',flex:1,borderRadius:8,border:'1px solid var(--border)'}}>
+          <table style={{borderCollapse:'collapse',width:'100%'}}>
+            <thead>
+              <tr style={{background:'var(--surface2)',position:'sticky',top:0,zIndex:1}}>
+                {['Data','Descrizione','Importo'].map(h => (
+                  <th key={h} style={{padding:'6px 10px',fontSize:10,fontWeight:700,textAlign:h==='Importo'?'right':'left',
+                    textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',
+                    borderBottom:'1px solid var(--border)'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={3} style={{padding:'24px',textAlign:'center',
+                  color:'var(--text3)',fontSize:13}}>
+                  {rows.length === 0 ? '✅ Tutti gli accrediti Satispay sono abbinati!' : 'Nessun risultato'}
+                </td></tr>
+              )}
+              {filtered.map((t, i) => (
+                <tr key={t.txId} style={{
+                  background: i % 2 === 0 ? 'transparent' : 'var(--surface2)',
+                  borderBottom:'1px solid var(--border2)'}}>
+                  <td style={{padding:'6px 10px',fontSize:11,fontFamily:'var(--font-mono)',
+                    color:'var(--text3)',whiteSpace:'nowrap'}}>{t._effDate||t.date}</td>
+                  <td style={{padding:'6px 10px',maxWidth:280}}>
+                    <div style={{fontSize:12,fontWeight:600,color:'var(--text)',
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {t.descAI || t.description || '—'}
+                    </div>
+                    {t.descAI && (
+                      <div style={{fontSize:10,color:'var(--text3)',overflow:'hidden',
+                        textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:1}}>
+                        {t.description}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{padding:'6px 10px',fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',
+                    textAlign:'right',color:'var(--green)',whiteSpace:'nowrap'}}>
+                    + € {fmtIT(t.amount,2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{marginTop:12,display:'flex',justifyContent:'flex-end'}}>
+          <button className="btn btn-secondary" onClick={onClose}>Chiudi</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Non-abbinate modal ────────────────────────────────────
 function NonAbbinateModal({ onClose }) {
   const { satiPots, transactions } = useStore()
@@ -2635,9 +2744,9 @@ function NonAbbinateModal({ onClose }) {
 
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div>
-            <div style={{fontSize:16,fontWeight:800}}>🔍 Transazioni Satispay Non Abbinate</div>
+            <div style={{fontSize:16,fontWeight:800}}>⚠️ Accantonamenti non abbinati ({rows.length})</div>
             <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
-              Uscite Satispay non collegate a nessun fondo (escluse Satispay Varie)
+              Uscite Satispay (−) non collegate a nessun fondo di accantonamento
             </div>
           </div>
           <button onClick={onClose} style={{border:'none',background:'transparent',
@@ -2728,10 +2837,11 @@ function NonAbbinateModal({ onClose }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function SatispayPage() {
-  const { satiPots, transactions } = useStore()
-  const [showAdd,         setShowAdd]         = useState(false)
-  const [showNonAbbinate, setShowNonAbbinate] = useState(false)
-  const [tab, setTab]                         = useState('overview')
+  const { satiPots, transactions, appPrefs } = useStore()
+  const [showAdd,             setShowAdd]             = useState(false)
+  const [showAccrediti,       setShowAccrediti]       = useState(false)
+  const [showAccantonamenti,  setShowAccantonamenti]  = useState(false)
+  const [tab, setTab]                                 = useState('overview')
 
   const isSati = (t) => {
     const desc  = (t.description||'').toUpperCase()
@@ -2748,6 +2858,27 @@ export default function SatispayPage() {
     transactions.filter(t => !t.excluded && t.amount < 0 && isSati(t))
       .sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   , [transactions])
+
+  // Counts for header buttons
+  const satiMatches = appPrefs?.satiMatches || {}
+  const matchedIncomeIds = new Set(
+    Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId)
+  )
+  const accreditiNonAbbinati = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
+
+  // Accantonamenti non abbinati: negative Satispay txs not linked to any fund
+  const allLinkedToFund = new Set()
+  satiPots.forEach(p => {
+    Object.values(p.data || {}).forEach(entry => {
+      if (!entry?.linked) return
+      const ids = Array.isArray(entry.linked) ? entry.linked : [entry.linked]
+      ids.forEach(id => allLinkedToFund.add(id))
+    })
+  })
+  const accantonamentiNonAbbinati = satiUscite.filter(t => {
+    if (t.cat1 === 'Altro' && t.cat2 === 'Satispay Varie') return false
+    return !allLinkedToFund.has(t.txId)
+  })
 
   const currentPot = (tab !== 'overview' && tab !== 'altrespese') ? satiPots.find(p=>p.id===tab) : null
 
@@ -2777,12 +2908,22 @@ export default function SatispayPage() {
           </div>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <button className="btn btn-ghost" onClick={()=>setShowNonAbbinate(true)}
-            style={{display:'flex',alignItems:'center',gap:6,
-              border:'1px solid var(--red)',color:'var(--red)',borderRadius:8,
-              padding:'6px 12px',fontSize:12,fontWeight:700,background:'rgba(200,80,80,.07)'}}>
-            🔍 Non abbinate
-          </button>
+          {accreditiNonAbbinati.length > 0 && (
+            <button onClick={()=>setShowAccrediti(true)}
+              style={{display:'flex',alignItems:'center',gap:6,border:'1px solid var(--gold)',
+                color:'var(--gold)',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,
+                background:'rgba(200,160,0,.08)',cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+              ⚠️ Accrediti non abbinati ({accreditiNonAbbinati.length})
+            </button>
+          )}
+          {accantonamentiNonAbbinati.length > 0 && (
+            <button onClick={()=>setShowAccantonamenti(true)}
+              style={{display:'flex',alignItems:'center',gap:6,border:'1px solid var(--gold)',
+                color:'var(--gold)',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,
+                background:'rgba(200,160,0,.08)',cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+              ⚠️ Accantonamenti non abbinati ({accantonamentiNonAbbinati.length})
+            </button>
+          )}
           <button className="btn btn-primary" onClick={()=>setShowAdd(true)}
             style={{display:'flex',alignItems:'center',gap:6}}>
             <Plus size={14}/> Nuovo Fondo
@@ -2839,7 +2980,14 @@ export default function SatispayPage() {
       )}
 
       {showAdd && <PotFormModal onClose={()=>setShowAdd(false)}/>}
-      {showNonAbbinate && <NonAbbinateModal onClose={()=>setShowNonAbbinate(false)}/>}
+      {showAccrediti && (
+        <AccreditiNonAbbinatiModal
+          satiIncome={satiIncome}
+          satiMatches={satiMatches}
+          onClose={()=>setShowAccrediti(false)}
+        />
+      )}
+      {showAccantonamenti && <NonAbbinateModal onClose={()=>setShowAccantonamenti(false)}/>}
     </div>
   )
 }
