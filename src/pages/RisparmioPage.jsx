@@ -5,7 +5,8 @@ import { SavingsChart } from '../components/Charts'
 import { getMergedCats, getMergedCatNames } from '../data/categories'
 import { fmtIT } from '../utils/format'
 import {
-  BarChart, Bar, LineChart, Line,
+  BarChart, Bar, LineChart, Line, ComposedChart,
+  PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts'
 
@@ -269,6 +270,7 @@ export default function RisparmioPage() {
 
   const [excludedCats, setExcludedCats] = useState(new Set())
   const [showWhatIf,   setShowWhatIf]   = useState(false)
+  const [pieMonth, setPieMonth] = useState(null) // ym for pie chart popup
 
   const now   = new Date()
   const thisYM = ymOf(now)
@@ -318,33 +320,18 @@ export default function RisparmioPage() {
     return count>0 ? Math.round(total/count) : null
   }
   function savgYear(y) {
-    let total=0,count=0
-    for(let m=0;m<12;m++){
-      const ym=`${y}-${String(m+1).padStart(2,'0')}`
-      if(ym >= thisYM) break // stop at current month — don't include partial months
-      const inc=mInc(ym)
-      if(inc>0){total+=mSav(ym);count++}
+    let totalInc = 0, totalExp = 0
+    for (let m = 0; m < 12; m++) {
+      const ym = `${y}-${String(m+1).padStart(2,'0')}`
+      if (ym >= thisYM) break
+      totalInc += activeTxs.filter(t => t.amount > 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
+      totalExp += Math.abs(activeTxs.filter(t => t.amount < 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
     }
-    return count>0 ? Math.round(total/count) : null
+    // return total savings for the year (only if we have some data)
+    return totalInc > 0 || totalExp > 0 ? Math.round(totalInc - totalExp) : null
   }
 
-  const thisInc  = mInc(thisYM)
-  const thisExp  = mExp(thisYM)
-  const thisSav  = mSav(thisYM)
-  const thisSavRate = mRate(thisYM)
-
-  const prevInc  = mInc(prevYM)
-  const prevSav  = mSav(prevYM)
-  const prevSavRate = mRate(prevYM)
-
-  const avg3m    = savgMonths(3)
-  const avg6m    = savgMonths(6)
   const avg12m   = savgMonths(12)
-
-  const ytdSav   = Array.from({length:now.getMonth()+1},(_,i)=>{
-    const ym=`${yr}-${String(i+1).padStart(2,'0')}`
-    return mSav(ym)
-  }).reduce((s,v)=>s+v,0)
 
   // Cumulative savings chart
   let cumulative = 0
@@ -390,36 +377,20 @@ export default function RisparmioPage() {
         </button>
       </div>
 
-      {/* ── KPI Row 1 — mese corrente ─────────────────── */}
-      <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
-        color:'var(--text3)',marginBottom:8}}>📅 Mese corrente</div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:20}}>
-        {[
-          { label:'Entrate',          value:`€ ${fmtIT(thisInc,0)}`,  color:'var(--green)' },
-          { label:'Uscite',           value:`€ ${fmtIT(thisExp,0)}`,  color:'var(--red)'   },
-          { label:'Risparmio',        value:fmtSav(thisSav),          color:savColor(thisSav) },
-          { label:'Tasso risparmio',  value:thisSavRate!==null?`${thisSavRate}%`:'—', color:thisSavRate===null?'var(--text3)':thisSavRate>=20?'var(--green)':thisSavRate>=10?'var(--gold)':'var(--red)' },
-          { label:'Risparmio YTD',    value:fmtSav(ytdSav),           color:savColor(ytdSav) },
-        ].map(k=>(
-          <div key={k.label} className="card" style={{padding:'12px 16px',borderLeft:`3px solid ${k.color}`}}>
-            <div style={{fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
-              color:'var(--text3)',marginBottom:5}}>{k.label}</div>
-            <div style={{fontSize:20,fontWeight:800,fontFamily:'var(--font-mono)',color:k.color}}>{k.value}</div>
-          </div>
-        ))}
-      </div>
-
       {/* ── KPI Row 2 — medie ─────────────────────────── */}
-      <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
-        color:'var(--text3)',marginBottom:8}}>📊 Risparmio medio mensile</div>
+      <div style={{display:'flex',alignItems:'baseline',gap:10,fontSize:11,fontWeight:700,
+        letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
+        📊 Risparmio medio mensile
+        <span style={{fontSize:10,fontWeight:400,textTransform:'none',letterSpacing:0,
+          color:'var(--text3)',opacity:.7}}>totale entrate anno − totale uscite anno</span>
+      </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:28}}>
         {[
-          ['Ultimi 3 mesi',  avg3m,        ''],
-          ['Ultimi 6 mesi',  avg6m,        ''],
-          ['Ultimi 12 mesi', avg12m,       ''],
-          [`Anno ${yr-1}`,   savgYear(yr-1), String(yr-1)],
-          [`Anno ${yr-2}`,   savgYear(yr-2), String(yr-2)],
-          [`Anno ${yr-3}`,   savgYear(yr-3), String(yr-3)],
+          ['Ultimi 12 mesi', avg12m, 'media/mese'],
+          [`Anno ${yr-1}`, savgYear(yr-1), `totale ${yr-1}`],
+          [`Anno ${yr-2}`, savgYear(yr-2), `totale ${yr-2}`],
+          [`Anno ${yr-3}`, savgYear(yr-3), `totale ${yr-3}`],
+          [`Anno ${yr-4}`, savgYear(yr-4), `totale ${yr-4}`],
         ].map(([label,val,sub])=>(
           <div key={label} className="card" style={{padding:'12px 16px',borderLeft:`3px solid ${savColor(val)}`}}>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
@@ -427,58 +398,136 @@ export default function RisparmioPage() {
             <div style={{fontSize:18,fontWeight:800,fontFamily:'var(--font-mono)',color:savColor(val)}}>
               {fmtSav(val)}
             </div>
-            <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{sub||'media/mese'}</div>
+            <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{sub}</div>
           </div>
         ))}
       </div>
 
-      {/* ── Charts row ─────────────────────────────────── */}
+      {/* ── Charts + Table ─────────────────────────────────── */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
 
-        {/* Monthly savings bar */}
+        {/* LEFT: combined bar (risparmio) + line (tasso%) dual-axis chart */}
         <div className="card" style={{padding:'18px 20px'}}>
           <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>Risparmio mensile — ultimi 12 mesi</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={savingsMonthly}>
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={savingsMonthly} margin={{top:4,right:32,bottom:0,left:0}}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
               <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={56}
+              <YAxis yAxisId="left" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={56}
                 tickFormatter={v=>`€${v>=1000?(v/1000).toFixed(0)+'K':v}`}/>
-              <Tooltip formatter={(v,n)=>[`€ ${fmtIT(Math.round(v),0)}`,n==='saving'?'Risparmio':n]}
+              <YAxis yAxisId="right" orientation="right" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={32}
+                tickFormatter={v=>`${v}%`}/>
+              <Tooltip
+                formatter={(v,n)=>{
+                  if (n==='Tasso %') return [`${v}%`, n]
+                  return [`€ ${fmtIT(Math.round(v),0)}`, n==='saving'?'Risparmio':n]
+                }}
                 contentStyle={{fontSize:11,border:'1px solid var(--border)',borderRadius:8}}/>
-              <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1}/>
-              <Bar dataKey="saving" name="Risparmio" radius={[4,4,0,0]}
-                fill="var(--green)"
-                label={false}
-                // Color bars: positive=green, negative=red
-                isAnimationActive={false}
-              >
+              <ReferenceLine yAxisId="left" y={0} stroke="var(--border)" strokeWidth={1}/>
+              <ReferenceLine yAxisId="right" y={20} stroke="var(--green)" strokeDasharray="4 4"
+                label={{value:'20%',position:'right',fontSize:9,fill:'var(--green)'}}/>
+              <Bar yAxisId="left" dataKey="saving" name="Risparmio" radius={[4,4,0,0]} isAnimationActive={false}>
                 {savingsMonthly.map((entry,i)=>(
-                  <rect key={i} fill={entry.saving>=0?'var(--green)':'var(--red)'}/>
+                  <Cell key={i} fill={entry.saving>=0?'var(--green)':'var(--red)'}/>
                 ))}
               </Bar>
-            </BarChart>
+              <Line yAxisId="right" type="monotone" dataKey="rate" name="Tasso %" stroke="var(--accent)" strokeWidth={2}
+                dot={{r:3,fill:'var(--accent)'}} activeDot={{r:5}}/>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Tasso risparmio % */}
+        {/* RIGHT: last 6 closed months table */}
         <div className="card" style={{padding:'18px 20px'}}>
-          <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>Tasso di risparmio % — ultimi 12 mesi</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={savingsMonthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-              <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={38}
-                tickFormatter={v=>`${v}%`}/>
-              <Tooltip formatter={v=>[`${v}%`,'Tasso risparmio']}
-                contentStyle={{fontSize:11,border:'1px solid var(--border)',borderRadius:8}}/>
-              <ReferenceLine y={0}  stroke="var(--border)"/>
-              <ReferenceLine y={20} stroke="var(--green)" strokeDasharray="4 4"
-                label={{value:'20% target',position:'right',fontSize:9,fill:'var(--green)'}}/>
-              <Line type="monotone" dataKey="rate" stroke="var(--accent)" strokeWidth={2}
-                dot={{r:3,fill:'var(--accent)'}} activeDot={{r:5}}/>
-            </LineChart>
-          </ResponsiveContainer>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>Dettaglio mensile</div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead>
+                <tr>
+                  {['Mese','Entrate','Uscite','Risparmio','Tasso %'].map(h=>(
+                    <th key={h} style={{padding:'6px 10px',textAlign:h==='Mese'?'left':'right',
+                      fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
+                      color:'var(--text3)',borderBottom:'1px solid var(--border)',paddingBottom:8}}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {savingsMonthly.slice().reverse().slice(0,6).reverse().map((m,i)=>(
+                  <tr key={m.ym} style={{borderBottom:'1px solid var(--border)',
+                    background:i%2===0?'transparent':'var(--surface2)'}}>
+                    <td style={{padding:'7px 10px',fontWeight:600,color:'var(--text)'}}>{m.label}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                      color:'var(--green)',fontWeight:600}}>
+                      € {fmtIT(Math.round(m.income),0)}
+                    </td>
+                    <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                      color:'var(--red)',fontWeight:600,cursor:'pointer',textDecoration:'underline dotted'}}
+                      onClick={()=>setPieMonth(pieMonth===m.ym?null:m.ym)}
+                      title="Clicca per dettaglio categorie">
+                      € {fmtIT(Math.round(m.expense),0)}
+                      {pieMonth===m.ym && ' 📊'}
+                    </td>
+                    <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                      color:m.saving>=0?'var(--green)':'var(--red)',fontWeight:700}}>
+                      {m.saving>=0?'+':''}{fmtIT(Math.round(m.saving),0)}
+                    </td>
+                    <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                      color:m.rate>=20?'var(--green)':m.rate>=10?'var(--gold)':'var(--red)',fontWeight:700}}>
+                      {m.rate!==null?`${m.rate}%`:'—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pie chart for selected month */}
+          {pieMonth && (() => {
+            const mergedCats = getMergedCats(customCats)
+            const expByL1 = {}
+            activeTxs.filter(t=>t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(pieMonth))
+              .forEach(t=>{
+                const k = t.cat1||'Altro'
+                expByL1[k] = (expByL1[k]||0)+Math.abs(t.amount)
+              })
+            const pieData = Object.entries(expByL1).sort((a,b)=>b[1]-a[1])
+              .map(([name,value])=>({name,value:Math.round(value),color:mergedCats[name]?.color||'#888'}))
+            const pieLabel = savingsMonthly.find(m=>m.ym===pieMonth)?.label
+            return (
+              <div style={{marginTop:14,borderTop:'1px solid var(--border)',paddingTop:14}}>
+                <div style={{fontSize:12,fontWeight:700,marginBottom:10,color:'var(--text2)'}}>
+                  📊 Uscite per categoria — {pieLabel}
+                  <button onClick={()=>setPieMonth(null)} style={{marginLeft:8,border:'none',background:'none',
+                    cursor:'pointer',color:'var(--text3)',fontSize:11,fontFamily:'var(--font-sans)'}}>✕</button>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <PieChart width={120} height={120}>
+                    <Pie data={pieData} dataKey="value" cx={55} cy={55} innerRadius={28} outerRadius={52}
+                      paddingAngle={2}>
+                      {pieData.map((d,i)=><Cell key={i} fill={d.color}/>)}
+                    </Pie>
+                    <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={{fontSize:10}}/>
+                  </PieChart>
+                  <div style={{flex:1,overflowY:'auto',maxHeight:110}}>
+                    {pieData.slice(0,8).map(d=>(
+                      <div key={d.name} style={{display:'flex',justifyContent:'space-between',
+                        alignItems:'center',padding:'2px 0',fontSize:11}}>
+                        <span style={{display:'flex',alignItems:'center',gap:4}}>
+                          <span style={{width:7,height:7,borderRadius:'50%',background:d.color,flexShrink:0}}/>
+                          {d.name}
+                        </span>
+                        <span style={{fontFamily:'var(--font-mono)',color:'var(--red)',fontWeight:600}}>
+                          €{fmtIT(d.value,0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       </div>
 

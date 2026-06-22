@@ -156,12 +156,6 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
 export default function ForecastPage() {
   const { transactions, customCats, appPrefs, setAppPref } = useStore()
   const excludedMonths = appPrefs?.forecastExcludedMonths || []
-  function toggleExcludedMonth(ym) {
-    const next = excludedMonths.includes(ym)
-      ? excludedMonths.filter(m => m !== ym)
-      : [...excludedMonths, ym]
-    setAppPref('forecastExcludedMonths', next)
-  }
 
   // Adjustable parameters
   const [growth,    setGrowth]    = useState(2)
@@ -178,9 +172,7 @@ export default function ForecastPage() {
     const d = new Date(); d.setFullYear(d.getFullYear() + 1)
     return `${d.getFullYear()}-01`
   })
-
-  // Diagnostics
-  const [showIncomeDetail, setShowIncomeDetail] = useState(false)
+  const [mortgageAnticipo, setMortgageAnticipo] = useState(0)
 
   // What if
   const [whatIfOpen,   setWhatIfOpen]   = useState(false)
@@ -228,9 +220,9 @@ export default function ForecastPage() {
       return { ym, label: ymToLabel(ym), saldo: Math.round(saldoUpTo) }
     })
 
-    // Last 6 FULL months — EXCLUDING current month
+    // Last 12 FULL months — EXCLUDING current month
     const last6 = []
-    for (let i = 6; i >= 1; i--) {
+    for (let i = 12; i >= 1; i--) {
       const d  = new Date(now.getFullYear(), now.getMonth() - i, 1)
       const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
       last6.push(ym)
@@ -266,7 +258,7 @@ export default function ForecastPage() {
       other: incomeTxs.filter(t => t.cat2 !== 'Fra' && t.cat2 !== 'Sofi' && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0),
     }))
 
-    // Always divide by 6 — fixed window of 6 closed months
+    // Always divide by 12 — fixed window of 12 closed months
 
     // Cat stats for What If panel — avg monthly per cat1 and cat2
     const catRaw = {}
@@ -284,15 +276,15 @@ export default function ForecastPage() {
     const catStats = {}
     Object.entries(catRaw).forEach(([c1, data]) => {
       catStats[c1] = {
-        avg:   Math.round(data.total / 6),
+        avg:   Math.round(data.total / 12),
         color: data.color,
-        subs:  Object.fromEntries(Object.entries(data.subs).map(([c2, tot]) => [c2, Math.round(tot / 6)])),
+        subs:  Object.fromEntries(Object.entries(data.subs).map(([c2, tot]) => [c2, Math.round(tot / 12)])),
       }
     })
 
     return {
-      avgIncome:  Math.round(totalIncome  / 6),
-      avgExpense: Math.round(totalExpense / 6),
+      avgIncome:  Math.round(totalIncome  / 12),
+      avgExpense: Math.round(totalExpense / 12),
       currentSaldo,
       historicalPoints,
       catStats,
@@ -347,7 +339,8 @@ export default function ForecastPage() {
   const forecastData = useMemo(() => {
     const now = new Date()
     const pts = []
-    let saldo = currentSaldo
+    const startSaldo = currentSaldo - (mortgageOn && mortgageAnticipo > 0 ? mortgageAnticipo : 0)
+    let saldo = startSaldo
     let inc   = avgIncomeEffective
     let exp   = effectiveExpense
 
@@ -372,7 +365,7 @@ export default function ForecastPage() {
       exp *= (1 + inflation / 100)
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAnticipo])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -417,9 +410,9 @@ export default function ForecastPage() {
           <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600}}>📊 Forecast Finanziario</h1>
           <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>
             Proiezione basata su dati reali · {sourceLabel} ·{' '}
-            {last6.length === 6 && (
+            {last6.length >= 6 && (
               <span style={{fontFamily:'var(--font-mono)',fontSize:12}}>
-                {ymToLabel(last6[0])} → {ymToLabel(last6[5])}
+                {ymToLabel(last6[0])} → {ymToLabel(last6[last6.length - 1])}
               </span>
             )}
           </div>
@@ -446,16 +439,14 @@ export default function ForecastPage() {
 
           {/* Real data summary */}
           <div className="card fc-controls">
-            <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>📈 Dati Reali (Media 6 mesi)</div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:700}}>📈 Dati Reali (Media 1 anno)</div>
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>entrate cumulate − spese cumulate</div>
+            </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
-              {/* Entrate — cliccabile per dettaglio */}
-              <div onClick={() => setShowIncomeDetail(v=>!v)}
-                style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,
-                  border:`1px solid ${showIncomeDetail ? 'var(--green)' : 'var(--border)'}`,
-                  cursor:'pointer',transition:'border-color .15s'}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
-                  <span>Entrate / mese</span>
-                  <span style={{color:'var(--accent)',opacity:.7}}>🔍</span>
+              <div style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3}}>
+                  Entrate / mese
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncomeEffective)}</div>
               </div>
@@ -470,68 +461,6 @@ export default function ForecastPage() {
                 </div>
               ))}
             </div>
-
-            {/* Income detail breakdown */}
-            {showIncomeDetail && (
-              <div style={{marginBottom:14,border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
-                <div style={{padding:'8px 12px',background:'var(--surface2)',fontSize:11,fontWeight:700,color:'var(--text3)',borderBottom:'1px solid var(--border)'}}>
-                  Dettaglio entrate per mese
-                </div>
-                <div style={{padding:'6px 12px',fontSize:10,color:'var(--text3)',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
-                  Clicca su un mese per escluderlo dalla media · {excludedMonths.length > 0 && <span style={{color:'var(--accent)',cursor:'pointer'}} onClick={()=>setAppPref('forecastExcludedMonths',[])}>Ripristina tutti</span>}
-                </div>
-                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                  <thead>
-                    <tr style={{background:'var(--surface2)'}}>
-                      {['Mese','Fra','Sofi', incomeByMonth.some(m=>m.other>0)?'Altro':null,'Totale'].filter(Boolean).map(h=>(
-                        <th key={h} style={{padding:'5px 10px',textAlign:h==='Mese'?'left':'right',fontSize:10,fontWeight:700,color:'var(--text3)',borderBottom:'1px solid var(--border)'}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {incomeByMonth.map(m => {
-                      const tot = m.fra + m.sofi + m.other
-                      const missing = tot === 0
-                      return (
-                        <tr key={m.ym}
-                          onClick={() => toggleExcludedMonth(m.ym)}
-                          style={{
-                            borderBottom:'1px solid var(--border)',
-                            background: excludedMonths.includes(m.ym) ? 'rgba(180,180,180,.08)' : (missing ? 'rgba(220,50,50,.04)' : 'none'),
-                            cursor: 'pointer',
-                            opacity: excludedMonths.includes(m.ym) ? 0.45 : 1,
-                            transition: 'opacity .15s',
-                          }}
-                        >
-                          <td style={{padding:'6px 10px',fontWeight:600,color: missing ? 'var(--red)' : 'var(--text)'}}>{m.label}</td>
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color: m.fra>0?'var(--green)':'var(--text3)'}}>
-                            {m.fra > 0 ? fmtFull(m.fra) : '—'}
-                          </td>
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color: m.sofi>0?'var(--green)':'var(--text3)'}}>
-                            {m.sofi > 0 ? fmtFull(m.sofi) : '—'}
-                          </td>
-                          {incomeByMonth.some(m=>m.other>0) && (
-                            <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text3)'}}>
-                              {m.other > 0 ? fmtFull(m.other) : '—'}
-                            </td>
-                          )}
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color: missing ? 'var(--red)' : 'var(--text)', textDecoration: excludedMonths.includes(m.ym) ? 'line-through' : 'none'}}>
-                            {missing ? '⚠️ 0' : fmtFull(tot)}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
-                      <td style={{padding:'6px 10px',fontWeight:700,fontSize:11}}>Media /{effectiveIncomeMths.length}</td>
-                      <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--green)',fontSize:11}} colSpan={incomeByMonth.some(m=>m.other>0)?3:2}/>
-                      <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color:'var(--green)'}}>
-                        {fmtFull(avgIncomeEffective)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
 
             {/* What If toggle button */}
             <button className={`fc-whatif-btn ${whatIfOpen ? 'open' : ''}`}
@@ -624,6 +553,12 @@ export default function ForecastPage() {
                       onChange={e=>setMortgageAmt(Number(e.target.value))} placeholder="200000"/>
                   </div>
                   <div className="fc-mortgage-field">
+                    <label className="form-lbl-sm">Anticipo (€)</label>
+                    <input className="fc-input" type="number" value={mortgageAnticipo}
+                      onChange={e=>setMortgageAnticipo(Number(e.target.value))} placeholder="0"/>
+                    <div className="fc-input-hint">Dedotto dal saldo</div>
+                  </div>
+                  <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">TAEG (%)</label>
                     <input className="fc-input" type="number" value={mortgageTaeg}
                       onChange={e=>setMortgageTaeg(Number(e.target.value))} step="0.1" placeholder="3.5"/>
@@ -661,6 +596,12 @@ export default function ForecastPage() {
                       <span>Impatto mensile</span>
                       <strong style={{color:'var(--red)'}}>−{fmtFull(mortgage.rata)}</strong>
                     </div>
+                    {mortgageAnticipo > 0 && (
+                      <div className="fc-preview-item">
+                        <span>Anticipo</span>
+                        <strong style={{color:'var(--red)'}}>−{fmtFull(mortgageAnticipo)}</strong>
+                      </div>
+                    )}
                     {breakeven >= 0 && (
                       <div className="fc-preview-item">
                         <span>Saldo {'>'} Debito dal</span>

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { useFinancials, ymLabel, getLast6Months, getYM } from '../hooks/useFinancials'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { CATS } from '../data/categories'
 import './CategoryPage.css'
 import { fmtIT } from '../utils/format'
@@ -219,6 +219,7 @@ function L2AnnualAverages({ catTxs, cat1Ctx, color, effectiveAmountFn }) {
 export default function CategoryPage({ cat1, icon, title, description }) {
   const transactions = useStore(s => s.transactions)
   const [period, setPeriod] = useState('month') // 'month' | '3m' | 'year'
+  const [selectedBar, setSelectedBar] = useState(null)
 
   const catInfo = CATS[cat1] || { color: '#888', sub: [] }
   const color   = catInfo.color
@@ -262,6 +263,7 @@ export default function CategoryPage({ cat1, icon, title, description }) {
   // Monthly chart data (use effectiveAmount for MIX transactions)
   const chartData = last6.map(ym => ({
     label: ymLabel(ym),
+    ym,
     v: Math.abs(catTxs.filter(t => (t._effDate||t.date).startsWith(ym) && effectiveAmount(t) < 0)
                .reduce((s,t) => s+effectiveAmount(t), 0)),
   }))
@@ -364,7 +366,17 @@ export default function CategoryPage({ cat1, icon, title, description }) {
                     formatter={v => [`€ ${fmtIT(v, 0)}`, cat1]}
                     contentStyle={{ fontSize: 12, border: '1px solid var(--border)', borderRadius: 8 }}
                   />
-                  <Bar dataKey="v" name={cat1} fill={color} radius={[4,4,0,0]} />
+                  <Bar dataKey="v" name={cat1} radius={[4,4,0,0]}
+                    isAnimationActive={false}
+                    cursor="pointer"
+                    onClick={(data) => setSelectedBar(selectedBar === data.ym ? null : data.ym)}
+                  >
+                    {chartData.map((d,i) => (
+                      <Cell key={i}
+                        fill={selectedBar === d.ym ? color : color+'aa'}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -372,10 +384,17 @@ export default function CategoryPage({ cat1, icon, title, description }) {
             {catInfo.sub.length > 0 && (
               <div className="card cat-chart-card">
                 <div className="card-title-row" style={{ marginBottom: 16 }}>
-                  <span className="card-title">Per sottocategoria</span>
-                  <span className="card-sub-label">Periodo selezionato</span>
+                  <span className="card-title">{selectedBar ? `${ymLabel(selectedBar)} — dettaglio` : 'Per sottocategoria'}</span>
+                  <span className="card-sub-label">{selectedBar ? 'Mese selezionato' : 'Periodo selezionato'}</span>
                 </div>
-                <SubBreakdown txs={periodTxs.filter(t => effectiveAmount(t) < 0)} color={color} cat1Ctx={cat1} />
+                {selectedBar ? (
+                  <SubBreakdown
+                    txs={catTxs.filter(t => (t._effDate||t.date).startsWith(selectedBar) && effectiveAmount(t) < 0)}
+                    color={color} cat1Ctx={cat1}
+                  />
+                ) : (
+                  <SubBreakdown txs={periodTxs.filter(t => effectiveAmount(t) < 0)} color={color} cat1Ctx={cat1} />
+                )}
               </div>
             )}
           </div>

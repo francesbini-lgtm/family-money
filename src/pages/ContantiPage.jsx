@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { CATS, CAT_NAMES } from '../data/categories'
-import { getYM, getLast6Months, ymLabel } from '../hooks/useFinancials'
+import { getYM, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Plus, Trash2, Wallet, Link2, User } from 'lucide-react'
@@ -194,6 +194,24 @@ function MemberCell({ txId }) {
   const members = getAllMembers()
   const current = meta.member || null
 
+  // Auto-suggest based on account name matching family members
+  const appPrefs = useStore.getState()?.appPrefs || {}
+  const ownerNick = appPrefs.ownerNickname || 'Admin'
+  const family = appPrefs.family || []
+  const txAccount = useStore.getState()?.transactions?.find(t=>t.txId===txId)?.account || ''
+
+  let autoSuggest = null
+  if (!current) {
+    const allNicks = [{name: ownerNick, nick: ownerNick}, ...family.map(m=>({name:m.name,nick:m.nickname||m.name.split(' ')[0]}))]
+    for (const m of allNicks) {
+      if (txAccount.toLowerCase().includes(m.name.toLowerCase()) || txAccount.toLowerCase().includes(m.nick.toLowerCase())) {
+        autoSuggest = m.nick
+        break
+      }
+    }
+  }
+  const displayNick = current || autoSuggest
+
   function pick(nick) {
     const m = getAtmMeta()
     if (!m[txId]) m[txId] = {}
@@ -205,9 +223,10 @@ function MemberCell({ txId }) {
 
   return (
     <div style={{position:'relative'}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'3px 8px',borderRadius:12,fontSize:12,display:'flex',alignItems:'center',gap:4,color:current?'var(--accent)':'var(--text3)',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'3px 8px',borderRadius:12,fontSize:12,display:'flex',alignItems:'center',gap:4,color:displayNick?(current?'var(--accent)':'var(--text2)'):'var(--text3)',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
         <User size={11}/>
-        {current||'—'}
+        {displayNick||'—'}
+        {!current && autoSuggest && <span style={{fontSize:9,opacity:.5,marginLeft:3}}>auto</span>}
       </button>
       {open && (
         <div style={{position:'absolute',top:'calc(100% + 2px)',left:0,zIndex:100,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',boxShadow:'0 4px 12px rgba(0,0,0,.1)',minWidth:120,overflow:'hidden'}}>
@@ -223,40 +242,57 @@ function MemberCell({ txId }) {
   )
 }
 
-// ── Date competenza cell ──────────────────────────────────
-function DateCell({ tx }) {
+// ── Date valuta cell (read-only, shows tx.date) ───────────
+function DateValutaCell({ tx }) {
+  const d = tx.date || ''
+  const display = d.length >= 10 ? `${d.slice(8,10)}/${d.slice(5,7)}` : d
+  return <span style={{fontFamily:'var(--font-mono)',fontSize:12,color:'var(--text3)'}}>{display}</span>
+}
+
+// ── Date rettificata cell (editable, stored in atmMeta.effDate) ───
+function DateRettCell({ tx }) {
+  const { updateTransaction } = useStore()
   const meta = getAtmMeta()[tx.txId] || {}
   const [editing, setEditing] = useState(false)
-  const [val, setVal] = useState(meta.competenza || (tx._effDate||(tx._effDate||tx.date||'')).slice(0,7))
+  const stored = meta.effDate || tx._effDate || tx.date || ''
+  const [val, setVal] = useState(stored.slice(0,10))
   const [, forceUpdate] = useState(0)
-  const displayDate = meta.competenza
-    ? <span style={{color:'var(--accent)',fontWeight:700}}>{meta.competenza}</span>
-    : <span>{(tx._effDate||(tx._effDate||tx.date||'')).slice(5).replace('-','/')}</span>
+  const isCustom = !!meta.effDate
 
   function save() {
     const m = getAtmMeta()
     if (!m[tx.txId]) m[tx.txId] = {}
-    if (val) m[tx.txId].competenza = val
-    else delete m[tx.txId].competenza
-    saveAtmMeta(m)
+    if (val) {
+      m[tx.txId].effDate = val
+      saveAtmMeta(m)
+      updateTransaction(tx.txId, { _effDate: val })
+    } else {
+      delete m[tx.txId].effDate
+      saveAtmMeta(m)
+      updateTransaction(tx.txId, { _effDate: tx.date })
+    }
     setEditing(false)
     forceUpdate(n=>n+1)
   }
 
   if (editing) return (
     <div style={{display:'flex',gap:4,alignItems:'center'}}>
-      <input type="month" value={val} onChange={e=>setVal(e.target.value)} autoFocus
-        style={{width:120,padding:'3px 6px',borderRadius:'var(--radius-sm)',border:'1px solid var(--accent)',fontSize:11,background:'var(--bg)',color:'var(--text)'}}/>
+      <input type="date" value={val} onChange={e=>setVal(e.target.value)} autoFocus
+        style={{width:130,padding:'3px 6px',borderRadius:6,border:'1px solid var(--accent)',
+          fontSize:11,background:'var(--bg)',color:'var(--text)'}}/>
       <button className="btn btn-ghost" style={{padding:'2px 6px',fontSize:11}} onClick={save}>✓</button>
       <button className="btn btn-ghost" style={{padding:'2px 6px',fontSize:11}} onClick={()=>setEditing(false)}>✕</button>
     </div>
   )
 
+  const displayDate = stored.length >= 10 ? `${stored.slice(8,10)}/${stored.slice(5,7)}/${stored.slice(2,4)}` : stored
   return (
-    <button onClick={()=>setEditing(true)} title="Clicca per impostare competenza"
-      style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',fontFamily:'var(--font-mono)',fontSize:12,color:'inherit',textAlign:'left'}}>
+    <button onClick={()=>setEditing(true)} title="Clicca per modificare data rettificata"
+      style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',
+        fontFamily:'var(--font-mono)',fontSize:12,textAlign:'left',
+        color:isCustom?'var(--accent)':'inherit'}}>
       {displayDate}
-      {!meta.competenza && <span style={{fontSize:9,color:'var(--text3)',marginLeft:4}}>✏</span>}
+      {!isCustom && <span style={{fontSize:9,color:'var(--text3)',marginLeft:4}}>✏</span>}
     </button>
   )
 }
@@ -412,7 +448,13 @@ export default function ContantiPage() {
 
   const now   = new Date()
   const thisYM = getYM(now)
-  const last6  = getLast6Months()
+  const last12 = useMemo(() => {
+    const n = new Date()
+    return Array.from({length:12}, (_,i) => {
+      const d = new Date(n.getFullYear(), n.getMonth() - (11-i), 1)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    })
+  }, [])
 
   // ATM withdrawals from imported transactions
   const atmTxs = useMemo(() =>
@@ -423,7 +465,7 @@ export default function ContantiPage() {
   const totalSpent     = cashEntries.reduce((s,e)=>s+(e.amount||0),0)
   const cashOnHand     = totalWithdrawn - totalSpent
 
-  const chartData = last6.map(ym=>({
+  const chartData = last12.map(ym=>({
     label:    ymLabel(ym),
     prelievi: Math.abs(atmTxs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)),
     speso:    cashEntries.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0),
@@ -591,14 +633,15 @@ export default function ContantiPage() {
           <div className="card" style={{padding:0,overflow:'hidden',marginBottom:20}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr>
-                {['Data / Competenza','Descrizione','Chi ha prelevato','Collegato a','Importo'].map(h=>(
+                {['Data valuta','Data rettificata','Descrizione','Chi ha prelevato','Collegato a','Importo'].map(h=>(
                   <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
                 {atmTxs.map(t=>(
                   <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateCell tx={t}/></td>
+                    <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateValutaCell tx={t}/></td>
+                    <td style={{padding:'9px 14px',fontSize:12}}><DateRettCell tx={t}/></td>
                     <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,38)}</td>
                     <td style={{padding:'6px 14px'}}><MemberCell txId={t.txId}/></td>
                     <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>

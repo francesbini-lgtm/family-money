@@ -2049,9 +2049,12 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           </td>
         )
         if(id==='amount') return (
-          <td key={id} className={'tx-amount'+amtClass} style={tx._compensatedAmt>0?{color:'var(--blue)'}:undefined}>
+          <td key={id} className={'tx-amount'+amtClass}
+            style={tx._compensatedAmt>0?{color:'var(--gold)',cursor:'pointer'}:undefined}
+            onClick={tx._compensatedAmt>0 ? ()=>window.location.hash='#/satispay' : undefined}
+            title={tx._compensatedAmt>0?'Spesa compensata — clicca per andare a Satispay':undefined}>
             {tx._compensatedAmt>0
-              ? <>{fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:1}}>*</span></>
+              ? <>{fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:2}}>*</span></>
               : fmtIT(Math.abs(tx.amount), 2)}
           </td>
         )
@@ -2566,8 +2569,9 @@ export default function TransactionsPage() {
           </table>
         )}
         {filtered.some(t => t._compensatedAmt > 0) && (
-          <div style={{fontSize:11,color:'var(--blue)',padding:'8px 14px',background:'rgba(42,92,138,.05)',borderTop:'1px solid var(--border)',textAlign:'right'}}>
-            * Importo ridotto — spesa parzialmente compensata da un&#39;entrata collegata in &quot;Altre Entrate&quot;
+          <div style={{fontSize:11,color:'var(--gold)',padding:'8px 14px',background:'rgba(200,160,0,.05)',borderTop:'1px solid var(--border)',textAlign:'right',cursor:'pointer'}}
+            onClick={()=>window.location.hash='#/satispay'}>
+            * Importo rettificato — spesa compensata da entrata Satispay. Clicca per dettaglio →
           </div>
         )}
       </div>

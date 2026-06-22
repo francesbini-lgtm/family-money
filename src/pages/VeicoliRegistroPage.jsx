@@ -559,15 +559,22 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
 // ── Charts Section ────────────────────────────────────────
 const CHART_TOOLTIP = { fontSize:11, border:'1px solid var(--border)', borderRadius:7, background:'var(--surface)' }
 
-function VehicleCharts({ vehicles, allExpenses }) {
+function VehicleCharts({ vehicles, allExpenses, transactions }) {
   const last6 = getLast6Months()
   const noData = allExpenses.length === 0
   const empty = <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>Nessuna spesa registrata.</div>
 
   // ── Chart 1: Andamento Carburante (bar, 6 mesi) ──────────
+  // Bank transactions for carburante (Veicoli > Carburante)
+  const fuelBankTxs = (transactions||[]).filter(t =>
+    !t.excluded && t.amount < 0 && t.cat1 === 'Veicoli' && t.cat2 === 'Carburante'
+  )
+
   const fuelData = last6.map(ym => ({
     label: MONTHS_IT[parseInt(ym.slice(5))-1],
-    Carburante: allExpenses.filter(e=>e.cat==='Carburante'&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0)
+    Carburante:
+      allExpenses.filter(e=>e.cat==='Carburante'&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0) +
+      fuelBankTxs.filter(t=>(t._effDate||t.date||'').startsWith(ym)).reduce((s,t)=>s+Math.abs(t.amount),0)
   }))
   const fuelAvg = fuelData.reduce((s,d)=>s+(d.Carburante||0),0) / (fuelData.filter(d=>d.Carburante>0).length||1)
 
@@ -1018,9 +1025,10 @@ export default function VeicoliRegistroPage() {
       </div>
 
       {/* Charts */}
-      {vehExpenses.length > 0 && (
-        <VehicleCharts vehicles={vehicles} allExpenses={vehExpenses}/>
-      )}
+      {(() => {
+        const hasFuelData = vehExpenses.length > 0 || transactions.some(t => !t.excluded && t.amount < 0 && t.cat1 === 'Veicoli' && t.cat2 === 'Carburante')
+        return hasFuelData && <VehicleCharts vehicles={vehicles} allExpenses={vehExpenses} transactions={transactions}/>
+      })()}
 
       {/* All expenses table */}
       <AllExpensesTable
