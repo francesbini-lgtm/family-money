@@ -5,7 +5,7 @@ import { saveTotpSecret } from '../services/firestore'
 import './LoginScreen.css'
 
 export const APP_VERSION = '3.5.1'
-export const BUILD_TIME  = '20/06 17:30'
+export const BUILD_TIME  = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '—'
 
 // ── PIN digit input ───────────────────────────────────────
 function CodeInput({ onComplete, disabled, error, onReset }) {
