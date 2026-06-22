@@ -1,4 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { CATS } from '../data/categories'
@@ -192,14 +195,9 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
 
       // ── Handle PDFs: extract text → gpt-4o-mini ──────────
       if (pdfs.length > 0) {
-        const pdfjsLib = await import('pdfjs-dist')
-        const { GlobalWorkerOptions, getDocument } = pdfjsLib
-        // Use CDN worker — most reliable in Vite/browser env
-        GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
-
         for (const pdf of pdfs) {
           const arrayBuffer = await pdf.arrayBuffer()
-          const doc  = await getDocument({ data: arrayBuffer }).promise
+          const doc  = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
           let fullText = ''
           for (let i = 1; i <= doc.numPages; i++) {
             const page = await doc.getPage(i)
