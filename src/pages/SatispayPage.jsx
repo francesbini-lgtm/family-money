@@ -1966,11 +1966,13 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const matchedIncomeIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
   const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
 
-  // ── Migration: rename + exclude all already-matched income txs ──
+  // ── Migration: fix all matched income/expense txs to current rules ──
   const migrationDoneRef = useRef(false)
   useEffect(() => {
     if (migrationDoneRef.current) return
     migrationDoneRef.current = true
+
+    // 1) Fix satiMatches-tracked pairs
     const matched = Object.entries(satiMatches).filter(([,m]) => m.status === 'matched' && m.incomeTxId)
     matched.forEach(([expTxId, m]) => {
       // Fix income: ensure excluded + correct name 'Accredito Satispay'
@@ -1981,13 +1983,33 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         if (inc.descAI !== 'Accredito Satispay') patch.descAI = 'Accredito Satispay'
         if (Object.keys(patch).length) updateTransaction(m.incomeTxId, patch)
       }
-      // Fix expense: un-exclude if excluded, always set _compensatedAmt correctly
+      // Fix expense: un-exclude, keep _compensatedAmt
       const exp = transactions.find(t => t.txId === expTxId)
-      if (exp) {
+      if (exp && exp.excluded) {
         const absExp = Math.abs(exp.amount)
-        const comp = Math.min(m.compensatedAmt || 0, absExp)
-        if (exp.excluded || !exp._compensatedAmt) {
-          updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: m.incomeTxId })
+        const comp = exp._compensatedAmt || Math.min(m.compensatedAmt || 0, absExp)
+        updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp })
+      }
+    })
+
+    // 2) Broad historical fix: ANY excluded expense with _compensatedBy set
+    //    (old applyMatch excluded fully-covered expenses — undo that)
+    transactions.forEach(t => {
+      if (t.excluded && t.amount < 0 && t._compensatedBy) {
+        // Find the matching income to get compensatedAmt
+        const incTx = transactions.find(i => i.txId === t._compensatedBy)
+        const comp = t._compensatedAmt || (incTx ? Math.min(Math.abs(incTx.amount), Math.abs(t.amount)) : Math.abs(t.amount))
+        updateTransaction(t.txId, { excluded: false, _compensatedAmt: comp })
+      }
+    })
+
+    // 3) Fix income txs that were renamed 'Accantonamento Satispay' by old code
+    //    — rename to 'Accredito Satispay' (keep excluded: true)
+    transactions.forEach(t => {
+      if (t.excluded && t.amount > 0 && t.descAI === 'Accantonamento Satispay' && t._compensatedBy === undefined) {
+        // Only rename abbinamento ones (not pot-linked ones — pot-linked have _satiLinked)
+        if (!t._satiLinked) {
+          updateTransaction(t.txId, { descAI: 'Accredito Satispay' })
         }
       }
     })
