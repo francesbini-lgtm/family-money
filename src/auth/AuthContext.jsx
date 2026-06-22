@@ -9,6 +9,7 @@ const AuthContext = createContext(null)
 // ── Whitelist: only these Google accounts can log in ──────────────────────────
 const ALLOWED_EMAILS = [
   'francesco.bini@lastminute.com',
+  'frances.bini@gmail.com',
   'sofi.vergallo@gmail.com',
 ]
 
