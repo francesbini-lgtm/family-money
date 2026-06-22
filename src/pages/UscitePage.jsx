@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, Customized
+  ResponsiveContainer, LabelList,
+  PieChart, Pie, Cell
 } from 'recharts'
 import { CATS } from '../data/categories'
 import { fmtIT } from '../utils/format'
@@ -27,7 +28,7 @@ function catColor(cat1) { return CATS[cat1]?.color || '#888888' }
 // ── Formatters ────────────────────────────────────────────────────────────────
 function eur(n) {
   if (!n || n < 1) return '—'
-  return fmtIT(Math.round(n)) + ' €'
+  return fmtIT(Math.round(n))
 }
 function fmtDate(dateStr) {
   const m = (dateStr||'').match(/\d{4}-(\d{2})-(\d{2})/)
@@ -59,31 +60,82 @@ function CustomTooltip({ active, payload, label }) {
   )
 }
 
-// ── Bar total labels (rendered on top of each stacked column) ─────────────────
-function BarTotalLabels({ formattedGraphicalItems, chartData }) {
-  if (!formattedGraphicalItems?.length || !chartData?.length) return null
-  return chartData.map((d, i) => {
-    const total = Object.keys(d).filter(k => k !== 'month').reduce((s, k) => s + (d[k] || 0), 0)
-    if (!total) return null
+// ── Transaction Detail Modal ──────────────────────────────────────────────────
+function TxDetailModal({ tx, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const [editCat1, setEditCat1] = useState(tx.cat1 || '')
+  const [editCat2, setEditCat2] = useState(tx.cat2 || '')
+  const [saved, setSaved] = useState(false)
+  const cat1Subs = CATS[editCat1]?.sub || []
 
-    let topY = Infinity
-    let x0 = 0, w0 = 40
-    formattedGraphicalItems.forEach(item => {
-      const entry = item.props.data?.[i]
-      if (!entry) return
-      if (entry.y !== undefined && entry.y < topY) topY = entry.y
-      if (entry.x !== undefined) { x0 = entry.x; w0 = entry.width || 40 }
-    })
-    if (!isFinite(topY)) return null
+  function fmtDateFull(d) {
+    const m = (d||'').match(/(\d{4})-(\d{2})-(\d{2})/)
+    if (!m) return d || '—'
+    return `${m[3]}/${m[2]}/${m[1]}`
+  }
 
-    return (
-      <text key={i} x={x0 + w0 / 2} y={topY - 5}
-        textAnchor="middle" fontSize={10} fontWeight={600}
-        fill="var(--text2)" style={{ pointerEvents: 'none' }}>
-        {fmtIT(Math.round(total))}
-      </text>
-    )
-  })
+  function handleSave() {
+    updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+  }
+
+  return (
+    <div className="uscite-modal-overlay" onClick={onClose}>
+      <div className="uscite-modal" onClick={e => e.stopPropagation()}>
+        <button className="uscite-modal-close" onClick={onClose}>✕</button>
+        <div className="uscite-modal-title">{tx.descAI || tx.description || '—'}</div>
+        <div className="uscite-modal-amount" style={{color: tx.amount < 0 ? 'var(--red)' : 'var(--green)'}}>
+          {tx.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(tx.amount), 2)}
+        </div>
+        <div className="uscite-modal-grid">
+          {[
+            ['Data contabile', fmtDateFull(tx.date)],
+            ['Data valuta', fmtDateFull(tx.effectiveDate || tx._effDate)],
+            ['Merchant', tx.merchant && tx.merchant !== 'null' ? tx.merchant : '—'],
+            ['Controparte', tx.counterpart || tx.counterparty || '—'],
+            ['Città', tx.city || '—'],
+            ['Categoria', tx.cat1 ? (tx.cat1 + (tx.cat2 ? ' › ' + tx.cat2 : '')) : '—'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div className="uscite-modal-label">{label}</div>
+              <div className="uscite-modal-value">{value}</div>
+            </div>
+          ))}
+          <div style={{gridColumn:'1 / -1'}}>
+            <div className="uscite-modal-label">Descrizione originale</div>
+            <div className="uscite-modal-value" style={{fontSize:11,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || '—'}</div>
+          </div>
+        </div>
+        <div className="uscite-modal-edit">
+          <div className="uscite-modal-edit-title">Modifica Categoria</div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:140}}>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Categoria</div>
+              <select value={editCat1} onChange={e=>{setEditCat1(e.target.value);setEditCat2('')}} className="uscite-modal-select">
+                <option value="">— Nessuna —</option>
+                {Object.keys(CATS).filter(n=>n!=='Non Categorizzato').map(n=>(
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            {cat1Subs.length > 0 && (
+              <div style={{flex:1,minWidth:140}}>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Sottocategoria</div>
+                <select value={editCat2} onChange={e=>setEditCat2(e.target.value)} className="uscite-modal-select">
+                  <option value="">— Nessuna —</option>
+                  {cat1Subs.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            )}
+            <button onClick={handleSave} className={'uscite-modal-save' + (saved ? ' saved' : '')}>
+              {saved ? '✓ Salvato' : 'Salva'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -93,6 +145,7 @@ export default function UscitePage() {
   const [expandedCats, setExpandedCats] = useState(new Set())
   const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey }
   const [withSati, setWithSati] = useState(false) // toggle accantonamenti
+  const [openTx, setOpenTx] = useState(null)
 
   // ── Build expense list ────────────────────────────────────────────────────
   const expenses = useMemo(() => {
@@ -151,21 +204,31 @@ export default function UscitePage() {
     return map
   }, [expenses, months])
 
-  // ── cat1 list: sorted by total desc, "Altro" penultimate ─────────────────
-  const cat1List = useMemo(() => {
-    const all = Object.keys(dataMap).sort((a, b) => {
-      const tA = months.reduce((s, m) => s + (dataMap[a][m.key]?.total || 0), 0)
-      const tB = months.reduce((s, m) => s + (dataMap[b][m.key]?.total || 0), 0)
-      return tB - tA
+  // ── Stable category order (from ALL transactions, ignoring withSati toggle) ─
+  const stableOrder = useMemo(() => {
+    const monthKeys = new Set(months.map(m => m.key))
+    const totals = {}
+    transactions.forEach(t => {
+      if (t.excluded || t.amount >= 0 || isComm(t) || t.cat1 === 'Entrate') return
+      const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
+      if (!monthKeys.has(ym)) return
+      const cat1 = t.cat1 || 'Non Categorizzato'
+      totals[cat1] = (totals[cat1] || 0) + Math.abs(t.amount)
     })
+    const sorted = Object.keys(totals).sort((a, b) => totals[b] - totals[a])
     // Move "Altro" to second-to-last
-    const altroIdx = all.indexOf('Altro')
-    if (altroIdx > -1 && altroIdx < all.length - 1) {
-      all.splice(altroIdx, 1)
-      all.push('Altro')
+    const altroIdx = sorted.indexOf('Altro')
+    if (altroIdx > -1 && altroIdx < sorted.length - 1) {
+      sorted.splice(altroIdx, 1)
+      sorted.push('Altro')
     }
-    return all
-  }, [dataMap, months])
+    return sorted
+  }, [transactions, months])
+
+  // ── cat1List: stableOrder filtered to cats present in current dataMap ─────
+  const cat1List = useMemo(() => {
+    return stableOrder.filter(cat1 => !!dataMap[cat1])
+  }, [stableOrder, dataMap])
 
   // ── Chart data ────────────────────────────────────────────────────────────
   const chartData = useMemo(() => months.map(m => {
@@ -175,6 +238,12 @@ export default function UscitePage() {
     })
     return row
   }), [months, cat1List, dataMap])
+
+  // ── Pie data ──────────────────────────────────────────────────────────────
+  const pieData = useMemo(() => cat1List.map(cat1 => ({
+    name: cat1,
+    value: months.reduce((s, m) => s + (dataMap[cat1]?.[m.key]?.total || 0), 0)
+  })).filter(d => d.value > 0), [cat1List, months, dataMap])
 
   // ── Detail transactions ───────────────────────────────────────────────────
   const detailTxs = useMemo(() => {
@@ -234,6 +303,52 @@ export default function UscitePage() {
     return active > 0 ? grandTotal / active : 0
   })()
 
+  // ── KPI values ────────────────────────────────────────────────────────────
+  const kpiTotale6m = grandTotal
+  const kpiMediaMensile = grandAvg
+  const kpiMesePeggiore = useMemo(() => {
+    let maxKey = null, maxVal = 0
+    months.forEach(m => {
+      if ((monthTotals[m.key] || 0) > maxVal) {
+        maxVal = monthTotals[m.key]
+        maxKey = m.label
+      }
+    })
+    return maxKey || '—'
+  }, [months, monthTotals])
+  const kpiCategoriaTop = useMemo(() => {
+    let topCat = '—', topVal = 0
+    cat1List.forEach(cat1 => {
+      const t = months.reduce((s, m) => s + (dataMap[cat1]?.[m.key]?.total || 0), 0)
+      if (t > topVal) { topVal = t; topCat = cat1 }
+    })
+    return topCat
+  }, [cat1List, months, dataMap])
+
+  // ── LabelList content for bar totals (last bar in stack) ─────────────────
+  function BarTotalLabel({ x, y, width, index }) {
+    if (index == null || !chartData[index]) return null
+    const total = cat1List.reduce((s, cat1) => s + (chartData[index][cat1] || 0), 0)
+    if (!total) return null
+    return (
+      <text x={x + width / 2} y={y - 5} textAnchor="middle" fontSize={10}
+        fontWeight={600} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+        {fmtIT(Math.round(total))}
+      </text>
+    )
+  }
+
+  // ── LabelList content for segment values inside bars ─────────────────────
+  function SegmentLabel({ x, y, width, height, value }) {
+    if (!value || value <= 1000 || height <= 18) return null
+    return (
+      <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle"
+        fontSize={9} fill="rgba(255,255,255,0.85)" style={{ pointerEvents: 'none' }}>
+        {fmtIT(Math.round(value))}
+      </text>
+    )
+  }
+
   return (
     <div className="uscite-page">
       {/* Header */}
@@ -252,26 +367,76 @@ export default function UscitePage() {
         </button>
       </div>
 
+      {/* KPI bar */}
+      <div className="uscite-kpis">
+        <div className="uscite-kpi">
+          <div className="uscite-kpi-label">Totale 6 mesi</div>
+          <div className="uscite-kpi-value">{fmtIT(Math.round(kpiTotale6m))} €</div>
+        </div>
+        <div className="uscite-kpi">
+          <div className="uscite-kpi-label">Media mensile</div>
+          <div className="uscite-kpi-value">{fmtIT(Math.round(kpiMediaMensile))} €</div>
+        </div>
+        <div className="uscite-kpi">
+          <div className="uscite-kpi-label">Mese peggiore</div>
+          <div className="uscite-kpi-value">{kpiMesePeggiore}</div>
+        </div>
+        <div className="uscite-kpi">
+          <div className="uscite-kpi-label">Categoria top</div>
+          <div className="uscite-kpi-value">{kpiCategoriaTop}</div>
+        </div>
+      </div>
+
       {/* Chart */}
       <div className="uscite-chart-card">
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={chartData} margin={{ top: 22, right: 16, left: 0, bottom: 0 }}
-            barCategoryGap="28%">
-            <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--text2)' }} axisLine={false} tickLine={false}/>
-            <YAxis tick={{ fontSize: 11, fill: 'var(--text3)' }} axisLine={false} tickLine={false}
-              tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
-              width={38}
-            />
-            <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(255,255,255,.04)' }}/>
-            {cat1List.map((cat1, idx) => (
-              <Bar key={cat1} dataKey={cat1} stackId="a"
-                fill={catColor(cat1)}
-                radius={idx === cat1List.length-1 ? [4,4,0,0] : [0,0,0,0]}
+        {/* Pie chart */}
+        <div className="uscite-pie-wrap">
+          <PieChart width={250} height={240}>
+            <Pie
+              data={pieData}
+              dataKey="value"
+              nameKey="name"
+              cx={125}
+              cy={120}
+              innerRadius={55}
+              outerRadius={95}
+              label={({ name, percent }) => percent > 0.05 ? name.split(' ')[0] : ''}
+              labelLine={false}
+            >
+              {pieData.map((entry, idx) => (
+                <Cell key={entry.name} fill={catColor(entry.name)} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => fmtIT(Math.round(value)) + ' €'} />
+          </PieChart>
+        </div>
+        {/* Bar chart */}
+        <div className="uscite-bar-wrap">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={chartData} margin={{ top: 22, right: 16, left: 0, bottom: 0 }}
+              barCategoryGap="28%"
+              background={{ fill: '#fff' }}>
+              <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--text2)' }} axisLine={false} tickLine={false}/>
+              <YAxis tick={{ fontSize: 11, fill: 'var(--text3)' }} axisLine={false} tickLine={false}
+                tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
+                width={38}
               />
-            ))}
-            <Customized component={(props) => <BarTotalLabels {...props} chartData={chartData}/>}/>
-          </BarChart>
-        </ResponsiveContainer>
+              <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(255,255,255,.04)' }}/>
+              {cat1List.map((cat1, idx) => {
+                const isLast = idx === cat1List.length - 1
+                return (
+                  <Bar key={cat1} dataKey={cat1} stackId="a"
+                    fill={catColor(cat1)}
+                    radius={isLast ? [4,4,0,0] : [0,0,0,0]}
+                  >
+                    <LabelList content={<SegmentLabel />} />
+                    {isLast && <LabelList content={<BarTotalLabel />} />}
+                  </Bar>
+                )
+              })}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* Table + Detail */}
@@ -280,9 +445,10 @@ export default function UscitePage() {
           <table className="uscite-table">
             <thead>
               <tr>
-                <th className="uscite-th-cat">Categoria</th>
+                <th className="uscite-th-cat">Categoria (€)</th>
                 {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
                 <th className="uscite-th-total">Media/mese</th>
+                <th className="uscite-th-total">%</th>
               </tr>
             </thead>
             <tbody>
@@ -314,6 +480,7 @@ export default function UscitePage() {
                       )
                     })}
                     <td className="uscite-td-val l1 row-total">{eur(rowAvg(cat1))}</td>
+                    <td className="uscite-td-pct">{grandAvg > 0 ? Math.round(rowAvg(cat1) / grandAvg * 100) + '%' : '—'}</td>
                   </tr>,
 
                   ...(expanded ? l2List.map(cat2 => (
@@ -334,6 +501,7 @@ export default function UscitePage() {
                         )
                       })}
                       <td className="uscite-td-val l2 row-total">{eur(rowAvg(cat1, cat2))}</td>
+                      <td className="uscite-td-pct">{grandAvg > 0 ? Math.round(rowAvg(cat1, cat2) / grandAvg * 100) + '%' : '—'}</td>
                     </tr>
                   )) : [])
                 ]
@@ -348,6 +516,7 @@ export default function UscitePage() {
                   </td>
                 ))}
                 <td className="uscite-td-val grand">{eur(grandAvg)}</td>
+                <td className="uscite-td-pct">100%</td>
               </tr>
             </tbody>
           </table>
@@ -380,7 +549,9 @@ export default function UscitePage() {
               </div>
               <div className="uscite-detail-list">
                 {detailTxs.map((t, i) => (
-                  <div key={t.id || t.txId || i} className="uscite-detail-row">
+                  <div key={t.id || t.txId || i} className="uscite-detail-row"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setOpenTx(t)}>
                     <div className="uscite-detail-date">{fmtDate(t._effDate || t.competenza || t.date)}</div>
                     <div className="uscite-detail-desc">{t.descAI || t.description || t.desc || '—'}</div>
                     <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(t.amount)))} €</div>
@@ -391,6 +562,9 @@ export default function UscitePage() {
           )}
         </div>
       </div>
+
+      {/* Transaction detail modal */}
+      {openTx && <TxDetailModal tx={openTx} onClose={() => setOpenTx(null)}/>}
     </div>
   )
 }
