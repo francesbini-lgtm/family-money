@@ -670,16 +670,19 @@ export default function ContantiPage() {
                   <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateValutaCell tx={t}/></td>
                     <td style={{padding:'9px 14px',fontSize:12}}><DateRettCell tx={t}/></td>
-                    <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,38)}</td>
+                    <td style={{padding:'9px 14px'}}>
+                      {(t.card && t.card!=='null')
+                        ? <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',fontWeight:700}}>*{t.card}</span>
+                        : <span style={{color:'var(--text3)',opacity:.3}}>—</span>}
+                    </td>
                     <td style={{padding:'6px 14px'}}>
-                    {(()=>{
-                      const nick = resolveMemberFromTx(t)
-                      return nick
-                        ? <span style={{fontSize:12,fontWeight:600,padding:'3px 9px',borderRadius:10,
-                            background:'var(--accent-l,rgba(200,98,42,.1))',color:'var(--accent)'}}>{nick}</span>
-                        : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
-                    })()}
-                  </td>
+                      {(()=>{
+                        const nick = resolveMemberFromTx(t)
+                        return nick
+                          ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{nick}</span>
+                          : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>
+                      })()}
+                    </td>
                     <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
                     <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(Math.abs(t.amount), 2)}</td>
                   </tr>
