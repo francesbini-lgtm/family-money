@@ -566,12 +566,31 @@ export async function callPaypalVision(imagesBase64, key) {
 }
 
 // ── PayPal Text — PDF/CSV text extraction ─────────────────
+// Splits large PDFs into chunks and merges results
 export async function callPaypalText(pdfText, key) {
-  const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF/export di cronologia PayPal italiana ed estrai TUTTE le transazioni.\n\nTESTO:\n${pdfText.slice(0, 12000)}\n\n${PAYPAL_PROMPT_SUFFIX}`
-  const res = await fetch(proxyUrl('/gemini'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, key })
+  const CHUNK = 10000  // chars per call (~3k tokens input, leaves room for output)
+  const chunks = []
+  for (let i = 0; i < pdfText.length; i += CHUNK) {
+    chunks.push(pdfText.slice(i, i + CHUNK))
+  }
+  // Cap at 4 chunks (~40k chars) to avoid excessive API calls
+  const limited = chunks.slice(0, 4)
+  const allResults = []
+  for (const chunk of limited) {
+    const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF di cronologia PayPal italiana ed estrai TUTTE le transazioni presenti in questo estratto.\n\nTESTO:\n${chunk}\n\n${PAYPAL_PROMPT_SUFFIX}`
+    const res = await fetch(proxyUrl('/gemini'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, key })
+    })
+    const parsed = await parsePaypalResponse(res)
+    allResults.push(...parsed)
+  }
+  // Deduplicate by date+amount (same tx can appear at chunk boundary)
+  const seen = new Set()
+  return allResults.filter(t => {
+    const k = `${t.date}|${t.amount}|${t.merchant}`
+    if (seen.has(k)) return false
+    seen.add(k); return true
   })
-  return parsePaypalResponse(res)
 }

@@ -57,7 +57,7 @@ function callOpenAI(prompt, key, images) {
       model,
       messages: [{ role: 'user', content: messageContent }],
       temperature: 0.1,
-      max_tokens: hasImages ? 4096 : 2048,
+      max_tokens: hasImages ? 4096 : 8192,
     })
     const req = https.request({
       hostname: 'api.openai.com',
