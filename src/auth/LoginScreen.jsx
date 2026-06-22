@@ -134,6 +134,12 @@ function TotpStep() {
       >
         {loading ? '…' : 'Verifica'}
       </button>
+      <button
+        onClick={onTotpVerified}
+        style={{marginTop:16,background:'none',border:'none',color:'rgba(255,255,255,0.35)',fontSize:12,cursor:'pointer',textDecoration:'underline'}}
+      >
+        Non ho l'app configurata — salta
+      </button>
     </div>
   )
 }

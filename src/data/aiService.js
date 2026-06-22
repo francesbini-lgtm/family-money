@@ -60,8 +60,16 @@ function getPlacesKey() {
   return k || localStorage.getItem('fm-places-key') || ''
 }
 
-// ── Gemini call via local proxy (avoids CORS) ────────────
-// Proxy server: node proxy-server.js (porta 3001)
+// ── Detect proxy URL — locale o Netlify Function ─────────
+function proxyUrl(path) {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return `http://localhost:3001${path}`
+  }
+  // Su Netlify: usa le serverless functions
+  return `/.netlify/functions${path === '/gemini' ? '/gemini' : '/places'}`
+}
+
+// ── Gemini call via proxy ─────────────────────────────────
 export async function callGemini(prompt) {
   const key = getApiKey()
   if (!key) throw new Error('GEMINI_KEY_MISSING')
@@ -72,7 +80,7 @@ export async function callGemini(prompt) {
 
     let response
     try {
-      response = await fetch('http://localhost:3001/gemini', {
+      response = await fetch(proxyUrl('/gemini'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, key }),
@@ -476,7 +484,7 @@ export async function enrichCitiesBatch(transactions, { onProgress, skipCache = 
           console.log(`[places] Calling API for: "${query}"`)
           let resp
           try {
-            resp = await fetch('http://localhost:3001/places', {
+            resp = await fetch(proxyUrl('/places'), {
               method:  'POST',
               headers: { 'Content-Type': 'application/json' },
               body:    JSON.stringify({ query, key }),
