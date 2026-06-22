@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from './AuthContext'
+import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
+import { saveTotpSecret } from '../services/firestore'
 import './LoginScreen.css'
 
 export const APP_VERSION = '3.5.1'
@@ -86,6 +88,56 @@ function GoogleStep() {
   )
 }
 
+// ── TOTP step (solo verifica — setup nelle Impostazioni) ──
+function TotpStep() {
+  const { totpSecret, onTotpVerified } = useAuth()
+  const [code,    setCode]    = useState('')
+  const [error,   setError]   = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  async function handleVerify() {
+    setError(null); setLoading(true)
+    const ok = await validateToken(totpSecret, code.trim())
+    if (!ok) { setError('Codice non valido, riprova'); setCode(''); setLoading(false); return }
+    onTotpVerified()
+    setLoading(false)
+  }
+
+  return (
+    <div className="login-card">
+      <div className="login-icon">📱</div>
+      <h2 className="login-title">Codice Authenticator</h2>
+      <p className="login-sub" style={{marginBottom:20}}>Inserisci il codice a 6 cifre dalla tua app</p>
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={6}
+        placeholder="000000"
+        value={code}
+        onChange={e => setCode(e.target.value.replace(/\D/g,''))}
+        onKeyDown={e => e.key === 'Enter' && code.length === 6 && handleVerify()}
+        autoFocus
+        style={{
+          width:'100%', textAlign:'center', fontSize:28, letterSpacing:'0.3em',
+          padding:'12px 16px', borderRadius:10,
+          border: error ? '2px solid #ff4d4d' : '2px solid rgba(255,255,255,0.15)',
+          background:'rgba(255,255,255,0.08)', color:'#fff', outline:'none',
+          fontFamily:'var(--font-mono)', boxSizing:'border-box', marginBottom:12,
+        }}
+      />
+      {error && <p className="login-error">{error}</p>}
+      <button
+        className="google-btn"
+        onClick={handleVerify}
+        disabled={loading || code.length < 6}
+        style={{width:'100%', justifyContent:'center', marginTop:4}}
+      >
+        {loading ? '…' : 'Verifica'}
+      </button>
+    </div>
+  )
+}
+
 // ── PIN step ──────────────────────────────────────────────
 const VALID_PINS = ['182218', '000000']
 
@@ -145,6 +197,7 @@ export default function LoginScreen() {
     <div className="login-screen">
       <div className="login-bg"/>
       {authStep === 'google' && <GoogleStep/>}
+      {authStep === 'totp'   && <TotpStep/>}
       {authStep === 'pin'    && <PinStep/>}
     </div>
   )

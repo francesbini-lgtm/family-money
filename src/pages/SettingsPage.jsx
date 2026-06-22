@@ -9,6 +9,8 @@ import { createInvite } from '../services/invite'
 import { exportTransactionsCSV, exportSummaryCSV } from '../services/export'
 import { Plus, Trash2, LogOut, Download, Copy, UserPlus, Check, Pencil } from 'lucide-react'
 import { fmtIT } from '../utils/format'
+import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
+import { saveTotpSecret, deleteTotpSecret } from '../services/firestore'
 
 function Tabs({ tabs, active, onChange }) {
   return (
@@ -1763,9 +1765,157 @@ function NavSectionsTab() {
   )
 }
 
+// ── Security Tab (TOTP setup/remove) ─────────────────────
+function SecurityTab() {
+  const { user, totpSecret, onTotpSetupDone } = useAuth()
+  const [phase,     setPhase]     = useState('idle') // idle | setup | confirm | done | remove
+  const [newSecret, setNewSecret] = useState(null)
+  const [code,      setCode]      = useState('')
+  const [error,     setError]     = useState(null)
+  const [loading,   setLoading]   = useState(false)
+
+  const isConfigured = !!totpSecret
+
+  function startSetup() {
+    const s = generateSecret()
+    setNewSecret(s)
+    setCode('')
+    setError(null)
+    setPhase('setup')
+  }
+
+  async function confirmSetup() {
+    setError(null); setLoading(true)
+    const ok = await validateToken(newSecret, code.trim())
+    if (!ok) { setError('Codice non valido, riprova'); setCode(''); setLoading(false); return }
+    await saveTotpSecret(user.uid, newSecret)
+    onTotpSetupDone(newSecret)
+    setPhase('done')
+    setLoading(false)
+  }
+
+  async function removeTotp() {
+    setLoading(true)
+    await deleteTotpSecret(user.uid)
+    onTotpSetupDone(null)
+    setPhase('idle')
+    setLoading(false)
+  }
+
+  const card = {padding:'20px 24px', background:'var(--surface2)', borderRadius:'var(--radius)', border:'1px solid var(--border)', marginBottom:16}
+  const row  = {display:'flex', alignItems:'center', gap:12, marginBottom:8}
+
+  return (
+    <div style={{maxWidth:520}}>
+      <h2 style={{fontSize:17,fontWeight:700,marginBottom:20}}>🔐 Sicurezza</h2>
+
+      <div style={card}>
+        <div style={{...row, marginBottom:14}}>
+          <span style={{fontSize:22}}>📱</span>
+          <div>
+            <div style={{fontWeight:600,fontSize:14}}>Authenticator App</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
+              {isConfigured
+                ? 'TOTP attivo — il login richiede un codice dall\'app'
+                : 'Non configurato — il login usa solo Google + PIN'}
+            </div>
+          </div>
+          <span style={{
+            marginLeft:'auto', padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+            background: isConfigured ? 'var(--green-l)' : 'var(--surface3)',
+            color: isConfigured ? 'var(--green)' : 'var(--text3)',
+          }}>
+            {isConfigured ? '✓ Attivo' : 'Non attivo'}
+          </span>
+        </div>
+
+        {phase === 'idle' && (
+          <div style={{display:'flex',gap:8}}>
+            {!isConfigured && (
+              <button className="btn btn-primary" style={{fontSize:13}} onClick={startSetup}>
+                + Configura TOTP
+              </button>
+            )}
+            {isConfigured && (
+              <>
+                <button className="btn btn-ghost" style={{fontSize:13}} onClick={startSetup}>
+                  🔄 Rigenera
+                </button>
+                <button className="btn btn-ghost" style={{fontSize:13,color:'var(--red)'}} onClick={()=>setPhase('remove')}>
+                  🗑 Rimuovi
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {phase === 'setup' && newSecret && (
+          <div>
+            <p style={{fontSize:13,color:'var(--text2)',marginBottom:12}}>
+              1. Scansiona il QR con <strong>Google Authenticator</strong> o <strong>Authy</strong>
+            </p>
+            <img
+              src={qrCodeUrl(newSecret, user?.email)}
+              alt="QR Code"
+              style={{width:160,height:160,borderRadius:10,background:'#fff',padding:6,display:'block',marginBottom:12}}
+            />
+            <p style={{fontSize:11,color:'var(--text3)',marginBottom:12,fontFamily:'var(--font-mono)',letterSpacing:'0.06em'}}>
+              {formatSecret(newSecret)}
+            </p>
+            <p style={{fontSize:13,color:'var(--text2)',marginBottom:8}}>
+              2. Inserisci il codice a 6 cifre per confermare
+            </p>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input
+                type="text" inputMode="numeric" maxLength={6} placeholder="000000"
+                value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))}
+                onKeyDown={e=>e.key==='Enter'&&code.length===6&&confirmSetup()}
+                autoFocus
+                style={{
+                  width:120,textAlign:'center',fontSize:20,letterSpacing:'0.2em',
+                  padding:'8px 12px',borderRadius:8,border:'1px solid var(--border)',
+                  background:'var(--surface)',color:'var(--text1)',outline:'none',
+                  fontFamily:'var(--font-mono)',
+                }}
+              />
+              <button className="btn btn-primary" disabled={loading||code.length<6} onClick={confirmSetup} style={{fontSize:13}}>
+                {loading ? '…' : 'Attiva'}
+              </button>
+              <button className="btn btn-ghost" onClick={()=>setPhase('idle')} style={{fontSize:13}}>Annulla</button>
+            </div>
+            {error && <p style={{color:'var(--red)',fontSize:12,marginTop:8}}>{error}</p>}
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <div style={{color:'var(--green)',fontSize:13,fontWeight:600}}>
+            ✓ TOTP attivato! Al prossimo login ti verrà chiesto il codice dall'app.
+            <button className="btn btn-ghost" onClick={()=>setPhase('idle')} style={{marginLeft:12,fontSize:12}}>OK</button>
+          </div>
+        )}
+
+        {phase === 'remove' && (
+          <div>
+            <p style={{fontSize:13,color:'var(--text2)',marginBottom:10}}>
+              Sei sicuro? Rimuovendo il TOTP il login userà solo Google + PIN.
+            </p>
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-ghost" style={{fontSize:13,color:'var(--red)'}} onClick={removeTotp} disabled={loading}>
+                {loading ? '…' : 'Sì, rimuovi'}
+              </button>
+              <button className="btn btn-ghost" onClick={()=>setPhase('idle')} style={{fontSize:13}}>Annulla</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState("profile")
   const TABS=[
+    {id:"security",      icon:"🔐", label:"Sicurezza"},
     {id:"profile",       icon:"👤", label:"Profilo & Conti"},
     {id:"categories",    icon:"🏷",  label:"Categorie"},
     {id:"ai-rules",      icon:"🤖", label:"Regole AI"},
@@ -1780,6 +1930,7 @@ export default function SettingsPage() {
     <div style={{padding:"28px 32px",maxWidth:900}}>
       <h1 style={{fontFamily:"var(--font-serif)",fontSize:26,fontWeight:600,marginBottom:24}}>⚙️ Impostazioni</h1>
       <Tabs tabs={TABS} active={tab} onChange={setTab}/>
+      {tab==="security"      && <SecurityTab/>}
       {tab==="profile"       && <ProfileTab/>}
       {tab==="categories"    && <CategoriesTab/>}
       {tab==="ai-rules"      && <AiRulesTab/>}

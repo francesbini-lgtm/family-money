@@ -32,8 +32,10 @@ export function AuthProvider({ children }) {
         } else {
           setAuthError(null)
           setUser(fbUser)
-          // TOTP disabled — to re-enable: restore loadTotpSecret + setAuthStep('totp')
-          setAuthStep('pin')
+          const secret = await loadTotpSecret(fbUser.uid)
+          setTotpSecret(secret)
+          // Se TOTP non è ancora configurato, salta direttamente al PIN
+          setAuthStep(secret ? 'totp' : 'pin')
         }
       } else {
         setUser(null)
@@ -56,8 +58,9 @@ export function AuthProvider({ children }) {
       return null
     }
     setUser(fbUser)
-    // TOTP disabled — to re-enable: restore loadTotpSecret + setAuthStep('totp')
-    setAuthStep('pin')
+    const secret = await loadTotpSecret(fbUser.uid)
+    setTotpSecret(secret)
+    setAuthStep(secret ? 'totp' : 'pin')
     return fbUser
   }
 
@@ -93,10 +96,9 @@ export function AuthProvider({ children }) {
     setAuthStep('google')
   }
 
-  // ── TOTP setup complete ───────────────────────────────
+  // ── TOTP setup/remove (chiamato da SettingsPage) ─────────
   function onTotpSetupDone(secret) {
-    setTotpSecret(secret)
-    setAuthStep('pin')
+    setTotpSecret(secret) // null = rimosso
   }
 
   // ── TOTP verified ─────────────────────────────────────

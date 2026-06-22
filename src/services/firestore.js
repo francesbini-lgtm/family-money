@@ -54,6 +54,11 @@ export async function saveTotpSecret(userId, secret) {
   try { localStorage.setItem(`totp_${userId}`, secret) } catch {}
 }
 
+export async function deleteTotpSecret(userId) {
+  try { await deleteDoc(doc(db, 'totp_secrets', userId)) } catch {}
+  try { localStorage.removeItem(`totp_${userId}`) } catch {}
+}
+
 export async function loadTotpSecret(userId) {
   try {
     const snap = await getDoc(doc(db, 'totp_secrets', userId))
