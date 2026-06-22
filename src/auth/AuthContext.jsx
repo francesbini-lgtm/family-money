@@ -6,20 +6,35 @@ import { getInviteTokenFromUrl, acceptInvite } from '../services/invite'
 
 const AuthContext = createContext(null)
 
+// ── Whitelist: only these Google accounts can log in ──────────────────────────
+const ALLOWED_EMAILS = [
+  'francesco.bini@lastminute.com',
+  'sofi.vergallo@gmail.com',
+]
+
 export function AuthProvider({ children }) {
   const [user,        setUser]        = useState(null)
   const [loading,     setLoading]     = useState(true)  // initial Firebase check
   const [totpSecret,  setTotpSecret]  = useState(null)  // cached after Google login
   const [authStep,    setAuthStep]    = useState('google') // 'google' | 'totp' | 'pin' | 'mode' | 'done'
   const [householdId, setHouseholdId] = useState(null)
+  const [authError,   setAuthError]   = useState(null)
 
   // ── Detect returning user ─────────────────────────────
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
-        setUser(fbUser)
-        // TOTP disabled — to re-enable: restore loadTotpSecret + setAuthStep('totp')
-        setAuthStep('pin')
+        if (!ALLOWED_EMAILS.includes(fbUser.email)) {
+          await signOut(auth)
+          setAuthError(`Accesso negato: ${fbUser.email} non è autorizzato.`)
+          setUser(null)
+          setAuthStep('google')
+        } else {
+          setAuthError(null)
+          setUser(fbUser)
+          // TOTP disabled — to re-enable: restore loadTotpSecret + setAuthStep('totp')
+          setAuthStep('pin')
+        }
       } else {
         setUser(null)
         setTotpSecret(null)
@@ -32,8 +47,14 @@ export function AuthProvider({ children }) {
 
   // ── Google sign in ────────────────────────────────────
   async function signInWithGoogle() {
+    setAuthError(null)
     const result = await signInWithPopup(auth, gProvider)
     const fbUser = result.user
+    if (!ALLOWED_EMAILS.includes(fbUser.email)) {
+      await signOut(auth)
+      setAuthError(`Accesso negato: ${fbUser.email} non è autorizzato.`)
+      return null
+    }
     setUser(fbUser)
     // TOTP disabled — to re-enable: restore loadTotpSecret + setAuthStep('totp')
     setAuthStep('pin')
@@ -85,7 +106,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, totpSecret, authStep, householdId,
+      user, loading, totpSecret, authStep, householdId, authError,
       signInWithGoogle, completeLogin, logOut,
       onTotpSetupDone, onTotpVerified,
     }}>

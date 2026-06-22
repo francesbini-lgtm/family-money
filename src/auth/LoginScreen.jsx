@@ -50,15 +50,18 @@ function CodeInput({ onComplete, disabled, error, onReset }) {
 
 // ── Google login step ─────────────────────────────────────
 function GoogleStep() {
-  const { signInWithGoogle } = useAuth()
+  const { signInWithGoogle, authError } = useAuth()
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
 
   async function handleGoogle() {
     setLoading(true); setError(null)
     try { await signInWithGoogle() }
-    catch(e) { setError(e.message); setLoading(false) }
+    catch(e) { setError(e.message) }
+    setLoading(false)
   }
+
+  const displayError = authError || error
 
   return (
     <div className="login-card">
@@ -78,7 +81,7 @@ function GoogleStep() {
           </>
         )}
       </button>
-      {error && <p className="login-error">{error}</p>}
+      {displayError && <p className="login-error">{displayError}</p>}
     </div>
   )
 }
