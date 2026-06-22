@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { CATS } from '../data/categories'
 import { useFinancials } from '../hooks/useFinancials'
+import { chatWithData } from '../data/aiService'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -74,14 +75,39 @@ function PieLegend({ data, total }) {
 }
 
 export default function MobileOverview() {
-  const [period,  setPeriod]  = useState('1M')
-  const [horizon, setHorizon] = useState('10')
-  const [fcOpen,  setFcOpen]  = useState(false)
+  const [period,    setPeriod]    = useState('1M')
+  const [horizon,   setHorizon]   = useState('10')
+  const [fcOpen,    setFcOpen]    = useState(false)
+  const [chatOpen,  setChatOpen]  = useState(false)
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef(null)
 
-  const transactions = useStore(s => s.transactions)
-  const portfolios   = useStore(s => s.portfolios)
-  const loans        = useStore(s => s.loans)
+  const transactions  = useStore(s => s.transactions)
+  const portfolios    = useStore(s => s.portfolios)
+  const loans         = useStore(s => s.loans)
+  const aiChat        = useStore(s => s.aiChatHistory)
+  const addChatMsg    = useStore(s => s.addChatMessage)
   const { thisIncome, thisExpense } = useFinancials()
+
+  useEffect(() => {
+    if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [aiChat, chatOpen])
+
+  async function handleChatSend() {
+    const msg = chatInput.trim()
+    if (!msg || chatLoading) return
+    setChatInput('')
+    addChatMsg({ role: 'user', text: msg, ts: Date.now() })
+    setChatLoading(true)
+    try {
+      const reply = await chatWithData(msg, transactions)
+      addChatMsg({ role: 'ai', text: reply, ts: Date.now() })
+    } catch (e) {
+      addChatMsg({ role: 'ai', text: 'Errore: ' + e.message, ts: Date.now() })
+    }
+    setChatLoading(false)
+  }
 
   const periodCfg  = PERIOD_OPTS.find(p => p.id === period)
   const horizonYrs = HORIZONS.find(h => h.id === horizon)?.years || 10
@@ -148,6 +174,7 @@ export default function MobileOverview() {
   const totalSpese = stats.catData.reduce((s, d) => s + d.value, 0)
 
   return (
+    <>
     <div className="m-content">
       {/* Period selector */}
       <div className="m-period-row">
@@ -319,7 +346,128 @@ export default function MobileOverview() {
         </>
       )}
 
-      <div style={{ height:12 }}/>
+      <div style={{ height:80 }}/>
     </div>
+
+    {/* ── AI Chat FAB ─────────────────────────────────────── */}
+    <button
+      onClick={() => setChatOpen(true)}
+      style={{
+        position: 'absolute',
+        bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))',
+        left: 20,
+        width: 54, height: 54, borderRadius: '50%',
+        background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+        color: '#fff', fontSize: 22, border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 4px 20px rgba(0,0,0,.3)',
+        zIndex: 20, WebkitTapHighlightColor: 'transparent',
+        transition: 'transform .12s',
+      }}
+      onTouchStart={e => e.currentTarget.style.transform = 'scale(.92)'}
+      onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}
+      title="AI Chat"
+    >✨</button>
+
+    {/* ── AI Chat popup overlay ─────────────────────────── */}
+    {chatOpen && (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(4px)',
+        display: 'flex', flexDirection: 'column',
+      }} onClick={e => { if (e.target === e.currentTarget) setChatOpen(false) }}>
+        <div style={{
+          marginTop: 'auto',
+          background: 'var(--bg)', borderRadius: '20px 20px 0 0',
+          height: '85vh', display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '16px 18px 12px',
+            borderBottom: '1px solid var(--border)', flexShrink: 0,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 20 }}>✨</span>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>AI Assistant</div>
+                <div style={{ fontSize: 11, color: 'var(--text3)' }}>Analisi spese e consigli finanziari</div>
+              </div>
+            </div>
+            <button onClick={() => setChatOpen(false)} style={{
+              background: 'none', border: 'none', fontSize: 22,
+              color: 'var(--text3)', cursor: 'pointer', padding: '4px 8px',
+            }}>✕</button>
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {aiChat.length === 0 && (
+              <div style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 13, marginTop: 40 }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>💬</div>
+                <div>Chiedimi qualsiasi cosa sulle tue finanze</div>
+              </div>
+            )}
+            {aiChat.map((m, i) => (
+              <div key={m.id || i} style={{
+                display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
+              }}>
+                <div style={{
+                  maxWidth: '80%', padding: '10px 14px', borderRadius: 16, fontSize: 14, lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  background: m.role === 'user' ? 'var(--accent)' : 'var(--surface)',
+                  color: m.role === 'user' ? '#fff' : 'var(--text)',
+                  border: m.role === 'ai' ? '1px solid var(--border)' : 'none',
+                  borderBottomRightRadius: m.role === 'user' ? 4 : 16,
+                  borderBottomLeftRadius: m.role === 'ai' ? 4 : 16,
+                }}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div style={{ display: 'flex', gap: 5, padding: '10px 14px' }}>
+                {[0,1,2].map(i => (
+                  <span key={i} style={{
+                    width: 7, height: 7, borderRadius: '50%', background: 'var(--text3)',
+                    display: 'inline-block',
+                    animation: `dot-bounce 1.2s ${i*0.2}s infinite`,
+                  }}/>
+                ))}
+              </div>
+            )}
+            <div ref={chatEndRef}/>
+          </div>
+
+          {/* Input */}
+          <div style={{ padding: '10px 14px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
+                placeholder="Chiedi qualcosa…"
+                style={{
+                  flex: 1, padding: '10px 14px', borderRadius: 24,
+                  border: '1px solid var(--border)', background: 'var(--surface)',
+                  color: 'var(--text)', fontSize: 14, outline: 'none',
+                  fontFamily: 'var(--font-sans)',
+                }}
+              />
+              <button onClick={handleChatSend} disabled={!chatInput.trim() || chatLoading} style={{
+                width: 40, height: 40, borderRadius: '50%',
+                background: chatInput.trim() ? 'var(--accent)' : 'var(--border)',
+                color: '#fff', border: 'none', fontSize: 18,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: chatInput.trim() ? 'pointer' : 'default',
+                transition: 'background .15s', flexShrink: 0,
+              }}>↑</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   )
 }

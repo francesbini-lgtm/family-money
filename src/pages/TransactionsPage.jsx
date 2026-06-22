@@ -1757,6 +1757,7 @@ function QuickFilters({ transactions }) {
       if(filters.dateFrom===thisYM+'-01') store.clearFilters()
       else { store.setFilter('dateFrom',thisYM+'-01'); store.setFilter('dateTo',thisYM+'-31') }
     }},
+    {id:'hidecomm', label:'Nascondi commissioni', active:hideComm, action:()=>setHideComm(v=>!v)},
   ]
 
   return (
@@ -2227,6 +2228,7 @@ export default function TransactionsPage() {
   const [sortDir,        setSortDir]        = useState('desc')
   const [colFilters,     setColFilters]     = useState({})
   const [filterPopup,    setFilterPopup]    = useState(null)
+  const [hideComm,       setHideComm]       = useState(true)
 
   // Default date filter: last 6 months (only if no filter already set)
   useEffect(() => {
@@ -2274,6 +2276,7 @@ export default function TransactionsPage() {
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
     if (filters.flagged)        txs = txs.filter(t => !!t._flagged)
     if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.card))
+    if (hideComm) txs = txs.filter(t => t.descAI !== 'Commissioni' && t.cat2 !== 'Commissione Banca')
     // Column filters (Excel-style)
     Object.entries(colFilters).forEach(([colId, vals]) => {
       if (!vals || vals.length === 0) return
@@ -2295,7 +2298,7 @@ export default function TransactionsPage() {
       return sortDir==='asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return txs
-  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts])
+  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d==='asc'?'desc':'asc')

@@ -2,17 +2,18 @@ import { useState, useRef, useEffect } from 'react'
 import { useAuth } from './AuthContext'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
 import { saveTotpSecret } from '../services/firestore'
+import { getLastLogin, isBiometricSupported } from '../services/biometric'
 import './LoginScreen.css'
 
 export const APP_VERSION = '3.5.1'
 export const BUILD_TIME  = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '—'
 
-// ── PIN digit input ───────────────────────────────────────
-function CodeInput({ onComplete, disabled, error, onReset }) {
+// ── Digit input (6 boxes) ─────────────────────────────────────────────────────
+function CodeInput({ onComplete, disabled, error, label, autoFocus: af = false }) {
   const [digits, setDigits] = useState(['','','','','',''])
   const refs = [useRef(),useRef(),useRef(),useRef(),useRef(),useRef()]
 
-  useEffect(() => { refs[0].current?.focus() }, [])
+  useEffect(() => { if (af) refs[0].current?.focus() }, [])
   useEffect(() => { if (error) { setDigits(['','','','','','']); refs[0].current?.focus() } }, [error])
 
   function handleChange(i, val) {
@@ -31,26 +32,65 @@ function CodeInput({ onComplete, disabled, error, onReset }) {
   }
 
   return (
-    <div className="code-wrap">
-      {digits.map((d, i) => (
-        <input
-          key={i}
-          ref={refs[i]}
-          className={`code-digit${error ? ' error' : ''}`}
-          type="password"
-          inputMode="numeric"
-          maxLength={1}
-          value={d}
-          disabled={disabled}
-          onChange={e => handleChange(i, e.target.value)}
-          onKeyDown={e => handleKeyDown(i, e)}
-        />
-      ))}
+    <div>
+      {label && <div style={{ fontSize:11, color:'rgba(255,255,255,.4)', marginBottom:8, letterSpacing:'.05em', textTransform:'uppercase' }}>{label}</div>}
+      <div className="code-wrap">
+        {digits.map((d, i) => (
+          <input
+            key={i}
+            ref={refs[i]}
+            className={'code-digit' + (error ? ' error' : '')}
+            type="password"
+            inputMode="numeric"
+            maxLength={1}
+            value={d}
+            disabled={disabled}
+            onChange={e => handleChange(i, e.target.value)}
+            onKeyDown={e => handleKeyDown(i, e)}
+          />
+        ))}
+      </div>
     </div>
   )
 }
 
-// ── Google login step ─────────────────────────────────────
+// ── Shared footer ─────────────────────────────────────────────────────────────
+function VerifyFooter() {
+  return (
+    <div className="verify-footer">
+      <div style={{ fontSize:11, color:'rgba(255,255,255,.3)', fontWeight:500, letterSpacing:'.04em' }}>
+        Family Money Tracker
+      </div>
+      <div className="verify-build">
+        <span style={{ fontFamily:'var(--font-mono)' }}>v{APP_VERSION}</span>
+        <span style={{ opacity:.4 }}>·</span>
+        <span>{BUILD_TIME}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Shared user row ───────────────────────────────────────────────────────────
+function UserRow({ user, showLastLogin = true }) {
+  const lastLogin = user ? getLastLogin(user.uid) : null
+  return (
+    <div className="verify-user-row">
+      {user?.photoURL
+        ? <img src={user.photoURL} className="verify-avatar" alt="" referrerPolicy="no-referrer"/>
+        : <div className="verify-avatar-placeholder">{(user?.displayName || user?.email || '?')[0].toUpperCase()}</div>
+      }
+      <div>
+        <div className="verify-name">{user?.displayName || user?.email}</div>
+        <div className="verify-email">{user?.email}</div>
+        {showLastLogin && lastLogin && (
+          <div className="verify-last-login">Ultimo accesso: {lastLogin}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Google login step ─────────────────────────────────────────────────────────
 function GoogleStep() {
   const { signInWithGoogle, authError } = useAuth()
   const [loading, setLoading] = useState(false)
@@ -88,105 +128,186 @@ function GoogleStep() {
   )
 }
 
-// ── TOTP step (solo verifica — setup nelle Impostazioni) ──
-function TotpStep() {
-  const { totpSecret, onTotpVerified } = useAuth()
-  const [code,    setCode]    = useState('')
-  const [error,   setError]   = useState(null)
+// ── Combined verify step: PIN + TOTP (desktop) / PIN-only (mobile) ────────────
+function VerifyStep() {
+  const { user, totpSecret, isMobile, verifyAndLogin } = useAuth()
+  const [pin,      setPin]      = useState('')
+  const [totp,     setTotp]     = useState('')
+  const [error,    setError]    = useState(null)
+  const [loading,  setLoading]  = useState(false)
+  const [pinDone,  setPinDone]  = useState(false)
+
+  const needTotp = !!(totpSecret && !isMobile)
+
+  async function submit(pinVal, totpVal) {
+    setError(null); setLoading(true)
+    try {
+      await verifyAndLogin(pinVal, totpVal)
+    } catch(e) {
+      setError(e.message)
+      setPin(''); setTotp(''); setPinDone(false)
+    }
+    setLoading(false)
+  }
+
+  function handlePinComplete(val) {
+    setPin(val)
+    if (!needTotp) {
+      submit(val, '')
+    } else {
+      setPinDone(true)
+    }
+  }
+
+  function handleTotpComplete(val) {
+    setTotp(val)
+    // auto-submit when TOTP is complete
+    submit(pin, val)
+  }
+
+  return (
+    <div className="login-card verify-card">
+      <UserRow user={user}/>
+      <div className="verify-divider"/>
+
+      {!pinDone ? (
+        <CodeInput
+          label="Codice accesso"
+          onComplete={handlePinComplete}
+          disabled={loading}
+          error={error}
+          autoFocus
+        />
+      ) : (
+        <CodeInput
+          label="Codice Authenticator"
+          onComplete={handleTotpComplete}
+          disabled={loading}
+          error={error}
+          autoFocus
+        />
+      )}
+
+      {loading && (
+        <div style={{ display:'flex', justifyContent:'center', marginTop:16 }}>
+          <div className="spinner"/>
+        </div>
+      )}
+
+      {error && (
+        <div className="code-error" style={{ marginTop: 10 }}>
+          {error}
+          <button className="code-retry" onClick={() => { setError(null); setPin(''); setTotp(''); setPinDone(false) }}>
+            Riprova
+          </button>
+        </div>
+      )}
+
+      {pinDone && !loading && (
+        <button className="setup-link" onClick={() => { setPin(''); setPinDone(false); setError(null) }} style={{ marginTop:10 }}>
+          ← Cambia codice accesso
+        </button>
+      )}
+
+      <VerifyFooter/>
+    </div>
+  )
+}
+
+// ── Biometric (Face ID) step ──────────────────────────────────────────────────
+function BiometricStep() {
+  const { user, loginWithBiometric, fallbackToPin } = useAuth()
+  const [status, setStatus] = useState('idle')
+  const [error,  setError]  = useState(null)
+
+  useEffect(() => { triggerBiometric() }, [])
+
+  async function triggerBiometric() {
+    setStatus('scanning'); setError(null)
+    try {
+      await loginWithBiometric()
+    } catch(e) {
+      setStatus('error')
+      setError(e.message || 'Face ID non riuscito')
+    }
+  }
+
+  return (
+    <div className="login-card verify-card">
+      <UserRow user={user}/>
+      <div className="verify-divider"/>
+
+      <div className="biometric-center">
+        <button
+          className={'biometric-icon' + (status === 'scanning' ? ' scanning' : status === 'error' ? ' error' : '')}
+          onClick={triggerBiometric}
+          title="Tocca per usare Face ID"
+        >
+          {status === 'error' ? '🔒' : '🔓'}
+        </button>
+        <div className="biometric-label">
+          {status === 'scanning' ? 'Verifica in corso…' :
+           status === 'error'    ? 'Tocca per riprovare' :
+                                   'Face ID'}
+        </div>
+        {error && <div className="login-error" style={{ marginTop:8 }}>{error}</div>}
+      </div>
+
+      <button onClick={fallbackToPin} className="setup-link" style={{ marginTop:20 }}>
+        Usa codice
+      </button>
+
+      <VerifyFooter/>
+    </div>
+  )
+}
+
+// ── Biometric setup offer (after first PIN login on mobile) ───────────────────
+function BiometricSetupStep() {
+  const { user, setupBiometricAndLogin, skipBiometricAndLogin } = useAuth()
   const [loading, setLoading] = useState(false)
 
-  async function handleVerify() {
-    setError(null); setLoading(true)
-    const ok = await validateToken(totpSecret, code.trim())
-    if (!ok) { setError('Codice non valido, riprova'); setCode(''); setLoading(false); return }
-    onTotpVerified()
+  async function handleEnable() {
+    setLoading(true)
+    await setupBiometricAndLogin()
+    setLoading(false)
+  }
+
+  async function handleSkip() {
+    setLoading(true)
+    await skipBiometricAndLogin()
     setLoading(false)
   }
 
   return (
-    <div className="login-card">
-      <div className="login-icon">📱</div>
-      <h2 className="login-title">Codice Authenticator</h2>
-      <p className="login-sub" style={{marginBottom:20}}>Inserisci il codice a 6 cifre dalla tua app</p>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={6}
-        placeholder="000000"
-        value={code}
-        onChange={e => setCode(e.target.value.replace(/\D/g,''))}
-        onKeyDown={e => e.key === 'Enter' && code.length === 6 && handleVerify()}
-        autoFocus
-        style={{
-          width:'100%', textAlign:'center', fontSize:28, letterSpacing:'0.3em',
-          padding:'12px 16px', borderRadius:10,
-          border: error ? '2px solid #ff4d4d' : '2px solid rgba(255,255,255,0.15)',
-          background:'rgba(255,255,255,0.08)', color:'#fff', outline:'none',
-          fontFamily:'var(--font-mono)', boxSizing:'border-box', marginBottom:12,
-        }}
-      />
-      {error && <p className="login-error">{error}</p>}
-      <button
-        className="google-btn"
-        onClick={handleVerify}
-        disabled={loading || code.length < 6}
-        style={{width:'100%', justifyContent:'center', marginTop:4}}
-      >
-        {loading ? '…' : 'Verifica'}
-      </button>
-      <button
-        onClick={onTotpVerified}
-        style={{marginTop:16,background:'none',border:'none',color:'rgba(255,255,255,0.35)',fontSize:12,cursor:'pointer',textDecoration:'underline'}}
-      >
-        Non ho l'app configurata — salta
-      </button>
-    </div>
-  )
-}
+    <div className="login-card verify-card">
+      <UserRow user={user} showLastLogin={false}/>
+      <div className="verify-divider"/>
 
-// ── PIN step ──────────────────────────────────────────────
-const VALID_PINS = ['182218', '000000']
-
-function PinStep() {
-  const { completeLogin } = useAuth()
-  const [error,   setError]   = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  async function handleComplete(pin) {
-    if (!VALID_PINS.includes(pin)) { setError('PIN errato'); return }
-    setError(null); setLoading(true)
-    try { await completeLogin('full') }
-    catch(e) { setError(e.message); setLoading(false) }
-  }
-
-  return (
-    <div className="login-card">
-      <div className="login-icon">🔐</div>
-      <h2 className="login-title">Codice di sicurezza</h2>
-      <p className="login-sub">Inserisci il PIN a 6 cifre</p>
-      <CodeInput onComplete={handleComplete} disabled={loading} error={error} onReset={() => setError(null)}/>
-      {error && (
-        <div className="code-error">
-          {error}
-          <button className="code-retry" onClick={() => setError(null)}>Riprova</button>
+      <div style={{ textAlign:'center' }}>
+        <div style={{ fontSize:52, marginBottom:14 }}>🔓</div>
+        <div style={{ fontSize:16, fontWeight:700, color:'#F0EDE9', marginBottom:8 }}>
+          Abilita Face ID
         </div>
-      )}
-      <p className="login-hint">Codice demo: <code>000000</code></p>
-      <div style={{marginTop:24,paddingTop:16,borderTop:'1px solid rgba(255,255,255,0.1)',textAlign:'center'}}>
-        <div style={{fontSize:12,color:'rgba(255,255,255,0.35)',fontWeight:500,letterSpacing:'.04em'}}>
-          Family Money Tracker
-        </div>
-        <div style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:4,padding:'3px 10px',borderRadius:20,border:'1px solid rgba(255,255,255,0.12)',background:'rgba(255,255,255,0.06)'}}>
-          <span style={{fontSize:11,color:'rgba(255,255,255,0.5)',fontFamily:'var(--font-mono)'}}>v{APP_VERSION}</span>
-          <span style={{fontSize:9,color:'rgba(255,255,255,0.2)'}}>·</span>
-          <span style={{fontSize:11,color:'rgba(255,255,255,0.4)'}}>{BUILD_TIME}</span>
+        <div style={{ fontSize:13, color:'rgba(255,255,255,.45)', lineHeight:1.6, marginBottom:22 }}>
+          Accedi più velocemente la prossima volta.<br/>
+          Il codice resta sempre disponibile.
         </div>
       </div>
+
+      <button className="login-btn" onClick={handleEnable} disabled={loading}>
+        {loading ? '…' : '🔓  Abilita Face ID'}
+      </button>
+      <button onClick={handleSkip} disabled={loading} className="setup-link" style={{ marginTop:14, display:'block', width:'100%', textAlign:'center' }}>
+        Non ora
+      </button>
+
+      <VerifyFooter/>
     </div>
   )
 }
 
-// ── Main LoginScreen ──────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function LoginScreen() {
   const { authStep, loading } = useAuth()
 
@@ -202,9 +323,10 @@ export default function LoginScreen() {
   return (
     <div className="login-screen">
       <div className="login-bg"/>
-      {authStep === 'google' && <GoogleStep/>}
-      {authStep === 'totp'   && <TotpStep/>}
-      {authStep === 'pin'    && <PinStep/>}
+      {(authStep === 'google')                        && <GoogleStep/>}
+      {(authStep === 'verify' || authStep === 'totp' || authStep === 'pin') && <VerifyStep/>}
+      {authStep === 'biometric'                       && <BiometricStep/>}
+      {authStep === 'biometric-setup'                 && <BiometricSetupStep/>}
     </div>
   )
 }

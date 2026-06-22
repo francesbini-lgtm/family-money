@@ -234,3 +234,123 @@
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Verify card (combined PIN + TOTP per-user) ─────────────────────────────── */
+.verify-card { padding: 32px 32px 28px; }
+
+.verify-user-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.verify-avatar {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.15);
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.verify-avatar-placeholder {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.15);
+  background: rgba(200,98,42,.25);
+  color: #F0EDE9;
+  font-size: 26px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.verify-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #F0EDE9;
+  line-height: 1.2;
+}
+
+.verify-email {
+  font-size: 12px;
+  color: rgba(255,255,255,.4);
+  margin-top: 2px;
+}
+
+.verify-last-login {
+  font-size: 11px;
+  color: rgba(255,255,255,.25);
+  margin-top: 4px;
+}
+
+.verify-divider {
+  height: 1px;
+  background: rgba(255,255,255,.08);
+  margin: 20px 0;
+}
+
+.verify-footer {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255,255,255,.07);
+  text-align: center;
+}
+
+.verify-build {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.04);
+  font-size: 11px;
+  color: rgba(255,255,255,.4);
+}
+
+/* ── Biometric (Face ID) ────────────────────────────────────────────────────── */
+.biometric-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 4px;
+}
+
+.biometric-icon {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: 2px solid rgba(255,255,255,.12);
+  font-size: 38px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.biometric-icon:hover,
+.biometric-icon:focus { background: rgba(200,98,42,.15); border-color: var(--accent); outline: none; }
+
+.biometric-icon.scanning {
+  border-color: var(--accent);
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+.biometric-icon.error {
+  border-color: rgba(200,48,48,.5);
+  background: rgba(200,48,48,.08);
+}
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(200,98,42,.4); }
+  70%  { box-shadow: 0 0 0 14px rgba(200,98,42,0); }
+  100% { box-shadow: 0 0 0 0 rgba(200,98,42,0); }
+}
+
+.biometric-label {
+  font-size: 13px;
+  color: rgba(255,255,255,.5);
+  font-weight: 500;
+}

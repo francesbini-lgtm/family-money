@@ -5,7 +5,7 @@ import { TrendingUp, TrendingDown, PiggyBank, Percent, ArrowUpRight, ArrowDownRi
 import './DashboardPage.css'
 import { fmtIT } from '../utils/format'
 import { useMemo, useState } from 'react'
-import { CATS } from '../data/categories'
+import { CATS, CAT_NAMES } from '../data/categories'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar,
@@ -122,11 +122,136 @@ function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent, name })
   )
 }
 
+// ── Transaction Modal ────────────────────────────────────
+function TxModal({ tx, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const [editCat1, setEditCat1] = useState(tx?.cat1 || '')
+  const [editCat2, setEditCat2] = useState(tx?.cat2 || '')
+  const [saved, setSaved] = useState(false)
+
+  if (!tx) return null
+
+  const effDate = tx._effDate || tx.date || ''
+  const fmtDate = (d) => {
+    if (!d) return '—'
+    const parts = d.slice(0,10).split('-')
+    return parts.length===3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d
+  }
+
+  const cat1Subs = CATS[editCat1]?.sub || []
+
+  const handleSave = () => {
+    updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+  }
+
+  return (
+    <div style={{
+      position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:9999,
+      display:'flex',alignItems:'center',justifyContent:'center',padding:16,
+    }} onClick={onClose}>
+      <div style={{
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,
+        padding:24,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto',
+        boxShadow:'0 8px 40px rgba(0,0,0,.35)',position:'relative',
+      }} onClick={e=>e.stopPropagation()}>
+        {/* Close */}
+        <button onClick={onClose} style={{
+          position:'absolute',top:12,right:14,background:'none',border:'none',
+          fontSize:20,cursor:'pointer',color:'var(--text3)',lineHeight:1,
+        }}>✕</button>
+
+        {/* Header */}
+        <div style={{marginBottom:16,paddingRight:28}}>
+          <div style={{fontSize:15,fontWeight:700,color:'var(--text)',lineHeight:1.3,marginBottom:4}}>
+            {tx.descAI || (tx.description||'').slice(0,60) || '—'}
+          </div>
+          <div style={{fontSize:22,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>
+            {tx.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(tx.amount),2)}
+          </div>
+        </div>
+
+        {/* Info grid */}
+        <div style={{
+          display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 16px',
+          marginBottom:20,padding:'14px 16px',
+          background:'var(--surface2)',borderRadius:8,
+          border:'1px solid var(--border)',
+        }}>
+          {[
+            ['Data contabile', fmtDate(tx.date)],
+            ['Data valuta', fmtDate(tx.effectiveDate || tx._effDate)],
+            ['Merchant', tx.merchant || '—'],
+            ['Controparte', tx.counterpart || tx.counterparty || '—'],
+            ['Città', tx.city || '—'],
+            ['Categoria', tx.cat1 ? (tx.cat1 + (tx.cat2 ? ' › ' + tx.cat2 : '')) : '—'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>{label}</div>
+              <div style={{fontSize:12,color:'var(--text)',fontWeight:500}}>{value}</div>
+            </div>
+          ))}
+          <div style={{gridColumn:'1 / -1'}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>Descrizione originale</div>
+            <div style={{fontSize:12,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || '—'}</div>
+          </div>
+        </div>
+
+        {/* Category editor */}
+        <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:10}}>
+            Modifica Categoria
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:140}}>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Categoria</div>
+              <select value={editCat1} onChange={e=>{setEditCat1(e.target.value);setEditCat2('')}} style={{
+                width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',
+                background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
+              }}>
+                <option value="">— Nessuna —</option>
+                {CAT_NAMES.filter(n=>n!=='Non Categorizzato').map(n=>(
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            {cat1Subs.length > 0 && (
+              <div style={{flex:1,minWidth:140}}>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Sottocategoria</div>
+                <select value={editCat2} onChange={e=>setEditCat2(e.target.value)} style={{
+                  width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
+                }}>
+                  <option value="">— Nessuna —</option>
+                  {cat1Subs.map(s=>(
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button onClick={handleSave} style={{
+              padding:'7px 18px',borderRadius:8,border:'none',cursor:'pointer',
+              background: saved ? 'var(--green)' : 'var(--accent)',
+              color:'#fff',fontSize:13,fontWeight:700,fontFamily:'var(--font-sans)',
+              transition:'background .2s',whiteSpace:'nowrap',
+            }}>
+              {saved ? '✓ Salvato' : 'Salva'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Spese per categoria — Pie Chart, L1+L2 toggle, no Entrate ──
 function SpeseCatChart({ transactions }) {
-  const [showL2, setShowL2]     = useState(false)
-  const [period, setPeriod]     = useState('M')
-  const [activeIdx, setActiveIdx] = useState(null)
+  const [showL2, setShowL2]       = useState(false)
+  const [period, setPeriod]       = useState('M')
+  const [hoverIdx, setHoverIdx]   = useState(null)
+  const [selectedCat, setSelectedCat] = useState(null)
+  const [selectedTx, setSelectedTx]   = useState(null)
   const now = new Date()
 
   const getMonths = () => {
@@ -145,15 +270,15 @@ function SpeseCatChart({ transactions }) {
       .map(([name, info]) => {
         const txs = transactions.filter(t=>!t.excluded&&t.amount<0&&t.cat1===name)
         const periodTxs = period==='M'
-          ? txs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(months[5]))
+          ? txs.filter(t=>(t._effDate||t.date||'').startsWith(months[5]))
           : period==='Q'
-            ? txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=months[months.length-3])
-            : txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=months[0])
+            ? txs.filter(t=>(t._effDate||t.date||'')>=months[months.length-3])
+            : txs.filter(t=>(t._effDate||t.date||'')>=months[0])
         const total = Math.abs(periodTxs.reduce((s,t)=>s+t.amount,0))
         const l2 = {}
         periodTxs.forEach(t=>{ const k=t.cat2||'Altro'; l2[k]=(l2[k]||0)+Math.abs(t.amount) })
         const l2list = Object.entries(l2).sort((a,b)=>b[1]-a[1])
-        return { name, color:info.color, total, l2list }
+        return { name, color:info.color, total, l2list, periodTxs }
       })
       .filter(d=>d.total>0)
       .sort((a,b)=>b.total-a.total)
@@ -167,8 +292,7 @@ function SpeseCatChart({ transactions }) {
       if (d.l2list.length === 0) {
         out.push({ name:d.name, value:d.total, color:d.color, parent:d.name })
       } else {
-        d.l2list.forEach(([s,v], i) => {
-          // Shade the color slightly per L2 entry
+        d.l2list.forEach(([s,v]) => {
           out.push({ name:s, value:v, color:d.color, parent:d.name })
         })
       }
@@ -177,10 +301,44 @@ function SpeseCatChart({ transactions }) {
   }, [catData, showL2])
 
   const totalSpese = catData.reduce((s,d)=>s+d.total,0)
-  const activeCat  = activeIdx !== null ? pieData[activeIdx] : null
+
+  // The active index for display: hover takes priority, else selected cat
+  const activeIdx = useMemo(() => {
+    if (hoverIdx !== null) return hoverIdx
+    if (selectedCat !== null) {
+      const idx = pieData.findIndex(p =>
+        showL2 ? p.parent === selectedCat : p.name === selectedCat
+      )
+      return idx >= 0 ? idx : null
+    }
+    return null
+  }, [hoverIdx, selectedCat, pieData, showL2])
+
+  const activeCat = activeIdx !== null ? pieData[activeIdx] : null
 
   const periodLabel = period==='M' ? MONTHS_SHORT[now.getMonth()]+' '+String(now.getFullYear()).slice(2)
     : period==='Q' ? 'Ultimi 3 mesi' : 'Ultimi 6 mesi'
+
+  // Transactions for selected category, sorted by absolute amount descending
+  const catTxs = useMemo(() => {
+    if (!selectedCat) return []
+    const months = getMonths()
+    let txs = transactions.filter(t => !t.excluded && t.amount < 0)
+    if (showL2) {
+      txs = txs.filter(t => t.cat2 === selectedCat)
+    } else {
+      txs = txs.filter(t => t.cat1 === selectedCat)
+    }
+    // Apply period filter
+    if (period === 'M') {
+      txs = txs.filter(t => (t._effDate||t.date||'').startsWith(months[5]))
+    } else if (period === 'Q') {
+      txs = txs.filter(t => (t._effDate||t.date||'') >= months[months.length-3])
+    } else {
+      txs = txs.filter(t => (t._effDate||t.date||'') >= months[0])
+    }
+    return [...txs].sort((a,b) => Math.abs(a.amount) - Math.abs(b.amount)).reverse()
+  }, [selectedCat, transactions, period, showL2])
 
   const btnStyle = (active) => ({
     padding:'3px 10px',borderRadius:14,
@@ -190,108 +348,202 @@ function SpeseCatChart({ transactions }) {
     fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',
   })
 
+  const handlePieClick = (_, idx) => {
+    const clickedName = showL2 ? pieData[idx]?.parent : pieData[idx]?.name
+    setSelectedCat(prev => prev === clickedName ? null : clickedName)
+  }
+
+  const handleLegendClick = (catName) => {
+    setSelectedCat(prev => prev === catName ? null : catName)
+  }
+
+  const fmtShortDate = (d) => {
+    if (!d) return '—'
+    const s = (d||'').slice(0,10)
+    const parts = s.split('-')
+    return parts.length===3 ? `${parts[2]}/${parts[1]}` : s
+  }
+
+  // Color for selected cat in legend
+  const selectedColor = selectedCat ? (CATS[selectedCat]?.color || 'var(--accent)') : null
+
   return (
     <div>
       {/* Toolbar */}
       <div style={{display:'flex',gap:6,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
         {[['M','Mese'],['Q','Trimestre'],['A','6 Mesi']].map(([v,l])=>(
-          <button key={v} onClick={()=>{setPeriod(v);setActiveIdx(null)}} style={btnStyle(period===v)}>{l}</button>
+          <button key={v} onClick={()=>{setPeriod(v);setSelectedCat(null)}} style={btnStyle(period===v)}>{l}</button>
         ))}
-        <button onClick={()=>{setShowL2(s=>!s);setActiveIdx(null)}} style={{...btnStyle(showL2),marginLeft:'auto'}}>
+        <button onClick={()=>{setShowL2(s=>!s);setSelectedCat(null)}} style={{...btnStyle(showL2),marginLeft:'auto'}}>
           {showL2?'▾ L2':'▸ L2'}
         </button>
       </div>
 
-      {/* Pie + legend layout */}
-      <div style={{display:'flex',gap:24,alignItems:'flex-start',flexWrap:'wrap'}}>
+      {/* 50/50 grid */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24,alignItems:'flex-start'}}>
 
-        {/* Pie */}
-        <div style={{position:'relative',flexShrink:0}}>
-          <ResponsiveContainer width={240} height={240}>
-            <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%" cy="50%"
-                innerRadius={showL2?55:65}
-                outerRadius={showL2?110:110}
-                dataKey="value"
-                labelLine={false}
-                label={!showL2 ? PieLabel : false}
-                onMouseEnter={(_,idx)=>setActiveIdx(idx)}
-                onMouseLeave={()=>setActiveIdx(null)}
-                onClick={(_,idx)=>setActiveIdx(activeIdx===idx?null:idx)}
-                strokeWidth={1}
-                stroke="var(--surface)"
-              >
-                {pieData.map((entry,idx)=>(
-                  <Cell key={idx} fill={entry.color}
-                    opacity={activeIdx===null||activeIdx===idx?1:0.45}
-                    style={{cursor:'pointer',transition:'opacity .15s'}}
-                  />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(value, name) => [`€ ${fmtIT(value,0)}`, name]}
-                contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8,background:'var(--surface)'}}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-          {/* Center label */}
-          <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
-            textAlign:'center',pointerEvents:'none'}}>
-            {activeCat ? (
-              <>
-                <div style={{fontSize:11,color:'var(--text3)',fontWeight:600,lineHeight:1.2}}>{activeCat.name}</div>
-                <div style={{fontSize:15,fontWeight:800,color:activeCat.color}}>€ {fmtIT(activeCat.value,0)}</div>
-                {activeCat.parent && activeCat.parent!==activeCat.name &&
-                  <div style={{fontSize:9,color:'var(--text3)'}}>{activeCat.parent}</div>}
-              </>
-            ) : (
-              <>
-                <div style={{fontSize:10,color:'var(--text3)',fontWeight:600}}>{periodLabel}</div>
-                <div style={{fontSize:15,fontWeight:800,color:'var(--text)'}}>€ {fmtIT(totalSpese,0)}</div>
-              </>
-            )}
+        {/* LEFT: Pie + legend */}
+        <div>
+          {/* Pie */}
+          <div style={{position:'relative',width:'100%',display:'flex',justifyContent:'center',marginBottom:12}}>
+            <ResponsiveContainer width={220} height={220}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%" cy="50%"
+                  innerRadius={showL2?50:60}
+                  outerRadius={showL2?100:100}
+                  dataKey="value"
+                  labelLine={false}
+                  label={!showL2 ? PieLabel : false}
+                  onMouseEnter={(_,idx)=>setHoverIdx(idx)}
+                  onMouseLeave={()=>setHoverIdx(null)}
+                  onClick={handlePieClick}
+                  strokeWidth={1}
+                  stroke="var(--surface)"
+                >
+                  {pieData.map((entry,idx)=>(
+                    <Cell key={idx} fill={entry.color}
+                      opacity={activeIdx===null||activeIdx===idx?1:0.45}
+                      style={{cursor:'pointer',transition:'opacity .15s'}}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value, name) => [`€ ${fmtIT(value,0)}`, name]}
+                  contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8,background:'var(--surface)'}}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Center label */}
+            <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
+              textAlign:'center',pointerEvents:'none'}}>
+              {activeCat ? (
+                <>
+                  <div style={{fontSize:10,color:'var(--text3)',fontWeight:600,lineHeight:1.2}}>{activeCat.name}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:activeCat.color}}>€ {fmtIT(activeCat.value,0)}</div>
+                  {activeCat.parent && activeCat.parent!==activeCat.name &&
+                    <div style={{fontSize:9,color:'var(--text3)'}}>{activeCat.parent}</div>}
+                </>
+              ) : (
+                <>
+                  <div style={{fontSize:10,color:'var(--text3)',fontWeight:600}}>{periodLabel}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:'var(--text)'}}>€ {fmtIT(totalSpese,0)}</div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Legend list */}
+          <div style={{display:'flex',flexDirection:'column',gap:0,maxHeight:220,overflowY:'auto'}}>
+            {catData.map((d)=>(
+              <div key={d.name}>
+                <div style={{
+                  display:'flex',alignItems:'center',gap:7,padding:'5px 4px',borderRadius:6,
+                  cursor:'pointer',
+                  background: selectedCat===d.name ? d.color+'18' : 'transparent',
+                  outline: selectedCat===d.name ? `1px solid ${d.color}44` : 'none',
+                  transition:'background .12s',
+                }}
+                  onMouseEnter={()=>{
+                    const idx = pieData.findIndex(p=>showL2 ? p.parent===d.name : p.name===d.name)
+                    setHoverIdx(idx>=0?idx:null)
+                  }}
+                  onMouseLeave={()=>setHoverIdx(null)}
+                  onClick={()=>handleLegendClick(d.name)}
+                >
+                  <span style={{width:9,height:9,borderRadius:'50%',background:d.color,flexShrink:0}}/>
+                  <span style={{fontSize:12,flex:1,color:'var(--text2)',fontWeight:selectedCat===d.name?700:600}}>{d.name}</span>
+                  <span style={{fontSize:12,fontWeight:800,color:d.color,fontFamily:'var(--font-mono)'}}>
+                    € {fmtIT(d.total,0)}
+                  </span>
+                  <span style={{fontSize:10,color:'var(--text3)',marginLeft:4,minWidth:30,textAlign:'right'}}>
+                    {totalSpese>0?Math.round(d.total/totalSpese*100):0}%
+                  </span>
+                </div>
+                {showL2 && d.l2list.length>0 && (
+                  <div style={{marginLeft:16,marginBottom:2}}>
+                    {d.l2list.map(([s,v])=>(
+                      <div key={s} style={{display:'flex',alignItems:'center',gap:7,padding:'2px 4px'}}>
+                        <span style={{width:5,height:5,borderRadius:'50%',background:d.color+'99',flexShrink:0}}/>
+                        <span style={{fontSize:11,flex:1,color:'var(--text3)'}}>{s}</span>
+                        <span style={{fontSize:11,color:d.color,fontFamily:'var(--font-mono)'}}>€ {fmtIT(v,0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Legend list */}
-        <div style={{flex:1,minWidth:180,display:'flex',flexDirection:'column',gap:0,maxHeight:240,overflowY:'auto'}}>
-          {(showL2 ? catData : catData).map((d,i)=>(
-            <div key={d.name}>
-              <div style={{display:'flex',alignItems:'center',gap:7,padding:'5px 4px',borderRadius:6,
-                cursor:'pointer',background:activeIdx!==null&&pieData[activeIdx]?.parent===d.name?d.color+'12':'transparent',
-                transition:'background .12s'}}
-                onMouseEnter={()=>{
-                  const idx = pieData.findIndex(p=>p.name===d.name||(p.parent===d.name&&!showL2))
-                  setActiveIdx(idx>=0?idx:null)
-                }}
-                onMouseLeave={()=>setActiveIdx(null)}
-              >
-                <span style={{width:9,height:9,borderRadius:'50%',background:d.color,flexShrink:0}}/>
-                <span style={{fontSize:12,flex:1,color:'var(--text2)',fontWeight:600}}>{d.name}</span>
-                <span style={{fontSize:12,fontWeight:800,color:d.color,fontFamily:'var(--font-mono)'}}>
-                  € {fmtIT(d.total,0)}
-                </span>
-                <span style={{fontSize:10,color:'var(--text3)',marginLeft:4,minWidth:30,textAlign:'right'}}>
-                  {totalSpese>0?Math.round(d.total/totalSpese*100):0}%
+        {/* RIGHT: Transaction list */}
+        <div style={{display:'flex',flexDirection:'column'}}>
+          {selectedCat ? (
+            <>
+              <div style={{
+                fontSize:12,fontWeight:700,color: selectedColor,
+                marginBottom:8,display:'flex',alignItems:'center',gap:6,
+              }}>
+                <span style={{width:8,height:8,borderRadius:'50%',background:selectedColor,display:'inline-block'}}/>
+                {selectedCat}
+                <span style={{fontSize:11,color:'var(--text3)',fontWeight:500,marginLeft:2}}>
+                  ({catTxs.length} transazioni)
                 </span>
               </div>
-              {showL2 && d.l2list.length>0 && (
-                <div style={{marginLeft:16,marginBottom:2}}>
-                  {d.l2list.map(([s,v])=>(
-                    <div key={s} style={{display:'flex',alignItems:'center',gap:7,padding:'2px 4px'}}>
-                      <span style={{width:5,height:5,borderRadius:'50%',background:d.color+'99',flexShrink:0}}/>
-                      <span style={{fontSize:11,flex:1,color:'var(--text3)'}}>{s}</span>
-                      <span style={{fontSize:11,color:d.color,fontFamily:'var(--font-mono)'}}>€ {fmtIT(v,0)}</span>
+              <div style={{
+                maxHeight:340,overflowY:'auto',
+                border:'1px solid var(--border)',borderRadius:8,
+              }}>
+                {catTxs.length === 0 ? (
+                  <div style={{padding:20,textAlign:'center',color:'var(--text3)',fontSize:12}}>
+                    Nessuna transazione nel periodo
+                  </div>
+                ) : catTxs.map((tx, i) => {
+                  const d = tx._effDate || tx.date || ''
+                  const desc = tx.descAI || (tx.description||'').slice(0,40)
+                  return (
+                    <div key={tx.txId || i} onClick={()=>setSelectedTx(tx)} style={{
+                      display:'flex',alignItems:'center',gap:8,
+                      padding:'7px 10px',
+                      borderBottom: i < catTxs.length-1 ? '1px solid var(--border)' : 'none',
+                      cursor:'pointer',
+                      transition:'background .1s',
+                    }}
+                      onMouseEnter={e=>e.currentTarget.style.background='var(--surface2)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                    >
+                      <span style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',flexShrink:0,width:38}}>
+                        {fmtShortDate(d)}
+                      </span>
+                      <span style={{fontSize:12,color:'var(--text2)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        {desc || '—'}
+                      </span>
+                      <span style={{fontSize:12,fontWeight:700,color:'var(--red)',fontFamily:'var(--font-mono)',flexShrink:0}}>
+                        € {fmtIT(Math.abs(tx.amount),2)}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            <div style={{
+              display:'flex',alignItems:'center',justifyContent:'center',
+              height:200,borderRadius:8,border:'1px dashed var(--border)',
+              color:'var(--text3)',fontSize:12,textAlign:'center',padding:16,
+            }}>
+              Clicca una categoria per vedere le transazioni
             </div>
-          ))}
+          )}
         </div>
+
       </div>
+
+      {/* Transaction modal */}
+      {selectedTx && (
+        <TxModal tx={selectedTx} onClose={()=>setSelectedTx(null)} />
+      )}
     </div>
   )
 }
@@ -721,16 +973,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Spese per Categoria + AI Insights (50/50) ── */}
+      {/* ── Spese per Categoria ── */}
       <div style={{display:'flex',gap:16,marginBottom:20,alignItems:'stretch'}}>
         <div className="card" style={{flex:'1 1 0',minWidth:0,padding:'18px 20px'}}>
           <div className="card-title-row" style={{marginBottom:4}}>
             <span className="card-title">Spese per Categoria</span>
           </div>
           <SpeseCatChart transactions={transactions} />
-        </div>
-        <div className="card" style={{flex:'1 1 0',minWidth:0,overflow:'hidden'}}>
-          <AIInsights transactions={transactions} catList={catList} monthly={monthly}/>
         </div>
       </div>
 

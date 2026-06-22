@@ -83,7 +83,8 @@ export default function MobileDiscovery() {
   // ── Queue ─────────────────────────────────────────────────
   const queue = useMemo(() => {
     const seen = loadSeen()
-    const cands = transactions.filter(isLowConfidence)
+    const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
+    const cands = transactions.filter(t => isLowConfidence(t) && !isComm(t))
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId])
@@ -91,7 +92,7 @@ export default function MobileDiscovery() {
     return [...unseen, ...seenTxs]
   }, [transactions, seenVer])
 
-  const total   = transactions.filter(isLowConfidence).length
+  const total   = transactions.filter(t => isLowConfidence(t) && !(t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca')).length
   const done    = Math.max(0, total - queue.length)
   const current = queue[0] || null
 

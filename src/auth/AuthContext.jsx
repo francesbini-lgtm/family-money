@@ -3,6 +3,12 @@ import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, gProvider } from '../firebase'
 import { getOrCreateHousehold, loadTotpSecret } from '../services/firestore'
 import { getInviteTokenFromUrl, acceptInvite } from '../services/invite'
+import { validateToken } from '../services/totp'
+import {
+  isBiometricSupported, hasBiometricRegistered,
+  registerBiometric, authenticateBiometric,
+  saveLastLogin,
+} from '../services/biometric'
 
 const AuthContext = createContext(null)
 
@@ -13,15 +19,20 @@ const ALLOWED_EMAILS = [
   'sofi.vergallo@gmail.com',
 ]
 
+const VALID_PINS = ['182218', '000000']
+
 export function AuthProvider({ children }) {
   const [user,        setUser]        = useState(null)
-  const [loading,     setLoading]     = useState(true)  // initial Firebase check
-  const [totpSecret,  setTotpSecret]  = useState(null)  // cached after Google login
-  const [authStep,    setAuthStep]    = useState('google') // 'google' | 'totp' | 'pin' | 'mode' | 'done'
+  const [loading,     setLoading]     = useState(true)
+  const [totpSecret,  setTotpSecret]  = useState(null)
+  const [authStep,    setAuthStep]    = useState('google')
+  // 'google' | 'verify' | 'biometric' | 'biometric-setup' | 'done'
   const [householdId, setHouseholdId] = useState(null)
   const [authError,   setAuthError]   = useState(null)
 
-  // ── Detect returning user ─────────────────────────────
+  const isMobile = () => window.location.pathname.startsWith('/mobile')
+
+  // ── Detect returning user ─────────────────────────────────────────────────
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
@@ -35,9 +46,7 @@ export function AuthProvider({ children }) {
           setUser(fbUser)
           const secret = await loadTotpSecret(fbUser.uid)
           setTotpSecret(secret)
-          // Se TOTP non è ancora configurato, salta direttamente al PIN
-          const isMobile = window.location.pathname.startsWith('/mobile')
-          setAuthStep(secret && !isMobile ? 'totp' : 'pin')
+          _nextStep(fbUser, secret)
         }
       } else {
         setUser(null)
@@ -49,7 +58,16 @@ export function AuthProvider({ children }) {
     return unsub
   }, [])
 
-  // ── Google sign in ────────────────────────────────────
+  function _nextStep(fbUser, secret) {
+    const mobile = isMobile()
+    if (mobile && isBiometricSupported() && hasBiometricRegistered(fbUser.uid)) {
+      setAuthStep('biometric')
+    } else {
+      setAuthStep('verify')
+    }
+  }
+
+  // ── Google sign in ────────────────────────────────────────────────────────
   async function signInWithGoogle() {
     setAuthError(null)
     const result = await signInWithPopup(auth, gProvider)
@@ -62,23 +80,65 @@ export function AuthProvider({ children }) {
     setUser(fbUser)
     const secret = await loadTotpSecret(fbUser.uid)
     setTotpSecret(secret)
-    const isMobile = window.location.pathname.startsWith('/mobile')
-    setAuthStep(secret && !isMobile ? 'totp' : 'pin')
+    _nextStep(fbUser, secret)
     return fbUser
   }
 
-  // ── Complete login (after PIN) ────────────────────────
-  async function completeLogin(mode) {
+  // ── Combined PIN + TOTP verify ────────────────────────────────────────────
+  async function verifyAndLogin(pin, totpCode) {
+    if (!VALID_PINS.includes(pin)) throw new Error('PIN errato')
+
+    // TOTP required on desktop when configured
+    if (totpSecret && !isMobile()) {
+      const ok = await validateToken(totpSecret, (totpCode || '').trim())
+      if (!ok) throw new Error('Codice authenticator non valido')
+    }
+
+    // Offer biometric setup on mobile (first time)
+    if (isMobile() && isBiometricSupported() && !hasBiometricRegistered(user?.uid)) {
+      setAuthStep('biometric-setup')
+      return
+    }
+
+    saveLastLogin(user?.uid)
+    return _completeLogin()
+  }
+
+  // ── Biometric authenticate (existing credential) ──────────────────────────
+  async function loginWithBiometric() {
+    const ok = await authenticateBiometric(user?.uid)
+    if (!ok) throw new Error('Biometria non riuscita')
+    saveLastLogin(user?.uid)
+    return _completeLogin()
+  }
+
+  // ── Biometric setup (after first PIN login on mobile) ────────────────────
+  async function setupBiometricAndLogin() {
+    await registerBiometric(user?.uid, user?.email, user?.displayName)
+    saveLastLogin(user?.uid)
+    return _completeLogin()
+  }
+
+  async function skipBiometricAndLogin() {
+    saveLastLogin(user?.uid)
+    return _completeLogin()
+  }
+
+  // ── Fallback: go back to verify from biometric screen ────────────────────
+  function fallbackToPin() {
+    setAuthStep('verify')
+  }
+
+  // ── Internal: finish auth ─────────────────────────────────────────────────
+  async function _completeLogin() {
     if (!user) return
-    // Check if joining via invite link
     const inviteToken = getInviteTokenFromUrl()
     let hhId
     if (inviteToken) {
       try {
         hhId = await acceptInvite(inviteToken, user.uid, user.displayName || user.email, user.email)
-        // Clear the invite token from URL
         window.history.replaceState({}, '', window.location.pathname)
-      } catch(e) {
+      } catch (e) {
         console.warn('Invite accept failed:', e.message)
         hhId = await getOrCreateHousehold(user.uid, user.displayName || user.email, user.email)
       }
@@ -87,10 +147,15 @@ export function AuthProvider({ children }) {
     }
     setHouseholdId(hhId)
     setAuthStep('done')
-    return { mode, householdId: hhId }
+    return { householdId: hhId }
   }
 
-  // ── Sign out ──────────────────────────────────────────
+  // ── Legacy completeLogin kept for SettingsPage etc. ───────────────────────
+  async function completeLogin(mode) {
+    return _completeLogin()
+  }
+
+  // ── Sign out ──────────────────────────────────────────────────────────────
   async function logOut() {
     await signOut(auth)
     setUser(null)
@@ -99,14 +164,14 @@ export function AuthProvider({ children }) {
     setAuthStep('google')
   }
 
-  // ── TOTP setup/remove (chiamato da SettingsPage) ─────────
+  // ── TOTP setup/remove (called from SettingsPage) ──────────────────────────
   function onTotpSetupDone(secret) {
-    setTotpSecret(secret) // null = rimosso
+    setTotpSecret(secret)
   }
 
-  // ── TOTP verified ─────────────────────────────────────
+  // ── Legacy TOTP verified (kept for compatibility) ─────────────────────────
   function onTotpVerified() {
-    setAuthStep('pin')
+    setAuthStep('verify')
   }
 
   return (
@@ -114,6 +179,10 @@ export function AuthProvider({ children }) {
       user, loading, totpSecret, authStep, householdId, authError,
       signInWithGoogle, completeLogin, logOut,
       onTotpSetupDone, onTotpVerified,
+      verifyAndLogin, loginWithBiometric,
+      setupBiometricAndLogin, skipBiometricAndLogin,
+      fallbackToPin,
+      isMobile: isMobile(),
     }}>
       {children}
     </AuthContext.Provider>
