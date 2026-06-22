@@ -1973,20 +1973,21 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     migrationDoneRef.current = true
     const matched = Object.entries(satiMatches).filter(([,m]) => m.status === 'matched' && m.incomeTxId)
     matched.forEach(([expTxId, m]) => {
-      const inc = satiIncome.find(t => t.txId === m.incomeTxId)
-      if (inc && inc.descAI !== 'Accantonamento Satispay') {
-        updateTransaction(m.incomeTxId, { excluded: true, descAI: 'Accantonamento Satispay' })
-      } else if (inc && !inc.excluded) {
-        updateTransaction(m.incomeTxId, { excluded: true })
+      // Fix income: ensure excluded + correct name 'Accredito Satispay'
+      const inc = transactions.find(t => t.txId === m.incomeTxId)
+      if (inc) {
+        const patch = {}
+        if (!inc.excluded) patch.excluded = true
+        if (inc.descAI !== 'Accredito Satispay') patch.descAI = 'Accredito Satispay'
+        if (Object.keys(patch).length) updateTransaction(m.incomeTxId, patch)
       }
-      // Also set _compensatedAmt on expense tx if missing
-      const exp = speseDaComp.find(t => t.txId === expTxId)
-      if (exp && !exp._compensatedAmt && m.compensatedAmt > 0) {
+      // Fix expense: un-exclude if excluded, always set _compensatedAmt correctly
+      const exp = transactions.find(t => t.txId === expTxId)
+      if (exp) {
         const absExp = Math.abs(exp.amount)
-        if (m.compensatedAmt >= absExp) {
-          updateTransaction(expTxId, { excluded: true, _compensatedAmt: absExp, _compensatedBy: m.incomeTxId })
-        } else {
-          updateTransaction(expTxId, { _compensatedAmt: m.compensatedAmt, _compensatedBy: m.incomeTxId })
+        const comp = Math.min(m.compensatedAmt || 0, absExp)
+        if (exp.excluded || !exp._compensatedAmt) {
+          updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: m.incomeTxId })
         }
       }
     })
@@ -1995,21 +1996,17 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   // ── Actions ──────────────────────────────────────────────
   function applyMatch(expTxId, incTxId) {
     const inc = satiIncome.find(t => t.txId === incTxId)
-    const exp = speseDaComp.find(t => t.txId === expTxId)
+    const exp = transactions.find(t => t.txId === expTxId)
     const compensatedAmt = inc?.amount || 0
-    // 1) Exclude the accredito + rename it
+    // 1) Exclude the income + rename to 'Accredito Satispay'
     if (inc) {
-      updateTransaction(incTxId, { excluded: true, descAI: 'Accantonamento Satispay' })
+      updateTransaction(incTxId, { excluded: true, descAI: 'Accredito Satispay' })
     }
-    // 2) Rectify the expense
+    // 2) Compensate expense — NEVER exclude, always visible with _compensatedAmt
     if (exp) {
       const absExp = Math.abs(exp.amount)
-      if (compensatedAmt >= absExp) {
-        // Fully covered → exclude the expense too
-        updateTransaction(expTxId, { excluded: true, _compensatedAmt: absExp, _compensatedBy: incTxId })
-      } else {
-        updateTransaction(expTxId, { _compensatedAmt: compensatedAmt, _compensatedBy: incTxId })
-      }
+      const comp = Math.min(compensatedAmt, absExp)
+      updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: incTxId })
       // Sanity check: if somehow net becomes positive, warn
       const net = absExp - compensatedAmt
       if (net < -0.01) {
