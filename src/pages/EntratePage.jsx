@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import './EntratePage.css'
 import { fmtIT } from '../utils/format'
+import AltreEntratePage from './AltreEntratePage'
 
 const INCOME_CATS = ['Fra', 'Sofi', 'Fra-Bonus', 'Sofi-Bonus']
 const COLORS = {
@@ -185,6 +186,7 @@ export default function EntratePage() {
   const setAppPref   = useStore(s => s.setAppPref)
   const { fmt }      = useFinancials()
   const [period, setPeriod] = useState('month')
+  const [tab, setTab]       = useState('stipendi')
 
   const now    = new Date()
   const thisYM = getYM(now)
@@ -304,7 +306,19 @@ export default function EntratePage() {
   const topCat     = activeCats.at(-1)
 
   return (
-    <div className="en-page">
+    <>
+      {/* Tab bar */}
+      <div className="en-tab-bar">
+        <button className={'en-tab' + (tab === 'stipendi' ? ' active' : '')} onClick={() => setTab('stipendi')}>
+          💰 Stipendi
+        </button>
+        <button className={'en-tab' + (tab === 'altre' ? ' active' : '')} onClick={() => setTab('altre')}>
+          💸 Altre Entrate
+        </button>
+      </div>
+
+      {tab === 'altre' && <AltreEntratePage />}
+      {tab === 'stipendi' && <div className="en-page">
       {/* Header */}
       <div className="en-header">
         <div>
@@ -501,6 +515,7 @@ export default function EntratePage() {
           </div>
         </>
       )}
-    </div>
+      </div>}
+    </>
   )
 }
