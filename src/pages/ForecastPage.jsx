@@ -553,15 +553,15 @@ export default function ForecastPage() {
                       onChange={e=>setMortgageAmt(Number(e.target.value))} placeholder="200000"/>
                   </div>
                   <div className="fc-mortgage-field">
+                    <label className="form-lbl-sm">TAEG (%)</label>
+                    <input className="fc-input" type="number" value={mortgageTaeg}
+                      onChange={e=>setMortgageTaeg(Number(e.target.value))} step="0.1" placeholder="3.5"/>
+                  </div>
+                  <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">Anticipo (€)</label>
                     <input className="fc-input" type="number" value={mortgageAnticipo}
                       onChange={e=>setMortgageAnticipo(Number(e.target.value))} placeholder="0"/>
                     <div className="fc-input-hint">Dedotto dal saldo</div>
-                  </div>
-                  <div className="fc-mortgage-field">
-                    <label className="form-lbl-sm">TAEG (%)</label>
-                    <input className="fc-input" type="number" value={mortgageTaeg}
-                      onChange={e=>setMortgageTaeg(Number(e.target.value))} step="0.1" placeholder="3.5"/>
                   </div>
                   <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">Durata (anni)</label>

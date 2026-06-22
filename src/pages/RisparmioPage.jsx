@@ -332,6 +332,7 @@ export default function RisparmioPage() {
   }
 
   const avg12m   = savgMonths(12)
+  const total12  = Math.round(savingsMonthly.filter(m => m.ym < thisYM).slice(-12).reduce((s,m) => s+m.saving, 0))
 
   // Cumulative savings chart
   let cumulative = 0
@@ -386,19 +387,21 @@ export default function RisparmioPage() {
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:28}}>
         {[
-          ['Ultimi 12 mesi', avg12m, 'media/mese'],
-          [`Anno ${yr-1}`, savgYear(yr-1), `totale ${yr-1}`],
-          [`Anno ${yr-2}`, savgYear(yr-2), `totale ${yr-2}`],
-          [`Anno ${yr-3}`, savgYear(yr-3), `totale ${yr-3}`],
-          [`Anno ${yr-4}`, savgYear(yr-4), `totale ${yr-4}`],
-        ].map(([label,val,sub])=>(
-          <div key={label} className="card" style={{padding:'12px 16px',borderLeft:`3px solid ${savColor(val)}`}}>
+          ['Ultimi 12 mesi', total12, avg12m],
+          [`Anno ${yr-1}`, savgYear(yr-1), savgYear(yr-1)!=null ? Math.round(savgYear(yr-1)/12) : null],
+          [`Anno ${yr-2}`, savgYear(yr-2), savgYear(yr-2)!=null ? Math.round(savgYear(yr-2)/12) : null],
+          [`Anno ${yr-3}`, savgYear(yr-3), savgYear(yr-3)!=null ? Math.round(savgYear(yr-3)/12) : null],
+          [`Anno ${yr-4}`, savgYear(yr-4), savgYear(yr-4)!=null ? Math.round(savgYear(yr-4)/12) : null],
+        ].map(([label,total,avg])=>(
+          <div key={label} className="card" style={{padding:'12px 16px',borderLeft:`3px solid ${savColor(total)}`}}>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
               color:'var(--text3)',marginBottom:5}}>{label}</div>
-            <div style={{fontSize:18,fontWeight:800,fontFamily:'var(--font-mono)',color:savColor(val)}}>
-              {fmtSav(val)}
+            <div style={{fontSize:18,fontWeight:800,fontFamily:'var(--font-mono)',color:savColor(total)}}>
+              {fmtSav(total)}
             </div>
-            <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{sub}</div>
+            <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
+              {avg!=null ? `media/mese ${fmtSav(avg)}` : '—'}
+            </div>
           </div>
         ))}
       </div>
@@ -480,6 +483,32 @@ export default function RisparmioPage() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                {(() => {
+                  const rows6 = savingsMonthly.slice().reverse().slice(0,6).reverse()
+                  const totInc = rows6.reduce((s,m)=>s+m.income,0)
+                  const totExp = rows6.reduce((s,m)=>s+m.expense,0)
+                  const totSav = rows6.reduce((s,m)=>s+m.saving,0)
+                  const totRate = totInc>0 ? Math.round(totSav/totInc*100) : null
+                  return (
+                    <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)',fontWeight:700}}>
+                      <td style={{padding:'7px 10px',fontSize:12,color:'var(--text3)'}}>Totale</td>
+                      <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:'var(--green)',fontSize:12}}>€ {fmtIT(Math.round(totInc),0)}</td>
+                      <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:'var(--red)',fontSize:12}}>€ {fmtIT(Math.round(totExp),0)}</td>
+                      <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:totSav>=0?'var(--green)':'var(--red)',fontSize:12}}>
+                        {totSav>=0?'+':''}{fmtIT(Math.round(totSav),0)}
+                      </td>
+                      <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:totRate>=20?'var(--green)':totRate>=10?'var(--gold)':'var(--red)',fontSize:12}}>
+                        {totRate!=null?`${totRate}%`:'—'}
+                      </td>
+                    </tr>
+                  )
+                })()}
+              </tfoot>
             </table>
           </div>
 
