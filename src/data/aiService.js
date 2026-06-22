@@ -60,13 +60,13 @@ function getPlacesKey() {
   return k || localStorage.getItem('fm-places-key') || ''
 }
 
-// ── Detect proxy URL — locale o Netlify Function ─────────
+// ── Detect proxy URL — locale o Vercel Function ──────────
 function proxyUrl(path) {
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return `http://localhost:3001${path}`
   }
-  // Su Netlify: usa le serverless functions
-  return `/.netlify/functions${path === '/gemini' ? '/gemini' : '/places'}`
+  // Su Vercel: usa le API routes
+  return `/api${path}`
 }
 
 // ── Gemini call via proxy ─────────────────────────────────
