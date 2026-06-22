@@ -66,6 +66,8 @@ function TxDetailModal({ tx, onClose }) {
   const [editCat1, setEditCat1] = useState(tx.cat1 || '')
   const [editCat2, setEditCat2] = useState(tx.cat2 || '')
   const [saved, setSaved] = useState(false)
+  const [toReview, setToReview] = useState(tx?._toReview || false)
+  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
   const cat1Subs = CATS[editCat1]?.sub || []
 
   function fmtDateFull(d) {
@@ -106,6 +108,20 @@ function TxDetailModal({ tx, onClose }) {
             <div className="uscite-modal-label">Descrizione originale</div>
             <div className="uscite-modal-value" style={{fontSize:11,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || '—'}</div>
           </div>
+        </div>
+        <div onClick={toggleReview}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
+            border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:toReview?'#92400e':'var(--text2)'}}>
+            🔍 Da rivedere
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:toReview?'#f59e0b':'var(--border)',
+            color:toReview?'#fff':'var(--text3)'}}>
+            {toReview ? 'Attivo' : 'Off'}
+          </span>
         </div>
         <div className="uscite-modal-edit">
           <div className="uscite-modal-edit-title">Modifica Categoria</div>
