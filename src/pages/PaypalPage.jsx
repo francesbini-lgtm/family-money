@@ -92,7 +92,7 @@ function TxDetailModal({ tx, onClose, updateTransaction, customCats }) {
   function handleSave() {
     updateTransaction(tx.txId, { cat1, cat2 })
     setSaved(true)
-    setTimeout(() => setSaved(false), 1800)
+    setTimeout(onClose, 1000)
   }
 
   const effDate = tx._effDate || tx.date || ''

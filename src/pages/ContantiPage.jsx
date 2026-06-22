@@ -186,6 +186,34 @@ function LinksModal({ tx, onClose }) {
   )
 }
 
+// ── Resolve member from transaction (same logic as TransactionsPage) ──
+function resolveMemberFromTx(t) {
+  const appPrefs   = useStore.getState()?.appPrefs || {}
+  const userAccounts = appPrefs.userAccounts || []
+  const ownerNick  = appPrefs.ownerNickname || 'Admin'
+  const family     = appPrefs.family || []
+  // 1. Card match
+  if (t.card) {
+    const acc = userAccounts.find(a => a.card4 === t.card)
+    if (acc?.memberId) {
+      if (acc.memberId === 'owner') return ownerNick
+      const member = family.find(m => String(m.id) === String(acc.memberId))
+      if (member) return member.nickname || member.name?.split(' ')[0] || null
+    }
+  }
+  // 2. Account name / nickname match
+  const allMembers = [
+    { nick: ownerNick, name: ownerNick },
+    ...family.map(m => ({ nick: m.nickname || m.name?.split(' ')[0] || '', name: m.name || '' }))
+  ]
+  const acc2 = (t.account || '').toLowerCase()
+  for (const m of allMembers) {
+    if (m.name && acc2.includes(m.name.toLowerCase())) return m.nick
+    if (m.nick && acc2.includes(m.nick.toLowerCase())) return m.nick
+  }
+  return null
+}
+
 // ── Member picker inline ──────────────────────────────────
 function MemberCell({ txId }) {
   const meta = getAtmMeta()[txId] || {}
@@ -633,7 +661,7 @@ export default function ContantiPage() {
           <div className="card" style={{padding:0,overflow:'hidden',marginBottom:20}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr>
-                {['Data valuta','Data rettificata','Descrizione','Chi ha prelevato','Collegato a','Importo'].map(h=>(
+                {['Data valuta','Data rettificata','Descrizione','Utente','Collegato a','Importo'].map(h=>(
                   <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
                 ))}
               </tr></thead>
@@ -643,7 +671,15 @@ export default function ContantiPage() {
                     <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateValutaCell tx={t}/></td>
                     <td style={{padding:'9px 14px',fontSize:12}}><DateRettCell tx={t}/></td>
                     <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,38)}</td>
-                    <td style={{padding:'6px 14px'}}><MemberCell txId={t.txId}/></td>
+                    <td style={{padding:'6px 14px'}}>
+                    {(()=>{
+                      const nick = resolveMemberFromTx(t)
+                      return nick
+                        ? <span style={{fontSize:12,fontWeight:600,padding:'3px 9px',borderRadius:10,
+                            background:'var(--accent-l,rgba(200,98,42,.1))',color:'var(--accent)'}}>{nick}</span>
+                        : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
+                    })()}
+                  </td>
                     <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
                     <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(Math.abs(t.amount), 2)}</td>
                   </tr>

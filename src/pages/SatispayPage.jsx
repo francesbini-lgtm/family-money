@@ -1787,7 +1787,7 @@ function SatiTxDetailModal({ tx, onClose }) {
   function handleSave() {
     updateTransaction(tx.txId, { cat1, cat2 })
     setSaved(true)
-    setTimeout(() => setSaved(false), 1800)
+    setTimeout(onClose, 1000)
   }
 
   return (

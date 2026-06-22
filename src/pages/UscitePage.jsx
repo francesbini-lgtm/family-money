@@ -77,7 +77,7 @@ function TxDetailModal({ tx, onClose }) {
   function handleSave() {
     updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
     setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
+    setTimeout(onClose, 1000)
   }
 
   return (
