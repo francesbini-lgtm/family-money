@@ -91,7 +91,10 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
   return (
     <div className="fc-whatif-panel">
       <div style={{fontSize:11,color:'var(--text3)',marginBottom:12,lineHeight:1.5}}>
-        Seleziona le categorie da escludere: il risparmio mensile aumenta dell'importo medio mensile di quelle spese.
+        Seleziona le categorie da escludere: il risparmio mensile aumenta dell'importo indicato.
+        <span style={{display:'block',marginTop:3,fontStyle:'italic',opacity:.8}}>
+          Importi calcolati come: totale spese categoria (ultimi 12 mesi) ÷ 12
+        </span>
       </div>
       {cats.map(([c1, info]) => {
         const c1Excluded  = excludedCats.has(c1)
