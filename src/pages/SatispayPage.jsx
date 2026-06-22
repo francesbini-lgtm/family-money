@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
+import { showToast } from '../services/notifications'
 import { CATS, getMergedCats } from '../data/categories'
 import { Plus, Trash2, Edit2, Check, X, Link } from 'lucide-react'
 import {
@@ -1517,57 +1518,419 @@ function FundCard({ pot, allPots }) {
   )
 }
 
+// ── Auto-match helper ─────────────────────────────────────
+// Regola: importo esatto ≤15 giorni → auto | ±3€ ≤20 giorni → da confermare
+function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
+  const result = {}
+  const usedIncomeIds = new Set(
+    Object.values(existingMatches)
+      .filter(m => m.status === 'matched' && m.incomeTxId)
+      .map(m => m.incomeTxId)
+  )
+
+  for (const exp of expenses) {
+    const existing = existingMatches[exp.txId]
+    if (existing?.status === 'matched' && existing?.incomeTxId) {
+      result[exp.txId] = existing
+      usedIncomeIds.add(existing.incomeTxId)
+      continue
+    }
+    if (existing?.status === 'pending_approval') {
+      result[exp.txId] = existing
+      continue
+    }
+
+    const expDate = new Date(exp._effDate || exp.date)
+    const expAmt  = Math.abs(exp.amount)
+    let autoInc = null, pendingInc = null
+    let autoDiff = Infinity, pendingScore = Infinity
+
+    for (const inc of incomeEntries) {
+      if (usedIncomeIds.has(inc.txId)) continue
+      const incDate  = new Date(inc._effDate || inc.date)
+      const incAmt   = Math.abs(inc.amount)
+      const dateDiff = Math.abs(expDate - incDate) / 86400000
+      const amtDiff  = Math.abs(expAmt - incAmt)
+
+      if (amtDiff < 0.02 && dateDiff <= 15 && dateDiff < autoDiff) {
+        autoDiff = dateDiff; autoInc = inc
+      } else if (amtDiff <= 3 && dateDiff <= 20 && dateDiff < pendingScore) {
+        pendingScore = dateDiff; pendingInc = inc
+      }
+    }
+
+    if (autoInc) {
+      result[exp.txId] = { status: 'matched', incomeTxId: autoInc.txId, pendingIncomeTxId: null, compensatedAmt: autoInc.amount }
+      usedIncomeIds.add(autoInc.txId)
+    } else if (pendingInc) {
+      result[exp.txId] = { status: 'pending_approval', incomeTxId: null, pendingIncomeTxId: pendingInc.txId, compensatedAmt: 0 }
+    } else {
+      result[exp.txId] = { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 }
+    }
+  }
+  return result
+}
+
+// ── Sati pending approval modal ───────────────────────────
+function SatiPendingModal({ expense, incomeEntry, onApprove, onReject, onClose }) {
+  if (!expense || !incomeEntry) return null
+  const diff = Math.round(Math.abs(new Date(expense._effDate||expense.date) - new Date(incomeEntry._effDate||incomeEntry.date)) / 86400000)
+  const amtDiff = Math.abs(Math.abs(expense.amount) - Math.abs(incomeEntry.amount))
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{background:'var(--surface)',borderRadius:16,padding:'26px 28px',width:'100%',maxWidth:680,
+        maxHeight:'90vh',overflowY:'auto',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.28)'}}>
+        <button onClick={onClose} style={{position:'absolute',top:14,right:16,background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>⏳ Abbinamento da confermare</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:20}}>
+          {diff} {diff===1?'giorno':'giorni'} di distanza{amtDiff > 0.01 ? ` · differenza €${fmtIT(amtDiff,2)}` : ''}. Conferma se si tratta della stessa operazione.
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:4}}>
+          <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:12,padding:'14px 16px'}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--red)',marginBottom:10}}>🧾 Spesa da compensare</div>
+            {[
+              ['Descrizione', expense.descAI||expense.description?.slice(0,40)||'—'],
+              ['Data', fmtDate(expense._effDate||expense.date)],
+              ['Importo', `−€ ${fmtIT(Math.abs(expense.amount),2)}`],
+              ...(expense.cat1?[['Categoria',`${expense.cat1}${expense.cat2?' › '+expense.cat2:''}`]]:[]),
+            ].map(([l,v])=>(
+              <div key={l} style={{display:'flex',justifyContent:'space-between',gap:8,padding:'4px 0',borderBottom:'1px solid rgba(0,0,0,.05)',fontSize:13}}>
+                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',flexShrink:0}}>{l}</span>
+                <span style={{textAlign:'right'}}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{background:'#f0fdf4',border:'1px solid #6ee7b7',borderRadius:12,padding:'14px 16px'}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--green)',marginBottom:10}}>📥 Entrata Satispay</div>
+            {[
+              ['Descrizione', incomeEntry.descAI||incomeEntry.description?.slice(0,40)||'—'],
+              ['Data', fmtDate(incomeEntry._effDate||incomeEntry.date)],
+              ['Importo', `+€ ${fmtIT(incomeEntry.amount,2)}`],
+              ...(incomeEntry.cat1?[['Categoria',`${incomeEntry.cat1}${incomeEntry.cat2?' › '+incomeEntry.cat2:''}`]]:[]),
+            ].map(([l,v])=>(
+              <div key={l} style={{display:'flex',justifyContent:'space-between',gap:8,padding:'4px 0',borderBottom:'1px solid rgba(0,0,0,.05)',fontSize:13}}>
+                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',flexShrink:0}}>{l}</span>
+                <span style={{textAlign:'right'}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{display:'flex',gap:10,marginTop:20,flexWrap:'wrap'}}>
+          <button onClick={onApprove}
+            style={{padding:'9px 20px',background:'#16a34a',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+            ✅ Approva abbinamento
+          </button>
+          <button onClick={onReject}
+            style={{padding:'9px 18px',background:'transparent',color:'var(--text2)',border:'1px solid var(--border)',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+            ❌ Rifiuta
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Sati abbina expense → income modal ────────────────────
+function SatiAbbinaTxModal({ expense, availableIncome, onLink, onClose }) {
+  const [chosen, setChosen] = useState('')
+  const expDate = new Date(expense._effDate || expense.date)
+
+  const sorted = useMemo(() =>
+    [...availableIncome].sort((a,b) =>
+      Math.abs(new Date(a._effDate||a.date) - expDate) - Math.abs(new Date(b._effDate||b.date) - expDate)
+    ), [availableIncome])
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 26px',width:'100%',maxWidth:560,
+        maxHeight:'90vh',overflowY:'auto',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.28)'}}>
+        <button onClick={onClose} style={{position:'absolute',top:14,right:16,background:'none',border:'none',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:12}}>🔗 Abbina spesa a entrata Satispay</div>
+        <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13}}>
+          <span style={{fontWeight:700}}>{expense.descAI||expense.description?.slice(0,40)||'—'}</span>
+          <span style={{marginLeft:10,fontSize:12,color:'var(--text3)'}}>{fmtDate(expense._effDate||expense.date)} · </span>
+          <span style={{color:'var(--red)',fontWeight:600}}>−€{fmtIT(Math.abs(expense.amount),2)}</span>
+        </div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:8}}>Seleziona l'entrata Satispay corrispondente:</div>
+        {sorted.length === 0 ? (
+          <div style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>Nessuna entrata Satispay disponibile</div>
+        ) : (
+          <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:320,overflowY:'auto',border:'1px solid var(--border)',borderRadius:10,padding:6}}>
+            {sorted.map(inc => {
+              const diff = Math.round(Math.abs(new Date(inc._effDate||inc.date) - expDate) / 86400000)
+              const amtMatch = Math.abs(Math.abs(inc.amount) - Math.abs(expense.amount)) < 0.02
+              const isSel = chosen === inc.txId
+              return (
+                <div key={inc.txId} onClick={() => setChosen(inc.txId)}
+                  style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',borderRadius:8,cursor:'pointer',
+                    background:isSel?'#eff6ff':'transparent',border:`1px solid ${isSel?'#3b82f6':'transparent'}`,transition:'all .1s'}}>
+                  <input type="radio" readOnly checked={isSel} style={{flexShrink:0}} onChange={()=>{}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:13}}>{inc.descAI||inc.description?.slice(0,40)||'—'}</div>
+                    <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
+                      {fmtDate(inc._effDate||inc.date)} · {diff===0?'stesso giorno':`${diff}gg di distanza`}
+                      {amtMatch && <span style={{marginLeft:6,color:'#16a34a',fontWeight:600}}>✓ stesso importo</span>}
+                    </div>
+                  </div>
+                  <div style={{fontWeight:700,color:'var(--green)',fontSize:13,flexShrink:0}}>+€{fmtIT(inc.amount,2)}</div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div style={{display:'flex',gap:10,marginTop:16}}>
+          <button disabled={!chosen} onClick={() => onLink(expense.txId, chosen)}
+            style={{padding:'9px 20px',background:chosen?'#16a34a':'var(--border)',color:'#fff',border:'none',borderRadius:8,
+              fontSize:13,fontWeight:700,cursor:chosen?'pointer':'not-allowed',fontFamily:'var(--font-sans)'}}>
+            🔗 Abbina selezionato
+          </button>
+          <button onClick={onClose}
+            style={{padding:'9px 18px',background:'transparent',color:'var(--text2)',border:'1px solid var(--border)',
+              borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+            Annulla
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Non abbinate income overlay ───────────────────────────
+function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
+  const matchedIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
+  const unmatched = incomeEntries
+    .filter(t => t.cat1 === 'Entrate' && t.cat2 === 'SATISPAY' && !matchedIds.has(t.txId))
+    .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 28px',width:'100%',maxWidth:740,
+        maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 16px 48px rgba(0,0,0,.25)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+          <span style={{fontSize:18}}>⚠️</span>
+          <div style={{fontSize:16,fontWeight:800}}>Entrate non abbinate ({unmatched.length})</div>
+          <div style={{fontSize:12,color:'var(--text3)',marginLeft:4}}>· L1 = Entrate · L2 = SATISPAY</div>
+          <button onClick={onClose} style={{marginLeft:'auto',border:'none',background:'transparent',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
+        </div>
+        <div style={{flex:1,overflowY:'auto',border:'1px solid var(--border)',borderRadius:10}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead>
+              <tr style={{background:'var(--surface2)',position:'sticky',top:0}}>
+                {['Data','Descrizione','Importo','Stato'].map(h => (
+                  <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,textTransform:'uppercase',
+                    letterSpacing:'.07em',color:'var(--text3)',borderBottom:'1px solid var(--border)',
+                    textAlign:h==='Importo'?'right':'left'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {unmatched.length === 0 && (
+                <tr><td colSpan={4} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
+                  ✅ Tutte le entrate Satispay sono abbinate
+                </td></tr>
+              )}
+              {unmatched.map(t => (
+                <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                  <td style={{padding:'9px 14px'}}>
+                    <div style={{fontSize:13,fontWeight:500}}>{t.descAI||t.description?.slice(0,50)}</div>
+                    <div style={{fontSize:11,color:'var(--text3)'}}>{(t.description||'').slice(0,60)}</div>
+                  </td>
+                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--green)'}}>
+                    +€ {fmtIT(t.amount,2)}
+                  </td>
+                  <td style={{padding:'9px 14px'}}>
+                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
+                      background:'#fef3c7',color:'#92400e',border:'1px solid #f59e0b'}}>
+                      ⚠️ non abbinata
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{marginTop:12,display:'flex',justifyContent:'flex-end'}}>
+          <button className="btn btn-secondary" onClick={onClose}>Chiudi</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, pot }) {
-  const [abbina, setAbbina] = useState(null) // incomeEntry being linked
-  const [compLinks, setCompLinks] = useState(getSatiComp)
+  const appPrefs  = useStore(s => s.appPrefs)
+  const setAppPref = useStore(s => s.setAppPref)
 
-  function refreshLinks() { setCompLinks(getSatiComp()) }
-
-  const thisYear = String(new Date().getFullYear())
-
-  // ── Strict L1+L2 match: BOTH must be explicitly saved (raw Firestore, no migration of old `cat`) ─
+  // ── Regole configurate nel pot ──────────────────────────
   const catFilters = useMemo(() =>
-    (pot?.voci||[]).filter(v => v.cat1 && v.cat2)   // raw voci only — ignores old `cat` field
-  , [pot])
+    (pot?.voci||[]).filter(v => v.cat1 && v.cat2), [pot])
 
+  // ── Solo spese (non entrate) che rispettano le regole ───
   const speseDaComp = useMemo(() => {
     if (!catFilters.length) return []
     return transactions.filter(t => {
       if (t.excluded || t.amount >= 0) return false
       return catFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
-    }).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+    }).sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   }, [transactions, catFilters])
 
-  // ── Unified rows (sorted by date desc) ───────────────────
-  const allRows = useMemo(() => {
-    const rows = [
-      ...satiIncome.map(t=>({...t, _rowType:'entrata'})),
-      ...speseDaComp.map(t=>({...t, _rowType:'spesa'})),
-    ]
-    return rows.sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
-  }, [satiIncome, speseDaComp])
+  // ── Matches storage ─────────────────────────────────────
+  const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
+  function saveMatches(m) { setAppPref('satiMatches', m) }
 
-  const totEntrate   = satiIncome.reduce((s,t)=>s+t.amount, 0)
-  const totSpese     = speseDaComp.reduce((s,t)=>s+Math.abs(t.amount), 0)
-  const saldoNetto   = totEntrate - totSpese
+  // ── Auto-match on data change ───────────────────────────
+  const prevMatchesRef = useRef(null)
+  useEffect(() => {
+    if (!speseDaComp.length || !satiIncome.length) return
+    const computed = autoMatchSati(speseDaComp, satiIncome, satiMatches)
+    const key = JSON.stringify(computed)
+    if (prevMatchesRef.current === key) return
+    prevMatchesRef.current = key
+
+    // Check for NEW pending approvals
+    const newPending = Object.entries(computed).filter(([id, m]) =>
+      m.status === 'pending_approval' && (!satiMatches[id] || satiMatches[id].status !== 'pending_approval')
+    )
+    if (newPending.length > 0) {
+      showToast(`${newPending.length} compensazione da confermare`, 'warning', 6000)
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('💚 Satispay — Compensazioni da confermare', {
+          body: `${newPending.length} spese trovate con entrata simile, conferma l'abbinamento`,
+          icon: '/icon.svg', tag: 'sati-pending',
+        })
+      }
+    }
+    saveMatches(computed)
+  }, [speseDaComp, satiIncome])
+
+  // ── State ────────────────────────────────────────────────
+  const [pendingModal, setPendingModal] = useState(null)  // expense txId
+  const [abbinaTx, setAbbinaTx]         = useState(null)  // expense tx
+  const [showNonAbb, setShowNonAbb]     = useState(false)
+  const [hideComm, setHideComm]         = useState(true)
+  const [search, setSearch]             = useState('')
+
+  // ── Commission detection ────────────────────────────────
+  const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
+
+  // ── Filtered rows ───────────────────────────────────────
+  const filteredRows = useMemo(() => {
+    let list = speseDaComp
+    if (hideComm) list = list.filter(t => !isComm(t))
+    if (!search.trim()) return list
+    const q = search.toLowerCase()
+    return list.filter(t =>
+      (t.descAI||'').toLowerCase().includes(q) ||
+      (t.description||'').toLowerCase().includes(q) ||
+      (t.cat1||'').toLowerCase().includes(q) ||
+      (t.cat2||'').toLowerCase().includes(q) ||
+      String(Math.abs(t.amount)).includes(q)
+    )
+  }, [speseDaComp, hideComm, search])
+
+  // ── KPIs ─────────────────────────────────────────────────
+  const totSpese      = speseDaComp.reduce((s,t) => s + Math.abs(t.amount), 0)
+  const totCompensate = speseDaComp.reduce((s,t) => {
+    const m = satiMatches[t.txId]
+    return s + (m?.status === 'matched' ? (m.compensatedAmt || 0) : 0)
+  }, 0)
+  const saldoNetto    = totCompensate - totSpese  // negative = still to pay
+  const pendingCount  = Object.values(satiMatches).filter(m => m.status === 'pending_approval').length
+  const unmatchedIncomeCount = satiIncome.filter(t =>
+    t.cat1 === 'Entrate' && t.cat2 === 'SATISPAY' &&
+    !Object.values(satiMatches).some(m => m.status === 'matched' && m.incomeTxId === t.txId)
+  ).length
+
+  // ── Available income for manual linking ─────────────────
+  const matchedIncomeIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
+  const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
+
+  // ── Actions ──────────────────────────────────────────────
+  function handleApprove(expTxId) {
+    const m = satiMatches[expTxId]
+    if (!m?.pendingIncomeTxId) return
+    const inc = satiIncome.find(t => t.txId === m.pendingIncomeTxId)
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
+    saveMatches(newMatches)
+    setPendingModal(null)
+    showToast('Abbinamento approvato', 'success')
+  }
+
+  function handleReject(expTxId) {
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
+    saveMatches(newMatches)
+    setPendingModal(null)
+    showToast('Abbinamento rifiutato', 'info')
+  }
+
+  function handleLink(expTxId, incTxId) {
+    const inc = satiIncome.find(t => t.txId === incTxId)
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: incTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
+    saveMatches(newMatches)
+    setAbbinaTx(null)
+    showToast('Transazione abbinata con successo', 'success')
+  }
+
+  function handleUnlink(expTxId) {
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
+    saveMatches(newMatches)
+  }
+
+  if (!catFilters.length) {
+    return (
+      <div style={{marginTop:32,padding:'20px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>📥 Spese e Entrate da Compensare</div>
+        <div style={{fontSize:13,color:'var(--text3)'}}>Configura le categorie L1›L2 nelle voci del fondo per abilitare la compensazione automatica.</div>
+      </div>
+    )
+  }
 
   return (
     <div style={{marginTop:32}}>
-      <div style={{marginBottom:14}}>
-        <div style={{fontSize:16,fontWeight:700}}>📥 Spese e Entrate da Compensare</div>
-        <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
-          Entrate Satispay + spese nelle categorie L1›L2 configurate in tabella — ordinate per data
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:14,gap:12,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:700}}>📥 Spese e Entrate da Compensare</div>
+          <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
+            Spese nelle categorie configurate · abbinamento automatico: importo esatto ≤15 giorni | ±3€ ≤20 giorni da confermare
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          {pendingCount > 0 && (
+            <button onClick={() => {
+              const first = speseDaComp.find(t => satiMatches[t.txId]?.status === 'pending_approval')
+              if (first) setPendingModal(first.txId)
+            }}
+              style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 14px',
+                border:'1px solid #f59e0b',borderRadius:20,background:'#fef3c7',color:'#92400e',
+                fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+              ⏳ Da confermare ({pendingCount})
+            </button>
+          )}
+          {unmatchedIncomeCount > 0 && (
+            <button onClick={() => setShowNonAbb(true)}
+              style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 14px',
+                border:'1px solid #f59e0b',borderRadius:20,background:'#fef3c7',color:'#92400e',
+                fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+              ⚠️ Non abbinate ({unmatchedIncomeCount})
+            </button>
+          )}
         </div>
       </div>
 
       {/* KPIs */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:16}}>
         {[
-          ['📥 Entrate ricevute',   `€ ${fmtIT(totEntrate,0)}`,                         'var(--green)'],
-          ['🧾 Spese da compensare',`€ ${fmtIT(totSpese,0)}`,                            'var(--red)'],
-          ['⚖️ Saldo netto',        `${saldoNetto>=0?'+':''}€ ${fmtIT(saldoNetto,0)}`,  saldoNetto>=0?'var(--green)':'var(--red)'],
-          ['# Voci totali',         allRows.length,                                       'var(--text2)'],
+          ['🧾 Spese totali',     `€ ${fmtIT(totSpese,2)}`,      'var(--red)'],
+          ['📥 Compensate',       `€ ${fmtIT(totCompensate,2)}`, 'var(--green)'],
+          ['⚖️ Residuo',          `${saldoNetto>=0?'+':''}€ ${fmtIT(Math.abs(saldoNetto),2)}`, saldoNetto>=0?'var(--green)':'var(--red)'],
+          ['# Spese',             speseDaComp.length,              'var(--text2)'],
         ].map(([l,v,c])=>(
           <div key={l} className="card" style={{padding:'12px 16px',borderLeft:`3px solid ${c}`}}>
             <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text3)',marginBottom:4}}>{l}</div>
@@ -1576,97 +1939,107 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         ))}
       </div>
 
-      {/* Unified table */}
+      {/* Table card */}
       <div className="card" style={{padding:0,overflow:'hidden'}}>
+        {/* Table header bar */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderBottom:'1px solid var(--border)',gap:10,flexWrap:'wrap'}}>
+          <div style={{fontSize:14,fontWeight:700}}>
+            Spese da compensare ({filteredRows.length}{(search||hideComm)?`/${speseDaComp.length}`:''})</div>
+          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            <button onClick={() => setHideComm(v => !v)}
+              style={{display:'inline-flex',alignItems:'center',gap:5,padding:'5px 11px',
+                border:`1px solid ${hideComm?'#f59e0b':'var(--border)'}`,borderRadius:20,
+                background:hideComm?'#fef3c7':'transparent',
+                color:hideComm?'#92400e':'var(--text3)',fontSize:11,fontWeight:600,
+                cursor:'pointer',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
+              🚫 Commissioni
+            </button>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Cerca..."
+              style={{padding:'5px 10px',border:'1px solid var(--border)',borderRadius:8,
+                background:'var(--bg)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',
+                outline:'none',width:200}}/>
+          </div>
+        </div>
+
+        {/* Table */}
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr>
-              {['Data','Tipo','Descrizione','Abbina / Note','Categoria','Importo'].map(h=>(
+              {['Data','Descrizione','Categoria','Stato','Importo originale','Importo compensato'].map(h => (
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                   textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                   borderBottom:'1px solid var(--border)',
-                  textAlign:h==='Importo'?'right':'left',
-                  minWidth:h==='Categoria'?180:undefined}}>{h}</th>
+                  textAlign:h.startsWith('Importo')?'right':'left'}}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {allRows.length === 0 && (
+            {filteredRows.length === 0 && (
               <tr><td colSpan={6} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
-                Nessuna voce — aggiungi entrate Satispay o configura categorie L1›L2 in tabella
+                {search ? 'Nessun risultato' : 'Nessuna spesa da compensare — configura le categorie L1›L2 nel fondo'}
               </td></tr>
             )}
-            {allRows.slice(0,80).map((t,i)=>{
-              const isEntrata = t._rowType === 'entrata'
-              const link      = isEntrata ? compLinks[t.txId] : null
-              const catColor  = CATS[t.cat1]?.color || 'var(--accent)'
+            {filteredRows.map(t => {
+              const match  = satiMatches[t.txId]
+              const status = match?.status || 'unmatched'
+              const origAmt = Math.abs(t.amount)
+              const compAmt = status === 'matched' ? Math.max(0, origAmt - (match.compensatedAmt || 0)) : origAmt
+              const catColor = CATS[t.cat1]?.color || 'var(--accent)'
+
               return (
-                <tr key={(t.txId||i)+t._rowType}
-                  style={{borderBottom:'1px solid var(--border)',
-                    background: isEntrata ? 'transparent' : '#fff4f420'}}>
-                  {/* Data */}
-                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',
-                    fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',transition:'background .1s'}}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                     {fmtDate(t._effDate||t.date)}
                   </td>
-                  {/* Tipo badge */}
-                  <td style={{padding:'9px 10px',whiteSpace:'nowrap'}}>
-                    {isEntrata
-                      ? <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,fontWeight:700,
-                          background:'#2a7a4a20',color:'var(--green)',border:'1px solid #2a7a4a30'}}>
-                          📥 Entrata
-                        </span>
-                      : <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,fontWeight:700,
-                          background:'#e0242420',color:'var(--red)',border:'1px solid #e0242430'}}>
-                          🧾 Da comp.
-                        </span>
-                    }
-                  </td>
-                  {/* Descrizione */}
                   <td style={{padding:'9px 14px'}}>
                     <div style={{fontSize:13,fontWeight:500}}>{t.descAI||t.description?.slice(0,50)}</div>
                     <div style={{fontSize:11,color:'var(--text3)'}}>{(t.description||'').slice(0,60)}</div>
                   </td>
-                  {/* Abbina / Note (solo entrate) */}
-                  <td style={{padding:'9px 10px'}}>
-                    {isEntrata ? (
-                      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                        {link ? (
-                          <div style={{display:'flex',alignItems:'center',gap:4}}>
-                            <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,
-                              background:'var(--green-l)',color:'var(--green)',fontWeight:700,
-                              border:'1px solid var(--green)33'}}>🔗 Abbinata</span>
-                            <button onClick={()=>setAbbina(t)}
-                              style={{border:'none',background:'none',cursor:'pointer',
-                                color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>
-                          </div>
-                        ) : (
-                          <button onClick={()=>setAbbina(t)}
-                            style={{padding:'2px 8px',borderRadius:6,border:'1px solid var(--border)',
-                              background:'var(--surface2)',color:'var(--text2)',cursor:'pointer',
-                              fontSize:11,fontFamily:'var(--font-sans)',fontWeight:600}}>
-                            🔗 Abbina
-                          </button>
-                        )}
-                        <SatiNoteCell txId={t.txId||i}/>
-                      </div>
-                    ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>}
+                  <td style={{padding:'9px 14px'}}>
+                    {t.cat1 && (
+                      <span style={{fontSize:11,padding:'3px 10px',borderRadius:10,fontWeight:600,
+                        background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
+                        {t.cat2 || t.cat1}
+                      </span>
+                    )}
                   </td>
-                  {/* Categoria (solo spese, spostata prima di Importo) */}
-                  <td style={{padding:'9px 14px',minWidth:180}}>
-                    {!isEntrata && t.cat1
-                      ? <span style={{fontSize:11,padding:'3px 10px',borderRadius:10,fontWeight:600,
-                          background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
-                          {t.cat2 || t.cat1}
+                  <td style={{padding:'9px 14px'}}>
+                    {status === 'matched' ? (
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
+                          background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
+                          ✅ compensata
                         </span>
-                      : <span style={{color:'var(--text3)',fontSize:11}}>—</span>}
+                        <button onClick={() => handleUnlink(t.txId)}
+                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>
+                      </div>
+                    ) : status === 'pending_approval' ? (
+                      <button onClick={() => setPendingModal(t.txId)}
+                        style={{fontSize:11,padding:'3px 9px',borderRadius:12,fontWeight:700,
+                          background:'#fef3c7',color:'#92400e',border:'1px solid #f59e0b',cursor:'pointer',
+                          fontFamily:'var(--font-sans)'}}>
+                        ⏳ da confermare
+                      </button>
+                    ) : (
+                      <button onClick={() => setAbbinaTx(t)}
+                        style={{fontSize:11,padding:'3px 10px',borderRadius:20,fontWeight:600,
+                          background:'transparent',color:'var(--text3)',border:'1px solid var(--border)',
+                          cursor:'pointer',fontFamily:'var(--font-sans)',transition:'all .1s'}}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor='#3b82f6'; e.currentTarget.style.color='#2563eb' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.color='var(--text3)' }}>
+                        🔗 Abbina
+                      </button>
+                    )}
                   </td>
-                  {/* Importo */}
-                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',
-                    fontSize:13,fontWeight:700,color:isEntrata?'var(--green)':'var(--red)'}}>
-                    {isEntrata
-                      ? `+€ ${fmtIT(t.amount,2)}`
-                      : `−€ ${fmtIT(Math.abs(t.amount),2)}`}
+                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--red)'}}>
+                    −€ {fmtIT(origAmt,2)}
+                  </td>
+                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
+                    color: compAmt < 0.01 ? 'var(--green)' : compAmt < origAmt ? 'var(--gold,#b8942a)' : 'var(--text2)'}}>
+                    {compAmt < 0.01 ? '€ 0,00 ✅' : `−€ ${fmtIT(compAmt,2)}`}
                   </td>
                 </tr>
               )
@@ -1675,11 +2048,36 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         </table>
       </div>
 
-      {abbina && (
-        <SatiCompensaModal
-          incomeEntry={abbina}
-          transactions={transactions}
-          onClose={()=>{ setAbbina(null); refreshLinks() }}
+      {/* Modals */}
+      {pendingModal && (() => {
+        const exp = speseDaComp.find(t => t.txId === pendingModal)
+        const m   = exp && satiMatches[exp.txId]
+        const inc = m?.pendingIncomeTxId ? satiIncome.find(t => t.txId === m.pendingIncomeTxId) : null
+        if (!exp || !inc) return null
+        return (
+          <SatiPendingModal
+            expense={exp} incomeEntry={inc}
+            onApprove={() => handleApprove(exp.txId)}
+            onReject={() => handleReject(exp.txId)}
+            onClose={() => setPendingModal(null)}
+          />
+        )
+      })()}
+
+      {abbinaTx && (
+        <SatiAbbinaTxModal
+          expense={abbinaTx}
+          availableIncome={availableIncome}
+          onLink={handleLink}
+          onClose={() => setAbbinaTx(null)}
+        />
+      )}
+
+      {showNonAbb && (
+        <SatiNonAbbinateOverlay
+          incomeEntries={satiIncome}
+          satiMatches={satiMatches}
+          onClose={() => setShowNonAbb(false)}
         />
       )}
     </div>
