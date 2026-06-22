@@ -152,12 +152,22 @@ function TxDetailModal({ tx, onClose, updateTransaction }) {
   )
 }
 
+// ── Dedup key helper ──────────────────────────────────────
+function dupKey(item) {
+  return `${item.date}|${String(item.merchant||'').toLowerCase().trim()}|${Math.round(Math.abs(item.amount||0) * 100)}`
+}
+function isAlreadyImported(item, existingImports) {
+  const k = dupKey(item)
+  return existingImports.some(e => dupKey(e) === k)
+}
+
 // ── Import Modal ──────────────────────────────────────────
-function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
+function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImports }) {
   const [files, setFiles]       = useState([])
   const [processing, setProc]   = useState(false)
   const [results, setResults]   = useState(null)
   const [selected, setSelected] = useState(new Set())
+  const [duplicates, setDuplicates] = useState(new Set())
 
   function handleFiles(newFiles) {
     setFiles(prev => [...prev, ...Array.from(newFiles)])
@@ -221,8 +231,22 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
         allResults = allResults.concat(parsed)
       }
 
+      // Detect duplicates: against existing imports + intra-batch
+      const dupSet = new Set()
+      const batchSeen = new Set()
+      allResults.forEach((r, i) => {
+        const k = dupKey(r)
+        if (isAlreadyImported(r, paypalImports) || batchSeen.has(k)) {
+          dupSet.add(i)
+        } else {
+          batchSeen.add(k)
+        }
+      })
+
       setResults(allResults)
-      setSelected(new Set(allResults.map((_,i) => i)))
+      setDuplicates(dupSet)
+      // Auto-select only non-duplicates
+      setSelected(new Set(allResults.map((_,i) => i).filter(i => !dupSet.has(i))))
     } catch(e) {
       alert('Errore analisi AI: ' + e.message)
     } finally {
@@ -231,7 +255,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
   }
 
   function toggleAll(v) {
-    if (v) setSelected(new Set(results.map((_,i) => i)))
+    if (v) setSelected(new Set(results.map((_,i) => i).filter(i => !duplicates.has(i))))
     else setSelected(new Set())
   }
 
@@ -306,7 +330,13 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
           <>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
               <div style={{ fontSize:13, fontWeight:600, color:'var(--text)' }}>
-                {results.length} transazioni trovate
+                {results.length} trovate
+                {duplicates.size > 0 && (
+                  <span style={{ marginLeft:8, fontSize:11, color:'#b45309', background:'#fef3c7',
+                    borderRadius:6, padding:'1px 7px', border:'1px solid #fcd34d' }}>
+                    {duplicates.size} già importate
+                  </span>
+                )}
               </div>
               <div style={{ display:'flex', gap:8 }}>
                 <button className="pp-btn-sm" onClick={() => toggleAll(true)}>Tutte</button>
@@ -324,26 +354,37 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey }) {
                 </tr>
               </thead>
               <tbody>
-                {results.map((r,i) => (
-                  <tr key={i} style={{ opacity: selected.has(i) ? 1 : .45 }}>
-                    <td className="pp-results-td">
-                      <input type="checkbox" checked={selected.has(i)} onChange={() => toggleItem(i)} />
-                    </td>
-                    <td className="pp-results-td">{r.merchant}</td>
-                    <td className="pp-results-td">{fmtDate(r.date)}</td>
-                    <td className="pp-results-td" style={{ color: r.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:600 }}>
-                      {r.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(r.amount), 2)}
-                    </td>
-                    <td className="pp-results-td">
-                      {r.cat1_suggestion && (
-                        <span className="pp-cat-cell">
-                          <CatDot cat1={r.cat1_suggestion} />
-                          {r.cat1_suggestion}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {results.map((r,i) => {
+                  const isDup = duplicates.has(i)
+                  return (
+                    <tr key={i} style={{ opacity: isDup ? .4 : (selected.has(i) ? 1 : .5) }}>
+                      <td className="pp-results-td">
+                        <input type="checkbox" checked={selected.has(i)} disabled={isDup}
+                          onChange={() => !isDup && toggleItem(i)} />
+                      </td>
+                      <td className="pp-results-td">
+                        {r.merchant}
+                        {isDup && (
+                          <span style={{ marginLeft:6, fontSize:10, color:'#b45309',
+                            background:'#fef3c7', borderRadius:4, padding:'1px 5px',
+                            border:'1px solid #fcd34d', verticalAlign:'middle' }}>🔁 già importata</span>
+                        )}
+                      </td>
+                      <td className="pp-results-td">{fmtDate(r.date)}</td>
+                      <td className="pp-results-td" style={{ color: r.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:600 }}>
+                        {r.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(r.amount), 2)}
+                      </td>
+                      <td className="pp-results-td">
+                        {r.cat1_suggestion && (
+                          <span className="pp-cat-cell">
+                            <CatDot cat1={r.cat1_suggestion} />
+                            {r.cat1_suggestion}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
             <button
@@ -553,7 +594,10 @@ export default function PaypalPage() {
   }, [sortedTxs, search])
 
   function handleImport(newItems) {
-    const withId = newItems.map(item => ({
+    // Safety dedup: never store an item already in paypalImports
+    const deduped = newItems.filter(item => !isAlreadyImported(item, paypalImports))
+    if (deduped.length === 0) return
+    const withId = deduped.map(item => ({
       id: `pp-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
       merchant: item.merchant,
       date: item.date,
@@ -774,6 +818,7 @@ export default function PaypalPage() {
           onImport={handleImport}
           transactions={transactions}
           apiKey={apiKey}
+          paypalImports={paypalImports}
         />
       )}
 
