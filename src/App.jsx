@@ -43,6 +43,7 @@ import EnergiePage          from './pages/EnergiePage'
 import AnalyticsPage        from './pages/AnalyticsPage'
 import RisparmioPage        from './pages/RisparmioPage'
 import CarteCreditoPage     from './pages/CarteCreditoPage'
+import UscitePage           from './pages/UscitePage'
 import OnboardingWizard     from './components/OnboardingWizard'
 
 import { requestNotificationPermission, scheduleScadenzeNotifications } from './services/notifications'
@@ -71,7 +72,8 @@ const NAV = [
   { id:'altro',           icon:'📦', label:'Altro',              group:null },
   { id:'shopping',        icon:'🛍', label:'Shopping',           group:'Other' },
   { id:'salute',          icon:'💊', label:'Salute e Cura',      group:null },
-  { id:'analytics',       icon:'🔬', label:'Analytics',           group:'Analytics' },
+  { id:'uscite',          icon:'📉', label:'Uscite',              group:'Analytics' },
+  { id:'analytics',       icon:'🔬', label:'Analytics',           group:null },
   { id:'calendario',      icon:'🗓', label:'Calendario',          group:null },
   { id:'forecast',        icon:'📊', label:'Forecast',           group:null },
   { id:'patrimonio',      icon:'💎', label:'Patrimonio',          group:'Finanza' },
@@ -119,6 +121,7 @@ const PAGE_MAP = {
   cecilia:           CeciliaPage,
   contanti:          ContantiPage,
   energie:           UtenzePage,
+  uscite:            UscitePage,
   analytics:         AnalyticsPage,
   risparmio:         RisparmioPage,
   carte:             CarteCreditoPage,
