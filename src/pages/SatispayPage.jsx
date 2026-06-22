@@ -1770,6 +1770,103 @@ function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
   )
 }
 
+// ── Tx Detail Modal (Spese da compensare) ────────────────
+function SatiTxDetailModal({ tx, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats        = useStore(s => s.customCats)
+  const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
+  const [cat1, setCat1]   = useState(tx.cat1 || '')
+  const [cat2, setCat2]   = useState(tx.cat2 || '')
+  const [saved, setSaved] = useState(false)
+
+  const cat2Options = cat1 && allCats[cat1]?.sub ? allCats[cat1].sub : []
+  const merchant    = tx.merchant || tx.descAI || tx.description?.slice(0,50) || '—'
+  const effDate     = tx._effDate || tx.date || ''
+  const amtStr      = `−€ ${fmtIT(Math.abs(tx.amount), 2)}`
+
+  function handleSave() {
+    updateTransaction(tx.txId, { cat1, cat2 })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1800)
+  }
+
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()}
+      style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.45)',
+        display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{background:'var(--surface)',borderRadius:16,padding:'28px 32px',
+        width:480,maxHeight:'88vh',overflowY:'auto',
+        boxShadow:'0 20px 60px rgba(0,0,0,.3)',position:'relative'}}>
+        <button onClick={onClose}
+          style={{position:'absolute',top:16,right:16,border:'none',background:'none',
+            cursor:'pointer',fontSize:18,color:'var(--text3)',lineHeight:1}}>✕</button>
+
+        <div style={{fontSize:17,fontWeight:700,color:'var(--text)',marginBottom:4,paddingRight:28}}>
+          {merchant}
+        </div>
+        <div style={{fontSize:22,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)',marginBottom:20}}>
+          {amtStr}
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
+          {[
+            ['Data', effDate ? effDate.slice(0,10).split('-').reverse().join('/') : '—'],
+            ['Conto', tx.account || '—'],
+            ['Categoria attuale', tx.cat1 ? `${tx.cat1}${tx.cat2 ? ' › '+tx.cat2 : ''}` : '—'],
+            ['Importo originale', `−€ ${fmtIT(Math.abs(tx.amount),2)}`],
+          ].map(([l,v]) => (
+            <div key={l}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
+                color:'var(--text3)',marginBottom:3}}>{l}</div>
+              <div style={{fontSize:13,color:'var(--text)',fontWeight:500}}>{v}</div>
+            </div>
+          ))}
+          <div style={{gridColumn:'1/-1'}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
+              color:'var(--text3)',marginBottom:3}}>Descrizione originale</div>
+            <div style={{fontSize:12,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || tx.descAI || '—'}</div>
+          </div>
+          {tx._compensatedAmt > 0 && (
+            <div style={{gridColumn:'1/-1',padding:'8px 12px',background:'rgba(200,160,0,.1)',
+              borderRadius:8,border:'1px solid var(--gold)'}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
+                color:'var(--gold)',marginBottom:3}}>Compensazione Satispay</div>
+              <div style={{fontSize:13,fontWeight:700,color:'var(--gold)'}}>
+                −€ {fmtIT(tx._compensatedAmt,2)} compensati
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>Modifica Categoria</div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+            <select value={cat1} onChange={e=>{setCat1(e.target.value);setCat2('')}}
+              style={{padding:'6px 10px',borderRadius:7,border:'1px solid var(--border)',
+                background:'var(--surface2)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',flex:1,minWidth:120}}>
+              <option value="">— L1 —</option>
+              {Object.keys(allCats).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={cat2} onChange={e=>setCat2(e.target.value)} disabled={!cat2Options.length}
+              style={{padding:'6px 10px',borderRadius:7,border:'1px solid var(--border)',
+                background:'var(--surface2)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',flex:1,minWidth:120}}>
+              <option value="">— L2 —</option>
+              {cat2Options.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button onClick={handleSave}
+              style={{padding:'6px 16px',borderRadius:7,border:'none',cursor:'pointer',
+                background: saved ? 'var(--green)' : 'var(--accent)',
+                color:'#fff',fontWeight:700,fontSize:12,fontFamily:'var(--font-sans)',
+                transition:'background .2s',whiteSpace:'nowrap'}}>
+              {saved ? '✓ Salvato' : 'Salva'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const appPrefs          = useStore(s => s.appPrefs)
@@ -1824,6 +1921,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   // ── State ────────────────────────────────────────────────
   const [pendingModal, setPendingModal] = useState(null)  // expense txId
   const [abbinaTx, setAbbinaTx]         = useState(null)  // expense tx
+  const [detailTx, setDetailTx]         = useState(null)  // detail popup tx
   const [showNonAbb, setShowNonAbb]     = useState(false)
   const [hideComm, setHideComm]         = useState(true)
   const [search, setSearch]             = useState('')
@@ -2158,7 +2256,8 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
               const catColor = CATS[t.cat1]?.color || 'var(--accent)'
 
               return (
-                <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',transition:'background .1s'}}
+                <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',transition:'background .1s',cursor:'pointer'}}
+                  onClick={() => setDetailTx(t)}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
@@ -2183,18 +2282,18 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
                         </span>
-                        <button onClick={() => handleUnlink(t.txId)}
+                        <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
                           style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>
                       </div>
                     ) : status === 'pending_approval' ? (
-                      <button onClick={() => setPendingModal(t.txId)}
+                      <button onClick={e => { e.stopPropagation(); setPendingModal(t.txId) }}
                         style={{fontSize:11,padding:'3px 9px',borderRadius:12,fontWeight:700,
                           background:'#fef3c7',color:'#92400e',border:'1px solid #f59e0b',cursor:'pointer',
                           fontFamily:'var(--font-sans)'}}>
                         ⏳ da confermare
                       </button>
                     ) : (
-                      <button onClick={() => setAbbinaTx(t)}
+                      <button onClick={e => { e.stopPropagation(); setAbbinaTx(t) }}
                         style={{fontSize:11,padding:'3px 10px',borderRadius:20,fontWeight:600,
                           background:'transparent',color:'var(--text3)',border:'1px solid var(--border)',
                           cursor:'pointer',fontFamily:'var(--font-sans)',transition:'all .1s'}}
@@ -2219,6 +2318,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
       </div>
 
       {/* Modals */}
+      {detailTx && <SatiTxDetailModal tx={detailTx} onClose={() => setDetailTx(null)}/>}
       {pendingModal && (() => {
         const exp = speseDaComp.find(t => t.txId === pendingModal)
         const m   = exp && satiMatches[exp.txId]
