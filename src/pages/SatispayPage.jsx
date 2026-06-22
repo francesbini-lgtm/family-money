@@ -3168,8 +3168,8 @@ function NonAbbinateModal({ onClose }) {
         const desc  = (t.description || '').toLowerCase()
         const merch = (t.merchant || '').toLowerCase()
         if (!desc.includes('satispay') && !merch.includes('satispay')) return false
-        // exclude "Altro > Satispay Varie"
-        if (t.cat1 === 'Altro' && t.cat2 === 'Satispay Varie') return false
+        // exclude "Altro > Satispay Varie" (case-insensitive)
+        if ((t.cat1||'').toLowerCase() === 'altro' && (t.cat2||'').toLowerCase() === 'satispay varie') return false
         // exclude already linked
         if (allLinked.has(t.txId)) return false
         return true
@@ -3375,6 +3375,11 @@ export default function SatispayPage() {
     return t.cat1 === 'Satispay' || desc.includes('SATISPAY') || merch.includes('SATISPAY')
   }
 
+  // Case-insensitive check for "Altro > Satispay Varie" category
+  const isAltroSatiVarie = (t) =>
+    (t.cat1||'').toLowerCase() === 'altro' &&
+    (t.cat2||'').toLowerCase() === 'satispay varie'
+
   const satiIncome = useMemo(() =>
     transactions.filter(t => !t.excluded && t.amount > 0 && isSati(t))
       .sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
@@ -3402,16 +3407,15 @@ export default function SatispayPage() {
     })
   })
   const accantonamentiNonAbbinati = satiUscite.filter(t => {
-    if (t.cat1 === 'Altro' && t.cat2 === 'Satispay Varie') return false
+    if (isAltroSatiVarie(t)) return false
     return !allLinkedToFund.has(t.txId)
   })
 
   const currentPot = (tab !== 'overview' && tab !== 'altrespese') ? satiPots.find(p=>p.id===tab) : null
 
-  // Altre Spese: only "Altro > Satispay Varie" expenses
+  // Altre Spese: only "Altro > Satispay Varie" expenses (case-insensitive)
   const altreSpeseTxs = useMemo(() =>
-    transactions.filter(t => !t.excluded && t.amount < 0
-      && t.cat1 === 'Altro' && t.cat2 === 'Satispay Varie')
+    transactions.filter(t => !t.excluded && t.amount < 0 && isAltroSatiVarie(t))
       .sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   , [transactions])
 
