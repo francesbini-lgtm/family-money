@@ -661,7 +661,7 @@ export default function ContantiPage() {
           <div className="card" style={{padding:0,overflow:'hidden',marginBottom:20}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr>
-                {['Data valuta','Data rettificata','Descrizione','Utente','Collegato a','Importo'].map(h=>(
+                {['Data valuta','Data rettificata','Carta','Utente','Collegato a','Importo'].map(h=>(
                   <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
                 ))}
               </tr></thead>
