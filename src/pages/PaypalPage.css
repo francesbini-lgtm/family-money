@@ -474,6 +474,31 @@
   background: var(--hover, rgba(59,130,246,.05));
 }
 
+/* ── Commissioni toggle ──────────────────────────────────── */
+.pp-comm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background .15s, color .15s, border-color .15s;
+  white-space: nowrap;
+}
+.pp-comm-toggle:hover { border-color: var(--text3); color: var(--text2); }
+.pp-comm-toggle.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+.pp-comm-toggle.active:hover { background: #fde68a; }
+
 /* ── Unmatched button (header) ───────────────────────────── */
 .pp-unmatched-btn {
   display: inline-flex;
@@ -590,6 +615,190 @@
 }
 .pp-modal-save.saved { background: #16a34a; }
 
+/* ── Pending approval button (header) ────────────────────── */
+.pp-pending-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid #f59e0b;
+  border-radius: 20px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background .15s;
+}
+.pp-pending-btn:hover { background: #fde68a; }
+
+/* ── Pending badge in table ──────────────────────────────── */
+.pp-badge-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 20px;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background .15s;
+  white-space: nowrap;
+}
+.pp-badge-pending:hover { background: #fde68a; }
+
+/* ── Abbina button in table ──────────────────────────────── */
+.pp-btn-abbina {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.pp-btn-abbina:hover { border-color: #3b82f6; color: #2563eb; }
+
+/* ── Pending approval modal ──────────────────────────────── */
+.pp-approval-modal {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 26px 28px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,.28);
+}
+.pp-approval-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+.pp-approval-side {
+  background: var(--surface2);
+  border-radius: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+}
+.pp-approval-side--import { border-color: #93c5fd; background: #eff6ff; }
+.pp-approval-side--tx     { border-color: #6ee7b7; background: #f0fdf4; }
+.pp-approval-side-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--text2);
+}
+.pp-approval-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(0,0,0,.05);
+  font-size: 13px;
+}
+.pp-approval-field:last-child { border-bottom: none; }
+.pp-approval-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.pp-approval-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.pp-btn-approve {
+  padding: 9px 20px;
+  background: #16a34a;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: opacity .15s;
+}
+.pp-btn-approve:disabled { opacity: .4; cursor: not-allowed; }
+.pp-btn-approve:not(:disabled):hover { opacity: .85; }
+.pp-btn-reject {
+  padding: 9px 18px;
+  background: transparent;
+  color: var(--text2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: border-color .15s, color .15s;
+}
+.pp-btn-reject:hover { border-color: var(--red, #d64e4e); color: var(--red, #d64e4e); }
+
+/* ── Abbina tx → import modal ────────────────────────────── */
+.pp-abbina-modal {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 24px 26px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,.28);
+}
+.pp-abbina-tx-header {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-top: 12px;
+}
+.pp-abbina-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+}
+.pp-abbina-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background .1s, border-color .1s;
+  font-size: 13px;
+}
+.pp-abbina-item:hover { background: var(--surface2); border-color: var(--border); }
+.pp-abbina-item.selected { background: #eff6ff; border-color: #3b82f6; }
+
 @media (max-width: 768px) {
   .pp-page { padding: 16px 14px 48px; }
   .pp-charts { flex-direction: column; }
@@ -597,4 +806,5 @@
   .pp-kpi { min-width: 140px; }
   .pp-search-input { width: 100%; }
   .pp-modal-grid { grid-template-columns: 1fr; }
+  .pp-approval-sides { grid-template-columns: 1fr; }
 }

@@ -4,8 +4,9 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
-import { CATS } from '../data/categories'
+import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText } from '../data/aiService'
+import { showToast } from '../services/notifications'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
@@ -36,18 +37,30 @@ function getLast6Months() {
 
 function autoMatch(imports, transactions) {
   return imports.map(imp => {
-    if (imp.status === 'matched') return imp
+    if (imp.status === 'matched' || imp.status === 'pending_approval') return imp
     const impDate = new Date(imp.date)
-    const match = transactions.find(t => {
-      if (!isPayPal(t)) return false
-      if (t._paypalOverride) return false
+    const amtCents = Math.round(Math.abs(imp.amount) * 100)
+
+    let bestMatch = null
+    let bestDiff = Infinity
+    for (const t of transactions) {
+      if (!isPayPal(t)) continue
+      if (t._paypalOverride) continue
+      if (Math.abs(Math.round(Math.abs(t.amount) * 100) - amtCents) >= 2) continue
       const diff = Math.abs(new Date(t._effDate || t.date) - impDate) / 86400000
-      const amtMatch = Math.abs(Math.abs(t.amount) - Math.abs(imp.amount)) < 0.02
-      return diff <= 3 && amtMatch
-    })
-    if (match) return { ...imp, status: 'matched', matchedTxId: match.txId }
+      if (diff < bestDiff) { bestDiff = diff; bestMatch = t }
+    }
+
+    if (!bestMatch) return imp
+    if (bestDiff <= 1) return { ...imp, status: 'matched', matchedTxId: bestMatch.txId }
+    if (bestDiff <= 6) return { ...imp, status: 'pending_approval', pendingTxId: bestMatch.txId }
     return imp
   })
+}
+
+function daysDiff(d1, d2) {
+  if (!d1 || !d2) return '?'
+  return Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
 }
 
 // ── Cat dot ───────────────────────────────────────────────
@@ -67,13 +80,14 @@ function KpiCard({ label, value, colorClass, onClick }) {
 }
 
 // ── Transaction detail modal ──────────────────────────────
-function TxDetailModal({ tx, onClose, updateTransaction }) {
+function TxDetailModal({ tx, onClose, updateTransaction, customCats }) {
   const [cat1, setCat1] = useState(tx.cat1 || '')
   const [cat2, setCat2] = useState(tx.cat2 || '')
   const [saved, setSaved]  = useState(false)
 
-  const cat1Options = Object.keys(CATS)
-  const cat2Options = cat1 && CATS[cat1]?.sub ? CATS[cat1].sub : []
+  const allCats = getMergedCats(customCats)
+  const cat1Options = Object.keys(allCats)
+  const cat2Options = cat1 && allCats[cat1]?.sub ? allCats[cat1].sub : []
 
   function handleSave() {
     updateTransaction(tx.txId, { cat1, cat2 })
@@ -146,6 +160,144 @@ function TxDetailModal({ tx, onClose, updateTransaction }) {
               {saved ? '✓ Salvato' : 'Salva'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Pending approval modal ────────────────────────────────
+function PendingApprovalModal({ imp, tx, onApprove, onReject, onClose }) {
+  const impMerchant = imp.merchant || '—'
+  const txMerchant  = tx ? (tx.merchant || tx.descAI || tx.description?.slice(0,40) || '—') : null
+  const diff        = tx ? daysDiff(imp.date, tx._effDate || tx.date) : '?'
+
+  return (
+    <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="pp-approval-modal">
+        <button className="pp-modal-close" onClick={onClose}>✕</button>
+        <div className="pp-modal-title">⏳ Abbinamento da approvare</div>
+        <div style={{ fontSize:12, color:'var(--text3)', marginBottom:16 }}>
+          Stesso importo, {diff} giorni di distanza. Conferma se è la stessa operazione.
+        </div>
+
+        <div className="pp-approval-sides">
+          <div className="pp-approval-side pp-approval-side--import">
+            <div className="pp-approval-side-title">📱 Da PayPal (importato)</div>
+            <div className="pp-approval-field"><span className="pp-approval-label">Merchant</span><span>{impMerchant}</span></div>
+            <div className="pp-approval-field"><span className="pp-approval-label">Data</span><span>{fmtDate(imp.date)}</span></div>
+            <div className="pp-approval-field">
+              <span className="pp-approval-label">Importo</span>
+              <span style={{ color: imp.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:700 }}>
+                {imp.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(imp.amount), 2)}
+              </span>
+            </div>
+            {imp.cat1_suggestion && (
+              <div className="pp-approval-field"><span className="pp-approval-label">Categoria</span><span>{imp.cat1_suggestion}</span></div>
+            )}
+          </div>
+
+          <div className="pp-approval-side pp-approval-side--tx">
+            <div className="pp-approval-side-title">🏦 Dal conto bancario</div>
+            {tx ? (
+              <>
+                <div className="pp-approval-field"><span className="pp-approval-label">Merchant</span><span>{txMerchant}</span></div>
+                <div className="pp-approval-field"><span className="pp-approval-label">Data</span><span>{fmtDate(tx._effDate || tx.date)}</span></div>
+                <div className="pp-approval-field">
+                  <span className="pp-approval-label">Importo</span>
+                  <span style={{ color: tx.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:700 }}>
+                    {tx.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(tx.amount), 2)}
+                  </span>
+                </div>
+                {tx.cat1 && (
+                  <div className="pp-approval-field"><span className="pp-approval-label">Categoria</span><span>{tx.cat1}{tx.cat2 ? ' › ' + tx.cat2 : ''}</span></div>
+                )}
+              </>
+            ) : (
+              <div style={{ color:'var(--text3)', fontSize:12, padding:'12px 0' }}>Transazione bancaria non trovata</div>
+            )}
+          </div>
+        </div>
+
+        <div className="pp-approval-actions">
+          <button className="pp-btn-approve" onClick={onApprove}>✅ Approva abbinamento</button>
+          <button className="pp-btn-reject" onClick={onReject}>❌ Rifiuta</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Abbina tx → import modal ──────────────────────────────
+function AbbinaTxModal({ tx, unmatchedImports, onLink, onClose }) {
+  const [chosen, setChosen] = useState('')
+  const txMerchant = tx.merchant || tx.descAI || tx.description?.slice(0,40) || '—'
+  const txDate = new Date(tx._effDate || tx.date)
+
+  const sorted = useMemo(() =>
+    [...unmatchedImports].sort((a,b) =>
+      Math.abs(new Date(a.date) - txDate) - Math.abs(new Date(b.date) - txDate)
+    ),
+    [unmatchedImports, tx]
+  )
+
+  return (
+    <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="pp-abbina-modal">
+        <button className="pp-modal-close" onClick={onClose}>✕</button>
+        <div className="pp-modal-title">🔗 Abbina transazione PayPal</div>
+
+        <div className="pp-abbina-tx-header">
+          <span style={{ fontWeight:700 }}>{txMerchant}</span>
+          <span style={{ marginLeft:10, fontSize:12, color:'var(--text3)' }}>
+            {fmtDate(tx._effDate || tx.date)} ·{' '}
+            <span style={{ color: tx.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:600 }}>
+              {tx.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(tx.amount), 2)}
+            </span>
+          </span>
+        </div>
+
+        <div style={{ fontSize:12, color:'var(--text3)', margin:'12px 0 8px' }}>
+          Seleziona l'operazione PayPal importata corrispondente:
+        </div>
+
+        {sorted.length === 0 ? (
+          <div style={{ padding:'24px', textAlign:'center', color:'var(--text3)', fontSize:13 }}>
+            Nessuna operazione PayPal non abbinata disponibile
+          </div>
+        ) : (
+          <div className="pp-abbina-list">
+            {sorted.map(imp => {
+              const diff = Math.round(Math.abs(new Date(imp.date) - txDate) / 86400000)
+              const amtMatch = Math.abs(Math.abs(imp.amount) - Math.abs(tx.amount)) < 0.02
+              return (
+                <div
+                  key={imp.id}
+                  className={`pp-abbina-item${chosen === imp.id ? ' selected' : ''}`}
+                  onClick={() => setChosen(imp.id)}
+                >
+                  <input type="radio" readOnly checked={chosen === imp.id} style={{ flexShrink:0 }} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:600, fontSize:13 }}>{imp.merchant}</div>
+                    <div style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>
+                      {fmtDate(imp.date)} · {diff === 0 ? 'stesso giorno' : `${diff}gg di distanza`}
+                      {amtMatch && <span style={{ marginLeft:6, color:'#16a34a', fontWeight:600 }}>✓ stesso importo</span>}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight:700, color: imp.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontSize:13, flexShrink:0 }}>
+                    {imp.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(imp.amount), 2)}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="pp-approval-actions">
+          <button className="pp-btn-approve" disabled={!chosen} onClick={() => onLink(tx.txId, chosen)}>
+            🔗 Abbina selezionato
+          </button>
+          <button className="pp-btn-reject" onClick={onClose}>Annulla</button>
         </div>
       </div>
     </div>
@@ -503,14 +655,18 @@ export default function PaypalPage() {
   const updateTransaction = useStore(s => s.updateTransaction)
   const appPrefs          = useStore(s => s.appPrefs)
   const setAppPref        = useStore(s => s.setAppPref)
+  const customCats        = useStore(s => s.customCats)
 
   // Read API key from settings (same key used for AI enrichment)
   const apiKey = appPrefs?.geminiKey || localStorage.getItem('fm-gemini-key') || ''
 
-  const [showModal, setShowModal]       = useState(false)
+  const [showModal, setShowModal]         = useState(false)
   const [showUnmatched, setShowUnmatched] = useState(false)
-  const [search, setSearch]             = useState('')
-  const [selectedTx, setSelectedTx]     = useState(null)
+  const [search, setSearch]               = useState('')
+  const [selectedTx, setSelectedTx]       = useState(null)
+  const [hideComm, setHideComm]           = useState(true)
+  const [pendingModal, setPendingModal]   = useState(null)  // import with pending_approval
+  const [abbinaTx, setAbbinaTx]           = useState(null)  // bank tx to link to an import
 
   const paypalImports = useMemo(
     () => appPrefs?.paypalImports || [],
@@ -534,9 +690,10 @@ export default function PaypalPage() {
 
   // KPIs
   const totalSpent   = useMemo(() => paypalExpenses.reduce((s,t) => s + Math.abs(t.amount), 0), [paypalExpenses])
-  const txCount      = paypalTxs.length
-  const unmatchedCnt = paypalImports.filter(i => i.status === 'unmatched').length
-  const monthlyAvg   = last6.length > 0 ? totalSpent / last6.length : 0
+  const txCount              = paypalTxs.length
+  const unmatchedCnt         = paypalImports.filter(i => i.status === 'unmatched').length
+  const pendingApprovalCount = paypalImports.filter(i => i.status === 'pending_approval').length
+  const monthlyAvg           = last6.length > 0 ? totalSpent / last6.length : 0
 
   // Pie data
   const pieData = useMemo(() => {
@@ -578,10 +735,14 @@ export default function PaypalPage() {
     [paypalTxs]
   )
 
+  const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
+
   const filteredTxs = useMemo(() => {
-    if (!search.trim()) return sortedTxs
+    let list = sortedTxs
+    if (hideComm) list = list.filter(t => !isComm(t))
+    if (!search.trim()) return list
     const q = search.toLowerCase()
-    return sortedTxs.filter(t => {
+    return list.filter(t => {
       const d = (t._effDate||t.date||'').replace(/-/g,'/')
       const m = (t.merchant||'').toLowerCase()
       const desc = (t.description||'').toLowerCase()
@@ -591,7 +752,7 @@ export default function PaypalPage() {
       const amt = String(Math.abs(t.amount))
       return m.includes(q) || desc.includes(q) || descAI.includes(q) || cat1.includes(q) || cat2.includes(q) || d.includes(q) || amt.includes(q)
     })
-  }, [sortedTxs, search])
+  }, [sortedTxs, search, hideComm])
 
   function handleImport(newItems) {
     // Safety dedup: never store an item already in paypalImports
@@ -613,6 +774,7 @@ export default function PaypalPage() {
 
     const afterMatch = autoMatch([...paypalImports, ...withId], transactions)
 
+    // Apply auto-matched imports
     afterMatch.forEach(imp => {
       if (imp.status === 'matched' && imp.matchedTxId) {
         const wasUnmatched = withId.find(w => w.id === imp.id)
@@ -629,6 +791,22 @@ export default function PaypalPage() {
         }
       }
     })
+
+    // Notify about new pending approvals
+    const newPending = afterMatch.filter(imp =>
+      imp.status === 'pending_approval' &&
+      withId.some(w => w.id === imp.id)
+    )
+    if (newPending.length > 0) {
+      showToast(`${newPending.length} abbinamento PayPal da approvare`, 'warning', 6000)
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('💙 PayPal — Abbinamenti da approvare', {
+          body: `${newPending.length} transazioni trovate con date simili, conferma l'abbinamento`,
+          icon: '/icon.svg',
+          tag: 'paypal-pending',
+        })
+      }
+    }
 
     setAppPref('paypalImports', afterMatch)
   }
@@ -650,6 +828,53 @@ export default function PaypalPage() {
     setAppPref('paypalImports', updated)
   }
 
+  function handleApprovePending(importId) {
+    const imp = paypalImports.find(i => i.id === importId)
+    if (!imp || !imp.pendingTxId) return
+    updateTransaction(imp.pendingTxId, {
+      merchant: imp.merchant,
+      descAI: imp.merchant,
+      cat1: imp.cat1_suggestion,
+      cat2: imp.cat2_suggestion,
+      _paypalOverride: true,
+      conf: 100,
+    })
+    const updated = paypalImports.map(i =>
+      i.id === importId ? { ...i, status: 'matched', matchedTxId: imp.pendingTxId, pendingTxId: null } : i
+    )
+    setAppPref('paypalImports', updated)
+    setPendingModal(null)
+    showToast('Abbinamento approvato', 'success')
+  }
+
+  function handleRejectPending(importId) {
+    const updated = paypalImports.map(i =>
+      i.id === importId ? { ...i, status: 'unmatched', pendingTxId: null } : i
+    )
+    setAppPref('paypalImports', updated)
+    setPendingModal(null)
+    showToast('Abbinamento rifiutato', 'info')
+  }
+
+  function handleLinkTxToImport(txId, importId) {
+    const imp = paypalImports.find(i => i.id === importId)
+    if (!imp) return
+    updateTransaction(txId, {
+      merchant: imp.merchant,
+      descAI: imp.merchant,
+      cat1: imp.cat1_suggestion,
+      cat2: imp.cat2_suggestion,
+      _paypalOverride: true,
+      conf: 100,
+    })
+    const updated = paypalImports.map(i =>
+      i.id === importId ? { ...i, status: 'matched', matchedTxId: txId, pendingTxId: null } : i
+    )
+    setAppPref('paypalImports', updated)
+    setAbbinaTx(null)
+    showToast('Transazione abbinata con successo', 'success')
+  }
+
   const unmatchedImports = paypalImports.filter(i => i.status === 'unmatched')
 
   return (
@@ -661,6 +886,14 @@ export default function PaypalPage() {
           <div className="pp-subtitle">Transazioni PayPal · ultimi 6 mesi</div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+          {pendingApprovalCount > 0 && (
+            <button className="pp-pending-btn" onClick={() => {
+              const first = paypalImports.find(i => i.status === 'pending_approval')
+              if (first) setPendingModal(first)
+            }}>
+              ⏳ Da approvare ({pendingApprovalCount})
+            </button>
+          )}
           {unmatchedCnt > 0 && (
             <button className="pp-unmatched-btn" onClick={() => setShowUnmatched(true)}>
               ⚠️ Non abbinate ({unmatchedCnt})
@@ -750,14 +983,23 @@ export default function PaypalPage() {
       {/* Main transactions table */}
       <div className="pp-table-card">
         <div className="pp-table-header">
-          <div className="pp-table-title">Transazioni PayPal ({filteredTxs.length}{search ? `/${paypalTxs.length}` : ''})</div>
-          <input
-            className="pp-search-input"
-            type="search"
-            placeholder="Cerca merchant, categoria, importo…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+          <div className="pp-table-title">Transazioni PayPal ({filteredTxs.length}{(search || hideComm) ? `/${paypalTxs.length}` : ''})</div>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <button
+              className={`pp-comm-toggle${hideComm ? ' active' : ''}`}
+              onClick={() => setHideComm(v => !v)}
+              title={hideComm ? 'Mostra commissioni' : 'Nascondi commissioni'}
+            >
+              🚫 Commissioni
+            </button>
+            <input
+              className="pp-search-input"
+              type="search"
+              placeholder="Cerca merchant, categoria, importo…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
         </div>
         {filteredTxs.length === 0 ? (
           <div style={{ padding:'32px', textAlign:'center', color:'var(--text3)', fontSize:13 }}>
@@ -776,36 +1018,52 @@ export default function PaypalPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredTxs.map(t => (
-                <tr
-                  key={t.txId}
-                  className="pp-tr pp-tr-clickable"
-                  onClick={() => setSelectedTx(t)}
-                >
-                  <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
-                  <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
-                  <td className="pp-td" style={{ fontWeight:600, color: t.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a' }}>
-                    {t.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(t.amount), 2)}
-                  </td>
-                  <td className="pp-td">
-                    {t.cat1 && (
-                      <span className="pp-cat-cell">
-                        <CatDot cat1={t.cat1} />
-                        {t.cat1}
-                      </span>
-                    )}
-                  </td>
-                  <td className="pp-td" style={{ color:'var(--text2)', fontSize:12 }}>
-                    {t.cat2 || '—'}
-                  </td>
-                  <td className="pp-td">
-                    {t._paypalOverride
-                      ? <span className="pp-badge-matched">✅ abbinata</span>
-                      : <span style={{ color:'var(--text3)' }}>—</span>
-                    }
-                  </td>
-                </tr>
-              ))}
+              {filteredTxs.map(t => {
+                const pendingImp = paypalImports.find(i => i.status === 'pending_approval' && i.pendingTxId === t.txId)
+                return (
+                  <tr
+                    key={t.txId}
+                    className="pp-tr pp-tr-clickable"
+                    onClick={() => setSelectedTx(t)}
+                  >
+                    <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
+                    <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
+                    <td className="pp-td" style={{ fontWeight:600, color: t.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a' }}>
+                      {t.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(t.amount), 2)}
+                    </td>
+                    <td className="pp-td">
+                      {t.cat1 && (
+                        <span className="pp-cat-cell">
+                          <CatDot cat1={t.cat1} />
+                          {t.cat1}
+                        </span>
+                      )}
+                    </td>
+                    <td className="pp-td" style={{ color:'var(--text2)', fontSize:12 }}>
+                      {t.cat2 || '—'}
+                    </td>
+                    <td className="pp-td">
+                      {t._paypalOverride ? (
+                        <span className="pp-badge-matched">✅ abbinata</span>
+                      ) : pendingImp ? (
+                        <button
+                          className="pp-badge-pending"
+                          onClick={e => { e.stopPropagation(); setPendingModal(pendingImp) }}
+                        >
+                          ⏳ da approvare
+                        </button>
+                      ) : (
+                        <button
+                          className="pp-btn-abbina"
+                          onClick={e => { e.stopPropagation(); setAbbinaTx(t) }}
+                        >
+                          🔗 Abbina
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -836,6 +1094,26 @@ export default function PaypalPage() {
           tx={selectedTx}
           onClose={() => setSelectedTx(null)}
           updateTransaction={updateTransaction}
+          customCats={customCats}
+        />
+      )}
+
+      {pendingModal && (
+        <PendingApprovalModal
+          imp={pendingModal}
+          tx={transactions.find(t => t.txId === pendingModal.pendingTxId) || null}
+          onApprove={() => handleApprovePending(pendingModal.id)}
+          onReject={() => handleRejectPending(pendingModal.id)}
+          onClose={() => setPendingModal(null)}
+        />
+      )}
+
+      {abbinaTx && (
+        <AbbinaTxModal
+          tx={abbinaTx}
+          unmatchedImports={paypalImports.filter(i => i.status === 'unmatched')}
+          onLink={handleLinkTxToImport}
+          onClose={() => setAbbinaTx(null)}
         />
       )}
     </div>
