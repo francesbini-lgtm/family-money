@@ -1764,8 +1764,9 @@ function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
 
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, pot }) {
-  const appPrefs  = useStore(s => s.appPrefs)
-  const setAppPref = useStore(s => s.setAppPref)
+  const appPrefs          = useStore(s => s.appPrefs)
+  const setAppPref        = useStore(s => s.setAppPref)
+  const updateTransaction = useStore(s => s.updateTransaction)
 
   // ── Regole configurate nel pot ──────────────────────────
   const satiCompCats = appPrefs?.satiCompCats?.[pot?.id]
@@ -1859,13 +1860,74 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const matchedIncomeIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
   const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
 
+  // ── Migration: rename + exclude all already-matched income txs ──
+  const migrationDoneRef = useRef(false)
+  useEffect(() => {
+    if (migrationDoneRef.current) return
+    migrationDoneRef.current = true
+    const matched = Object.entries(satiMatches).filter(([,m]) => m.status === 'matched' && m.incomeTxId)
+    matched.forEach(([expTxId, m]) => {
+      const inc = satiIncome.find(t => t.txId === m.incomeTxId)
+      if (inc && inc.descAI !== 'Accantonamento Satispay') {
+        updateTransaction(m.incomeTxId, { excluded: true, descAI: 'Accantonamento Satispay' })
+      } else if (inc && !inc.excluded) {
+        updateTransaction(m.incomeTxId, { excluded: true })
+      }
+      // Also set _compensatedAmt on expense tx if missing
+      const exp = speseDaComp.find(t => t.txId === expTxId)
+      if (exp && !exp._compensatedAmt && m.compensatedAmt > 0) {
+        const absExp = Math.abs(exp.amount)
+        if (m.compensatedAmt >= absExp) {
+          updateTransaction(expTxId, { excluded: true, _compensatedAmt: absExp, _compensatedBy: m.incomeTxId })
+        } else {
+          updateTransaction(expTxId, { _compensatedAmt: m.compensatedAmt, _compensatedBy: m.incomeTxId })
+        }
+      }
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Actions ──────────────────────────────────────────────
+  function applyMatch(expTxId, incTxId) {
+    const inc = satiIncome.find(t => t.txId === incTxId)
+    const exp = speseDaComp.find(t => t.txId === expTxId)
+    const compensatedAmt = inc?.amount || 0
+    // 1) Exclude the accredito + rename it
+    if (inc) {
+      updateTransaction(incTxId, { excluded: true, descAI: 'Accantonamento Satispay' })
+    }
+    // 2) Rectify the expense
+    if (exp) {
+      const absExp = Math.abs(exp.amount)
+      if (compensatedAmt >= absExp) {
+        // Fully covered → exclude the expense too
+        updateTransaction(expTxId, { excluded: true, _compensatedAmt: absExp, _compensatedBy: incTxId })
+      } else {
+        updateTransaction(expTxId, { _compensatedAmt: compensatedAmt, _compensatedBy: incTxId })
+      }
+      // Sanity check: if somehow net becomes positive, warn
+      const net = absExp - compensatedAmt
+      if (net < -0.01) {
+        showToast(`⚠️ Eccedenza: €${fmtIT(Math.abs(net),2)} in più rispetto alla spesa`, 'warning')
+      }
+    }
+  }
+
+  function removeMatch(expTxId, incTxId) {
+    // Restore income tx
+    if (incTxId) {
+      updateTransaction(incTxId, { excluded: false, descAI: 'Accredito Satispay' })
+    }
+    // Restore expense tx
+    updateTransaction(expTxId, { excluded: false, _compensatedAmt: undefined, _compensatedBy: undefined })
+  }
+
   function handleApprove(expTxId) {
     const m = satiMatches[expTxId]
     if (!m?.pendingIncomeTxId) return
     const inc = satiIncome.find(t => t.txId === m.pendingIncomeTxId)
     const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
     saveMatches(newMatches)
+    applyMatch(expTxId, m.pendingIncomeTxId)
     setPendingModal(null)
     showToast('Abbinamento approvato', 'success')
   }
@@ -1881,13 +1943,16 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     const inc = satiIncome.find(t => t.txId === incTxId)
     const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: incTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
     saveMatches(newMatches)
+    applyMatch(expTxId, incTxId)
     setAbbinaTx(null)
     showToast('Transazione abbinata con successo', 'success')
   }
 
   function handleUnlink(expTxId) {
+    const prevMatch = satiMatches[expTxId]
     const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
     saveMatches(newMatches)
+    removeMatch(expTxId, prevMatch?.incomeTxId || null)
   }
 
   function saveCatFilters(filters) {
