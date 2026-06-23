@@ -24,15 +24,12 @@ export function getMergedCats(customCats = {}) {
       // Entirely new category
       merged[name] = { color: data.color || '#888', sub: data.sub || [] }
     } else {
-      // Existing base category — always keep base subs + append any custom-only extras
-      const baseSubs = merged[name].sub || []
-      const customSubs = data.sub || []
-      // Union: base subs first, then any custom subs not already in base
-      const extra = customSubs.filter(s => !baseSubs.includes(s))
+      // Existing base category — if customCats has a sub array, use it directly
+      // (this preserves both additions AND deletions of base subs)
       merged[name] = {
         ...merged[name],
         color: data.color || merged[name].color,
-        sub:   extra.length ? [...baseSubs, ...extra] : baseSubs,
+        sub: Array.isArray(data.sub) ? data.sub : merged[name].sub,
       }
     }
   })

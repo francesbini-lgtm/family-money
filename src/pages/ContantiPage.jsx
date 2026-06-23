@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { getYM, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
@@ -350,6 +350,8 @@ function LinkBadge({ tx, onOpen }) {
 
 // ── Category picker with L1/L2 + quick picks ─────────────
 function CatPicker({ cat1, cat2, onChange, quickPicks }) {
+  const customCats = useStore(s => s.customCats)
+  const _ccats = getMergedCats(customCats)
   const [open, setOpen] = useState(false)
   const [selL1, setSelL1] = useState(cat1 || CAT_NAMES.filter(c=>c!=='Entrate')[0])
   const color = CATS[cat1]?.color || '#888'
@@ -441,7 +443,7 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
             }}>
               — nessuna —
             </button>
-            {(CATS[selL1]?.sub||[]).map(sub=>(
+            {(_ccats[selL1]?.sub||[]).map(sub=>(
               <button key={sub} onClick={()=>select(selL1,sub)} style={{
                 display:'block',width:'100%',padding:'8px 10px',
                 border:'none',borderRadius:'var(--radius-sm)',

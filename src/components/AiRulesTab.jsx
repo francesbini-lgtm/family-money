@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CAT_NAMES, CATS } from '../data/categories'
+import { CAT_NAMES, CATS, getMergedCats } from '../data/categories'
 import { useStore } from '../store/useStore'
 
 // ── Bulk re-apply button ──────────────────────────────────────
@@ -354,7 +354,8 @@ function ConditionsEditor({ conds, onChange }) {
 
 // ── Category + descAI editor row ──────────────────────────────
 function CatDescEditor({ cat1, cat2, descAI, onChangeCat1, onChangeCat2, onChangeDescAI }) {
-  const subCats = CATS[cat1]?.sub || []
+  const customCats = useStore(s => s.customCats)
+  const subCats = getMergedCats(customCats)[cat1]?.sub || []
   return (
     <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
       <span style={{fontSize:12,color:'var(--text3)',flexShrink:0}}>→ Categoria:</span>

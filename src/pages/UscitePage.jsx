@@ -5,7 +5,7 @@ import {
   ResponsiveContainer, LabelList,
   PieChart, Pie, Cell
 } from 'recharts'
-import { CATS } from '../data/categories'
+import { CATS, getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
 import './UscitePage.css'
 
@@ -64,6 +64,7 @@ function CustomTooltip({ active, payload, label }) {
 // ── Transaction Detail Modal ──────────────────────────────────────────────────
 function TxDetailModal({ tx, onClose }) {
   const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats = useStore(s => s.customCats)
   const [editCat1, setEditCat1] = useState(tx.cat1 || '')
   const [editCat2, setEditCat2] = useState(tx.cat2 || '')
   const [saved, setSaved] = useState(false)
@@ -71,7 +72,8 @@ function TxDetailModal({ tx, onClose }) {
   function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
   const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
   function toggleNonRecurring() { const n=!nonRecurring; setNonRecurring(n); updateTransaction(tx.txId,{_nonRecurring:n}) }
-  const cat1Subs = CATS[editCat1]?.sub || []
+  const _allCats = getMergedCats(customCats)
+  const cat1Subs = _allCats[editCat1]?.sub || []
 
   function fmtDateFull(d) {
     const m = (d||'').match(/(\d{4})-(\d{2})-(\d{2})/)

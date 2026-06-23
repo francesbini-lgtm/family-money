@@ -5,7 +5,7 @@ import { TrendingUp, TrendingDown, PiggyBank, Percent, ArrowUpRight, ArrowDownRi
 import './DashboardPage.css'
 import { fmtIT } from '../utils/format'
 import { useMemo, useState } from 'react'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar,
@@ -140,6 +140,7 @@ function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent, name })
 // ── Transaction Modal ────────────────────────────────────
 function TxModal({ tx, onClose }) {
   const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats = useStore(s => s.customCats)
   const [editCat1, setEditCat1] = useState(tx?.cat1 || '')
   const [editCat2, setEditCat2] = useState(tx?.cat2 || '')
   const [saved, setSaved] = useState(false)
@@ -148,6 +149,7 @@ function TxModal({ tx, onClose }) {
 
   if (!tx) return null
 
+  const _allCats = getMergedCats(customCats)
   const effDate = tx._effDate || tx.date || ''
   const fmtDate = (d) => {
     if (!d) return '—'
@@ -155,7 +157,7 @@ function TxModal({ tx, onClose }) {
     return parts.length===3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d
   }
 
-  const cat1Subs = CATS[editCat1]?.sub || []
+  const cat1Subs = _allCats[editCat1]?.sub || []
 
   const handleSave = () => {
     updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
@@ -243,7 +245,7 @@ function TxModal({ tx, onClose }) {
                 background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
               }}>
                 <option value="">— Nessuna —</option>
-                {CAT_NAMES.filter(n=>n!=='Non Categorizzato').map(n=>(
+                {Object.keys(_allCats).filter(n=>n!=='Non Categorizzato').map(n=>(
                   <option key={n} value={n}>{n}</option>
                 ))}
               </select>
