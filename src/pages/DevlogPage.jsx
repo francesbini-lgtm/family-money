@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 // ── Hardcoded git log (updated with each push) ────────────
 const DEVLOG = [
+  { date:'2026-06-23', desc:'Satispay: tab Cecilia — flag "Fondo risparmio (no compensazione)" nel form pot; se attivo, nasconde SatiIncomeSection e SatiUsciteSection e mostra FundProjectionKPIs con proiezione saldo tra 1, 2, 5, 10, 15 anni (media versamenti ultimi 6 mesi)' },
   { date:'2026-06-23', desc:'Forecast: fix spese mensili — _satiLinked sostituiti con splits (stesso comportamento di Uscite e Dashboard); expTotal/expList aggiunti come helpers' },
   { date:'2026-06-23', desc:'Uscite: Media/mese → totale periodo ÷ 12 (era ÷ mesi attivi); asterisco con nota sotto tabella' },
   { date:'2026-06-23', desc:'Uscite: fix discrepanza cella/dettaglio — splits virtuali fondo Satispay ora incluse nei txs del pannello dettaglio (mostrate in corsivo come "⚙ Fondo: …", non cliccabili)' },

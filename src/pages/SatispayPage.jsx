@@ -331,13 +331,14 @@ function PotFormModal({ pot, onClose }) {
     name:    pot?.name    || '',
     icon:    pot?.icon    || '💰',
     startYM: pot?.startYM || nowYM(),
+    noCompensazione: pot?.noCompensazione || false,
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   function save() {
     if (!form.name) return
     if (pot) {
-      updateSatiPot(pot.id, { name: form.name, icon: form.icon, startYM: form.startYM })
+      updateSatiPot(pot.id, { name: form.name, icon: form.icon, startYM: form.startYM, noCompensazione: form.noCompensazione })
     } else {
       addSatiPot({
         ...form,
@@ -377,6 +378,15 @@ function PotFormModal({ pot, onClose }) {
           <input type="month" value={form.startYM} onChange={e=>set('startYM',e.target.value)}
             style={{width:'100%',padding:'8px 10px',borderRadius:8,border:'1px solid var(--border)',
               background:'var(--bg)',color:'var(--text)',fontSize:14,fontFamily:'var(--font-sans)'}}/>
+        </div>
+        <div style={{marginBottom:20,display:'flex',alignItems:'center',gap:10,padding:'10px 12px',
+          background:'var(--surface2)',borderRadius:8,cursor:'pointer'}}
+          onClick={()=>set('noCompensazione',!form.noCompensazione)}>
+          <input type="checkbox" checked={form.noCompensazione} readOnly style={{cursor:'pointer'}}/>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--text1)'}}>Fondo risparmio (no compensazione)</div>
+            <div style={{fontSize:11,color:'var(--text3)'}}>Nasconde le sezioni "Spese da compensare" e "Uscite Satispay"</div>
+          </div>
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
           <button className="btn btn-ghost" onClick={onClose}>Annulla</button>
@@ -810,6 +820,75 @@ function findExactSubset(txs, target) {
     if (Math.abs(sum - target) < 0.01) return ids
   }
   return null
+}
+
+// ── Fund projection KPIs (shown when noCompensazione is true) ─────────────
+function FundProjectionKPIs({ pot }) {
+  const now = nowYM()
+  const voci = (pot.voci || []).map(migrateVoce)
+  const allYMs = monthsRange(pot.startYM || nowYM())
+
+  // Saldo accumulato ad oggi
+  const totalAcc = allYMs.filter(m => m <= now).reduce((s, ym) => {
+    const cells = pot.data?.[ym]?.cells || {}
+    return s + voci.reduce((vs, v) => vs + (parseFloat(cells[v.id]) || 0), 0)
+  }, 0)
+
+  // Media mensile ultimi 6 mesi (mesi con dati > 0)
+  const last6YMs = Array.from({length: 6}, (_, i) => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - (i + 1))
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+  }).filter(ym => ym >= (pot.startYM || nowYM()))
+
+  const monthlyAmounts = last6YMs.map(ym => {
+    const cells = pot.data?.[ym]?.cells || {}
+    return voci.reduce((s, v) => s + (parseFloat(cells[v.id]) || 0), 0)
+  }).filter(v => v > 0)
+
+  const monthlyAvg = monthlyAmounts.length > 0
+    ? monthlyAmounts.reduce((s, v) => s + v, 0) / monthlyAmounts.length
+    : 0
+
+  const horizons = [1, 2, 5, 10, 15]
+
+  return (
+    <div style={{background:'#fff',border:'1px solid var(--border)',borderRadius:14,padding:'20px 20px 16px',marginTop:16}}>
+      <div style={{fontSize:14,fontWeight:700,color:'var(--text1)',marginBottom:4}}>📈 Proiezione crescita fondo</div>
+      <div style={{fontSize:12,color:'var(--text3)',marginBottom:18}}>
+        Saldo attuale: <strong>€ {fmtIT(Math.round(totalAcc))}</strong>
+        {monthlyAvg > 0 && <> · Versamento medio: <strong>€ {fmtIT(Math.round(monthlyAvg))}/mese</strong></>}
+      </div>
+      <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+        {horizons.map(years => {
+          const projected = Math.round(totalAcc + monthlyAvg * 12 * years)
+          const gain = Math.round(monthlyAvg * 12 * years)
+          return (
+            <div key={years} style={{flex:'1 1 100px',minWidth:100,padding:'14px 16px',
+              background:'var(--surface2,#f7f4f0)',border:'1px solid var(--border)',borderRadius:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',
+                letterSpacing:'.07em',marginBottom:6}}>
+                Tra {years === 1 ? '1 anno' : `${years} anni`}
+              </div>
+              <div style={{fontSize:20,fontWeight:800,color:'var(--text1)',fontVariantNumeric:'tabular-nums'}}>
+                € {fmtIT(projected)}
+              </div>
+              {gain > 0 && (
+                <div style={{fontSize:11,color:'var(--green)',marginTop:3}}>
+                  +€ {fmtIT(gain)} versati
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {monthlyAvg === 0 && (
+        <div style={{fontSize:12,color:'var(--text3)',marginTop:8}}>
+          Nessun versamento registrato negli ultimi 6 mesi — inserisci dati nella tabella sopra per vedere la proiezione.
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Fund card ─────────────────────────────────────────────
@@ -3738,8 +3817,13 @@ export default function SatispayPage() {
       {currentPot && (
         <>
           <FundCard pot={currentPot} allPots={satiPots}/>
-          <SatiIncomeSection satiIncome={satiIncome} transactions={transactions} pot={currentPot}/>
-          <SatiUsciteSection satiUscite={satiUscite} satiPots={satiPots}/>
+          {currentPot.noCompensazione
+            ? <FundProjectionKPIs pot={currentPot}/>
+            : <>
+                <SatiIncomeSection satiIncome={satiIncome} transactions={transactions} pot={currentPot}/>
+                <SatiUsciteSection satiUscite={satiUscite} satiPots={satiPots}/>
+              </>
+          }
         </>
       )}
 
