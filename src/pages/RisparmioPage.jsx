@@ -10,6 +10,20 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from 'recharts'
 
+function expTotal(transactions, ym) {
+  let total = 0
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0) return
+    if (!(t._effDate || t.date || '').startsWith(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
+    } else {
+      total += Math.abs(t.amount)
+    }
+  })
+  return total
+}
+
 // ── helpers ───────────────────────────────────────────────
 function ymOf(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
@@ -290,7 +304,7 @@ export default function RisparmioPage() {
 
   // Month income/expense helpers on activeTxs
   function mInc(ym)  { return activeTxs.filter(t=>t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0) }
-  function mExp(ym)  { return Math.abs(activeTxs.filter(t=>t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)) }
+  function mExp(ym)  { return expTotal(activeTxs, ym) }
   function mSav(ym)  { return mInc(ym) - mExp(ym) }
   function mRate(ym) { const i=mInc(ym); return i>0 ? Math.round(mSav(ym)/i*100) : null }
 
@@ -324,8 +338,8 @@ export default function RisparmioPage() {
     for (let m = 0; m < 12; m++) {
       const ym = `${y}-${String(m+1).padStart(2,'0')}`
       if (ym >= thisYM) break
-      totalInc += activeTxs.filter(t => t.amount > 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      totalExp += Math.abs(activeTxs.filter(t => t.amount < 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      totalInc += mInc(ym)
+      totalExp += mExp(ym)
     }
     // return total savings for the year (only if we have some data)
     return totalInc > 0 || totalExp > 0 ? Math.round(totalInc - totalExp) : null

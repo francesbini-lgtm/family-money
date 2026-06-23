@@ -2047,6 +2047,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const [detailTx, setDetailTx]         = useState(null)  // detail popup tx
   const [showNonAbb, setShowNonAbb]     = useState(false)
   const [hideComm, setHideComm]         = useState(true)
+  const [hideCompensate, setHideCompensate] = useState(false)
   const [search, setSearch]             = useState('')
   const [showCatConfig, setShowCatConfig] = useState(false)
   const [catDraftL1, setCatDraftL1]     = useState('')
@@ -2061,6 +2062,10 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const filteredRows = useMemo(() => {
     let list = speseDaComp
     if (hideComm) list = list.filter(t => !isComm(t))
+    if (hideCompensate) list = list.filter(t => {
+      const residual = Math.abs(t.amount) - (t._compensatedAmt || 0)
+      return !(t._compensatedAmt > 0 || t._compensatedBy || residual === 0)
+    })
     if (!search.trim()) return list
     const q = search.toLowerCase()
     return list.filter(t =>
@@ -2070,7 +2075,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
       (t.cat2||'').toLowerCase().includes(q) ||
       String(Math.abs(t.amount)).includes(q)
     )
-  }, [speseDaComp, hideComm, search])
+  }, [speseDaComp, hideComm, hideCompensate, search])
 
   // ── KPIs ─────────────────────────────────────────────────
   const totSpese      = speseDaComp.reduce((s,t) => s + Math.abs(t.amount), 0)
@@ -2350,11 +2355,11 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
       </div>
 
 
-      {/* ── Istogramma spese non compensate ultimi 12 mesi ── */}
+      {/* ── Istogramma spese non compensate ultimi 24 mesi ── */}
       {(() => {
         const now = new Date()
-        const bar12 = Array.from({length:12}, (_,i) => {
-          const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1)
+        const bar24 = Array.from({length:24}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - 23 + i, 1)
           const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
           const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
           // sum expenses in this month that are NOT compensated (or only partially)
@@ -2370,7 +2375,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
           return { label, total: Math.round(total * 100) / 100 }
         })
 
-        if (bar12.every(b => b.total === 0)) return null
+        if (bar24.every(b => b.total === 0)) return null
 
         return (
           <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
@@ -2378,7 +2383,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
               📊 Spese non compensate per mese
             </div>
             <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={bar12} margin={{top:8,right:8,bottom:0,left:0}} barSize={28} barCategoryGap="30%">
+              <BarChart data={bar24} margin={{top:8,right:8,bottom:0,left:0}} barSize={28} barCategoryGap="30%">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
@@ -2407,6 +2412,17 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                 color:hideComm?'#92400e':'var(--text3)',fontSize:11,fontWeight:600,
                 cursor:'pointer',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
               🚫 Commissioni
+            </button>
+            <button
+              onClick={() => setHideCompensate(v => !v)}
+              style={{
+                padding:'4px 10px', borderRadius:20, fontSize:12, cursor:'pointer',
+                border: hideCompensate ? 'none' : '1px solid var(--border)',
+                background: hideCompensate ? 'var(--green)' : 'var(--surface2)',
+                color: hideCompensate ? '#fff' : 'var(--text2)',
+                fontWeight: hideCompensate ? 700 : 400,
+              }}>
+              Compensate
             </button>
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Cerca..."
