@@ -599,6 +599,9 @@ function KPICard({ icon, label, value, sub, color, delta, deltaLabel }) {
           ) : (
             <span style={{ color: 'var(--text3)' }}>{sub}</span>
           )}
+          {sub && delta !== null && delta !== undefined && (
+            <span style={{ color: 'var(--text3)', fontSize: 11, display: 'block', marginTop: 2 }}>{sub}</span>
+          )}
         </div>
       </div>
     </div>
@@ -616,10 +619,14 @@ function AIInsights({ transactions, catList, monthly }) {
 
   const thisTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM))
   const prevTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM))
-  const thisInc  = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const thisExp  = expTotal(transactions, thisYM)
-  const prevInc  = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const prevExp  = expTotal(transactions, prevYM)
+  const thisInc      = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const thisSalaryInc= thisTxs.filter(t=>t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')).reduce((s,t)=>s+t.amount,0)
+  const thisOtherInc = Math.round(thisInc - thisSalaryInc)
+  const thisExp      = expTotal(transactions, thisYM)
+  const prevInc      = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const prevSalaryInc= prevTxs.filter(t=>t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')).reduce((s,t)=>s+t.amount,0)
+  const prevOtherInc = Math.round(prevInc - prevSalaryInc)
+  const prevExp      = expTotal(transactions, prevYM)
   const thisSav  = thisInc - thisExp
   const prevSav  = prevInc - prevExp
   const thisSavRate = thisInc > 0 ? Math.round(thisSav/thisInc*100) : null
@@ -924,7 +931,8 @@ export default function DashboardPage() {
                 📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE
               </div>
               <div className="kpi-grid">
-                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(thisIncome)} color="var(--green)" delta={deltaIncome}/>
+                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(thisIncome)} color="var(--green)" delta={deltaIncome}
+                  sub={thisOtherInc > 0 ? `di cui € ${fmtIT(thisOtherInc)} altre entrate` : undefined}/>
                 <KPICard icon={<TrendingDown size={18}/>} label="Uscite" value={fmt(thisExpense)} color="var(--red)" delta={deltaExpense} deltaLabel="vs mese scorso"/>
                 <KPICard icon={<PiggyBank size={18}/>} label="Risparmio"
                   value={(cashflow>=0?'+':'')+fmt(cashflow)}
@@ -943,7 +951,8 @@ export default function DashboardPage() {
                 📅 {prevName.toUpperCase()} — MESE CHIUSO
               </div>
               <div className="kpi-grid">
-                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(prevInc)} color="var(--green)"/>
+                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(prevInc)} color="var(--green)"
+                  sub={prevOtherInc > 0 ? `di cui € ${fmtIT(prevOtherInc)} altre entrate` : undefined}/>
                 <KPICard icon={<TrendingDown size={18}/>} label="Uscite" value={fmt(prevExp)} color="var(--red)"/>
                 <KPICard icon={<PiggyBank size={18}/>} label="Risparmio"
                   value={(prevSav>=0?'+':'')+fmt(prevSav)}
