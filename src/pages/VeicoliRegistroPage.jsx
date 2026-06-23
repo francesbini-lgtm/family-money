@@ -4,7 +4,7 @@ import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { uploadExpenseFiles, deleteExpenseFile } from '../services/storage'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend,
+  Tooltip, ResponsiveContainer, Legend, LabelList,
   LineChart, Line, PieChart, Pie, Cell, Area, AreaChart
 } from 'recharts'
 import { Plus, Trash2, Link } from 'lucide-react'
@@ -130,8 +130,8 @@ function getLast6Months() {
 }
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
 const fmtDate = d => {
-  const m = (d||'').match(/\d{4}-(\d{2})-(\d{2})/)
-  return m ? `${parseInt(m[2])} ${MONTHS_IT[parseInt(m[1])-1]}` : d||'—'
+  const m = (d||'').match(/(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${parseInt(m[3])} ${MONTHS_IT[parseInt(m[2])-1]} ${m[1]}` : d||'—'
 }
 
 // ── Add/Edit Vehicle Modal ────────────────────────────────
@@ -513,7 +513,7 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
 }
 
 // ── Vehicle Compact Card ──────────────────────────────────
-function VehicleChip({ vehicle, onEdit, onDelete }) {
+function VehicleChip({ vehicle, onEdit, onDelete, spending12m = 0 }) {
   const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
     .filter(([k]) => vehicle[k])
     .map(([k,icon]) => {
@@ -558,6 +558,12 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
                 {s.icon} {s.key.slice(0,4)}: {s.date?.slice(5).replace('-','/')} {s.label}
               </span>
             ))}
+          </div>
+        )}
+        {spending12m > 0 && (
+          <div style={{marginTop:8,paddingTop:6,borderTop:'1px solid var(--border)',fontSize:11,color:'var(--text3)'}}>
+            <span style={{fontWeight:700,color:'var(--text)',fontFamily:'var(--font-mono)'}}>€ {fmtIT(Math.round(spending12m),0)}</span>
+            {' '}ultimi 12 mesi
           </div>
         )}
       </div>
@@ -627,7 +633,7 @@ function VehicleCharts({ vehicles, allRows = [] }) {
       {/* 1 — Andamento Carburante */}
       <ChartCard title="⛽ Andamento Spesa Carburante">
         <ResponsiveContainer width="100%" height={190}>
-          <BarChart data={fuelData} margin={{top:4,right:4,bottom:0,left:0}}>
+          <BarChart data={fuelData} margin={{top:20,right:4,bottom:0,left:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
             <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
             <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={44} tickFormatter={v=>`€${v}`}/>
@@ -637,6 +643,9 @@ function VehicleCharts({ vehicles, allRows = [] }) {
               {fuelData.map((d,i)=>(
                 <Cell key={i} fill={d.Carburante > fuelAvg ? '#c8622a' : '#e8a888'}/>
               ))}
+              <LabelList dataKey="Carburante" position="top"
+                formatter={v=>v>0?`€${fmtIT(Math.round(v),0)}`:''}
+                style={{fontSize:9,fill:'var(--text2)',fontFamily:'var(--font-mono)'}}/>
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -1411,6 +1420,20 @@ export default function VeicoliRegistroPage() {
     return [...manualRows, ...autoRows]
   }, [vehExpenses, transactions, vehCatFiltersPage, vehTxVehiclesPage])
 
+  // Per-vehicle spending last 12 months
+  const vehSpending12m = useMemo(() => {
+    const now = new Date()
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-01`
+    const result = {}
+    mergedVehRows.forEach(r => {
+      if ((r.date || '') >= cutoffStr && r.vehicleId) {
+        result[r.vehicleId] = (result[r.vehicleId] || 0) + r.amount
+      }
+    })
+    return result
+  }, [mergedVehRows])
+
   function openAddExpense(vehicleId = '') {
     setPreVehId(vehicleId)
     setShowAddExp(true)
@@ -1444,13 +1467,11 @@ export default function VeicoliRegistroPage() {
         </div>
       </div>
 
-      {/* KPIs */}
-      {mergedVehRows.length > 0 && <KPIStrip vehicles={vehicles} allExpenses={vehExpenses}/>}
-
       {/* Vehicle chips */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:24}}>
         {vehicles.map(v=>(
           <VehicleChip key={v.id} vehicle={v}
+            spending12m={vehSpending12m[v.id] || 0}
             onEdit={()=>setEditVeh(v)}
             onDelete={deleteVehicle}
           />
