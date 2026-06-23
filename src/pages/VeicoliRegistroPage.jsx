@@ -10,7 +10,7 @@ import {
 import { Plus, Trash2, Link } from 'lucide-react'
 import './VeicoliRegistroPage.css'
 import { fmtIT } from '../utils/format'
-import { CATS } from '../data/categories'
+import { CATS, getMergedCats } from '../data/categories'
 
 const VEH_ICONS = ['🚗','🚙','🚕','🏎','🚐','🛻','🏍','🚤','⛵','🚁','🛵','🚌',
   'svg:motocross','svg:motoscafo','svg:bmw1','svg:jeep']
@@ -756,6 +756,7 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
   const [reconExp,  setReconExp]  = useState(null)
   const [attExp,    setAttExp]    = useState(null)
   const [editExp,   setEditExp]   = useState(null)
+  const [detailTx,  setDetailTx]  = useState(null)
 
   const vehMap = Object.fromEntries(vehicles.map(v => [v.id, v]))
 
@@ -956,8 +957,19 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                   const veh = vehMap[r.vehicleId]
                   const catColor = CAT_COLORS[r.cat] || '#888'
 
+                  // For auto rows, find the transaction to open detail modal
+                  const handleRowClick = () => {
+                    if (r._type === 'auto' && r.txId) {
+                      const tx = transactions.find(t => t.txId === r.txId)
+                      if (tx) setDetailTx(tx)
+                    }
+                  }
+
                   return (
-                    <tr key={r._key} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <tr key={r._key} style={{ borderBottom: '1px solid var(--border)', cursor: r._type === 'auto' ? 'pointer' : 'default' }}
+                      onClick={handleRowClick}
+                      onMouseEnter={e => { if (r._type === 'auto') e.currentTarget.style.background = 'var(--surface2)' }}
+                      onMouseLeave={e => { if (r._type === 'auto') e.currentTarget.style.background = 'transparent' }}>
                       {/* Data */}
                       <td style={{ padding: '7px 12px', fontSize: 12, color: 'var(--text3)',
                         fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
@@ -984,6 +996,7 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                         {r._type === 'auto' ? (
                           <select value={r.vehicleId}
                             onChange={e => setTxVehicle(r.txId, e.target.value)}
+                            onClick={e => e.stopPropagation()}
                             style={{ padding: '3px 7px', border: '1px solid var(--border)', borderRadius: 6,
                               fontSize: 11, background: 'var(--surface2)', color: r.vehicleId ? 'var(--text)' : 'var(--text3)',
                               fontFamily: 'var(--font-sans)', cursor: 'pointer' }}>
@@ -1120,6 +1133,196 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
           onClose={() => setEditExp(null)}
         />
       )}
+
+      {detailTx && (
+        <TxDetailModal tx={detailTx} onClose={() => setDetailTx(null)}/>
+      )}
+    </div>
+  )
+}
+
+// ── Tx Detail Modal ───────────────────────────────────────
+function TxDetailModal({ tx, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats = useStore(s => s.customCats)
+  const [editCat1, setEditCat1] = useState(tx?.cat1 || '')
+  const [editCat2, setEditCat2] = useState(tx?.cat2 || '')
+  const [editDescAI, setEditDescAI] = useState(tx?.descAI || '')
+  const [saved, setSaved] = useState(false)
+  const [toReview, setToReview] = useState(tx?._toReview || false)
+  const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
+
+  if (!tx) return null
+
+  const _allCats = getMergedCats(customCats)
+  const effDate = tx._effDate || tx.date || ''
+  const fmtDateTx = (d) => {
+    if (!d) return '—'
+    const parts = (d||'').slice(0,10).split('-')
+    return parts.length===3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d
+  }
+
+  const cat1Subs = _allCats[editCat1]?.sub || []
+
+  function toggleReview() {
+    const n = !toReview
+    setToReview(n)
+    updateTransaction(tx.txId, { _toReview: n })
+  }
+
+  function toggleNonRecurring() {
+    const n = !nonRecurring
+    setNonRecurring(n)
+    updateTransaction(tx.txId, { _nonRecurring: n })
+  }
+
+  const handleSave = () => {
+    updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
+    setSaved(true)
+    setTimeout(onClose, 1000)
+  }
+
+  return (
+    <div style={{
+      position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:9999,
+      display:'flex',alignItems:'center',justifyContent:'center',padding:16,
+    }} onClick={onClose}>
+      <div style={{
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,
+        padding:24,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto',
+        boxShadow:'0 8px 40px rgba(0,0,0,.35)',position:'relative',
+      }} onClick={e=>e.stopPropagation()}>
+        {/* Close */}
+        <button onClick={onClose} style={{
+          position:'absolute',top:12,right:14,background:'none',border:'none',
+          fontSize:20,cursor:'pointer',color:'var(--text3)',lineHeight:1,
+        }}>✕</button>
+
+        {/* Header */}
+        <div style={{marginBottom:16,paddingRight:28}}>
+          <div style={{fontSize:15,fontWeight:700,color:'var(--text)',lineHeight:1.3,marginBottom:4}}>
+            {tx.descAI || (tx.description||'').slice(0,60) || '—'}
+          </div>
+          <div style={{fontSize:22,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>
+            {tx.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(tx.amount),2)}
+          </div>
+        </div>
+
+        {/* Info grid */}
+        <div style={{
+          display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 16px',
+          marginBottom:20,padding:'14px 16px',
+          background:'var(--surface2)',borderRadius:8,
+          border:'1px solid var(--border)',
+        }}>
+          {[
+            ['Data contabile', fmtDateTx(tx.date)],
+            ['Data valuta', fmtDateTx(tx.effectiveDate || tx._effDate)],
+            ['Merchant', tx.merchant || '—'],
+            ['Controparte', tx.counterpart || tx.counterparty || '—'],
+            ['Categoria', tx.cat1 ? (tx.cat1 + (tx.cat2 ? ' › ' + tx.cat2 : '')) : '—'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>{label}</div>
+              <div style={{fontSize:12,color:'var(--text)',fontWeight:500}}>{value}</div>
+            </div>
+          ))}
+          <div style={{gridColumn:'1 / -1'}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>Descrizione originale</div>
+            <div style={{fontSize:12,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || '—'}</div>
+          </div>
+        </div>
+
+        {/* To Review flag */}
+        <div onClick={toggleReview}
+          style={{marginBottom:10,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
+            border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:toReview?'#92400e':'var(--text2)'}}>
+            🔍 Da rivedere
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:toReview?'#f59e0b':'var(--border)',
+            color:toReview?'#fff':'var(--text3)'}}>
+            {toReview ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+
+        {/* Non ricorrente flag */}
+        <div onClick={toggleNonRecurring}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:nonRecurring?'rgba(59,130,246,.08)':'var(--surface2)',
+            border:`1px solid ${nonRecurring?'var(--blue)':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:nonRecurring?'var(--blue)':'var(--text2)'}}>
+            🔁 Non ricorrente
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:nonRecurring?'var(--blue)':'var(--border)',
+            color:nonRecurring?'#fff':'var(--text3)'}}>
+            {nonRecurring ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+
+        {/* AI Descr */}
+        <div style={{padding:'12px 16px',background:'var(--surface2)',borderRadius:10,marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
+            color:'var(--text3)',marginBottom:6}}>✏️ Descrizione AI</div>
+          <input
+            value={editDescAI}
+            onChange={e=>setEditDescAI(e.target.value)}
+            onBlur={()=>{ if(editDescAI.trim()!==tx.descAI) updateTransaction(tx.txId,{descAI:editDescAI.trim()}) }}
+            placeholder="Descrizione AI personalizzata..."
+            style={{width:'100%',boxSizing:'border-box',padding:'7px 10px',borderRadius:7,
+              border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text)',
+              fontSize:13,fontFamily:'var(--font-sans)',outline:'none'}}
+          />
+        </div>
+
+        {/* Category editor */}
+        <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:10}}>
+            Modifica Categoria
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:140}}>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Categoria</div>
+              <select value={editCat1} onChange={e=>{setEditCat1(e.target.value);setEditCat2('')}} style={{
+                width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',
+                background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
+              }}>
+                <option value="">— Nessuna —</option>
+                {Object.keys(_allCats).filter(n=>n!=='Non Categorizzato').map(n=>(
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            {cat1Subs.length > 0 && (
+              <div style={{flex:1,minWidth:140}}>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Sottocategoria</div>
+                <select value={editCat2} onChange={e=>setEditCat2(e.target.value)} style={{
+                  width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
+                }}>
+                  <option value="">— Nessuna —</option>
+                  {cat1Subs.map(s=>(
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button onClick={handleSave} style={{
+              padding:'7px 18px',borderRadius:8,border:'none',cursor:'pointer',
+              background: saved ? 'var(--green)' : 'var(--accent)',
+              color:'#fff',fontSize:13,fontWeight:700,fontFamily:'var(--font-sans)',
+              transition:'background .2s',whiteSpace:'nowrap',
+            }}>
+              {saved ? '✓ Salvato' : 'Salva'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

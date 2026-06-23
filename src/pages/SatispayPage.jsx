@@ -2079,6 +2079,18 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     )
   }, [showUnmatchedIncome, satiIncome, satiMatches])
 
+  // Combined rows: spese + accrediti non abbinati, sorted by date desc
+  const combinedRows = useMemo(() => {
+    const spese = filteredRows.map(r => ({...r, _rowType: 'spesa'}))
+    if (!showUnmatchedIncome || !unmatchedIncomeRows.length) return spese
+    const accrediti = unmatchedIncomeRows.map(r => ({...r, _rowType: 'accredito'}))
+    return [...spese, ...accrediti].sort((a, b) => {
+      const da = (a._effDate || a.date || '')
+      const db = (b._effDate || b.date || '')
+      return db.localeCompare(da)
+    })
+  }, [filteredRows, unmatchedIncomeRows, showUnmatchedIncome])
+
   // ── KPIs ─────────────────────────────────────────────────
   const totSpese      = speseDaComp.reduce((s,t) => s + Math.abs(t.amount), 0)
   const totCompensate = speseDaComp.reduce((s,t) => {
@@ -2353,20 +2365,6 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         </div>
       )}
 
-      {/* KPIs */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:16}}>
-        {[
-          ['🧾 Spese totali',     `€ ${fmtIT(totSpese,2)}`,      'var(--red)'],
-          ['📥 Compensate',       `€ ${fmtIT(totCompensate,2)}`, 'var(--green)'],
-          ['⚖️ Residuo',          `${saldoNetto>=0?'+':''}€ ${fmtIT(Math.abs(saldoNetto),2)}`, saldoNetto>=0?'var(--green)':'var(--red)'],
-          ['# Spese',             speseDaComp.length,              'var(--text2)'],
-        ].map(([l,v,c])=>(
-          <div key={l} className="card" style={{padding:'12px 16px',borderLeft:`3px solid ${c}`}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text3)',marginBottom:4}}>{l}</div>
-            <div style={{fontSize:19,fontWeight:800,fontFamily:'var(--font-mono)',color:c}}>{v}</div>
-          </div>
-        ))}
-      </div>
 
 
       {/* ── Istogramma spese non compensate ultimi 24 mesi ── */}
@@ -2386,26 +2384,32 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
             const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
             return s + Math.max(0, orig - comp)
           }, 0)
-          return { label, total: Math.round(total * 100) / 100 }
+          const income = satiIncome.filter(t =>
+            !t.excluded &&
+            (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched') &&
+            (t._effDate||t.date||'').slice(0,7) === ym
+          ).reduce((s,t) => s + Math.abs(t.amount), 0)
+          return { label, total: Math.round(total * 100) / 100, income: Math.round(income * 100) / 100 }
         })
 
-        if (bar24.every(b => b.total === 0)) return null
+        if (bar24.every(b => b.total === 0 && b.income === 0)) return null
 
         return (
           <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>
-              📊 Spese non compensate per mese
+              📊 Spese non compensate e accrediti per mese
             </div>
             <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={bar24} margin={{top:8,right:8,bottom:0,left:0}} barSize={28} barCategoryGap="30%">
+              <BarChart data={bar24} margin={{top:8,right:8,bottom:0,left:0}} barSize={14} barCategoryGap="30%">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
                 <Tooltip
-                  formatter={v=>[`€ ${fmtIT(v,0)}`,'Non compensato']}
+                  formatter={(v, name) => [`€ ${fmtIT(v,0)}`, name === 'total' ? 'Non compensato' : 'Accrediti']}
                   contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
                   cursor={{fill:'var(--surface2)'}}/>
                 <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]}/>
+                <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -2471,31 +2475,38 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
             </tr>
           </thead>
           <tbody>
-            {filteredRows.length === 0 && (
+            {combinedRows.length === 0 && (
               <tr><td colSpan={6} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
                 {search ? 'Nessun risultato' : 'Nessuna spesa da compensare — configura le categorie L1›L2 nel fondo'}
               </td></tr>
             )}
-            {showUnmatchedIncome && unmatchedIncomeRows.map(t => (
-              <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',background:'var(--blue-l,#f0f8ff)'}}>
-                <td style={{padding:'10px 14px',fontSize:12,color:'var(--text2)'}}>
-                  {(t._effDate||t.date||'').slice(0,10).split('-').reverse().join('/')}
-                </td>
-                <td style={{padding:'10px 14px',fontSize:12,color:'var(--blue)'}}>
-                  💳 {t.descAI || t.description || '—'}
-                </td>
-                <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)'}}>
-                  {t.cat1}{t.cat2?` › ${t.cat2}`:''}
-                </td>
-                <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)'}}>
-                  +€ {fmtIT(Math.abs(t.amount))}
-                </td>
-                <td colSpan={2} style={{padding:'10px 14px',fontSize:11,color:'var(--text3)'}}>
-                  Non abbinato
-                </td>
-              </tr>
-            ))}
-            {filteredRows.map(t => {
+            {combinedRows.map(t => {
+              if (t._rowType === 'accredito') {
+                return (
+                  <tr key={t.txId} style={{borderBottom:'1px solid var(--border)', background:'var(--blue-l,#e8f4ff)'}}>
+                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>
+                      {fmtDate(t._effDate||t.date)}
+                    </td>
+                    <td style={{padding:'10px 14px',fontSize:12}}>
+                      <div style={{fontWeight:600,color:'var(--blue)'}}>💳 {t.descAI || t.description?.slice(0,50) || '—'}</div>
+                      <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>{t.description?.slice(0,60)}</div>
+                    </td>
+                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)'}}>
+                      {t.cat1}{t.cat2?` › ${t.cat2}`:''}
+                    </td>
+                    <td style={{padding:'10px 14px',fontSize:11}}>
+                      <span style={{background:'var(--blue-l,#dbeafe)',color:'var(--blue)',padding:'2px 8px',borderRadius:12,fontWeight:700}}>
+                        💳 Accredito
+                      </span>
+                    </td>
+                    <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)'}}>
+                      +€ {fmtIT(Math.abs(t.amount))}
+                    </td>
+                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)'}}>—</td>
+                  </tr>
+                )
+              }
+              // spesa row
               const match  = satiMatches[t.txId]
               const status = match?.status || 'unmatched'
               const origAmt = Math.abs(t.amount)
