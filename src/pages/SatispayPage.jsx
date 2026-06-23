@@ -1510,7 +1510,7 @@ function FundCard({ pot, allPots }) {
                 const total  = monthTotal(ym)
                 const status = reconcStatus(ym)
                 const future = ym > now
-                const cellStyle = {padding:'3px 6px',textAlign:'center',width:COL_W}
+                const cellStyle = {padding:'3px 6px',textAlign:'right',width:COL_W}
                 if (future || total===0) return (
                   <td key={ym} style={{...cellStyle,color:'var(--text3)',fontSize:11}}>—</td>
                 )
@@ -1518,7 +1518,7 @@ function FundCard({ pot, allPots }) {
                   <td key={ym} style={cellStyle}>
                     <button onClick={()=>setAbbina(ym)} title="Abbinamento trovato — clicca per modificare"
                       style={{border:'none',background:'transparent',cursor:'pointer',padding:0,
-                        display:'flex',alignItems:'center',justifyContent:'center',width:'100%'}}>
+                        display:'flex',alignItems:'center',justifyContent:'flex-end',width:'100%'}}>
                       <span style={{fontSize:14,lineHeight:1}}>{status.exact ? '✅' : '⚠️'}</span>
                     </button>
                   </td>
@@ -2408,8 +2408,10 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                   formatter={(v, name) => [`€ ${fmtIT(v,0)}`, name === 'total' ? 'Non compensato' : 'Accrediti']}
                   contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
                   cursor={{fill:'var(--surface2)'}}/>
-                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]}/>
-                <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]}/>
+                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Spese non compensate"/>
+                <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati"/>
+                <Legend iconType="circle" iconSize={8}
+                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -2499,10 +2501,10 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                         💳 Accredito
                       </span>
                     </td>
-                    <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)'}}>
+                    <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right'}}>
                       +€ {fmtIT(Math.abs(t.amount))}
                     </td>
-                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)'}}>—</td>
+                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',textAlign:'right'}}>—</td>
                   </tr>
                 )
               }
