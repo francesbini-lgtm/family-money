@@ -2,7 +2,8 @@ import { useState } from 'react'
 
 // ── Hardcoded git log (updated with each push) ────────────
 const DEVLOG = [
-  { date:'2026-06-23', desc:'Satispay: fix spese compensate scomparse; mostra flag Compensato e importo; istogramma orizzontale spese non compensate per mese (ultimi 12m); Uscite: filtro periodo per scegliere quali 6 mesi; VehReconModal: cash mode mostra prelievi ATM reali; aggiunti pagina Sviluppo' },
+  { date:'2026-06-23', desc:'Flag _nonRecurring per transazione: toggle ⚡ in modal Satispay, Uscite e pulsante in riga Transazioni; Satispay istogramma → barre verticali standard; Uscite: filtri spostati sopra tabella, riga "di cui non ricorrenti" italica sotto il totale, toggle "mostra non ricorrenti"' },
+  { date:'2026-06-23', desc:'Satispay: fix spese compensate scomparse; mostra flag Compensato e importo; istogramma spese non compensate per mese (ultimi 12m); Uscite: filtro periodo per scegliere quali 6 mesi; VehReconModal: cash mode mostra prelievi ATM reali; aggiunti pagina Sviluppo' },
   { date:'2026-06-22', desc:'Contanti: colonna Carta mostra *last4 digit, Utente usa card→nickname; VehReconModal cash mostra ATM prelievi (cat Contanti); colonna Descrizione rinominata Carta' },
   { date:'2026-06-22', desc:'Toggle "Da rivedere" aggiunto a tutti i modal di dettaglio (Dashboard, PayPal, Uscite, Satispay)' },
   { date:'2026-06-22', desc:'Popup Salva: auto-chiudi dopo 1s in PayPal, Uscite, Satispay, Dashboard; Contanti: colonna Utente con resolveUserByCard' },

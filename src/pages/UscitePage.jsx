@@ -68,6 +68,8 @@ function TxDetailModal({ tx, onClose }) {
   const [saved, setSaved] = useState(false)
   const [toReview, setToReview] = useState(tx?._toReview || false)
   function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
+  const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
+  function toggleNonRecurring() { const n=!nonRecurring; setNonRecurring(n); updateTransaction(tx.txId,{_nonRecurring:n}) }
   const cat1Subs = CATS[editCat1]?.sub || []
 
   function fmtDateFull(d) {
@@ -110,7 +112,7 @@ function TxDetailModal({ tx, onClose }) {
           </div>
         </div>
         <div onClick={toggleReview}
-          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+          style={{marginBottom:8,display:'flex',alignItems:'center',justifyContent:'space-between',
             padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
             background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
             border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
@@ -121,6 +123,20 @@ function TxDetailModal({ tx, onClose }) {
             background:toReview?'#f59e0b':'var(--border)',
             color:toReview?'#fff':'var(--text3)'}}>
             {toReview ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+        <div onClick={toggleNonRecurring}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:nonRecurring?'rgba(99,102,241,.08)':'var(--surface2)',
+            border:`1px solid ${nonRecurring?'#6366f1':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:nonRecurring?'#4338ca':'var(--text2)'}}>
+            ⚡ Non ricorrente
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:nonRecurring?'#6366f1':'var(--border)',
+            color:nonRecurring?'#fff':'var(--text3)'}}>
+            {nonRecurring ? 'Attivo' : 'Off'}
           </span>
         </div>
         <div className="uscite-modal-edit">
@@ -160,8 +176,9 @@ export default function UscitePage() {
   const [monthOffset, setMonthOffset] = useState(0)
   const months = useMemo(() => getMonthsWithOffset(monthOffset), [monthOffset])
   const [expandedCats, setExpandedCats] = useState(new Set())
-  const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey }
+  const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey } | { _nonRecurring: true, monthKey }
   const [withSati, setWithSati] = useState(false) // toggle accantonamenti
+  const [showNonRecurring, setShowNonRecurring] = useState(false) // toggle riga non ricorrenti
   const [openTx, setOpenTx] = useState(null)
 
   // ── Build expense list ────────────────────────────────────────────────────
@@ -265,12 +282,18 @@ export default function UscitePage() {
   // ── Detail transactions ───────────────────────────────────────────────────
   const detailTxs = useMemo(() => {
     if (!selected) return []
+    if (selected._nonRecurring) {
+      return expenses.filter(t =>
+        t._nonRecurring &&
+        (t._effDate || t.competenza || t.date || '').slice(0,7) === selected.monthKey
+      ).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+    }
     const { cat1, cat2, monthKey } = selected
     let txs = cat2
       ? (dataMap[cat1]?.[monthKey]?.l2[cat2]?.txs || [])
       : (dataMap[cat1]?.[monthKey]?.txs || [])
     return [...txs].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
-  }, [selected, dataMap])
+  }, [selected, dataMap, expenses])
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function toggleCat(cat1) {
@@ -287,6 +310,11 @@ export default function UscitePage() {
     } else {
       setSelected({ cat1, cat2, monthKey })
     }
+  }
+
+  function selectNonRecurringCell(monthKey) {
+    if (selected?._nonRecurring && selected.monthKey === monthKey) setSelected(null)
+    else setSelected({ _nonRecurring: true, monthKey })
   }
 
   function rowTotal(cat1, cat2 = null) {
@@ -313,6 +341,17 @@ export default function UscitePage() {
     })
     return t
   }, [months, cat1List, dataMap])
+
+  const nonRecurringByMonth = useMemo(() => {
+    const t = {}
+    months.forEach(m => {
+      t[m.key] = expenses.filter(tx =>
+        tx._nonRecurring &&
+        (tx._effDate || tx.competenza || tx.date || '').slice(0,7) === m.key
+      ).reduce((s, tx) => s + Math.abs(tx.amount), 0)
+    })
+    return t
+  }, [expenses, months])
 
   const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0)
   const grandAvg = (() => {
@@ -375,28 +414,6 @@ export default function UscitePage() {
           <p className="uscite-subtitle">
             {months[0].label} — {months[5].label}
           </p>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-          {/* Period navigator */}
-          <div style={{display:'flex',alignItems:'center',gap:4,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'3px 6px'}}>
-            <button onClick={() => setMonthOffset(o => o - 1)}
-              style={{border:'none',background:'none',cursor:'pointer',fontSize:16,color:'var(--text2)',padding:'0 4px',lineHeight:1}}>‹</button>
-            <span style={{fontSize:11,fontWeight:600,color:'var(--text3)',minWidth:90,textAlign:'center'}}>
-              {monthOffset === 0 ? 'ultimi 6 mesi' : `${Math.abs(monthOffset)} mes${Math.abs(monthOffset)===1?'e':'i'} fa`}
-            </span>
-            <button onClick={() => setMonthOffset(o => Math.min(0, o + 1))}
-              disabled={monthOffset === 0}
-              style={{border:'none',background:'none',cursor:monthOffset===0?'default':'pointer',fontSize:16,
-                color:monthOffset===0?'var(--border)':'var(--text2)',padding:'0 4px',lineHeight:1}}>›</button>
-          </div>
-          <button
-            className={'uscite-sati-toggle' + (withSati ? ' active' : '')}
-            onClick={() => setWithSati(v => !v)}
-            title="Includi/escludi accantonamenti Satispay spalmate per categoria"
-          >
-            <span className="uscite-sati-dot"/>
-            {withSati ? 'Con accantonamenti' : 'Senza accantonamenti'}
-          </button>
         </div>
       </div>
 
@@ -489,6 +506,38 @@ export default function UscitePage() {
         </div>
       </div>
 
+      {/* Controls bar — between chart and table */}
+      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:12}}>
+        {/* Period navigator */}
+        <div style={{display:'flex',alignItems:'center',gap:4,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'3px 6px'}}>
+          <button onClick={() => setMonthOffset(o => o - 1)}
+            style={{border:'none',background:'none',cursor:'pointer',fontSize:16,color:'var(--text2)',padding:'0 4px',lineHeight:1}}>‹</button>
+          <span style={{fontSize:11,fontWeight:600,color:'var(--text3)',minWidth:90,textAlign:'center'}}>
+            {monthOffset === 0 ? 'ultimi 6 mesi' : `${Math.abs(monthOffset)} mes${Math.abs(monthOffset)===1?'e':'i'} fa`}
+          </span>
+          <button onClick={() => setMonthOffset(o => Math.min(0, o + 1))}
+            disabled={monthOffset === 0}
+            style={{border:'none',background:'none',cursor:monthOffset===0?'default':'pointer',fontSize:16,
+              color:monthOffset===0?'var(--border)':'var(--text2)',padding:'0 4px',lineHeight:1}}>›</button>
+        </div>
+        <button
+          className={'uscite-sati-toggle' + (withSati ? ' active' : '')}
+          onClick={() => setWithSati(v => !v)}
+          title="Includi/escludi accantonamenti Satispay spalmate per categoria"
+        >
+          <span className="uscite-sati-dot"/>
+          {withSati ? 'Con accantonamenti' : 'Senza accantonamenti'}
+        </button>
+        <button
+          className={'uscite-sati-toggle' + (showNonRecurring ? ' active' : '')}
+          onClick={() => setShowNonRecurring(v => !v)}
+          title="Mostra/nascondi riga delle spese non ricorrenti"
+        >
+          <span className="uscite-sati-dot" style={{background: showNonRecurring ? '#6366f1' : undefined}}/>
+          {showNonRecurring ? 'Non ricorrenti visibili' : 'Mostra non ricorrenti'}
+        </button>
+      </div>
+
       {/* Table + Detail */}
       <div className="uscite-body">
         <div className="uscite-table-wrap">
@@ -568,6 +617,34 @@ export default function UscitePage() {
                 <td className="uscite-td-val grand">{eur(grandAvg)}</td>
                 <td className="uscite-td-pct">100%</td>
               </tr>
+
+              {/* Non ricorrenti row */}
+              {showNonRecurring && Object.values(nonRecurringByMonth).some(v => v > 0) && (
+                <tr>
+                  <td className="uscite-td-cat" style={{fontStyle:'italic',fontWeight:400,color:'#6366f1',paddingLeft:20}}>
+                    ⚡ di cui non ricorrenti
+                  </td>
+                  {months.map(m => {
+                    const val = nonRecurringByMonth[m.key] || 0
+                    const isSel = selected?._nonRecurring && selected.monthKey === m.key
+                    return (
+                      <td key={m.key}
+                        className={'uscite-td-val'+(val>0?' clickable':'')+(isSel?' selected':'')}
+                        style={{fontStyle:'italic',fontWeight:400,color:val>0?'#6366f1':'var(--text3)'}}
+                        onClick={() => val>0 && selectNonRecurringCell(m.key)}>
+                        {eur(val)}
+                      </td>
+                    )
+                  })}
+                  <td className="uscite-td-val" style={{fontStyle:'italic',fontWeight:400,color:'#6366f1'}}>
+                    {eur((() => {
+                      const vals = months.map(m => nonRecurringByMonth[m.key]||0).filter(v=>v>0)
+                      return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0
+                    })())}
+                  </td>
+                  <td className="uscite-td-pct" style={{fontStyle:'italic'}}>—</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -582,10 +659,10 @@ export default function UscitePage() {
           ) : (
             <>
               <div className="uscite-detail-header">
-                <span className="uscite-detail-dot" style={{ background: catColor(selected.cat1) }}/>
+                <span className="uscite-detail-dot" style={{ background: selected._nonRecurring ? '#6366f1' : catColor(selected.cat1) }}/>
                 <div>
-                  <div className="uscite-detail-cat">{selected.cat2 || selected.cat1}</div>
-                  {selected.cat2 && <div className="uscite-detail-sub">{selected.cat1}</div>}
+                  <div className="uscite-detail-cat">{selected._nonRecurring ? '⚡ Non ricorrenti' : (selected.cat2 || selected.cat1)}</div>
+                  {!selected._nonRecurring && selected.cat2 && <div className="uscite-detail-sub">{selected.cat1}</div>}
                   <div className="uscite-detail-month">
                     {months.find(m => m.key === selected.monthKey)?.label}&nbsp;
                     {selected.monthKey?.slice(0,4)}

@@ -1885,6 +1885,12 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
       </td>
       <td style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
         {tx._flagged && <span title="Flaggata per revisione" style={{marginRight:4,fontSize:11}}>🚩</span>}
+        <button
+          onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_nonRecurring:!tx._nonRecurring})}}
+          title={tx._nonRecurring?'Non ricorrente — clicca per rimuovere':'Segna come non ricorrente'}
+          style={{border:'none',background:'none',cursor:'pointer',padding:'0 3px 0 0',fontSize:11,lineHeight:1,
+            opacity:tx._nonRecurring?1:0.2,color:tx._nonRecurring?'#6366f1':'var(--text3)',
+            verticalAlign:'middle'}}>⚡</button>
         <span style={{fontSize:10,fontFamily:'var(--font-mono)',padding:'2px 5px',borderRadius:4,
           background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',
           ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</span>

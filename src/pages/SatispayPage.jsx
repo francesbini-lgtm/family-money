@@ -1780,6 +1780,8 @@ function SatiTxDetailModal({ tx, onClose }) {
   const [saved, setSaved] = useState(false)
   const [toReview, setToReview] = useState(tx?._toReview || false)
   function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
+  const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
+  function toggleNonRecurring() { const n=!nonRecurring; setNonRecurring(n); updateTransaction(tx.txId,{_nonRecurring:n}) }
 
   const cat2Options = cat1 && allCats[cat1]?.sub ? allCats[cat1].sub : []
   const merchant    = tx.merchant || tx.descAI || tx.description?.slice(0,50) || '—'
@@ -1842,7 +1844,7 @@ function SatiTxDetailModal({ tx, onClose }) {
 
         {/* ── To Review flag ── */}
         <div onClick={toggleReview}
-          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+          style={{marginBottom:8,display:'flex',alignItems:'center',justifyContent:'space-between',
             padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
             background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
             border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
@@ -1853,6 +1855,22 @@ function SatiTxDetailModal({ tx, onClose }) {
             background:toReview?'#f59e0b':'var(--border)',
             color:toReview?'#fff':'var(--text3)'}}>
             {toReview ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+
+        {/* ── Non Recurring flag ── */}
+        <div onClick={toggleNonRecurring}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:nonRecurring?'rgba(99,102,241,.08)':'var(--surface2)',
+            border:`1px solid ${nonRecurring?'#6366f1':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:nonRecurring?'#4338ca':'var(--text2)'}}>
+            ⚡ Non ricorrente
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:nonRecurring?'#6366f1':'var(--border)',
+            color:nonRecurring?'#fff':'var(--text3)'}}>
+            {nonRecurring ? 'Attivo' : 'Off'}
           </span>
         </div>
 
@@ -2274,18 +2292,16 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
             <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>
               📊 Spese non compensate per mese
             </div>
-            <ResponsiveContainer width="100%" height={bar12.length * 28 + 16}>
-              <BarChart layout="vertical" data={bar12}
-                margin={{top:0,right:60,bottom:0,left:0}}
-                barSize={14} barCategoryGap="25%">
-                <XAxis type="number" hide />
-                <YAxis type="category" dataKey="label" width={54}
-                  tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={bar12} margin={{top:8,right:8,bottom:0,left:0}} barSize={28} barCategoryGap="30%">
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                <YAxis hide/>
                 <Tooltip
                   formatter={v=>[`€ ${fmtIT(v,0)}`,'Non compensato']}
                   contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
                   cursor={{fill:'var(--surface2)'}}/>
-                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[0,4,4,0]}/>
+                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
