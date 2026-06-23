@@ -2244,6 +2244,15 @@ export default function TransactionsPage() {
   const [enriching,      setEnriching]      = useState(false)
   const [reenriching,    setReenriching]    = useState(false)
   const [enrichingSelected, setEnrichingSelected] = useState(false)
+  const [aiCodePrompt,   setAiCodePrompt]   = useState(null) // null | 'enrich' | 'reenrich' | 'selected'
+  const [aiCodeInput,    setAiCodeInput]    = useState('')
+  const [aiCodeError,    setAiCodeError]    = useState(false)
+  const appPrefs_tx = useStore(s => s.appPrefs)
+  function checkAiCode(then) {
+    const code = appPrefs_tx?.aiEnrichCode || ''
+    if (!code || aiCodeInput.trim() === code) { then(); setAiCodePrompt(null); setAiCodeInput('') }
+    else { setAiCodeError(true); setTimeout(() => setAiCodeError(false), 800) }
+  }
   const [enrichSingleTx, setEnrichSingleTx] = useState(null)
   const [feedbackTx,     setFeedbackTx]     = useState(null)
   const [selected,       setSelected]       = useState(new Set())
@@ -2384,21 +2393,21 @@ export default function TransactionsPage() {
               ✓ {enriched} arricchite
             </button>
           )}
-          {/* AI Enrichment — solo Admin */}
-          {isAdmin && (
+          {/* AI Enrichment */}
+          {(appPrefs_tx?.aiEnrichEnabled !== false) && (
             <button className="btn btn-secondary"
               style={{background:'var(--gold-l)',borderColor:'var(--gold)',color:'var(--gold)',fontWeight:700,
                 opacity: unenriched > 0 ? 1 : 0.45}}
-              onClick={()=>setEnriching(true)}
+              onClick={()=>{setAiCodeInput('');setAiCodeError(false);setAiCodePrompt('enrich')}}
               title={unenriched === 0 ? 'Tutte le transazioni sono già elaborate' : `${unenriched} transazioni da elaborare`}>
               ✨ AI {unenriched > 0 ? `(${unenriched})` : ''}
             </button>
           )}
-          {/* Re-enrich — solo Admin */}
-          {isAdmin && (
+          {/* Re-enrich */}
+          {(appPrefs_tx?.aiEnrichEnabled !== false) && (
             <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)'}}
               title="Forza ri-processamento AI su tutte le transazioni"
-              onClick={()=>{if(confirm('Ri-processare con AI TUTTE le transazioni?'))setReenriching(true)}}>
+              onClick={()=>{setAiCodeInput('');setAiCodeError(false);setAiCodePrompt('reenrich')}}>
               🔄 Re-enrich
             </button>
           )}
@@ -2443,9 +2452,9 @@ export default function TransactionsPage() {
       {selected.size > 0 && (
         <div style={{display:'flex',gap:8,alignItems:'center',padding:'10px 14px',background:'var(--accent-l)',borderRadius:'var(--radius-sm)',marginBottom:12,flexWrap:'wrap'}}>
           <span style={{fontSize:13,fontWeight:600,color:'var(--accent)'}}>{selected.size} selezionate</span>
-          {isAdmin && (
+          {(appPrefs_tx?.aiEnrichEnabled !== false) && (
             <button className="btn btn-ghost" style={{fontSize:12,color:'var(--gold)',fontWeight:700,border:'1px solid var(--gold)',borderRadius:6,padding:'4px 10px'}}
-              onClick={()=>setEnrichingSelected(true)}>
+              onClick={()=>{setAiCodeInput('');setAiCodeError(false);setAiCodePrompt('selected')}}>
               ✨ AI Enrichment ({selected.size})
             </button>
           )}
@@ -2583,6 +2592,53 @@ export default function TransactionsPage() {
       {enriching       && <AiEnrichmentOverlay transactions={store.transactions} onDone={()=>setEnriching(false)}/>}
       {reenriching     && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions} onDone={()=>setReenriching(false)}/>}
       {enrichingSelected && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions.filter(t=>selected.has(t.txId))} onDone={()=>{setEnrichingSelected(false);setSelected(new Set())}}/>}
+
+      {/* ── AI Code Prompt ── */}
+      {aiCodePrompt && (
+        <div onClick={e=>e.target===e.currentTarget&&setAiCodePrompt(null)}
+          style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.4)',
+            display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{background:'var(--surface)',borderRadius:16,padding:'28px 32px',width:340,
+            boxShadow:'0 20px 60px rgba(0,0,0,.3)',textAlign:'center'}}>
+            <div style={{fontSize:28,marginBottom:8}}>✨</div>
+            <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Codice di conferma</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>
+              Inserisci il codice per avviare AI Enrichment
+            </div>
+            <input
+              autoFocus
+              type="password"
+              value={aiCodeInput}
+              onChange={e=>{setAiCodeInput(e.target.value);setAiCodeError(false)}}
+              onKeyDown={e=>{if(e.key==='Enter')checkAiCode(()=>{
+                if(aiCodePrompt==='enrich') setEnriching(true)
+                else if(aiCodePrompt==='reenrich') setReenriching(true)
+                else if(aiCodePrompt==='selected') setEnrichingSelected(true)
+              })}}
+              placeholder="Codice..."
+              style={{width:'100%',boxSizing:'border-box',padding:'10px 14px',
+                borderRadius:8,border:`1.5px solid ${aiCodeError?'var(--red)':'var(--border)'}`,
+                background:'var(--surface2)',color:'var(--text)',fontSize:15,
+                fontFamily:'var(--font-mono)',outline:'none',textAlign:'center',
+                transition:'border-color .2s',marginBottom:12,
+                animation: aiCodeError ? 'shake .3s' : 'none'}}
+            />
+            {aiCodeError && <div style={{fontSize:11,color:'var(--red)',marginBottom:8}}>Codice errato</div>}
+            <div style={{display:'flex',gap:8,justifyContent:'center'}}>
+              <button className="btn btn-secondary" onClick={()=>setAiCodePrompt(null)}>Annulla</button>
+              <button className="btn btn-primary"
+                style={{background:'var(--gold)',borderColor:'var(--gold)'}}
+                onClick={()=>checkAiCode(()=>{
+                  if(aiCodePrompt==='enrich') setEnriching(true)
+                  else if(aiCodePrompt==='reenrich') setReenriching(true)
+                  else if(aiCodePrompt==='selected') setEnrichingSelected(true)
+                })}>
+                Conferma
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {enrichSingleTx  && <AiEnrichmentOverlay forceAll={true} transactions={[enrichSingleTx]} onDone={()=>setEnrichSingleTx(null)}/>}
       {filterPopup && (
         <>

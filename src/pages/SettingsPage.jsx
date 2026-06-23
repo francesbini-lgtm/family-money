@@ -1922,6 +1922,158 @@ function SecurityTab() {
   )
 }
 
+
+// ── AI Enrichment Settings Tab ────────────────────────────
+function AIEnrichmentTab() {
+  const { appPrefs, setAppPref } = useStore()
+  const enabled = appPrefs?.aiEnrichEnabled !== false
+  const savedCode = appPrefs?.aiEnrichCode || ''
+
+  const [codeInput, setCodeInput]   = useState('')
+  const [codeError, setCodeError]   = useState('')
+  const [codeSaved, setCodeSaved]   = useState(false)
+  const [newCode,   setNewCode]     = useState('')
+  const [newCode2,  setNewCode2]    = useState('')
+  const [toggleErr, setToggleErr]   = useState('')
+  const [toggleInput, setToggleInput] = useState('')
+  const [showChange, setShowChange] = useState(false)
+
+  function checkCode(input) {
+    return !savedCode || input.trim() === savedCode
+  }
+
+  function handleToggle() {
+    if (!checkCode(toggleInput)) { setToggleErr('Codice errato'); return }
+    setAppPref('aiEnrichEnabled', !enabled)
+    setToggleInput(''); setToggleErr('')
+  }
+
+  function handleSetCode() {
+    if (savedCode && !checkCode(codeInput)) { setCodeError('Codice attuale errato'); return }
+    if (!newCode.trim()) { setCodeError('Inserisci un nuovo codice'); return }
+    if (newCode !== newCode2) { setCodeError('I codici non coincidono'); return }
+    setAppPref('aiEnrichCode', newCode.trim())
+    setCodeInput(''); setNewCode(''); setNewCode2('')
+    setCodeError(''); setCodeSaved(true)
+    setShowChange(false)
+    setTimeout(() => setCodeSaved(false), 2000)
+  }
+
+  return (
+    <div style={{maxWidth:580}}>
+      {/* Enable/disable */}
+      <div className="card" style={{padding:'18px 20px',marginBottom:16}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>✨ AI Enrichment</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
+          Abilita o disabilita il pulsante AI Enrichment nella pagina Transazioni.<br/>
+          Quando abilitato, è protetto dal codice di conferma.
+        </div>
+
+        {/* Current status */}
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16,
+          padding:'10px 14px',background:'var(--surface2)',borderRadius:8}}>
+          <div style={{width:10,height:10,borderRadius:'50%',
+            background:enabled?'var(--green)':'var(--text3)',flexShrink:0}}/>
+          <span style={{fontSize:13,fontWeight:600}}>
+            {enabled ? 'Abilitato' : 'Disabilitato'}
+          </span>
+        </div>
+
+        {/* Toggle with code */}
+        <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
+          {savedCode && (
+            <div style={{flex:1,minWidth:180}}>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Codice di conferma</div>
+              <input type="password" value={toggleInput}
+                onChange={e=>{setToggleInput(e.target.value);setToggleErr('')}}
+                onKeyDown={e=>e.key==='Enter'&&handleToggle()}
+                placeholder="Inserisci codice..."
+                style={{width:'100%',boxSizing:'border-box',padding:'8px 10px',
+                  border:`1px solid ${toggleErr?'var(--red)':'var(--border)'}`,borderRadius:7,
+                  fontSize:13,background:'var(--surface)',color:'var(--text)',
+                  fontFamily:'var(--font-mono)',outline:'none'}}/>
+              {toggleErr && <div style={{fontSize:11,color:'var(--red)',marginTop:3}}>{toggleErr}</div>}
+            </div>
+          )}
+          <button onClick={handleToggle}
+            className={enabled ? 'btn btn-secondary' : 'btn btn-primary'}
+            style={{fontSize:12}}>
+            {enabled ? '🚫 Disabilita' : '✅ Abilita'}
+          </button>
+        </div>
+      </div>
+
+      {/* Code management */}
+      <div className="card" style={{padding:'18px 20px'}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🔑 Codice di conferma</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
+          Questo codice viene richiesto ogni volta che si avvia l'AI Enrichment in Transazioni.
+          {!savedCode && ' Nessun codice impostato — al momento nessun gate attivo.'}
+        </div>
+
+        {codeSaved && (
+          <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,
+            fontSize:12,color:'var(--green)',fontWeight:600,marginBottom:12}}>
+            ✓ Codice salvato!
+          </div>
+        )}
+
+        {!showChange ? (
+          <button className="btn btn-secondary" style={{fontSize:12}}
+            onClick={()=>setShowChange(true)}>
+            {savedCode ? '🔄 Cambia codice' : '+ Imposta codice'}
+          </button>
+        ) : (
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {savedCode && (
+              <div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Codice attuale</div>
+                <input type="password" value={codeInput}
+                  onChange={e=>{setCodeInput(e.target.value);setCodeError('')}}
+                  placeholder="Codice attuale..."
+                  style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                    fontSize:13,background:'var(--surface)',color:'var(--text)',
+                    fontFamily:'var(--font-mono)',outline:'none',width:'100%',boxSizing:'border-box'}}/>
+              </div>
+            )}
+            <div>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Nuovo codice</div>
+              <input type="password" value={newCode}
+                onChange={e=>{setNewCode(e.target.value);setCodeError('')}}
+                placeholder="Nuovo codice..."
+                style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                  fontSize:13,background:'var(--surface)',color:'var(--text)',
+                  fontFamily:'var(--font-mono)',outline:'none',width:'100%',boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Ripeti nuovo codice</div>
+              <input type="password" value={newCode2}
+                onChange={e=>{setNewCode2(e.target.value);setCodeError('')}}
+                onKeyDown={e=>e.key==='Enter'&&handleSetCode()}
+                placeholder="Ripeti codice..."
+                style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                  fontSize:13,background:'var(--surface)',color:'var(--text)',
+                  fontFamily:'var(--font-mono)',outline:'none',width:'100%',boxSizing:'border-box'}}/>
+            </div>
+            {codeError && (
+              <div style={{fontSize:11,color:'var(--red)'}}>{codeError}</div>
+            )}
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-secondary" style={{fontSize:12}}
+                onClick={()=>{setShowChange(false);setCodeInput('');setNewCode('');setNewCode2('');setCodeError('')}}>
+                Annulla
+              </button>
+              <button className="btn btn-primary" style={{fontSize:12}} onClick={handleSetCode}>
+                Salva codice
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState("profile")
   const TABS=[
@@ -1935,6 +2087,7 @@ export default function SettingsPage() {
     {id:"nav-sections",  icon:"📋", label:"Sezioni"},
     {id:"danger",        icon:"⚠️", label:"Danger Zone"},
     {id:"ai-prompt",     icon:"🤖", label:"AI Prompt"},
+    {id:"ai-enrichment", icon:"✨", label:"AI Enrichment"},
   ]
   return (
     <div style={{padding:"28px 32px",maxWidth:900}}>
@@ -1950,6 +2103,7 @@ export default function SettingsPage() {
       {tab==="nav-sections"  && <NavSectionsTab/>}
       {tab==="danger"        && <DangerZoneTab/>}
       {tab==="ai-prompt"     && <AIPromptTab/>}
+      {tab==="ai-enrichment" && <AIEnrichmentTab/>}
     </div>
   )
 }
