@@ -1531,7 +1531,13 @@ function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
   for (const exp of expenses) {
     const existing = existingMatches[exp.txId]
     if (existing?.status === 'matched' && existing?.incomeTxId) {
-      result[exp.txId] = existing
+      // Re-hydrate compensatedAmt if stale/missing (old records stored 0)
+      if (!existing.compensatedAmt) {
+        const inc = incomeEntries.find(t => t.txId === existing.incomeTxId)
+        result[exp.txId] = { ...existing, compensatedAmt: inc ? Math.abs(inc.amount) : 0 }
+      } else {
+        result[exp.txId] = existing
+      }
       usedIncomeIds.add(existing.incomeTxId)
       continue
     }
@@ -2353,8 +2359,13 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
               const match  = satiMatches[t.txId]
               const status = match?.status || 'unmatched'
               const origAmt = Math.abs(t.amount)
-              // compensatedAmt = how much was covered by income; residual = what remains
-              const compensatedAmt = t._compensatedAmt || (status === 'matched' ? (match.compensatedAmt || 0) : 0)
+              // compensatedAmt: try _compensatedAmt on tx, then match record, then direct income lookup
+              const incTx = (status === 'matched' && match?.incomeTxId)
+                ? satiIncome.find(i => i.txId === match.incomeTxId)
+                : null
+              const compensatedAmt = t._compensatedAmt
+                || (match?.compensatedAmt || 0)
+                || (incTx ? Math.abs(incTx.amount) : 0)
               const residual = Math.max(0, origAmt - compensatedAmt)
               const catColor = CATS[t.cat1]?.color || 'var(--accent)'
 
