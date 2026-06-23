@@ -2269,30 +2269,25 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
 
         if (bar12.length === 0) return null
 
-        const maxVal = Math.max(...bar12.map(b => b.total))
         return (
           <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>
               📊 Spese non compensate per mese
             </div>
-            <div style={{display:'flex',flexDirection:'column',gap:6}}>
-              {bar12.map(b => (
-                <div key={b.label} style={{display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{fontSize:11,color:'var(--text3)',width:54,flexShrink:0,textAlign:'right'}}>{b.label}</div>
-                  <div style={{flex:1,height:18,background:'var(--surface2)',borderRadius:4,overflow:'hidden'}}>
-                    <div style={{
-                      height:'100%',borderRadius:4,
-                      background:'var(--red)',opacity:.75,
-                      width:`${Math.round(b.total/maxVal*100)}%`,
-                      transition:'width .3s',minWidth: b.total > 0 ? 2 : 0
-                    }}/>
-                  </div>
-                  <div style={{fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',width:72,flexShrink:0}}>
-                    €{fmtIT(b.total,0)}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ResponsiveContainer width="100%" height={bar12.length * 28 + 16}>
+              <BarChart layout="vertical" data={bar12}
+                margin={{top:0,right:60,bottom:0,left:0}}
+                barSize={14} barCategoryGap="25%">
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="label" width={54}
+                  tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                <Tooltip
+                  formatter={v=>[`€ ${fmtIT(v,0)}`,'Non compensato']}
+                  contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
+                  cursor={{fill:'var(--surface2)'}}/>
+                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[0,4,4,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         )
       })()}
