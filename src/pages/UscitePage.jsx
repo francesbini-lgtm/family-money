@@ -9,6 +9,8 @@ import { CATS } from '../data/categories'
 import { fmtIT } from '../utils/format'
 import './UscitePage.css'
 
+const FIXED_CATS = ['Casa', 'Spesa e Alimentari', 'Veicoli', 'Salute e Cura', 'Figli']
+
 // ── Months ────────────────────────────────────────────────────────────────────
 const MONTH_LABELS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
@@ -261,8 +263,14 @@ export default function UscitePage() {
 
   // ── cat1List: stableOrder filtered to cats present in current dataMap ─────
   const cat1List = useMemo(() => {
-    return stableOrder.filter(cat1 => !!dataMap[cat1])
+    const present = new Set(stableOrder.filter(cat1 => !!dataMap[cat1]))
+    const fixedPresent = FIXED_CATS.filter(c => present.has(c))
+    const remaining = stableOrder.filter(c => !FIXED_CATS.includes(c) && present.has(c))
+    return [...fixedPresent, ...remaining]
   }, [stableOrder, dataMap])
+
+  const fixedCatList = cat1List.filter(c => FIXED_CATS.includes(c))
+  const remainingCatList = cat1List.filter(c => !FIXED_CATS.includes(c))
 
   // ── Chart data ────────────────────────────────────────────────────────────
   const chartData = useMemo(() => months.map(m => {
@@ -334,6 +342,22 @@ export default function UscitePage() {
     return activeMonths > 0 ? total / activeMonths : 0
   }
 
+  function displayVal(cat1, cat2, ym) {
+    const total = cat2
+      ? (dataMap[cat1]?.[ym]?.l2[cat2]?.total || 0)
+      : (dataMap[cat1]?.[ym]?.total || 0)
+    if (!showNonRecurring) return total
+    const nr = cat2
+      ? (nonRecurringDataMap[cat1]?.[ym]?.l2[cat2]?.total || 0)
+      : (nonRecurringDataMap[cat1]?.[ym]?.total || 0)
+    return Math.max(0, total - nr)
+  }
+
+  function displayRowAvg(cat1, cat2 = null) {
+    const vals = months.map(m => displayVal(cat1, cat2, m.key)).filter(v => v > 0)
+    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
+  }
+
   const monthTotals = useMemo(() => {
     const t = {}
     months.forEach(m => {
@@ -352,6 +376,36 @@ export default function UscitePage() {
     })
     return t
   }, [expenses, months])
+
+  const nonRecurringDataMap = useMemo(() => {
+    const map = {}
+    expenses.filter(t => t._nonRecurring).forEach(t => {
+      const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
+      const cat1 = t.cat1 || 'Non Categorizzato'
+      const cat2 = t.cat2 || '(altro)'
+      const val = Math.abs(t.amount)
+      if (!map[cat1]) map[cat1] = {}
+      if (!map[cat1][ym]) map[cat1][ym] = { total: 0, l2: {} }
+      map[cat1][ym].total += val
+      if (!map[cat1][ym].l2[cat2]) map[cat1][ym].l2[cat2] = { total: 0 }
+      map[cat1][ym].l2[cat2].total += val
+    })
+    return map
+  }, [expenses])
+
+  const subTotalByMonth = useMemo(() => {
+    const t = {}
+    months.forEach(m => {
+      t[m.key] = fixedCatList.reduce((s, cat1) => s + (dataMap[cat1]?.[m.key]?.total || 0), 0)
+    })
+    return t
+  }, [months, fixedCatList, dataMap])
+
+  const subTotalAvg = (() => {
+    const active = months.filter(m => subTotalByMonth[m.key] > 0).length
+    const total = Object.values(subTotalByMonth).reduce((s, v) => s + v, 0)
+    return active > 0 ? total / active : 0
+  })()
 
   const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0)
   const grandAvg = (() => {
@@ -534,7 +588,7 @@ export default function UscitePage() {
           title="Mostra/nascondi riga delle spese non ricorrenti"
         >
           <span className="uscite-sati-dot" style={{background: showNonRecurring ? '#6366f1' : undefined}}/>
-          {showNonRecurring ? 'Non ricorrenti visibili' : 'Mostra non ricorrenti'}
+          {showNonRecurring ? 'Non ricorrenti visibili' : 'Separa non ricorrenti'}
         </button>
       </div>
 
@@ -551,99 +605,146 @@ export default function UscitePage() {
               </tr>
             </thead>
             <tbody>
-              {/* Category rows */}
-              {cat1List.map(cat1 => {
-                const expanded = expandedCats.has(cat1)
-                const allL2 = new Set()
-                months.forEach(m => Object.keys(dataMap[cat1]?.[m.key]?.l2 || {}).forEach(l2 => allL2.add(l2)))
-                const l2List = [...allL2].sort((a, b) => rowTotal(cat1, b) - rowTotal(cat1, a))
-                const hasL2 = l2List.length > 1 || (l2List.length === 1 && l2List[0] !== '(altro)')
+              {/* Category rows — renderCatRow helper */}
+              {(() => {
+                function renderCatRow(cat1) {
+                  const expanded = expandedCats.has(cat1)
+                  const allL2 = new Set()
+                  months.forEach(m => Object.keys(dataMap[cat1]?.[m.key]?.l2 || {}).forEach(l2 => allL2.add(l2)))
+                  const l2List = [...allL2].sort((a, b) => rowTotal(cat1, b) - rowTotal(cat1, a))
+                  const hasL2 = l2List.length > 1 || (l2List.length === 1 && l2List[0] !== '(altro)')
 
-                return [
-                  <tr key={cat1} className={'uscite-tr-l1' + (expanded ? ' expanded' : '')}>
-                    <td className="uscite-td-cat l1" onClick={() => hasL2 && toggleCat(cat1)}>
-                      <span className="uscite-cat-dot" style={{ background: catColor(cat1) }}/>
-                      <span className="uscite-cat-name">{cat1}</span>
-                      {hasL2 && <span className="uscite-expand-icon">{expanded ? '▾' : '▸'}</span>}
+                  return [
+                    <tr key={cat1} className={'uscite-tr-l1' + (expanded ? ' expanded' : '')}>
+                      <td className="uscite-td-cat l1" onClick={() => hasL2 && toggleCat(cat1)}>
+                        <span className="uscite-cat-dot" style={{ background: catColor(cat1) }}/>
+                        <span className="uscite-cat-name">{cat1}</span>
+                        {hasL2 && <span className="uscite-expand-icon">{expanded ? '▾' : '▸'}</span>}
+                      </td>
+                      {months.map(m => {
+                        const rawVal = dataMap[cat1]?.[m.key]?.total || 0
+                        const isSel = selected?.cat1 === cat1 && !selected?.cat2 && selected?.monthKey === m.key
+                        return (
+                          <td key={m.key}
+                            className={'uscite-td-val l1' + (rawVal > 0 ? ' clickable' : '') + (isSel ? ' selected' : '')}
+                            onClick={() => rawVal > 0 && selectCell(cat1, null, m.key)}
+                          >
+                            {eur(displayVal(cat1, null, m.key))}
+                          </td>
+                        )
+                      })}
+                      <td className="uscite-td-val l1 row-total">{eur(displayRowAvg(cat1))}</td>
+                      <td className="uscite-td-pct">{grandAvg > 0 ? Math.round(displayRowAvg(cat1) / grandAvg * 100) + '%' : '—'}</td>
+                    </tr>,
+
+                    ...(expanded ? l2List.map(cat2 => (
+                      <tr key={`${cat1}/${cat2}`} className="uscite-tr-l2">
+                        <td className="uscite-td-cat l2">
+                          <span className="uscite-l2-label">{cat2}</span>
+                        </td>
+                        {months.map(m => {
+                          const rawVal = dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0
+                          const isSel = selected?.cat1 === cat1 && selected?.cat2 === cat2 && selected?.monthKey === m.key
+                          return (
+                            <td key={m.key}
+                              className={'uscite-td-val l2' + (rawVal > 0 ? ' clickable' : '') + (isSel ? ' selected' : '')}
+                              onClick={() => rawVal > 0 && selectCell(cat1, cat2, m.key)}
+                            >
+                              {eur(displayVal(cat1, cat2, m.key))}
+                            </td>
+                          )
+                        })}
+                        <td className="uscite-td-val l2 row-total">{eur(displayRowAvg(cat1, cat2))}</td>
+                        <td className="uscite-td-pct">{grandAvg > 0 ? Math.round(displayRowAvg(cat1, cat2) / grandAvg * 100) + '%' : '—'}</td>
+                      </tr>
+                    )) : [])
+                  ]
+                }
+
+                return (
+                  <>
+                    {/* Fixed cats group */}
+                    {fixedCatList.map(cat1 => renderCatRow(cat1))}
+
+                    {/* Subtotale fisso */}
+                    {fixedCatList.length > 0 && (
+                      <tr style={{background:'var(--surface2,rgba(0,0,0,.03))'}}>
+                        <td className="uscite-td-cat" style={{fontWeight:700,fontSize:12,paddingLeft:14,color:'var(--text2)'}}>
+                          Subtotale
+                        </td>
+                        {months.map(m => (
+                          <td key={m.key} className="uscite-td-val grand" style={{fontSize:12,fontWeight:700,borderTop:'1px solid var(--border)'}}>
+                            {eur(subTotalByMonth[m.key])}
+                          </td>
+                        ))}
+                        <td className="uscite-td-val grand" style={{fontSize:12,fontWeight:700,borderTop:'1px solid var(--border)'}}>
+                          {eur(subTotalAvg)}
+                        </td>
+                        <td className="uscite-td-pct" style={{fontWeight:700,borderTop:'1px solid var(--border)'}}>
+                          {grandAvg > 0 ? Math.round(subTotalAvg/grandAvg*100)+'%' : '—'}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Remaining cats */}
+                    {remainingCatList.map(cat1 => renderCatRow(cat1))}
+                  </>
+                )
+              })()}
+
+              {/* Totale uscite (netto se showNonRecurring, altrimenti originale) */}
+              <tr className="uscite-tr-grand">
+                <td className="uscite-td-cat">{showNonRecurring ? 'Totale ricorrenti' : 'Totale uscite'}</td>
+                {months.map(m => {
+                  const val = showNonRecurring
+                    ? Math.max(0, (monthTotals[m.key]||0) - (nonRecurringByMonth[m.key]||0))
+                    : (monthTotals[m.key]||0)
+                  return <td key={m.key} className="uscite-td-val grand">{eur(val)}</td>
+                })}
+                <td className="uscite-td-val grand">
+                  {eur(showNonRecurring
+                    ? (() => { const vals=months.map(m=>Math.max(0,(monthTotals[m.key]||0)-(nonRecurringByMonth[m.key]||0))).filter(v=>v>0); return vals.length?vals.reduce((s,v)=>s+v,0)/vals.length:0 })()
+                    : grandAvg)}
+                </td>
+                <td className="uscite-td-pct">{showNonRecurring ? '—' : '100%'}</td>
+              </tr>
+
+              {/* Spese non ricorrenti + Totale (solo quando showNonRecurring) */}
+              {showNonRecurring && Object.values(nonRecurringByMonth).some(v=>v>0) && (
+                <>
+                  <tr>
+                    <td className="uscite-td-cat" style={{fontStyle:'italic',fontWeight:400,color:'#6366f1',paddingLeft:20}}>
+                      ⚡ Spese non ricorrenti
                     </td>
                     {months.map(m => {
-                      const val = dataMap[cat1]?.[m.key]?.total || 0
-                      const isSel = selected?.cat1 === cat1 && !selected?.cat2 && selected?.monthKey === m.key
+                      const val = nonRecurringByMonth[m.key] || 0
+                      const isSel = selected?._nonRecurring && selected.monthKey === m.key
                       return (
                         <td key={m.key}
-                          className={'uscite-td-val l1' + (val > 0 ? ' clickable' : '') + (isSel ? ' selected' : '')}
-                          onClick={() => val > 0 && selectCell(cat1, null, m.key)}
-                        >
+                          className={'uscite-td-val'+(val>0?' clickable':'')+(isSel?' selected':'')}
+                          style={{fontStyle:'italic',fontWeight:400,color:val>0?'#6366f1':'var(--text3)'}}
+                          onClick={() => val>0 && selectNonRecurringCell(m.key)}>
                           {eur(val)}
                         </td>
                       )
                     })}
-                    <td className="uscite-td-val l1 row-total">{eur(rowAvg(cat1))}</td>
-                    <td className="uscite-td-pct">{grandAvg > 0 ? Math.round(rowAvg(cat1) / grandAvg * 100) + '%' : '—'}</td>
-                  </tr>,
-
-                  ...(expanded ? l2List.map(cat2 => (
-                    <tr key={`${cat1}/${cat2}`} className="uscite-tr-l2">
-                      <td className="uscite-td-cat l2">
-                        <span className="uscite-l2-label">{cat2}</span>
-                      </td>
-                      {months.map(m => {
-                        const val = dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0
-                        const isSel = selected?.cat1 === cat1 && selected?.cat2 === cat2 && selected?.monthKey === m.key
-                        return (
-                          <td key={m.key}
-                            className={'uscite-td-val l2' + (val > 0 ? ' clickable' : '') + (isSel ? ' selected' : '')}
-                            onClick={() => val > 0 && selectCell(cat1, cat2, m.key)}
-                          >
-                            {eur(val)}
-                          </td>
-                        )
-                      })}
-                      <td className="uscite-td-val l2 row-total">{eur(rowAvg(cat1, cat2))}</td>
-                      <td className="uscite-td-pct">{grandAvg > 0 ? Math.round(rowAvg(cat1, cat2) / grandAvg * 100) + '%' : '—'}</td>
-                    </tr>
-                  )) : [])
-                ]
-              })}
-
-              {/* Grand total — last row */}
-              <tr className="uscite-tr-grand">
-                <td className="uscite-td-cat">Totale uscite</td>
-                {months.map(m => (
-                  <td key={m.key} className="uscite-td-val grand">
-                    {eur(monthTotals[m.key])}
-                  </td>
-                ))}
-                <td className="uscite-td-val grand">{eur(grandAvg)}</td>
-                <td className="uscite-td-pct">100%</td>
-              </tr>
-
-              {/* Non ricorrenti row */}
-              {showNonRecurring && Object.values(nonRecurringByMonth).some(v => v > 0) && (
-                <tr>
-                  <td className="uscite-td-cat" style={{fontStyle:'italic',fontWeight:400,color:'#6366f1',paddingLeft:20}}>
-                    ⚡ di cui non ricorrenti
-                  </td>
-                  {months.map(m => {
-                    const val = nonRecurringByMonth[m.key] || 0
-                    const isSel = selected?._nonRecurring && selected.monthKey === m.key
-                    return (
-                      <td key={m.key}
-                        className={'uscite-td-val'+(val>0?' clickable':'')+(isSel?' selected':'')}
-                        style={{fontStyle:'italic',fontWeight:400,color:val>0?'#6366f1':'var(--text3)'}}
-                        onClick={() => val>0 && selectNonRecurringCell(m.key)}>
-                        {eur(val)}
-                      </td>
-                    )
-                  })}
-                  <td className="uscite-td-val" style={{fontStyle:'italic',fontWeight:400,color:'#6366f1'}}>
-                    {eur((() => {
-                      const vals = months.map(m => nonRecurringByMonth[m.key]||0).filter(v=>v>0)
-                      return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0
-                    })())}
-                  </td>
-                  <td className="uscite-td-pct" style={{fontStyle:'italic'}}>—</td>
-                </tr>
+                    <td className="uscite-td-val" style={{fontStyle:'italic',fontWeight:400,color:'#6366f1'}}>
+                      {eur((() => {
+                        const vals = months.map(m=>nonRecurringByMonth[m.key]||0).filter(v=>v>0)
+                        return vals.length?vals.reduce((s,v)=>s+v,0)/vals.length:0
+                      })())}
+                    </td>
+                    <td className="uscite-td-pct" style={{fontStyle:'italic'}}>—</td>
+                  </tr>
+                  <tr className="uscite-tr-grand">
+                    <td className="uscite-td-cat">Totale uscite</td>
+                    {months.map(m => (
+                      <td key={m.key} className="uscite-td-val grand">{eur(monthTotals[m.key])}</td>
+                    ))}
+                    <td className="uscite-td-val grand">{eur(grandAvg)}</td>
+                    <td className="uscite-td-pct">100%</td>
+                  </tr>
+                </>
               )}
             </tbody>
           </table>

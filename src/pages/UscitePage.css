@@ -200,7 +200,7 @@
   text-align: left;
   padding: 12px 14px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--text3);
@@ -216,7 +216,7 @@
   text-align: right;
   padding: 12px 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--text3);
@@ -232,7 +232,7 @@
   text-align: right;
   padding: 12px 14px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--text3);
@@ -249,12 +249,13 @@
   background: var(--bg, #f7f4f0);
   border-top: 2px solid var(--border);
   border-bottom: none;
+  font-weight: 700;
 }
 
 .uscite-td-cat {
   padding: 10px 14px;
   color: var(--text2);
-  font-weight: 500;
+  font-weight: 400;
   white-space: nowrap;
 }
 
@@ -304,6 +305,7 @@
 .uscite-tr-l2 {
   background: var(--bg-subtle, rgba(0,0,0,.015));
   border-bottom: 1px solid var(--border);
+  font-style: italic;
 }
 
 .uscite-td-cat.l2 {
@@ -327,7 +329,7 @@
 }
 
 .uscite-td-val.l1 {
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text1);
 }
 
@@ -370,7 +372,7 @@
 
 /* ── Detail panel ───────────────────────────────────────── */
 .uscite-detail {
-  background: var(--card);
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: 14px;
   min-height: 300px;
