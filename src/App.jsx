@@ -45,6 +45,7 @@ import AnalyticsPage        from './pages/AnalyticsPage'
 import RisparmioPage        from './pages/RisparmioPage'
 import CarteCreditoPage     from './pages/CarteCreditoPage'
 import UscitePage           from './pages/UscitePage'
+import DevlogPage           from './pages/DevlogPage'
 import OnboardingWizard     from './components/OnboardingWizard'
 
 import { requestNotificationPermission, scheduleScadenzeNotifications } from './services/notifications'
@@ -87,6 +88,7 @@ const NAV = [
   { id:'mutuo',          icon:'🏠', label:'Mutuo',              group:null },
   { id:'stipendio',      icon:'💼', label:'Stipendi',            group:null },
   { id:'settings',        icon:'⚙️', label:'Impostazioni',       group:'Sistema' },
+  { id:'devlog',          icon:'🛠', label:'Sviluppo',            group:null },
 ]
 
 const PAGE_MAP = {
@@ -128,6 +130,7 @@ const PAGE_MAP = {
   risparmio:         RisparmioPage,
   carte:             CarteCreditoPage,
   settings:          SettingsPage,
+  devlog:            DevlogPage,
 }
 
 function getInitials(name='') {

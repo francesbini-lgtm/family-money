@@ -1902,7 +1902,9 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const speseDaComp = useMemo(() => {
     if (!catFilters.length) return []
     return transactions.filter(t => {
-      if (t.excluded || t.amount >= 0) return false
+      if (t.amount >= 0) return false
+      // Include expenses excluded only if compensated (have _compensatedBy)
+      if (t.excluded && !t._compensatedBy) return false
       return catFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
     }).sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   }, [transactions, catFilters])
@@ -2244,6 +2246,57 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         ))}
       </div>
 
+
+      {/* ── Istogramma spese non compensate ultimi 12 mesi ── */}
+      {(() => {
+        const now = new Date()
+        const bar12 = Array.from({length:12}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1)
+          const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+          const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
+          // sum expenses in this month that are NOT compensated (or only partially)
+          const total = speseDaComp.filter(t => {
+            const tYm = (t._effDate||t.date||'').slice(0,7)
+            return tYm === ym
+          }).reduce((s,t) => {
+            const m = satiMatches[t.txId]
+            const orig = Math.abs(t.amount)
+            const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
+            return s + Math.max(0, orig - comp)
+          }, 0)
+          return { label, total: Math.round(total * 100) / 100 }
+        }).filter(b => b.total > 0)
+
+        if (bar12.length === 0) return null
+
+        const maxVal = Math.max(...bar12.map(b => b.total))
+        return (
+          <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:14}}>
+              📊 Spese non compensate per mese
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {bar12.map(b => (
+                <div key={b.label} style={{display:'flex',alignItems:'center',gap:10}}>
+                  <div style={{fontSize:11,color:'var(--text3)',width:54,flexShrink:0,textAlign:'right'}}>{b.label}</div>
+                  <div style={{flex:1,height:18,background:'var(--surface2)',borderRadius:4,overflow:'hidden'}}>
+                    <div style={{
+                      height:'100%',borderRadius:4,
+                      background:'var(--red)',opacity:.75,
+                      width:`${Math.round(b.total/maxVal*100)}%`,
+                      transition:'width .3s',minWidth: b.total > 0 ? 2 : 0
+                    }}/>
+                  </div>
+                  <div style={{fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',width:72,flexShrink:0}}>
+                    €{fmtIT(b.total,0)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Table card */}
       <div className="card" style={{padding:0,overflow:'hidden'}}>
         {/* Table header bar */}
@@ -2289,7 +2342,9 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
               const match  = satiMatches[t.txId]
               const status = match?.status || 'unmatched'
               const origAmt = Math.abs(t.amount)
-              const compAmt = status === 'matched' ? Math.max(0, origAmt - (match.compensatedAmt || 0)) : origAmt
+              // compensatedAmt = how much was covered by income; residual = what remains
+              const compensatedAmt = t._compensatedAmt || (status === 'matched' ? (match.compensatedAmt || 0) : 0)
+              const residual = Math.max(0, origAmt - compensatedAmt)
               const catColor = CATS[t.cat1]?.color || 'var(--accent)'
 
               return (
@@ -2344,8 +2399,12 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                     −€ {fmtIT(origAmt,2)}
                   </td>
                   <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
-                    color: compAmt < 0.01 ? 'var(--green)' : compAmt < origAmt ? 'var(--gold,#b8942a)' : 'var(--text2)'}}>
-                    {compAmt < 0.01 ? '€ 0,00 ✅' : `−€ ${fmtIT(compAmt,2)}`}
+                    color: residual < 0.01 ? 'var(--green)' : residual < origAmt ? 'var(--gold,#b8942a)' : 'var(--text2)'}}>
+                    {residual < 0.01
+                      ? <span style={{color:'var(--green)'}}>✅ €{fmtIT(origAmt,2)}</span>
+                      : residual < origAmt
+                        ? <span><span style={{color:'var(--green)',fontSize:11}}>−€{fmtIT(compensatedAmt,2)} / </span>−€{fmtIT(residual,2)}</span>
+                        : `−€ ${fmtIT(origAmt,2)}`}
                   </td>
                 </tr>
               )

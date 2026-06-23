@@ -12,12 +12,12 @@ import './UscitePage.css'
 // ── Months ────────────────────────────────────────────────────────────────────
 const MONTH_LABELS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
-function getLast6Months() {
+function getMonthsWithOffset(offset = 0) {
   const now = new Date()
   return Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1)
+    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i + offset, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-    const label = MONTH_LABELS[d.getMonth()]
+    const label = `${MONTH_LABELS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`
     return { key, label }
   })
 }
@@ -157,7 +157,8 @@ function TxDetailModal({ tx, onClose }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function UscitePage() {
   const transactions = useStore(s => s.transactions)
-  const months = useMemo(() => getLast6Months(), [])
+  const [monthOffset, setMonthOffset] = useState(0)
+  const months = useMemo(() => getMonthsWithOffset(monthOffset), [monthOffset])
   const [expandedCats, setExpandedCats] = useState(new Set())
   const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey }
   const [withSati, setWithSati] = useState(false) // toggle accantonamenti
@@ -371,22 +372,38 @@ export default function UscitePage() {
       <div className="uscite-header">
         <div>
           <h1 className="uscite-title">📉 Uscite</h1>
-          <p className="uscite-subtitle">Ultimi 6 mesi per categoria di spesa</p>
+          <p className="uscite-subtitle">
+            {months[0].label} — {months[5].label}
+          </p>
         </div>
-        <button
-          className={'uscite-sati-toggle' + (withSati ? ' active' : '')}
-          onClick={() => setWithSati(v => !v)}
-          title="Includi/escludi accantonamenti Satispay spalmate per categoria"
-        >
-          <span className="uscite-sati-dot"/>
-          {withSati ? 'Con accantonamenti' : 'Senza accantonamenti'}
-        </button>
+        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+          {/* Period navigator */}
+          <div style={{display:'flex',alignItems:'center',gap:4,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'3px 6px'}}>
+            <button onClick={() => setMonthOffset(o => o - 1)}
+              style={{border:'none',background:'none',cursor:'pointer',fontSize:16,color:'var(--text2)',padding:'0 4px',lineHeight:1}}>‹</button>
+            <span style={{fontSize:11,fontWeight:600,color:'var(--text3)',minWidth:90,textAlign:'center'}}>
+              {monthOffset === 0 ? 'ultimi 6 mesi' : `${Math.abs(monthOffset)} mes${Math.abs(monthOffset)===1?'e':'i'} fa`}
+            </span>
+            <button onClick={() => setMonthOffset(o => Math.min(0, o + 1))}
+              disabled={monthOffset === 0}
+              style={{border:'none',background:'none',cursor:monthOffset===0?'default':'pointer',fontSize:16,
+                color:monthOffset===0?'var(--border)':'var(--text2)',padding:'0 4px',lineHeight:1}}>›</button>
+          </div>
+          <button
+            className={'uscite-sati-toggle' + (withSati ? ' active' : '')}
+            onClick={() => setWithSati(v => !v)}
+            title="Includi/escludi accantonamenti Satispay spalmate per categoria"
+          >
+            <span className="uscite-sati-dot"/>
+            {withSati ? 'Con accantonamenti' : 'Senza accantonamenti'}
+          </button>
+        </div>
       </div>
 
       {/* KPI bar */}
       <div className="uscite-kpis">
         <div className="uscite-kpi">
-          <div className="uscite-kpi-label">Totale 6 mesi</div>
+          <div className="uscite-kpi-label">{months[0].label} – {months[5].label}</div>
           <div className="uscite-kpi-value">{fmtIT(Math.round(kpiTotale6m))} €</div>
         </div>
         <div className="uscite-kpi">
