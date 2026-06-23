@@ -2315,9 +2315,21 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                 background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
                 fontFamily:'var(--font-sans)'}}>
               <option value="">— L2 —</option>
-              {(allCats[catDraftL1]?.sub||[]).map(c2=><option key={c2} value={c2}>{c2}</option>)}
+              {(() => {
+                const baseSubs = allCats[catDraftL1]?.sub || []
+                // Also include any L2 values used in pot voci for this L1 (e.g. "Ormeggio")
+                const vociSubs = (pot?.voci||[]).filter(v=>v.cat1===catDraftL1&&v.cat2).map(v=>v.cat2)
+                const allSubs = [...new Set([...baseSubs, ...vociSubs])]
+                return allSubs.map(c2=><option key={c2} value={c2}>{c2}</option>)
+              })()}
             </select>
-            <button onClick={() => addCatFilter(catDraftL1, catDraftL2)}
+            <button onClick={() => {
+                if (!catDraftL1||!catDraftL2) return
+                if (catFilters.some(f=>f.cat1===catDraftL1&&f.cat2===catDraftL2)) {
+                  showToast('Categoria già presente nella lista', 'info'); return
+                }
+                addCatFilter(catDraftL1, catDraftL2)
+              }}
               disabled={!catDraftL1||!catDraftL2}
               style={{padding:'5px 14px',borderRadius:7,border:'none',
                 background:'var(--accent)',color:'#fff',fontSize:12,fontWeight:700,
