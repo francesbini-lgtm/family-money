@@ -1855,6 +1855,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)
   const [descOpen,    setDescOpen]    = useState(false)
   const [mixCatOpen,  setMixCatOpen]  = useState(false)
+  const [amtPopup,    setAmtPopup]    = useState(false)
   const pillRef = useRef(null)
 
   const isIncome = tx.amount > 0
@@ -2055,13 +2056,39 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           </td>
         )
         if(id==='amount') return (
-          <td key={id} className={'tx-amount'+amtClass}
-            style={tx._compensatedAmt>0?{color:'var(--gold)',cursor:'pointer'}:undefined}
-            onClick={tx._compensatedAmt>0 ? ()=>window.location.hash='#/satispay' : undefined}
-            title={tx._compensatedAmt>0?'Spesa compensata — clicca per andare a Satispay':undefined}>
-            {tx._compensatedAmt>0
-              ? <>{fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:2}}>*</span></>
-              : fmtIT(Math.abs(tx.amount), 2)}
+          <td key={id} className={'tx-amount'+amtClass} style={{position:'relative'}}>
+            {tx._compensatedAmt>0 ? (
+              <>
+                <span
+                  style={{color:'var(--gold)',cursor:'pointer'}}
+                  title="Importo rettificato — clicca per dettaglio"
+                  onClick={e=>{e.stopPropagation();setAmtPopup(v=>!v)}}>
+                  {fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:2}}>*</span>
+                </span>
+                {amtPopup && (
+                  <div onClick={e=>e.stopPropagation()} style={{
+                    position:'absolute',right:0,top:'100%',zIndex:999,
+                    background:'var(--surface)',border:'1px solid var(--border)',
+                    borderRadius:10,padding:'12px 16px',minWidth:220,
+                    boxShadow:'0 8px 24px rgba(0,0,0,.18)',fontSize:13,whiteSpace:'nowrap'}}>
+                    <div style={{fontWeight:700,marginBottom:8,fontSize:12,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.05em'}}>Importo rettificato</div>
+                    <div style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
+                      <span style={{color:'var(--text2)'}}>Originale</span>
+                      <span style={{fontWeight:600,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount),2)} €</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
+                      <span style={{color:'var(--text2)'}}>Compensato Satispay</span>
+                      <span style={{fontWeight:600,color:'var(--gold)'}}>− {fmtIT(tx._compensatedAmt,2)} €</span>
+                    </div>
+                    <div style={{borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,display:'flex',justifyContent:'space-between',gap:16}}>
+                      <span style={{color:'var(--text2)'}}>Netto</span>
+                      <span style={{fontWeight:700,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount)-tx._compensatedAmt,2)} €</span>
+                    </div>
+                    <button onClick={()=>setAmtPopup(false)} style={{marginTop:10,width:'100%',padding:'5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',cursor:'pointer',fontSize:12,color:'var(--text2)'}}>Chiudi</button>
+                  </div>
+                )}
+              </>
+            ) : fmtIT(Math.abs(tx.amount), 2)}
           </td>
         )
         return null
