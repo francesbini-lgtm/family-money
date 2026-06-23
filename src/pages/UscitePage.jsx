@@ -8,6 +8,22 @@ import {
 import { CATS, getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
 import './UscitePage.css'
+import CategoryPage from '../components/CategoryPage'
+import VeicoliRegistroPage from './VeicoliRegistroPage'
+import WeekendVacanzePage from './WeekendVacanzePage'
+import UtenzePage from './UtenzePage'
+
+function TabPill({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      padding:'8px 16px',borderRadius:20,border:'none',cursor:'pointer',
+      fontFamily:'var(--font-sans)',fontSize:13,fontWeight:active?700:500,
+      background:active?'var(--accent)':'var(--surface)',
+      color:active?'#fff':'var(--text2)',
+      transition:'all .15s',
+    }}>{label}</button>
+  )
+}
 
 const FIXED_CATS = ['Casa', 'Spesa e Alimentari', 'Veicoli', 'Salute e Cura', 'Figli']
 
@@ -190,6 +206,7 @@ function TxDetailModal({ tx, onClose }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function UscitePage() {
+  const [activeTab, setActiveTab] = useState('overview')
   const transactions = useStore(s => s.transactions)
   const [monthOffset, setMonthOffset] = useState(0)
   const months = useMemo(() => getMonthsWithOffset(monthOffset), [monthOffset])
@@ -463,6 +480,24 @@ export default function UscitePage() {
 
   return (
     <div className="uscite-page">
+      {/* Tab switcher */}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>
+        <TabPill label="📉 Overview"          active={activeTab==='overview'}  onClick={()=>setActiveTab('overview')}/>
+        <TabPill label="🏡 Casa"               active={activeTab==='casa'}       onClick={()=>setActiveTab('casa')}/>
+        <TabPill label="🚗 Veicoli"            active={activeTab==='veicoli'}    onClick={()=>setActiveTab('veicoli')}/>
+        <TabPill label="🛒 Spesa"              active={activeTab==='spesa'}      onClick={()=>setActiveTab('spesa')}/>
+        <TabPill label="✈️ Weekend e Vacanze"  active={activeTab==='weekend'}    onClick={()=>setActiveTab('weekend')}/>
+        <TabPill label="⚡ Utenze"             active={activeTab==='utenze'}     onClick={()=>setActiveTab('utenze')}/>
+      </div>
+
+      {/* Tab content */}
+      {activeTab === 'casa'    && <CategoryPage cat1="Casa" icon="🏡" title="Casa" description="Affitto, utenze, condominio e spese domestiche"/>}
+      {activeTab === 'veicoli' && <VeicoliRegistroPage/>}
+      {activeTab === 'spesa'   && <CategoryPage cat1="Spesa e Alimentari" icon="🛒" title="Spesa e Alimentari" description="Spesa supermercato e pasti di lavoro"/>}
+      {activeTab === 'weekend' && <WeekendVacanzePage/>}
+      {activeTab === 'utenze'  && <UtenzePage/>}
+
+      {activeTab === 'overview' && <>
       {/* Header */}
       <div className="uscite-header">
         <div>
@@ -792,6 +827,7 @@ export default function UscitePage() {
 
       {/* Transaction detail modal */}
       {openTx && <TxDetailModal tx={openTx} onClose={() => setOpenTx(null)}/>}
+      </>}
     </div>
   )
 }
