@@ -513,7 +513,7 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
 }
 
 // ── Vehicle Compact Card ──────────────────────────────────
-function VehicleChip({ vehicle, onEdit, onDelete, spending12m = 0 }) {
+function VehicleChip({ vehicle, onEdit, onDelete }) {
   const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
     .filter(([k]) => vehicle[k])
     .map(([k,icon]) => {
@@ -560,13 +560,27 @@ function VehicleChip({ vehicle, onEdit, onDelete, spending12m = 0 }) {
             ))}
           </div>
         )}
-        {spending12m > 0 && (
-          <div style={{marginTop:8,paddingTop:6,borderTop:'1px solid var(--border)',fontSize:11,color:'var(--text3)'}}>
-            <span style={{fontWeight:700,color:'var(--text)',fontFamily:'var(--font-mono)'}}>€ {fmtIT(Math.round(spending12m),0)}</span>
-            {' '}ultimi 12 mesi
-          </div>
-        )}
       </div>
+    </div>
+  )
+}
+
+// ── Per-vehicle spending strip ─────────────────────────────
+function VehSpendingStrip({ vehicles, spending12m }) {
+  return (
+    <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.min(vehicles.length,4)},1fr)`,gap:12,marginBottom:20}}>
+      {vehicles.map(v => (
+        <div key={v.id} className="card" style={{padding:'12px 16px',display:'flex',alignItems:'center',gap:12}}>
+          <span style={{flexShrink:0,fontSize:24,lineHeight:1}}>{renderIcon(v.icon, 24)}</span>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name}</div>
+            <div style={{fontSize:16,fontWeight:800,color:'var(--accent)',fontFamily:'var(--font-mono)'}}>
+              {spending12m[v.id] ? `€ ${fmtIT(Math.round(spending12m[v.id]),0)}` : '—'}
+            </div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>ultimi 12 mesi</div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1467,11 +1481,13 @@ export default function VeicoliRegistroPage() {
         </div>
       </div>
 
+      {/* Per-vehicle spending KPIs */}
+      {vehicles.length > 0 && <VehSpendingStrip vehicles={vehicles} spending12m={vehSpending12m}/>}
+
       {/* Vehicle chips */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:24}}>
         {vehicles.map(v=>(
           <VehicleChip key={v.id} vehicle={v}
-            spending12m={vehSpending12m[v.id] || 0}
             onEdit={()=>setEditVeh(v)}
             onDelete={deleteVehicle}
           />
