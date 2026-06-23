@@ -1481,11 +1481,8 @@ export default function VeicoliRegistroPage() {
         </div>
       </div>
 
-      {/* Per-vehicle spending KPIs */}
-      {vehicles.length > 0 && <VehSpendingStrip vehicles={vehicles} spending12m={vehSpending12m}/>}
-
-      {/* Vehicle chips */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:24}}>
+      {/* Vehicle chips — row 1 */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:16}}>
         {vehicles.map(v=>(
           <VehicleChip key={v.id} vehicle={v}
             onEdit={()=>setEditVeh(v)}
@@ -1493,6 +1490,9 @@ export default function VeicoliRegistroPage() {
           />
         ))}
       </div>
+
+      {/* Per-vehicle spending KPIs — row 2 */}
+      {vehicles.length > 0 && <VehSpendingStrip vehicles={vehicles} spending12m={vehSpending12m}/>}
 
       {/* Charts — use mergedVehRows to match what's in the table below */}
       {mergedVehRows.length > 0 && <VehicleCharts vehicles={vehicles} allRows={mergedVehRows}/>}
