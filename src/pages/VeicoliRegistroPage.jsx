@@ -645,23 +645,24 @@ function VehicleCharts({ vehicles, allRows = [] }) {
         </div>
       </ChartCard>
 
-      {/* 2 — Distribuzione categorie (escluso carburante) */}
-      <ChartCard title="📊 Costi per Categoria (escluso carburante)">
-        {catTotals.length === 0
-          ? empty
-          : <>
-            <ResponsiveContainer width="100%" height={160}>
-              <PieChart>
-                <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
-                  dataKey="value" paddingAngle={2}>
-                  {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
-                </Pie>
-                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
-              </PieChart>
-            </ResponsiveContainer>
-            {renderLegend(catTotals, DONUT_COLORS)}
-          </>
-        }
+      {/* 2 — Trend costi totali (area) */}
+      <ChartCard title="📈 Trend Costi Totali">
+        <ResponsiveContainer width="100%" height={190}>
+          <AreaChart data={trendData} margin={{top:4,right:4,bottom:0,left:0}}>
+            <defs>
+              <linearGradient id="vehGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#c8622a" stopOpacity={0.25}/>
+                <stop offset="95%" stopColor="#c8622a" stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={48} tickFormatter={v=>`€${v}`}/>
+            <Tooltip formatter={v=>[`€ ${fmtIT(Math.round(v),0)}`,'Totale']} contentStyle={CHART_TOOLTIP}/>
+            <Area type="monotone" dataKey="Totale" stroke="#c8622a" strokeWidth={2.5}
+              fill="url(#vehGrad)" dot={{r:3,fill:'#c8622a'}} activeDot={{r:5}}/>
+          </AreaChart>
+        </ResponsiveContainer>
       </ChartCard>
 
       {/* 3 — Costo per Veicolo donut (escluso carburante) */}
@@ -683,24 +684,23 @@ function VehicleCharts({ vehicles, allRows = [] }) {
         }
       </ChartCard>
 
-      {/* 4 — Trend costi totali (area) */}
-      <ChartCard title="📈 Trend Costi Totali">
-        <ResponsiveContainer width="100%" height={190}>
-          <AreaChart data={trendData} margin={{top:4,right:4,bottom:0,left:0}}>
-            <defs>
-              <linearGradient id="vehGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#c8622a" stopOpacity={0.25}/>
-                <stop offset="95%" stopColor="#c8622a" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={48} tickFormatter={v=>`€${v}`}/>
-            <Tooltip formatter={v=>[`€ ${fmtIT(Math.round(v),0)}`,'Totale']} contentStyle={CHART_TOOLTIP}/>
-            <Area type="monotone" dataKey="Totale" stroke="#c8622a" strokeWidth={2.5}
-              fill="url(#vehGrad)" dot={{r:3,fill:'#c8622a'}} activeDot={{r:5}}/>
-          </AreaChart>
-        </ResponsiveContainer>
+      {/* 4 — Distribuzione categorie (escluso carburante) */}
+      <ChartCard title="📊 Costi per Categoria (escluso carburante)">
+        {catTotals.length === 0
+          ? empty
+          : <>
+            <ResponsiveContainer width="100%" height={160}>
+              <PieChart>
+                <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
+                  dataKey="value" paddingAngle={2}>
+                  {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
+                </Pie>
+                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
+              </PieChart>
+            </ResponsiveContainer>
+            {renderLegend(catTotals, DONUT_COLORS)}
+          </>
+        }
       </ChartCard>
 
     </div>
@@ -1397,15 +1397,17 @@ export default function VeicoliRegistroPage() {
       cat: e.cat || '—', vehicleId: e.vehicleId || '',
       amount: e.amount || 0, id: e.id,
     }))
-    const autoRows = vehCatFiltersPage.length > 0
-      ? transactions
-          .filter(t => !t.excluded && t.amount < 0 && vehCatFiltersPage.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2))
-          .map(t => ({
-            _type: 'auto', date: t._effDate || t.date || '',
-            cat: t.cat2 || t.cat1 || '—', vehicleId: vehTxVehiclesPage[t.txId] || '',
-            amount: Math.abs(t.amount), txId: t.txId,
-          }))
-      : []
+    // Always include Carburante bank txs + any other vehCatFilters matches
+    const autoRows = transactions
+      .filter(t => !t.excluded && t.amount < 0 && (
+        (t.cat1 === 'Veicoli' && t.cat2 === 'Carburante') ||
+        vehCatFiltersPage.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
+      ))
+      .map(t => ({
+        _type: 'auto', date: t._effDate || t.date || '',
+        cat: t.cat2 || t.cat1 || '—', vehicleId: vehTxVehiclesPage[t.txId] || '',
+        amount: Math.abs(t.amount), txId: t.txId,
+      }))
     return [...manualRows, ...autoRows]
   }, [vehExpenses, transactions, vehCatFiltersPage, vehTxVehiclesPage])
 
