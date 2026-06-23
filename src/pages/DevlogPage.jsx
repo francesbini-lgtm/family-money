@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 // ── Hardcoded git log (updated with each push) ────────────
 const DEVLOG = [
+  { date:'2026-06-23', desc:'Uscite: fix discrepanza cella/dettaglio — splits virtuali fondo Satispay ora incluse nei txs del pannello dettaglio (mostrate in corsivo come "⚙ Fondo: …", non cliccabili)' },
   { date:'2026-06-23', desc:'Uscite + Dashboard: fix bonifici fondo Satispay (_satiLinked) — sempre esplosi nelle splits per categoria; rimosso toggle "Senza accantonamenti" da Uscite; Dashboard usa expTotal() per coerenza' },
   { date:'2026-06-23', desc:'Uscite: fix esclusione commissioni — erano escluse dal calcolo dati (bug), ora incluse come tutte le altre spese; isComm rimane solo filtro visivo in Transazioni/Satispay/PayPal' },
   { date:'2026-06-23', desc:'Transazioni: click su importo rettificato (*) apre popup con importo originale, compensato Satispay e netto' },

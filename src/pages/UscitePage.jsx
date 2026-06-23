@@ -228,11 +228,11 @@ export default function UscitePage() {
       if (!map[cat1]) map[cat1] = {}
       if (!map[cat1][ym]) map[cat1][ym] = { total: 0, l2: {}, txs: [] }
       map[cat1][ym].total += val
-      if (!t._virtual) map[cat1][ym].txs.push(t)
+      map[cat1][ym].txs.push(t)
 
       if (!map[cat1][ym].l2[cat2]) map[cat1][ym].l2[cat2] = { total: 0, txs: [] }
       map[cat1][ym].l2[cat2].total += val
-      if (!t._virtual) map[cat1][ym].l2[cat2].txs.push(t)
+      map[cat1][ym].l2[cat2].txs.push(t)
     })
     return map
   }, [expenses, months])
@@ -767,10 +767,12 @@ export default function UscitePage() {
               <div className="uscite-detail-list">
                 {detailTxs.map((t, i) => (
                   <div key={t.id || t.txId || i} className="uscite-detail-row"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setOpenTx(t)}>
+                    style={{ cursor: t._virtual ? 'default' : 'pointer', opacity: t._virtual ? 0.7 : 1 }}
+                    onClick={() => !t._virtual && setOpenTx(t)}>
                     <div className="uscite-detail-date">{fmtDate(t._effDate || t.competenza || t.date)}</div>
-                    <div className="uscite-detail-desc">{t.descAI || t.description || t.desc || '—'}</div>
+                    <div className="uscite-detail-desc" style={t._virtual ? {fontStyle:'italic',color:'var(--text3)'} : undefined}>
+                      {t._virtual ? `⚙ Fondo: ${t.descAI || '—'}` : (t.descAI || t.description || t.desc || '—')}
+                    </div>
                     <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(t.amount)))} €</div>
                   </div>
                 ))}
