@@ -1848,23 +1848,44 @@ function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
 // ── Tx Detail Modal (Spese da compensare) ────────────────
 function SatiTxDetailModal({ tx, onClose }) {
   const updateTransaction = useStore(s => s.updateTransaction)
+  const updateVehExpense  = useStore(s => s.updateVehExpense)
   const customCats        = useStore(s => s.customCats)
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [cat1, setCat1]   = useState(tx.cat1 || '')
   const [cat2, setCat2]   = useState(tx.cat2 || '')
   const [saved, setSaved] = useState(false)
   const [toReview, setToReview] = useState(tx?._toReview || false)
-  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
+  function toggleReview() {
+    const n=!toReview; setToReview(n)
+    if (tx._source !== 'veh') updateTransaction(tx.txId,{_toReview:n})
+  }
   const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
-  function toggleNonRecurring() { const n=!nonRecurring; setNonRecurring(n); updateTransaction(tx.txId,{_nonRecurring:n}) }
+  function toggleNonRecurring() {
+    const n=!nonRecurring; setNonRecurring(n)
+    if (tx._source !== 'veh') updateTransaction(tx.txId,{_nonRecurring:n})
+  }
+  const [editDescAI, setEditDescAI]       = useState(tx.descAI || '')
+  const [editingTitle, setEditingTitle]   = useState(false)
 
   const cat2Options = cat1 && allCats[cat1]?.sub ? allCats[cat1].sub : []
   const merchant    = tx.merchant || tx.descAI || tx.description?.slice(0,50) || '—'
   const effDate     = tx._effDate || tx.date || ''
   const amtStr      = `−€ ${fmtIT(Math.abs(tx.amount), 2)}`
 
+  function saveDescAI() {
+    setEditingTitle(false)
+    if (!editDescAI.trim()) return
+    if (tx._source === 'veh') {
+      updateVehExpense(tx._vehId, { desc: editDescAI.trim() })
+    } else {
+      updateTransaction(tx.txId, { descAI: editDescAI.trim() })
+    }
+  }
+
   function handleSave() {
-    updateTransaction(tx.txId, { cat1, cat2 })
+    if (tx._source !== 'veh') {
+      updateTransaction(tx.txId, { cat1, cat2 })
+    }
     setSaved(true)
     setTimeout(onClose, 1000)
   }
@@ -1880,8 +1901,28 @@ function SatiTxDetailModal({ tx, onClose }) {
           style={{position:'absolute',top:16,right:16,border:'none',background:'none',
             cursor:'pointer',fontSize:18,color:'var(--text3)',lineHeight:1}}>✕</button>
 
-        <div style={{fontSize:17,fontWeight:700,color:'var(--text)',marginBottom:4,paddingRight:28}}>
-          {merchant}
+        {/* Title + pencil to edit AI descr */}
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,paddingRight:28}}>
+          {editingTitle ? (
+            <input value={editDescAI} onChange={e=>setEditDescAI(e.target.value)}
+              onBlur={saveDescAI}
+              onKeyDown={e=>{if(e.key==='Enter')saveDescAI();if(e.key==='Escape')setEditingTitle(false)}}
+              autoFocus
+              style={{flex:1,fontSize:16,fontWeight:700,color:'var(--text)',
+                border:'none',borderBottom:'2px solid var(--accent)',
+                background:'transparent',outline:'none',fontFamily:'var(--font-sans)',padding:'0 2px'}}/>
+          ) : (
+            <div style={{fontSize:17,fontWeight:700,color:'var(--text)',flex:1}}>
+              {editDescAI || merchant}
+            </div>
+          )}
+          <button onClick={()=>setEditingTitle(v=>!v)}
+            title="Modifica descrizione AI"
+            style={{border:'none',background:'none',cursor:'pointer',
+              color:editingTitle?'var(--accent)':'var(--text3)',
+              fontSize:14,lineHeight:1,padding:'2px',flexShrink:0,opacity:.7}}>
+            ✏️
+          </button>
         </div>
         <div style={{fontSize:22,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)',marginBottom:20}}>
           {amtStr}
@@ -1951,27 +1992,33 @@ function SatiTxDetailModal({ tx, onClose }) {
 
         <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
           <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>Modifica Categoria</div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-            <select value={cat1} onChange={e=>{setCat1(e.target.value);setCat2('')}}
-              style={{padding:'6px 10px',borderRadius:7,border:'1px solid var(--border)',
-                background:'var(--surface2)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',flex:1,minWidth:120}}>
-              <option value="">— L1 —</option>
-              {Object.keys(allCats).map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select value={cat2} onChange={e=>setCat2(e.target.value)} disabled={!cat2Options.length}
-              style={{padding:'6px 10px',borderRadius:7,border:'1px solid var(--border)',
-                background:'var(--surface2)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',flex:1,minWidth:120}}>
-              <option value="">— L2 —</option>
-              {cat2Options.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <button onClick={handleSave}
-              style={{padding:'6px 16px',borderRadius:7,border:'none',cursor:'pointer',
-                background: saved ? 'var(--green)' : 'var(--accent)',
-                color:'#fff',fontWeight:700,fontSize:12,fontFamily:'var(--font-sans)',
-                transition:'background .2s',whiteSpace:'nowrap'}}>
-              {saved ? '✓ Salvato' : 'Salva'}
-            </button>
-          </div>
+          {tx._source === 'veh' ? (
+            <div style={{fontSize:12,color:'var(--text3)',padding:'8px 12px',background:'var(--surface2)',borderRadius:8}}>
+              Spesa manuale veicoli — la categoria si modifica nella sezione Veicoli
+            </div>
+          ) : (
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+              <select value={cat1} onChange={e=>{setCat1(e.target.value);setCat2('')}}
+                style={{padding:'6px 10px',borderRadius:7,border:'1px solid var(--border)',
+                  background:'var(--surface2)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',flex:1,minWidth:120}}>
+                <option value="">— L1 —</option>
+                {Object.keys(allCats).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={cat2} onChange={e=>setCat2(e.target.value)} disabled={!cat2Options.length}
+                style={{padding:'6px 10px',borderRadius:7,border:'1px solid var(--border)',
+                  background:'var(--surface2)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',flex:1,minWidth:120}}>
+                <option value="">— L2 —</option>
+                {cat2Options.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button onClick={handleSave}
+                style={{padding:'6px 16px',borderRadius:7,border:'none',cursor:'pointer',
+                  background: saved ? 'var(--green)' : 'var(--accent)',
+                  color:'#fff',fontWeight:700,fontSize:12,fontFamily:'var(--font-sans)',
+                  transition:'background .2s',whiteSpace:'nowrap'}}>
+                {saved ? '✓ Salvato' : 'Salva'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1979,7 +2026,7 @@ function SatiTxDetailModal({ tx, onClose }) {
 }
 
 // ── SatiIncomeSection ─────────────────────────────────────
-function SatiIncomeSection({ satiIncome, transactions, pot }) {
+function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) {
   const appPrefs          = useStore(s => s.appPrefs)
   const setAppPref        = useStore(s => s.setAppPref)
   const updateTransaction = useStore(s => s.updateTransaction)
@@ -1994,13 +2041,31 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   // ── Solo spese (non entrate) che rispettano le regole ───
   const speseDaComp = useMemo(() => {
     if (!catFilters.length) return []
-    return transactions.filter(t => {
+    const txRows = transactions.filter(t => {
       if (t.amount >= 0) return false
       // Include expenses excluded only if compensated (have _compensatedBy)
       if (t.excluded && !t._compensatedBy) return false
       return catFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
-    }).sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
-  }, [transactions, catFilters])
+    })
+    // Includi spese manuali veicoli che corrispondono alle categorie configurate
+    const vehRows = (vehExpenses || [])
+      .filter(e => e.amount > 0 && catFilters.some(f => f.cat1 === 'Veicoli' && f.cat2 === e.cat))
+      .map(e => ({
+        txId: `veh-${e.id}`,
+        _vehId: e.id,
+        _source: 'veh',
+        amount: -(e.amount || 0),
+        date: e.date || '',
+        _effDate: e.date || '',
+        description: e.desc || '',
+        descAI: e.desc || '',
+        cat1: 'Veicoli',
+        cat2: e.cat || '',
+        account: 'Cash (Veicoli)',
+      }))
+    return [...txRows, ...vehRows]
+      .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+  }, [transactions, vehExpenses, catFilters])
 
   // ── Matches storage ─────────────────────────────────────
   const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
@@ -2160,21 +2225,23 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   // ── Actions ──────────────────────────────────────────────
   function applyMatch(expTxId, incTxId) {
     const inc = satiIncome.find(t => t.txId === incTxId)
-    const exp = transactions.find(t => t.txId === expTxId)
     const compensatedAmt = inc?.amount || 0
     // 1) Exclude the income + rename to 'Accredito Satispay'
     if (inc) {
       updateTransaction(incTxId, { excluded: true, descAI: 'Accredito Satispay' })
     }
-    // 2) Compensate expense — NEVER exclude, always visible with _compensatedAmt
-    if (exp) {
-      const absExp = Math.abs(exp.amount)
-      const comp = Math.min(compensatedAmt, absExp)
-      updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: incTxId })
-      // Sanity check: if somehow net becomes positive, warn
-      const net = absExp - compensatedAmt
-      if (net < -0.01) {
-        showToast(`⚠️ Eccedenza: €${fmtIT(Math.abs(net),2)} in più rispetto alla spesa`, 'warning')
+    // 2) Compensate expense — veh expenses tracked via satiMatches only; bank txs also updated
+    if (!expTxId.startsWith('veh-')) {
+      const exp = transactions.find(t => t.txId === expTxId)
+      if (exp) {
+        const absExp = Math.abs(exp.amount)
+        const comp = Math.min(compensatedAmt, absExp)
+        updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: incTxId })
+        // Sanity check: if somehow net becomes positive, warn
+        const net = absExp - compensatedAmt
+        if (net < -0.01) {
+          showToast(`⚠️ Eccedenza: €${fmtIT(Math.abs(net),2)} in più rispetto alla spesa`, 'warning')
+        }
       }
     }
   }
@@ -2184,8 +2251,10 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     if (incTxId) {
       updateTransaction(incTxId, { excluded: false, descAI: 'Accredito Satispay' })
     }
-    // Restore expense tx
-    updateTransaction(expTxId, { excluded: false, _compensatedAmt: undefined, _compensatedBy: undefined })
+    // Restore expense tx (bank txs only — veh expenses tracked via satiMatches)
+    if (!expTxId.startsWith('veh-')) {
+      updateTransaction(expTxId, { excluded: false, _compensatedAmt: undefined, _compensatedBy: undefined })
+    }
   }
 
   function advanceToNextPending(currentExpTxId, updatedMatches) {
@@ -3754,7 +3823,7 @@ function NonAbbinateModal({ onClose }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function SatispayPage() {
-  const { satiPots, transactions, appPrefs } = useStore()
+  const { satiPots, transactions, vehExpenses, appPrefs } = useStore()
   const [showAdd,             setShowAdd]             = useState(false)
   const [showAccrediti,       setShowAccrediti]       = useState(false)
   const [showAccantonamenti,  setShowAccantonamenti]  = useState(false)
@@ -3894,7 +3963,7 @@ export default function SatispayPage() {
           {currentPot.name?.toLowerCase() === 'cecilia'
             ? <FundProjectionKPIs pot={currentPot}/>
             : <>
-                <SatiIncomeSection satiIncome={satiIncome} transactions={transactions} pot={currentPot}/>
+                <SatiIncomeSection satiIncome={satiIncome} transactions={transactions} vehExpenses={vehExpenses} pot={currentPot}/>
               </>
           }
         </>

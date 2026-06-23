@@ -716,6 +716,7 @@ function VehicleCharts({ vehicles, allExpenses, transactions }) {
 // ── All Expenses Table ────────────────────────────────────
 function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, onAddExpense }) {
   const { deleteVehExpense, updateVehExpense, appPrefs, setAppPref } = useStore()
+  const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
 
   // ── Cat filters config (stored in appPrefs) ──────────────
   const vehCatFilters = useMemo(() => {
@@ -941,6 +942,11 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                   <TH k="vehicleId" label="Veicolo" />
                   <TH k="amount" label="Importo" right />
                   <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)',
+                    textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    Comp. Satisp
+                  </th>
+                  <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
                     textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
                     Fonte
                   </th>
@@ -1017,6 +1023,23 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                         fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
                         € {fmtIT(r.amount, 2)}
                       </td>
+
+                      {/* Comp. Satisp */}
+                      {(() => {
+                        const matchKey = r._type === 'manual' ? `veh-${r.id}` : r.txId
+                        const match = matchKey ? satiMatches[matchKey] : null
+                        const isMatched = match?.status === 'matched'
+                        return (
+                          <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                            {isMatched ? (
+                              <span title={`Compensato €${fmtIT(match.compensatedAmt||0,2)} via Satispay`}
+                                style={{ fontSize: 16, lineHeight: 1 }}>🟢</span>
+                            ) : (
+                              <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
+                            )}
+                          </td>
+                        )
+                      })()}
 
                       {/* Fonte */}
                       <td style={{ padding: '7px 12px' }}>
