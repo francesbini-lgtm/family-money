@@ -7,6 +7,8 @@ import { APP_VERSION, BUILD_TIME } from './auth/LoginScreen'
 // Debug: expose store to window
 if (typeof window !== 'undefined') { import('./store/useStore').then(m => { window.__store = m.useStore }) }
 import { setHouseholdId } from './services/firestore'
+import { navigateRef } from './utils/navigate'
+import NotifichePage from './pages/NotifichePage'
 
 import DashboardPage       from './pages/DashboardPage'
 import TransactionsPage    from './pages/TransactionsPage'
@@ -131,6 +133,7 @@ const PAGE_MAP = {
   carte:             CarteCreditoPage,
   settings:          SettingsPage,
   devlog:            DevlogPage,
+  notifiche:         NotifichePage,
 }
 
 function getInitials(name='') {
@@ -189,6 +192,8 @@ function AppShell() {
   const PageComp   = PAGE_MAP[page]
 
   function navigate(id) { setPage(id); setMenu(false) }
+  // Expose navigate globally for use in pages
+  navigateRef.current = navigate
 
   return (
     <div className="app-shell" style={isDemoMode?{paddingTop:30}:{}}>
@@ -250,7 +255,20 @@ function AppShell() {
           >
             {darkMode ? '☀️' : '🌙'}
           </button>
-            <button className="icon-btn" onClick={()=>navigate('scadenze')}>🔔</button>
+            {(() => {
+              const txs = useStore(s => s.transactions)
+              const uncatCount = txs.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
+              return (
+                <button className="icon-btn" onClick={()=>navigate('notifiche')}
+                  style={{position:'relative'}}>
+                  🔔
+                  {uncatCount > 0 && (
+                    <span style={{position:'absolute',top:0,right:0,width:8,height:8,
+                      borderRadius:'50%',background:'var(--red,#e53e3e)',border:'2px solid var(--bg)'}}/>
+                  )}
+                </button>
+              )
+            })()}
             <div className="topbar-avatar" onClick={()=>navigate('settings')} style={{cursor:'pointer'}}>
               <div className="avatar-circle" style={{background:avatarColor}}>{initials}</div>
               <span>{firstName}</span>

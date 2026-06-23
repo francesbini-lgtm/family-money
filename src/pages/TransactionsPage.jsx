@@ -2481,6 +2481,29 @@ export default function TransactionsPage() {
       </div>
 
 
+      {/* Uncategorized alert banner */}
+      {(() => {
+        const uncatCount = store.transactions.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
+        if (!uncatCount) return null
+        return (
+          <div style={{
+            margin:'0 0 16px',padding:'12px 16px',
+            background:'#fff8f0',border:'1px solid #f59e0b',borderRadius:10,
+            display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'
+          }}>
+            <div style={{flex:1,fontSize:13,fontWeight:600,color:'#92400e'}}>
+              ⚠️ {uncatCount} transazion{uncatCount===1?'e':'i'} senza categoria
+            </div>
+            <button onClick={()=>{ store.setFilter('cat1','Non Categorizzato'); store._recomputeFiltered() }}
+              style={{padding:'5px 14px',borderRadius:7,border:'none',cursor:'pointer',
+                background:'#f59e0b',color:'#fff',fontSize:12,fontWeight:700,
+                fontFamily:'var(--font-sans)'}}>
+              Mostra
+            </button>
+          </div>
+        )
+      })()}
+
       {/* Bulk action bar */}
       {selected.size > 0 && (
         <div style={{display:'flex',gap:8,alignItems:'center',padding:'10px 14px',background:'var(--accent-l)',borderRadius:'var(--radius-sm)',marginBottom:12,flexWrap:'wrap'}}>

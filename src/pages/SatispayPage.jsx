@@ -3882,7 +3882,6 @@ export default function SatispayPage() {
             ? <FundProjectionKPIs pot={currentPot}/>
             : <>
                 <SatiIncomeSection satiIncome={satiIncome} transactions={transactions} pot={currentPot}/>
-                <SatiUsciteSection satiUscite={satiUscite} satiPots={satiPots}/>
               </>
           }
         </>
