@@ -38,7 +38,6 @@ function fmtDate(dateStr) {
   return `${parseInt(m[2])} ${MONTH_LABELS[parseInt(m[1])-1]}`
 }
 
-const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
 const isSatiLinked = t => !!(t._satiLinked && t.splits?.length > 0)
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
@@ -189,7 +188,7 @@ export default function UscitePage() {
     const result = []
 
     transactions.forEach(t => {
-      if (t.excluded || t.amount >= 0 || isComm(t) || t.cat1 === 'Entrate') return
+      if (t.excluded || t.amount >= 0 || t.cat1 === 'Entrate') return
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
       if (!monthKeys.has(ym)) return
 
@@ -245,7 +244,7 @@ export default function UscitePage() {
     const monthKeys = new Set(months.map(m => m.key))
     const totals = {}
     transactions.forEach(t => {
-      if (t.excluded || t.amount >= 0 || isComm(t) || t.cat1 === 'Entrate') return
+      if (t.excluded || t.amount >= 0 || t.cat1 === 'Entrate') return
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
       if (!monthKeys.has(ym)) return
       const cat1 = t.cat1 || 'Non Categorizzato'
