@@ -178,7 +178,6 @@ export default function UscitePage() {
   const months = useMemo(() => getMonthsWithOffset(monthOffset), [monthOffset])
   const [expandedCats, setExpandedCats] = useState(new Set())
   const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey } | { _nonRecurring: true, monthKey }
-  const [withSati, setWithSati] = useState(false) // toggle accantonamenti
   const [showNonRecurring, setShowNonRecurring] = useState(false) // toggle riga non ricorrenti
   const [openTx, setOpenTx] = useState(null)
 
@@ -193,8 +192,7 @@ export default function UscitePage() {
       if (!monthKeys.has(ym)) return
 
       if (isSatiLinked(t)) {
-        if (!withSati) return // senza accantonamenti: escludi
-        // con accantonamenti: esplodi negli splits
+        // sempre esplodi negli splits
         t.splits.forEach(sp => {
           if (sp.amount > 0) {
             result.push({
@@ -216,7 +214,7 @@ export default function UscitePage() {
       result.push(t)
     })
     return result
-  }, [transactions, months, withSati])
+  }, [transactions, months])
 
   // ── Build data map: cat1 → monthKey → { total, l2Map, txs } ──────────────
   const dataMap = useMemo(() => {
@@ -573,14 +571,6 @@ export default function UscitePage() {
             style={{border:'none',background:'none',cursor:monthOffset===0?'default':'pointer',fontSize:16,
               color:monthOffset===0?'var(--border)':'var(--text2)',padding:'0 4px',lineHeight:1}}>›</button>
         </div>
-        <button
-          className={'uscite-sati-toggle' + (withSati ? ' active' : '')}
-          onClick={() => setWithSati(v => !v)}
-          title="Includi/escludi accantonamenti Satispay spalmate per categoria"
-        >
-          <span className="uscite-sati-dot"/>
-          {withSati ? 'Con accantonamenti' : 'Senza accantonamenti'}
-        </button>
         <button
           className={'uscite-sati-toggle' + (showNonRecurring ? ' active' : '')}
           onClick={() => setShowNonRecurring(v => !v)}

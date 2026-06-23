@@ -14,6 +14,21 @@ import {
 
 const MONTHS_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
+// ── Helper: calcola totale spese effettive per mese (satiLinked → splits) ──
+function expTotal(transactions, ym) {
+  let total = 0
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0) return
+    if (!(t._effDate || t.date || '').startsWith(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
+    } else {
+      total += Math.abs(t.amount)
+    }
+  })
+  return total
+}
+
 // ── Saldo Chart ───────────────────────────────────────────
 function SaldoChart({ transactions }) {
   const [view, setView] = useState('M')
@@ -602,9 +617,9 @@ function AIInsights({ transactions, catList, monthly }) {
   const thisTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM))
   const prevTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM))
   const thisInc  = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const thisExp  = Math.abs(thisTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  const thisExp  = expTotal(transactions, thisYM)
   const prevInc  = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const prevExp  = Math.abs(prevTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  const prevExp  = expTotal(transactions, prevYM)
   const thisSav  = thisInc - thisExp
   const prevSav  = prevInc - prevExp
   const thisSavRate = thisInc > 0 ? Math.round(thisSav/thisInc*100) : null
@@ -617,7 +632,7 @@ function AIInsights({ transactions, catList, monthly }) {
       const d  = new Date(now.getFullYear(), now.getMonth()-i, 1)
       const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
       const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const exp = expTotal(transactions, ym)
       if (inc>0) { total += inc-exp; count++ }
     }
     return count>0 ? total/count : null
@@ -650,7 +665,7 @@ function AIInsights({ transactions, catList, monthly }) {
     for (let m=0; m<now.getMonth(); m++) {
       const ym = `${now.getFullYear()}-${String(m+1).padStart(2,'0')}`
       const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const exp = expTotal(transactions, ym)
       if (inc>0 && inc<exp) count++
     }
     return count
@@ -662,7 +677,7 @@ function AIInsights({ transactions, catList, monthly }) {
     for (let m=0; m<now.getMonth(); m++) {
       const ym = `${now.getFullYear()}-${String(m+1).padStart(2,'0')}`
       const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const exp = expTotal(transactions, ym)
       const sav = inc-exp
       if (inc>0 && sav>bestAmt) { bestAmt=sav; best=MONTHS_IT[m] }
     }
@@ -867,7 +882,7 @@ export default function DashboardPage() {
         const prevYM = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}`
         const prevName = prevD.toLocaleDateString('it-IT',{month:'long',year:'numeric'})
         const prevInc  = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
-        const prevExp  = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)).reduce((s,t)=>s+t.amount,0))
+        const prevExp  = expTotal(transactions, prevYM)
         const prevSav  = prevInc - prevExp
         const prevRate = prevInc>0?Math.round(prevSav/prevInc*100):0
 
@@ -878,7 +893,7 @@ export default function DashboardPage() {
             const d = new Date(now2.getFullYear(),now2.getMonth()-i,1)
             const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
             const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-            const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+            const exp = expTotal(transactions, ym)
             if (inc>0) { total += (inc-exp); count++ }
           }
           return count>0?Math.round(total/count):null
@@ -888,7 +903,7 @@ export default function DashboardPage() {
           for(let m=0;m<12;m++){
             const ym=`${yr}-${String(m+1).padStart(2,'0')}`
             const inc=transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-            const exp=Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+            const exp=expTotal(transactions, ym)
             if(inc>0){total+=inc-exp;count++}
           }
           return count>0?Math.round(total/count):null

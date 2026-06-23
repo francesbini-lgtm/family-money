@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 // ── Hardcoded git log (updated with each push) ────────────
 const DEVLOG = [
+  { date:'2026-06-23', desc:'Uscite + Dashboard: fix bonifici fondo Satispay (_satiLinked) — sempre esplosi nelle splits per categoria; rimosso toggle "Senza accantonamenti" da Uscite; Dashboard usa expTotal() per coerenza' },
   { date:'2026-06-23', desc:'Uscite: fix esclusione commissioni — erano escluse dal calcolo dati (bug), ora incluse come tutte le altre spese; isComm rimane solo filtro visivo in Transazioni/Satispay/PayPal' },
   { date:'2026-06-23', desc:'Transazioni: click su importo rettificato (*) apre popup con importo originale, compensato Satispay e netto' },
   { date:'2026-06-23', desc:'Uscite: sfondo bianco pannello dettaglio; toggle "Separa non ricorrenti" — numeri netti in tabella, riga "Spese non ricorrenti" + nuovo "Totale uscite"; tipografia: header/totali grassetto, numeri tabella normali, L2 corsivo; ordine categorie fisso (Casa→Spesa→Veicoli→Salute→Figli→Subtotale→resto)' },
