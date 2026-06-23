@@ -843,6 +843,8 @@ function SaldoInizialeBox() {
 
 function CategoriesTab() {
   const { customCats, setCustomCats } = useStore()
+  const transactions = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
   const [selCat, setSelCat] = useState(CAT_NAMES[0])
   const [showAddCat, setShowAddCat] = useState(false)
   const [showAddSub, setShowAddSub] = useState(false)
@@ -854,6 +856,20 @@ function CategoriesTab() {
   const allCats = getMergedCats(customCats)
   const allCatNames = [...CAT_NAMES, ...Object.keys(customCats).filter(k=>!CAT_NAMES.includes(k))]
   const cat = allCats[selCat]
+
+  // Orphaned subcategories: transactions with cat2 not in allCats[cat1].sub
+  const orphanList = useMemo(() => {
+    const orphaned = {}
+    transactions.filter(t => !t.excluded && t.cat1 && t.cat2).forEach(t => {
+      const subs = allCats[t.cat1]?.sub || []
+      if (!subs.includes(t.cat2)) {
+        const key = `${t.cat1}›${t.cat2}`
+        if (!orphaned[key]) orphaned[key] = { cat1: t.cat1, cat2: t.cat2, count: 0 }
+        orphaned[key].count++
+      }
+    })
+    return Object.values(orphaned)
+  }, [transactions, allCats])
 
   function saveCustomCat() {
     if (!newCatForm.name.trim()) return
@@ -986,6 +1002,33 @@ function CategoriesTab() {
             <button className="btn btn-secondary" onClick={()=>setShowAddCat(false)}>Annulla</button>
           </ModalFooter>
         </Modal>
+      )}
+
+      {/* Orphaned subcategories */}
+      {orphanList.length > 0 && (
+        <div style={{marginTop:16,padding:'14px 16px',background:'#fff8f0',border:'1px solid #f59e0b',borderRadius:10,gridColumn:'1 / -1'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#92400e',marginBottom:8}}>
+            ⚠️ Sottocategorie rimosse con transazioni esistenti
+          </div>
+          {orphanList.map(({cat1,cat2,count})=>(
+            <div key={`${cat1}-${cat2}`} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+              <span style={{fontSize:12,color:'var(--text2)',fontWeight:600}}>{cat1} › {cat2}</span>
+              <span style={{fontSize:11,color:'var(--text3)'}}>({count} transazioni)</span>
+              <button
+                onClick={()=>{
+                  if(confirm(`Rimuovere la subcategoria "${cat2}" da tutte le ${count} transazioni ${cat1}?`)) {
+                    transactions
+                      .filter(t=>t.cat1===cat1&&t.cat2===cat2)
+                      .forEach(t=>updateTransaction(t.txId,{cat2:''}))
+                  }
+                }}
+                style={{fontSize:11,padding:'2px 10px',borderRadius:6,border:'1px solid var(--red)',
+                  background:'transparent',color:'var(--red)',cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+                Rimuovi da tutte
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

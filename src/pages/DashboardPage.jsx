@@ -143,6 +143,7 @@ function TxModal({ tx, onClose }) {
   const customCats = useStore(s => s.customCats)
   const [editCat1, setEditCat1] = useState(tx?.cat1 || '')
   const [editCat2, setEditCat2] = useState(tx?.cat2 || '')
+  const [editDescAI, setEditDescAI] = useState(tx?.descAI || '')
   const [saved, setSaved] = useState(false)
   const [toReview, setToReview] = useState(tx?._toReview || false)
   function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
@@ -231,6 +232,20 @@ function TxModal({ tx, onClose }) {
             color:toReview?'#fff':'var(--text3)'}}>
             {toReview ? 'Attivo' : 'Off'}
           </span>
+        </div>
+        {/* AI Descr */}
+        <div style={{padding:'12px 16px',background:'var(--surface2)',borderRadius:10,marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
+            color:'var(--text3)',marginBottom:6}}>✏️ Descrizione AI</div>
+          <input
+            value={editDescAI}
+            onChange={e=>setEditDescAI(e.target.value)}
+            onBlur={()=>{ if(editDescAI.trim()!==tx.descAI) updateTransaction(tx.txId,{descAI:editDescAI.trim()}) }}
+            placeholder="Descrizione AI personalizzata..."
+            style={{width:'100%',boxSizing:'border-box',padding:'7px 10px',borderRadius:7,
+              border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text)',
+              fontSize:13,fontFamily:'var(--font-sans)',outline:'none'}}
+          />
         </div>
         {/* Category editor */}
         <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>

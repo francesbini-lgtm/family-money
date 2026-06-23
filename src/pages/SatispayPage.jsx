@@ -2038,6 +2038,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
   const [showNonAbb, setShowNonAbb]     = useState(false)
   const [hideComm, setHideComm]         = useState(true)
   const [hideCompensate, setHideCompensate] = useState(false)
+  const [showUnmatchedIncome, setShowUnmatchedIncome] = useState(false)
   const [search, setSearch]             = useState('')
   const [showCatConfig, setShowCatConfig] = useState(false)
   const [catDraftL1, setCatDraftL1]     = useState('')
@@ -2053,8 +2054,10 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
     let list = speseDaComp
     if (hideComm) list = list.filter(t => !isComm(t))
     if (hideCompensate) list = list.filter(t => {
-      const residual = Math.abs(t.amount) - (t._compensatedAmt || 0)
-      return !(t._compensatedAmt > 0 || t._compensatedBy || residual === 0)
+      const match = satiMatches[t.txId]
+      const isMatchedInState = match?.status === 'matched' || match?.status === 'pending_approval'
+      const isCompensatedOnTx = (t._compensatedAmt || 0) > 0 || !!t._compensatedBy
+      return !(isMatchedInState || isCompensatedOnTx)
     })
     if (!search.trim()) return list
     const q = search.toLowerCase()
@@ -2065,7 +2068,16 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
       (t.cat2||'').toLowerCase().includes(q) ||
       String(Math.abs(t.amount)).includes(q)
     )
-  }, [speseDaComp, hideComm, hideCompensate, search])
+  }, [speseDaComp, hideComm, hideCompensate, search, satiMatches])
+
+  // ── Unmatched income rows ────────────────────────────────
+  const unmatchedIncomeRows = useMemo(() => {
+    if (!showUnmatchedIncome) return []
+    return satiIncome.filter(t =>
+      !t.excluded &&
+      (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched')
+    )
+  }, [showUnmatchedIncome, satiIncome, satiMatches])
 
   // ── KPIs ─────────────────────────────────────────────────
   const totSpese      = speseDaComp.reduce((s,t) => s + Math.abs(t.amount), 0)
@@ -2426,6 +2438,18 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
               }}>
               Compensate
             </button>
+            <button
+              onClick={() => setShowUnmatchedIncome(v => !v)}
+              style={{
+                display:'inline-flex',alignItems:'center',gap:5,padding:'5px 11px',
+                border:`1px solid ${showUnmatchedIncome?'var(--blue)':'var(--border)'}`,
+                borderRadius:20,
+                background:showUnmatchedIncome?'var(--blue-l,#e0f0ff)':'transparent',
+                color:showUnmatchedIncome?'var(--blue)':'var(--text3)',
+                fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',
+              }}>
+              💳 Accrediti
+            </button>
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Cerca..."
               style={{padding:'5px 10px',border:'1px solid var(--border)',borderRadius:8,
@@ -2452,6 +2476,25 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                 {search ? 'Nessun risultato' : 'Nessuna spesa da compensare — configura le categorie L1›L2 nel fondo'}
               </td></tr>
             )}
+            {showUnmatchedIncome && unmatchedIncomeRows.map(t => (
+              <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',background:'var(--blue-l,#f0f8ff)'}}>
+                <td style={{padding:'10px 14px',fontSize:12,color:'var(--text2)'}}>
+                  {(t._effDate||t.date||'').slice(0,10).split('-').reverse().join('/')}
+                </td>
+                <td style={{padding:'10px 14px',fontSize:12,color:'var(--blue)'}}>
+                  💳 {t.descAI || t.description || '—'}
+                </td>
+                <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)'}}>
+                  {t.cat1}{t.cat2?` › ${t.cat2}`:''}
+                </td>
+                <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)'}}>
+                  +€ {fmtIT(Math.abs(t.amount))}
+                </td>
+                <td colSpan={2} style={{padding:'10px 14px',fontSize:11,color:'var(--text3)'}}>
+                  Non abbinato
+                </td>
+              </tr>
+            ))}
             {filteredRows.map(t => {
               const match  = satiMatches[t.txId]
               const status = match?.status || 'unmatched'
