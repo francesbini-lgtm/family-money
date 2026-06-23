@@ -2038,17 +2038,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     return (pot?.voci||[]).filter(v => v.cat1 && v.cat2)
   }, [pot, satiCompCats])
 
-  // ── Solo spese (non entrate) che rispettano le regole ───
-  const speseDaComp = useMemo(() => {
-    if (!catFilters.length) return []
-    const txRows = transactions.filter(t => {
-      if (t.amount >= 0) return false
-      // Include expenses excluded only if compensated (have _compensatedBy)
-      if (t.excluded && !t._compensatedBy) return false
-      return catFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
-    })
-    // Includi TUTTE le spese manuali veicoli (nessun filtro per categoria: l'utente può compensare qualsiasi spesa cash)
-    const vehRows = (vehExpenses || [])
+  // ── Spese manuali veicoli — sempre incluse, indipendentemente da catFilters ──
+  const vehSpese = useMemo(() =>
+    (vehExpenses || [])
       .filter(e => e.amount > 0)
       .map(e => ({
         txId: `veh-${e.id}`,
@@ -2063,9 +2055,18 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
         cat2: e.cat || '',
         account: 'Cash (Veicoli)',
       }))
-    return [...txRows, ...vehRows]
+  , [vehExpenses])
+
+  // ── Spese bancarie che rispettano le catFilters configurate ──
+  const speseDaComp = useMemo(() => {
+    const txRows = catFilters.length > 0 ? transactions.filter(t => {
+      if (t.amount >= 0) return false
+      if (t.excluded && !t._compensatedBy) return false
+      return catFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
+    }) : []
+    return [...txRows, ...vehSpese]
       .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
-  }, [transactions, vehExpenses, catFilters])
+  }, [transactions, vehSpese, catFilters])
 
   // ── Matches storage ─────────────────────────────────────
   const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
@@ -2315,7 +2316,8 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     setCatDraftL1(''); setCatDraftL2('')
   }
 
-  if (!catFilters.length) {
+  // Se non ci sono catFilters MA ci sono spese veicoli manuali, mostra comunque la sezione
+  if (!catFilters.length && !vehSpese.length) {
     return (
       <div style={{marginTop:32,padding:'20px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12}}>
         <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>📥 Spese e Entrate da Compensare</div>
@@ -2592,17 +2594,26 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               const residual = Math.max(0, origAmt - compensatedAmt)
               const catColor = CATS[t.cat1]?.color || 'var(--accent)'
 
+              const isVeh = t._source === 'veh'
               return (
-                <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',transition:'background .1s',cursor:'pointer'}}
+                <tr key={t.txId}
+                  style={{borderBottom:'1px solid var(--border)',transition:'background .1s',cursor:'pointer',
+                    background: isVeh ? 'rgba(184,148,42,.06)' : 'transparent'}}
                   onClick={() => setDetailTx(t)}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  onMouseEnter={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.13)' : 'var(--surface2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.06)' : 'transparent'}>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                     {fmtDate(t._effDate||t.date)}
                   </td>
                   <td style={{padding:'9px 14px'}}>
                     <div style={{fontSize:13,fontWeight:500}}>{t.descAI||t.description?.slice(0,50)}</div>
-                    <div style={{fontSize:11,color:'var(--text3)'}}>{(t.description||'').slice(0,60)}</div>
+                    <div style={{fontSize:11,color:'var(--text3)',display:'flex',gap:6,alignItems:'center'}}>
+                      {isVeh && <span style={{fontSize:10,padding:'1px 6px',borderRadius:8,fontWeight:700,
+                        background:'rgba(184,148,42,.15)',color:'var(--gold,#b8942a)',border:'1px solid rgba(184,148,42,.3)'}}>
+                        🚗 Cash Veicoli
+                      </span>}
+                      <span>{(t.description||'').slice(0,60)}</span>
+                    </div>
                   </td>
                   <td style={{padding:'9px 14px'}}>
                     {t.cat1 && (
