@@ -10,6 +10,7 @@ import {
 import { Plus, Trash2, Link } from 'lucide-react'
 import './VeicoliRegistroPage.css'
 import { fmtIT } from '../utils/format'
+import { CATS } from '../data/categories'
 
 const VEH_ICONS = ['🚗','🚙','🚕','🏎','🚐','🛻','🏍','🚤','⛵','🚁','🛵','🚌',
   'svg:motocross','svg:motoscafo','svg:bmw1','svg:jeep']
@@ -714,195 +715,371 @@ function VehicleCharts({ vehicles, allExpenses, transactions }) {
 
 // ── All Expenses Table ────────────────────────────────────
 function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, onAddExpense }) {
-  const { deleteVehExpense, updateVehExpense } = useStore()
-  const [sortKey, setSortKey] = useState('date')
-  const [sortDir, setSortDir] = useState('desc')
+  const { deleteVehExpense, updateVehExpense, appPrefs, setAppPref } = useStore()
+
+  // ── Cat filters config (stored in appPrefs) ──────────────
+  const vehCatFilters = useMemo(() => {
+    const saved = appPrefs?.vehCatFilters
+    if (saved) return saved
+    // Default: all Veicoli sub-categories
+    const sub = CATS['Veicoli']?.sub || []
+    return sub.map(s => ({ cat1: 'Veicoli', cat2: s }))
+  }, [appPrefs?.vehCatFilters])
+
+  const vehTxVehicles = useMemo(() => appPrefs?.vehTxVehicles || {}, [appPrefs?.vehTxVehicles])
+
+  function saveCatFilters(f) { setAppPref('vehCatFilters', f) }
+  function removeCatFilter(cat1, cat2) {
+    saveCatFilters(vehCatFilters.filter(f => !(f.cat1 === cat1 && f.cat2 === cat2)))
+  }
+  function addCatFilter(cat1, cat2) {
+    if (!cat1 || !cat2) return
+    if (vehCatFilters.some(f => f.cat1 === cat1 && f.cat2 === cat2)) return
+    saveCatFilters([...vehCatFilters, { cat1, cat2 }])
+  }
+  function setTxVehicle(txId, vehicleId) {
+    setAppPref('vehTxVehicles', { ...vehTxVehicles, [txId]: vehicleId })
+  }
+
+  // ── Settings panel state ──────────────────────────────────
+  const [showSettings, setShowSettings] = useState(false)
+  const [draftL1, setDraftL1] = useState('Veicoli')
+  const [draftL2, setDraftL2] = useState('')
+  const cat1List = Object.keys(CATS)
+  const cat2List = draftL1 && CATS[draftL1]?.sub ? CATS[draftL1].sub : []
+
+  // ── Table state ───────────────────────────────────────────
+  const [sortKey, setSortKey]   = useState('date')
+  const [sortDir, setSortDir]   = useState('desc')
   const [filterVeh, setFilterVeh] = useState('')
   const [filterCat, setFilterCat] = useState('')
   const [reconExp,  setReconExp]  = useState(null)
-  const [attExp,    setAttExp]    = useState(null)  // expense whose attachments we're viewing
-  const [editExp,   setEditExp]   = useState(null)  // expense being edited
+  const [attExp,    setAttExp]    = useState(null)
+  const [editExp,   setEditExp]   = useState(null)
 
-  const vehMap = Object.fromEntries(vehicles.map(v=>[v.id, v]))
+  const vehMap = Object.fromEntries(vehicles.map(v => [v.id, v]))
+
+  // ── Merge manual + auto rows ──────────────────────────────
+  const rows = useMemo(() => {
+    // 1) Manual expenses
+    const manualRows = allExpenses.map(e => ({
+      _type: 'manual', _key: `m-${e.id}`,
+      date: e.date || '',
+      desc: e.desc || '—',
+      cat: e.cat || '—',
+      vehicleId: e.vehicleId || '',
+      amount: e.amount || 0,
+      id: e.id, payMethod: e.payMethod,
+      reconRef: e.reconRef, reconType: e.reconType,
+      reconPartial: e.reconPartial, reconUsedAmount: e.reconUsedAmount,
+      attachments: e.attachments,
+    }))
+
+    // 2) Auto-detected transactions matching configured L1/L2 filters
+    const autoRows = vehCatFilters.length > 0
+      ? transactions
+          .filter(t => {
+            if (t.excluded || t.amount >= 0) return false
+            return vehCatFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
+          })
+          .map(t => ({
+            _type: 'auto', _key: `a-${t.txId}`,
+            date: t._effDate || t.date || '',
+            desc: t.descAI || (t.description || '').slice(0, 60) || '—',
+            cat: t.cat2 || t.cat1 || '—',
+            vehicleId: vehTxVehicles[t.txId] || '',
+            amount: Math.abs(t.amount),
+            txId: t.txId,
+            cat1: t.cat1, cat2: t.cat2,
+          }))
+      : []
+
+    // 3) Merge + filter + sort
+    return [...manualRows, ...autoRows]
+      .filter(r => !filterVeh || r.vehicleId === filterVeh)
+      .filter(r => !filterCat || r.cat === filterCat)
+      .sort((a, b) => {
+        if (sortKey === 'amount') return sortDir === 'asc' ? a.amount - b.amount : b.amount - a.amount
+        const va = a[sortKey] || '', vb = b[sortKey] || ''
+        return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+      })
+  }, [allExpenses, transactions, vehCatFilters, vehTxVehicles, filterVeh, filterCat, sortKey, sortDir])
+
+  const total = rows.reduce((s, r) => s + r.amount, 0)
 
   function toggleSort(k) {
-    if (sortKey===k) setSortDir(d=>d==='asc'?'desc':'asc')
+    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(k); setSortDir('desc') }
   }
-  const sortIcon = (k) => sortKey===k ? (sortDir==='asc'?'▲':'▼') : ''
+  const sortIcon = k => sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : ''
 
-  const rows = useMemo(() => {
-    return [...allExpenses]
-      .filter(e => !filterVeh || e.vehicleId===filterVeh)
-      .filter(e => !filterCat || e.cat===filterCat)
-      .sort((a,b) => {
-        if (sortKey==='amount') return sortDir==='asc' ? (a.amount||0)-(b.amount||0) : (b.amount||0)-(a.amount||0)
-        return sortDir==='asc'
-          ? (a[sortKey]||'').localeCompare(b[sortKey]||'')
-          : (b[sortKey]||'').localeCompare(a[sortKey]||'')
-      })
-  }, [allExpenses, filterVeh, filterCat, sortKey, sortDir])
-
-  const total = rows.reduce((s,e)=>s+(e.amount||0),0)
-
-  const TH = ({k,label,right=false}) => (
-    <th onClick={()=>toggleSort(k)} style={{
-      padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-      textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',
-      textAlign:right?'right':'left',cursor:'pointer',whiteSpace:'nowrap',userSelect:'none'}}>
-      {label} <span style={{fontSize:9}}>{sortIcon(k)}</span>
+  const TH = ({ k, label, right = false }) => (
+    <th onClick={() => toggleSort(k)} style={{
+      padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+      textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)',
+      textAlign: right ? 'right' : 'left', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none'
+    }}>
+      {label} <span style={{ fontSize: 9 }}>{sortIcon(k)}</span>
     </th>
   )
 
+  // ── All cats for filter dropdown ──────────────────────────
+  const allCats = useMemo(() => {
+    const s = new Set(rows.map(r => r.cat).filter(Boolean))
+    return [...s].sort()
+  }, [rows])
+
   return (
-    <div style={{marginTop:8}}>
-      {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-        padding:'12px 16px',background:'var(--surface2)',
-        borderRadius:'var(--radius) var(--radius) 0 0',border:'1px solid var(--border)',borderBottom:'none'}}>
-        <div>
-          <div style={{fontSize:15,fontWeight:700}}>📋 Tutte le spese veicoli</div>
-          <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>{rows.length} spese · € {fmtIT(Math.round(total),0)} totale</div>
+    <div style={{ marginTop: 8 }}>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <div style={{ marginBottom: 12, padding: '16px 20px', background: 'var(--surface2)',
+          border: '1px solid var(--border)', borderRadius: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+            ⚙️ Categorie rilevate automaticamente
+          </div>
+
+          {/* Current filters */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+            {vehCatFilters.length === 0 && (
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>Nessuna categoria configurata</span>
+            )}
+            {vehCatFilters.map(f => (
+              <span key={`${f.cat1}-${f.cat2}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  background: 'var(--accent-l,rgba(200,98,42,.1))', color: 'var(--accent)',
+                  border: '1px solid var(--accent)44' }}>
+                {f.cat1} › {f.cat2}
+                <button onClick={() => removeCatFilter(f.cat1, f.cat2)}
+                  style={{ border: 'none', background: 'none', cursor: 'pointer',
+                    color: 'var(--accent)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </span>
+            ))}
+          </div>
+
+          {/* Add new filter */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select value={draftL1} onChange={e => { setDraftL1(e.target.value); setDraftL2('') }}
+              style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6,
+                fontSize: 12, background: 'var(--surface)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
+              <option value="">— L1 —</option>
+              {cat1List.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={draftL2} onChange={e => setDraftL2(e.target.value)}
+              disabled={!cat2List.length}
+              style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6,
+                fontSize: 12, background: 'var(--surface)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
+              <option value="">— L2 —</option>
+              {cat2List.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button onClick={() => { addCatFilter(draftL1, draftL2); setDraftL2('') }}
+              disabled={!draftL1 || !draftL2}
+              className="btn btn-primary" style={{ fontSize: 11, padding: '5px 14px' }}>
+              + Aggiungi
+            </button>
+          </div>
         </div>
-        <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <select value={filterVeh} onChange={e=>setFilterVeh(e.target.value)}
-            style={{padding:'5px 9px',border:'1px solid var(--border)',borderRadius:6,fontSize:11,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}}>
+      )}
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 16px', background: 'var(--surface2)',
+        borderRadius: 'var(--radius) var(--radius) 0 0', border: '1px solid var(--border)', borderBottom: 'none' }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>📋 Tutte le spese veicoli</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
+            {rows.length} spese · € {fmtIT(Math.round(total), 0)} totale
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Gear button */}
+          <button onClick={() => setShowSettings(v => !v)}
+            title="Configura categorie rilevate automaticamente"
+            style={{ border: `1px solid ${showSettings ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: 7, background: showSettings ? 'var(--accent-l,rgba(200,98,42,.1))' : 'transparent',
+              color: showSettings ? 'var(--accent)' : 'var(--text3)',
+              cursor: 'pointer', padding: '4px 8px', fontSize: 14, lineHeight: 1 }}>
+            ⚙️
+          </button>
+          <select value={filterVeh} onChange={e => setFilterVeh(e.target.value)}
+            style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11,
+              background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontFamily: 'var(--font-sans)' }}>
             <option value="">Tutti i veicoli</option>
-            {vehicles.map(v=><option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+            {vehicles.map(v => <option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
           </select>
-          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)}
-            style={{padding:'5px 9px',border:'1px solid var(--border)',borderRadius:6,fontSize:11,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}}>
+          <select value={filterCat} onChange={e => setFilterCat(e.target.value)}
+            style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11,
+              background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontFamily: 'var(--font-sans)' }}>
             <option value="">Tutte le categorie</option>
-            {VEH_CATS.map(c=><option key={c}>{c}</option>)}
+            {allCats.map(c => <option key={c}>{c}</option>)}
           </select>
-          <button className="btn btn-primary" style={{fontSize:11}} onClick={onAddExpense}>
-            <Plus size={11}/> Aggiungi spesa
+          <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={onAddExpense}>
+            <Plus size={11} /> Aggiungi spesa
           </button>
         </div>
       </div>
 
       {rows.length === 0 ? (
-        <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13,
-          border:'1px solid var(--border)',borderTop:'none',borderRadius:'0 0 var(--radius) var(--radius)',
-          background:'var(--surface)'}}>
-          Nessuna spesa registrata. Usa "+ Aggiungi spesa" o il pulsante Spesa su ogni veicolo.
+        <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)', fontSize: 13,
+          border: '1px solid var(--border)', borderTop: 'none',
+          borderRadius: '0 0 var(--radius) var(--radius)', background: 'var(--surface)' }}>
+          Nessuna spesa. Usa "+ Aggiungi spesa" o configura le categorie automatiche con ⚙️.
         </div>
       ) : (
-        <div style={{overflow:'hidden',border:'1px solid var(--border)',borderTop:'none',
-          borderRadius:'0 0 var(--radius) var(--radius)',background:'var(--surface)'}}>
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
+        <div style={{ overflow: 'hidden', border: '1px solid var(--border)', borderTop: 'none',
+          borderRadius: '0 0 var(--radius) var(--radius)', background: 'var(--surface)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{background:'var(--surface2)'}}>
-                  <TH k="date" label="Data"/>
-                  <TH k="desc" label="Descrizione"/>
-                  <TH k="cat" label="Categoria"/>
-                  <TH k="vehicleId" label="Veicolo"/>
-                  <TH k="amount" label="Importo" right/>
-                  <TH k="payMethod" label="Metodo"/>
-                  <th style={{padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-                    textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',minWidth:110}}>
+                <tr style={{ background: 'var(--surface2)' }}>
+                  <TH k="date" label="Data" />
+                  <TH k="desc" label="Descrizione" />
+                  <TH k="cat" label="Categoria" />
+                  <TH k="vehicleId" label="Veicolo" />
+                  <TH k="amount" label="Importo" right />
+                  <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
+                    Fonte
+                  </th>
+                  <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)', minWidth: 110 }}>
                     Riconciliazione
                   </th>
-                  <th style={{padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-                    textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',width:40}}>
-                    📎
-                  </th>
-                  <th style={{borderBottom:'1px solid var(--border)',width:36}}/>
-                  <th style={{borderBottom:'1px solid var(--border)',width:36}}/>
+                  <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
+                  <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map(e => {
-                  const veh = vehMap[e.vehicleId]
+                {rows.map(r => {
+                  const veh = vehMap[r.vehicleId]
+                  const catColor = CAT_COLORS[r.cat] || '#888'
+
                   return (
-                    <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-                      <td style={{padding:'7px 12px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                        {fmtDate(e.date)}
+                    <tr key={r._key} style={{ borderBottom: '1px solid var(--border)' }}>
+                      {/* Data */}
+                      <td style={{ padding: '7px 12px', fontSize: 12, color: 'var(--text3)',
+                        fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+                        {fmtDate(r.date)}
                       </td>
-                      <td style={{padding:'7px 12px',fontSize:13,fontWeight:600,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                        {e.desc || '—'}
+
+                      {/* Descrizione (descAI) */}
+                      <td style={{ padding: '7px 12px', fontSize: 13, fontWeight: 600,
+                        maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={r.desc}>
+                        {r.desc}
                       </td>
-                      <td style={{padding:'7px 12px'}}>
-                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:700,
-                          background:(CAT_COLORS[e.cat]||'#888')+'18',color:CAT_COLORS[e.cat]||'#888',
-                          border:`1px solid ${CAT_COLORS[e.cat]||'#888'}44`}}>
-                          {e.cat||'—'}
+
+                      {/* Categoria (L2) */}
+                      <td style={{ padding: '7px 12px' }}>
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                          background: catColor + '18', color: catColor, border: `1px solid ${catColor}44` }}>
+                          {r.cat}
                         </span>
                       </td>
-                      <td style={{padding:'7px 12px',fontSize:12}}>
-                        {veh ? <span style={{display:'flex',alignItems:'center',gap:4}}>{renderIcon(veh.icon,16)} {veh.name}</span> : <span style={{color:'var(--text3)'}}>—</span>}
-                      </td>
-                      <td style={{padding:'7px 12px',textAlign:'right',fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--red)'}}>
-                        € {fmtIT(e.amount||0,2)}
-                      </td>
-                      <td style={{padding:'7px 12px'}}>
-                        {e.payMethod ? (
-                          <span style={{fontSize:10,padding:'2px 7px',borderRadius:8,fontWeight:700,
-                            background: e.payMethod==='cash'?'var(--gold-l)': e.payMethod==='carta'?'var(--blue-l)':'var(--surface2)',
-                            color: e.payMethod==='cash'?'var(--gold)': e.payMethod==='carta'?'var(--blue)':'var(--text3)'}}>
-                            {e.payMethod==='cash'?'💵 Cash': e.payMethod==='carta'?'💳 Carta': e.payMethod==='bonifico'?'🏦 Bonifico':'• Altro'}
+
+                      {/* Veicolo — editable for auto rows */}
+                      <td style={{ padding: '7px 12px', fontSize: 12 }}>
+                        {r._type === 'auto' ? (
+                          <select value={r.vehicleId}
+                            onChange={e => setTxVehicle(r.txId, e.target.value)}
+                            style={{ padding: '3px 7px', border: '1px solid var(--border)', borderRadius: 6,
+                              fontSize: 11, background: 'var(--surface2)', color: r.vehicleId ? 'var(--text)' : 'var(--text3)',
+                              fontFamily: 'var(--font-sans)', cursor: 'pointer' }}>
+                            <option value="">— Assegna —</option>
+                            {vehicles.map(v => <option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+                          </select>
+                        ) : veh ? (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {renderIcon(veh.icon, 16)} {veh.name}
                           </span>
-                        ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>}
+                        ) : (
+                          <span style={{ color: 'var(--text3)' }}>—</span>
+                        )}
                       </td>
-                      <td style={{padding:'7px 12px'}}>
-                        {e.reconRef ? (
-                          <div style={{display:'flex',alignItems:'center',gap:4}}>
-                            <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,fontWeight:700,
-                              background:e.reconType==='cash'?'var(--gold-l)':'var(--blue-l)',
-                              color:e.reconType==='cash'?'var(--gold)':'var(--blue)'}}>
-                              {e.reconType==='cash'?'💵':'🏦'}
+
+                      {/* Importo */}
+                      <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700,
+                        fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
+                        € {fmtIT(r.amount, 2)}
+                      </td>
+
+                      {/* Fonte */}
+                      <td style={{ padding: '7px 12px' }}>
+                        {r._type === 'auto' ? (
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 8, fontWeight: 700,
+                            background: 'var(--blue-l)', color: 'var(--blue)' }}>
+                            🏦 Auto
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 8, fontWeight: 700,
+                            background: r.payMethod === 'cash' ? 'var(--gold-l)' : r.payMethod === 'carta' ? 'var(--blue-l)' : 'var(--surface2)',
+                            color: r.payMethod === 'cash' ? 'var(--gold)' : r.payMethod === 'carta' ? 'var(--blue)' : 'var(--text3)' }}>
+                            {r.payMethod === 'cash' ? '💵 Cash' : r.payMethod === 'carta' ? '💳 Carta' : r.payMethod === 'bonifico' ? '🏦 Bonifico' : '• Manuale'}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Riconciliazione (manual only) */}
+                      <td style={{ padding: '7px 12px' }}>
+                        {r._type === 'auto' ? (
+                          <span style={{ fontSize: 10, color: 'var(--text3)' }}>—</span>
+                        ) : r.reconRef ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 700,
+                              background: r.reconType === 'cash' ? 'var(--gold-l)' : 'var(--blue-l)',
+                              color: r.reconType === 'cash' ? 'var(--gold)' : 'var(--blue)' }}>
+                              {r.reconType === 'cash' ? '💵' : '🏦'}
                             </span>
-                            <span style={{fontSize:10,color:'var(--text3)',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-                              title={e.reconRef}>{e.reconRef.slice(0,30)}</span>
-                            <button className="btn btn-ghost" style={{padding:'1px 4px',fontSize:10,color:'var(--text3)'}}
-                              onClick={()=>updateVehExpense(e.id,{reconRef:null,reconType:null})}>×</button>
+                            <span style={{ fontSize: 10, color: 'var(--text3)', maxWidth: 80,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              title={r.reconRef}>{r.reconRef.slice(0, 28)}</span>
+                            <button className="btn btn-ghost" style={{ padding: '1px 4px', fontSize: 10, color: 'var(--text3)' }}
+                              onClick={() => updateVehExpense(r.id, { reconRef: null, reconType: null })}>×</button>
                           </div>
                         ) : (
                           <button className="btn btn-ghost"
-                            style={{fontSize:10,padding:'2px 7px',border:'1px solid var(--gold)',color:'var(--gold)',borderRadius:4}}
-                            onClick={()=>setReconExp(e)}>
-                            <Link size={9}/> Collega
+                            style={{ fontSize: 10, padding: '2px 7px', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 4 }}
+                            onClick={() => setReconExp({ ...r, payMethod: r.payMethod })}>
+                            <Link size={9} /> Collega
                           </button>
                         )}
                       </td>
-                      <td style={{padding:'5px 8px',textAlign:'center'}}>
-                        <button className="btn btn-ghost"
-                          style={{fontSize:11,padding:'2px 6px',color:(e.attachments?.length>0)?'var(--accent)':'var(--text3)',
-                            position:'relative'}}
-                          onClick={()=>setAttExp(e)}
-                          title={e.attachments?.length>0 ? `${e.attachments.length} allegato/i` : 'Aggiungi allegati'}>
-                          📎{e.attachments?.length>0 && <span style={{
-                            position:'absolute',top:-4,right:-4,fontSize:9,background:'var(--accent)',
-                            color:'#fff',borderRadius:8,padding:'0 4px',fontWeight:700,minWidth:14,textAlign:'center'}}>
-                            {e.attachments.length}
-                          </span>}
-                        </button>
+
+                      {/* Edit (manual only) */}
+                      <td style={{ padding: '5px 6px' }}>
+                        {r._type === 'manual' && (
+                          <button className="btn btn-ghost" style={{ color: 'var(--text3)', padding: '2px 5px' }}
+                            title="Modifica" onClick={() => setEditExp(r)}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                          </button>
+                        )}
                       </td>
-                      <td style={{padding:'5px 6px'}}>
-                        <button className="btn btn-ghost" style={{color:'var(--text3)',padding:'2px 5px'}}
-                          title="Modifica" onClick={()=>setEditExp(e)}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                          </svg>
-                        </button>
-                      </td>
-                      <td style={{padding:'5px 6px'}}>
-                        <button className="btn btn-ghost" style={{color:'var(--red)',padding:'2px 5px'}}
-                          onClick={()=>{if(confirm('Eliminare spesa?'))deleteVehExpense(e.id)}}>
-                          <Trash2 size={11}/>
-                        </button>
+
+                      {/* Delete (manual only) */}
+                      <td style={{ padding: '5px 6px' }}>
+                        {r._type === 'manual' && (
+                          <button className="btn btn-ghost" style={{ color: 'var(--red)', padding: '2px 5px' }}
+                            onClick={() => { if (confirm('Eliminare spesa?')) deleteVehExpense(r.id) }}>
+                            <Trash2 size={11} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )
                 })}
-                <tr style={{background:'var(--surface2)',fontWeight:700}}>
-                  <td colSpan={4} style={{padding:'8px 12px',fontSize:12}}>Totale ({rows.length})</td>
-                  <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)'}}>
-                    € {fmtIT(total,2)}
+                <tr style={{ background: 'var(--surface2)', fontWeight: 700 }}>
+                  <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12 }}>
+                    Totale ({rows.length})
                   </td>
-                  <td colSpan={4}/>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
+                    € {fmtIT(total, 2)}
+                  </td>
+                  <td colSpan={4} />
                 </tr>
               </tbody>
             </table>
@@ -917,21 +1094,21 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
           cashEntries={cashEntries}
           payMethod={reconExp.payMethod}
           allVehExpenses={allExpenses}
-          onSave={ref=>{updateVehExpense(reconExp.id,{reconRef:ref.label.slice(0,80),reconType:ref.type,reconPartial:ref.partial||false,reconUsedAmount:ref.usedAmount||null});setReconExp(null)}}
-          onClose={()=>setReconExp(null)}
+          onSave={ref => { updateVehExpense(reconExp.id, { reconRef: ref.label.slice(0, 80), reconType: ref.type, reconPartial: ref.partial || false, reconUsedAmount: ref.usedAmount || null }); setReconExp(null) }}
+          onClose={() => setReconExp(null)}
         />
       )}
 
       {attExp && (
         <AttachmentsModal
           expense={attExp}
-          onClose={()=>setAttExp(null)}
-          onDelete={async (att,i)=>{
-            if(!confirm(`Eliminare "${att.name}"?`)) return
-            if(att.path) await deleteExpenseFile(att.path)
-            const newAtts = (attExp.attachments||[]).filter((_,j)=>j!==i)
-            updateVehExpense(attExp.id, {attachments: newAtts})
-            setAttExp({...attExp, attachments: newAtts})
+          onClose={() => setAttExp(null)}
+          onDelete={async (att, i) => {
+            if (!confirm(`Eliminare "${att.name}"?`)) return
+            if (att.path) await deleteExpenseFile(att.path)
+            const newAtts = (attExp.attachments || []).filter((_, j) => j !== i)
+            updateVehExpense(attExp.id, { attachments: newAtts })
+            setAttExp({ ...attExp, attachments: newAtts })
           }}
         />
       )}
@@ -940,7 +1117,7 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
         <AddExpenseModal
           vehicles={vehicles}
           expense={editExp}
-          onClose={()=>setEditExp(null)}
+          onClose={() => setEditExp(null)}
         />
       )}
     </div>
