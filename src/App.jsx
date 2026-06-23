@@ -68,7 +68,6 @@ const NAV = [
   { id:'cecilia',         icon:'👧', label:'Cecilia',             group:'Famiglia' },
   { id:'nanny',           icon:'👩', label:'Nanny',              group:null },
   { id:'colf',            icon:'🧹', label:'Colf',               group:null },
-  { id:'altro',           icon:'📦', label:'Altro',              group:null },
   { id:'shopping',        icon:'🛍', label:'Shopping',           group:'Other' },
   { id:'salute',          icon:'💊', label:'Salute e Cura',      group:null },
   { id:'analytics',       icon:'🔬', label:'Analytics',           group:'Analytics' },

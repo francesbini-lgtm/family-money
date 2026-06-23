@@ -568,43 +568,37 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
 // ── Charts Section ────────────────────────────────────────
 const CHART_TOOLTIP = { fontSize:11, border:'1px solid var(--border)', borderRadius:7, background:'var(--surface)' }
 
-function VehicleCharts({ vehicles, allExpenses, transactions }) {
+// allRows = merged manual + auto rows from the table (same data)
+function VehicleCharts({ vehicles, allRows = [] }) {
   const last6 = getLast6Months()
-  const noData = allExpenses.length === 0
+  const noData = allRows.length === 0
   const empty = <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>Nessuna spesa registrata.</div>
 
   // ── Chart 1: Andamento Carburante (bar, 6 mesi) ──────────
-  // Bank transactions for carburante (Veicoli > Carburante)
-  const fuelBankTxs = (transactions||[]).filter(t =>
-    !t.excluded && t.amount < 0 && t.cat1 === 'Veicoli' && t.cat2 === 'Carburante'
-  )
-
   const fuelData = last6.map(ym => ({
     label: MONTHS_IT[parseInt(ym.slice(5))-1],
-    Carburante:
-      allExpenses.filter(e=>e.cat==='Carburante'&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0) +
-      fuelBankTxs.filter(t=>(t._effDate||t.date||'').startsWith(ym)).reduce((s,t)=>s+Math.abs(t.amount),0)
+    Carburante: allRows.filter(r => r.cat === 'Carburante' && (r.date||'').startsWith(ym)).reduce((s,r)=>s+r.amount,0)
   }))
   const fuelAvg = fuelData.reduce((s,d)=>s+(d.Carburante||0),0) / (fuelData.filter(d=>d.Carburante>0).length||1)
 
-  // ── Chart 2: Donut carburante per veicolo — N/A, invece facciamo distribuzione categorie (escluso carburante) ──
-  const nonFuelExp = allExpenses.filter(e=>e.cat!=='Carburante')
+  // ── Chart 2: Distribuzione categorie (escluso carburante) ──
+  const nonFuelRows = allRows.filter(r => r.cat !== 'Carburante')
   const catTotals = VEH_CATS.filter(c=>c!=='Carburante').map(c=>({
     name: c,
-    value: Math.round(nonFuelExp.filter(e=>e.cat===c).reduce((s,e)=>s+(e.amount||0),0))
+    value: Math.round(nonFuelRows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
   })).filter(x=>x.value>0)
 
   // ── Chart 3: Costo per veicolo donut (escluso carburante) ──
   const vehTotals = vehicles.map((v,i)=>({
     name: v.name,
-    value: Math.round(nonFuelExp.filter(e=>e.vehicleId===v.id).reduce((s,e)=>s+(e.amount||0),0)),
+    value: Math.round(nonFuelRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0)),
     color: VEH_COLORS[i%VEH_COLORS.length]
   })).filter(x=>x.value>0)
 
   // ── Chart 4: Trend costi totali — area chart ──────────────
   const trendData = last6.map(ym => ({
     label: MONTHS_IT[parseInt(ym.slice(5))-1],
-    Totale: Math.round(allExpenses.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0))
+    Totale: Math.round(allRows.filter(r=>(r.date||'').startsWith(ym)).reduce((s,r)=>s+r.amount,0))
   }))
 
   const DONUT_COLORS = ['#c8622a','#2a5c8a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#1abc9c']
@@ -1383,11 +1377,37 @@ function KPIStrip({ vehicles, allExpenses }) {
 
 // ── Main Page ─────────────────────────────────────────────
 export default function VeicoliRegistroPage() {
-  const { vehicles, vehExpenses, transactions, cashEntries, deleteVehicle } = useStore()
+  const { vehicles, vehExpenses, transactions, cashEntries, deleteVehicle, appPrefs } = useStore()
   const [showAddVeh,  setShowAddVeh]  = useState(false)
   const [editVeh,     setEditVeh]     = useState(null)
   const [showAddExp,  setShowAddExp]  = useState(false)
   const [preVehId,    setPreVehId]    = useState('')
+
+  // ── Merged rows (same logic as AllExpensesTable, unfiltered) for charts ──
+  const vehCatFiltersPage = useMemo(() => {
+    const saved = appPrefs?.vehCatFilters
+    if (saved) return saved
+    return (CATS['Veicoli']?.sub || []).map(s => ({ cat1: 'Veicoli', cat2: s }))
+  }, [appPrefs?.vehCatFilters])
+  const vehTxVehiclesPage = useMemo(() => appPrefs?.vehTxVehicles || {}, [appPrefs?.vehTxVehicles])
+
+  const mergedVehRows = useMemo(() => {
+    const manualRows = vehExpenses.map(e => ({
+      _type: 'manual', date: e.date || '',
+      cat: e.cat || '—', vehicleId: e.vehicleId || '',
+      amount: e.amount || 0, id: e.id,
+    }))
+    const autoRows = vehCatFiltersPage.length > 0
+      ? transactions
+          .filter(t => !t.excluded && t.amount < 0 && vehCatFiltersPage.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2))
+          .map(t => ({
+            _type: 'auto', date: t._effDate || t.date || '',
+            cat: t.cat2 || t.cat1 || '—', vehicleId: vehTxVehiclesPage[t.txId] || '',
+            amount: Math.abs(t.amount), txId: t.txId,
+          }))
+      : []
+    return [...manualRows, ...autoRows]
+  }, [vehExpenses, transactions, vehCatFiltersPage, vehTxVehiclesPage])
 
   function openAddExpense(vehicleId = '') {
     setPreVehId(vehicleId)
@@ -1423,7 +1443,7 @@ export default function VeicoliRegistroPage() {
       </div>
 
       {/* KPIs */}
-      {vehExpenses.length > 0 && <KPIStrip vehicles={vehicles} allExpenses={vehExpenses}/>}
+      {mergedVehRows.length > 0 && <KPIStrip vehicles={vehicles} allExpenses={vehExpenses}/>}
 
       {/* Vehicle chips */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:24}}>
@@ -1435,11 +1455,8 @@ export default function VeicoliRegistroPage() {
         ))}
       </div>
 
-      {/* Charts */}
-      {(() => {
-        const hasFuelData = vehExpenses.length > 0 || transactions.some(t => !t.excluded && t.amount < 0 && t.cat1 === 'Veicoli' && t.cat2 === 'Carburante')
-        return hasFuelData && <VehicleCharts vehicles={vehicles} allExpenses={vehExpenses} transactions={transactions}/>
-      })()}
+      {/* Charts — use mergedVehRows to match what's in the table below */}
+      {mergedVehRows.length > 0 && <VehicleCharts vehicles={vehicles} allRows={mergedVehRows}/>}
 
       {/* All expenses table */}
       <AllExpensesTable

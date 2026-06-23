@@ -12,6 +12,7 @@ import CategoryPage from '../components/CategoryPage'
 import VeicoliRegistroPage from './VeicoliRegistroPage'
 import WeekendVacanzePage from './WeekendVacanzePage'
 import UtenzePage from './UtenzePage'
+import AltroPage from './AltroPage'
 
 function TabPill({ label, active, onClick }) {
   return (
@@ -488,6 +489,7 @@ export default function UscitePage() {
         <TabPill label="🛒 Spesa"              active={activeTab==='spesa'}      onClick={()=>setActiveTab('spesa')}/>
         <TabPill label="✈️ Weekend e Vacanze"  active={activeTab==='weekend'}    onClick={()=>setActiveTab('weekend')}/>
         <TabPill label="⚡ Utenze"             active={activeTab==='utenze'}     onClick={()=>setActiveTab('utenze')}/>
+        <TabPill label="📦 Altro"             active={activeTab==='altro'}      onClick={()=>setActiveTab('altro')}/>
       </div>
 
       {/* Tab content */}
@@ -496,6 +498,7 @@ export default function UscitePage() {
       {activeTab === 'spesa'   && <CategoryPage cat1="Spesa e Alimentari" icon="🛒" title="Spesa e Alimentari" description="Spesa supermercato e pasti di lavoro"/>}
       {activeTab === 'weekend' && <WeekendVacanzePage/>}
       {activeTab === 'utenze'  && <UtenzePage/>}
+      {activeTab === 'altro'   && <AltroPage/>}
 
       {activeTab === 'overview' && <>
       {/* Header */}
