@@ -2047,9 +2047,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       if (t.excluded && !t._compensatedBy) return false
       return catFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
     })
-    // Includi spese manuali veicoli che corrispondono alle categorie configurate
+    // Includi TUTTE le spese manuali veicoli (nessun filtro per categoria: l'utente può compensare qualsiasi spesa cash)
     const vehRows = (vehExpenses || [])
-      .filter(e => e.amount > 0 && catFilters.some(f => f.cat1 === 'Veicoli' && f.cat2 === e.cat))
+      .filter(e => e.amount > 0)
       .map(e => ({
         txId: `veh-${e.id}`,
         _vehId: e.id,
@@ -2163,7 +2163,8 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     return s + (m?.status === 'matched' ? (m.compensatedAmt || 0) : 0)
   }, 0)
   const saldoNetto    = totCompensate - totSpese  // negative = still to pay
-  const pendingCount  = Object.values(satiMatches).filter(m => m.status === 'pending_approval').length
+  // Scope pending count to expenses actually in this pot's speseDaComp (not global)
+  const pendingCount  = speseDaComp.filter(t => satiMatches[t.txId]?.status === 'pending_approval').length
   const unmatchedIncomeCount = satiIncome.filter(t =>
     t.cat1 === 'Entrate' && t.cat2 === 'SATISPAY' &&
     !Object.values(satiMatches).some(m => m.status === 'matched' && m.incomeTxId === t.txId)
