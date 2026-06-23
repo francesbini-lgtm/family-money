@@ -2675,6 +2675,15 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
     satiPots.forEach(p => { junction[`${p.name}_f`] = last[p.name] })
     chartForecast.unshift(junction)
   }
+  // Nullify zero points where next month is also zero (hide leading/trailing zeros per fund)
+  satiPots.forEach(p => {
+    for (let i = 0; i < chartActual.length; i++) {
+      const val = chartActual[i][p.name] || 0
+      const nextVal = i + 1 < chartActual.length ? (chartActual[i+1][p.name] || 0) : 0
+      if (val === 0 && nextVal === 0) chartActual[i][p.name] = null
+    }
+  })
+
   const chartData = [...chartActual, ...chartForecast]
 
   // Last 12 months for bar chart (monthly deposits)
