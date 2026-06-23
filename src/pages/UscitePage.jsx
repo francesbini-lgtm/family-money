@@ -331,12 +331,7 @@ export default function UscitePage() {
   }
 
   function rowAvg(cat1, cat2 = null) {
-    const total = rowTotal(cat1, cat2)
-    const activeMonths = months.filter(m =>
-      cat2 ? (dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0) > 0
-            : (dataMap[cat1]?.[m.key]?.total || 0) > 0
-    ).length
-    return activeMonths > 0 ? total / activeMonths : 0
+    return rowTotal(cat1, cat2) / 12
   }
 
   function displayVal(cat1, cat2, ym) {
@@ -351,8 +346,8 @@ export default function UscitePage() {
   }
 
   function displayRowAvg(cat1, cat2 = null) {
-    const vals = months.map(m => displayVal(cat1, cat2, m.key)).filter(v => v > 0)
-    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
+    const total = months.reduce((s, m) => s + displayVal(cat1, cat2, m.key), 0)
+    return total / 12
   }
 
   const monthTotals = useMemo(() => {
@@ -398,17 +393,10 @@ export default function UscitePage() {
     return t
   }, [months, fixedCatList, dataMap])
 
-  const subTotalAvg = (() => {
-    const active = months.filter(m => subTotalByMonth[m.key] > 0).length
-    const total = Object.values(subTotalByMonth).reduce((s, v) => s + v, 0)
-    return active > 0 ? total / active : 0
-  })()
+  const subTotalAvg = Object.values(subTotalByMonth).reduce((s, v) => s + v, 0) / 12
 
   const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0)
-  const grandAvg = (() => {
-    const active = months.filter(m => monthTotals[m.key] > 0).length
-    return active > 0 ? grandTotal / active : 0
-  })()
+  const grandAvg = grandTotal / 12
 
   // ── KPI values ────────────────────────────────────────────────────────────
   const kpiTotale6m = grandTotal
@@ -589,7 +577,7 @@ export default function UscitePage() {
               <tr>
                 <th className="uscite-th-cat">Categoria (€)</th>
                 {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
-                <th className="uscite-th-total">Media/mese</th>
+                <th className="uscite-th-total">Media/mese *</th>
                 <th className="uscite-th-total">%</th>
               </tr>
             </thead>
@@ -737,6 +725,9 @@ export default function UscitePage() {
               )}
             </tbody>
           </table>
+          <div style={{padding:'6px 14px 10px',fontSize:11,color:'var(--text3)',borderTop:'1px solid var(--border)'}}>
+            * Media/mese = totale periodo ÷ 12
+          </div>
         </div>
 
         {/* Detail panel */}
