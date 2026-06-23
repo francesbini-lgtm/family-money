@@ -619,14 +619,10 @@ function AIInsights({ transactions, catList, monthly }) {
 
   const thisTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM))
   const prevTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM))
-  const thisInc      = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const thisSalaryInc= thisTxs.filter(t=>t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')).reduce((s,t)=>s+t.amount,0)
-  const thisOtherInc = Math.round(thisInc - thisSalaryInc)
-  const thisExp      = expTotal(transactions, thisYM)
-  const prevInc      = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const prevSalaryInc= prevTxs.filter(t=>t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')).reduce((s,t)=>s+t.amount,0)
-  const prevOtherInc = Math.round(prevInc - prevSalaryInc)
-  const prevExp      = expTotal(transactions, prevYM)
+  const thisInc  = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const thisExp  = expTotal(transactions, thisYM)
+  const prevInc  = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const prevExp  = expTotal(transactions, prevYM)
   const thisSav  = thisInc - thisExp
   const prevSav  = prevInc - prevExp
   const thisSavRate = thisInc > 0 ? Math.round(thisSav/thisInc*100) : null
@@ -849,6 +845,14 @@ export default function DashboardPage() {
 
   const now = new Date()
   const monthName = now.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
+
+  const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+  const prevYM = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
+  const thisSalaryInc = transactions.filter(t=>!t.excluded&&t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')&&(t._effDate||t.date||'').startsWith(thisYM)).reduce((s,t)=>s+t.amount,0)
+  const thisOtherInc  = Math.round(thisIncome - thisSalaryInc)
+  const prevSalaryInc = transactions.filter(t=>!t.excluded&&t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')&&(t._effDate||t.date||'').startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
+  const prevIncTotal  = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||t.date||'').startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
+  const prevOtherInc  = Math.round(prevIncTotal - prevSalaryInc)
 
   return (
     <div className="dash-page">
