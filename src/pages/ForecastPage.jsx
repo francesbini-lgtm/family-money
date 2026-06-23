@@ -11,6 +11,41 @@ import { fmtIT } from '../utils/format'
 // ── Helpers ───────────────────────────────────────────────
 const MON = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
+// Calcola totale spese per un mese, sostituendo _satiLinked con splits
+function expTotal(transactions, ym) {
+  let total = 0
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0) return
+    if (!(t._effDate || t.date || '').startsWith(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
+    } else {
+      total += Math.abs(t.amount)
+    }
+  })
+  return total
+}
+
+// Lista transazioni di spesa effettive per un set di mesi (satiLinked → splits virtuali)
+function expList(transactions, yms) {
+  const ymSet = new Set(yms)
+  const result = []
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0) return
+    const ym = (t._effDate || t.date || '').slice(0, 7)
+    if (!ymSet.has(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => {
+        if (sp.amount > 0) result.push({ ...t, _virtual: true, amount: -sp.amount,
+          cat1: sp.cat1 || 'Non Categorizzato', cat2: sp.cat2 || 'Altro' })
+      })
+    } else {
+      result.push(t)
+    }
+  })
+  return result
+}
+
 function fmtK(n) {
   const a = Math.abs(n)
   if (a >= 1_000_000) return `€ ${(n/1_000_000).toFixed(2)}M`
@@ -247,12 +282,7 @@ export default function ForecastPage() {
         )
 
     const totalIncome  = incomeTxs.reduce((s, t) => s + t.amount, 0)
-    const totalExpense = Math.abs(
-      transactions.filter(t =>
-        !t.excluded && t.amount < 0 &&
-        last6.some(ym => (t._effDate||(t._effDate||t.date||'')).startsWith(ym))
-      ).reduce((s, t) => s + t.amount, 0)
-    )
+    const totalExpense = last6.reduce((s, ym) => s + expTotal(transactions, ym), 0)
 
     // Monthly breakdown for diagnostics
     const incomeByMonth = last6.map(ym => ({
@@ -267,12 +297,7 @@ export default function ForecastPage() {
     const expenseByMonth = last6.map(ym => ({
       ym,
       label: ymToLabel(ym),
-      total: Math.abs(
-        transactions.filter(t =>
-          !t.excluded && t.amount < 0 &&
-          (t._effDate||(t._effDate||t.date||'')).startsWith(ym)
-        ).reduce((s,t) => s + t.amount, 0)
-      ),
+      total: expTotal(transactions, ym),
     }))
 
     // Historical saldo by year (for chart coherence when showing multi-year forecast)
@@ -294,10 +319,7 @@ export default function ForecastPage() {
 
     // Cat stats for What If panel — avg monthly per cat1 and cat2
     const catRaw = {}
-    transactions.filter(t =>
-      !t.excluded && t.amount < 0 &&
-      last6.some(ym => (t._effDate||(t._effDate||t.date||'')).startsWith(ym))
-    ).forEach(t => {
+    expList(transactions, last6).forEach(t => {
       const c1 = t.cat1 || 'Non Categorizzato'
       if (c1 === 'Entrate') return
       if (!catRaw[c1]) catRaw[c1] = { total: 0, subs: {}, color: (getMergedCats(customCats)[c1]?.color) || '#888' }
