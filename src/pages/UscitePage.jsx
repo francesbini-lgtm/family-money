@@ -331,7 +331,7 @@ export default function UscitePage() {
   }
 
   function rowAvg(cat1, cat2 = null) {
-    return rowTotal(cat1, cat2) / 12
+    return rowTotal(cat1, cat2) / 6
   }
 
   function displayVal(cat1, cat2, ym) {
@@ -347,7 +347,7 @@ export default function UscitePage() {
 
   function displayRowAvg(cat1, cat2 = null) {
     const total = months.reduce((s, m) => s + displayVal(cat1, cat2, m.key), 0)
-    return total / 12
+    return total / 6
   }
 
   const monthTotals = useMemo(() => {
@@ -393,7 +393,7 @@ export default function UscitePage() {
     return t
   }, [months, fixedCatList, dataMap])
 
-  const subTotalAvg = Object.values(subTotalByMonth).reduce((s, v) => s + v, 0) / 12
+  const subTotalAvg = Object.values(subTotalByMonth).reduce((s, v) => s + v, 0) / 6
 
   const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0)
   const grandAvg = grandTotal / 12
@@ -726,7 +726,7 @@ export default function UscitePage() {
             </tbody>
           </table>
           <div style={{padding:'6px 14px 10px',fontSize:11,color:'var(--text3)',borderTop:'1px solid var(--border)'}}>
-            * Media/mese = totale periodo ÷ 12
+            * Media/mese = totale periodo ÷ 6
           </div>
         </div>
 
