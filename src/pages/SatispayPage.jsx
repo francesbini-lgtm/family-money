@@ -2289,9 +2289,9 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
             return s + Math.max(0, orig - comp)
           }, 0)
           return { label, total: Math.round(total * 100) / 100 }
-        }).filter(b => b.total > 0)
+        })
 
-        if (bar12.length === 0) return null
+        if (bar12.every(b => b.total === 0)) return null
 
         return (
           <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
