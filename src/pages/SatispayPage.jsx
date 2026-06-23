@@ -331,14 +331,13 @@ function PotFormModal({ pot, onClose }) {
     name:    pot?.name    || '',
     icon:    pot?.icon    || '💰',
     startYM: pot?.startYM || nowYM(),
-    noCompensazione: pot?.noCompensazione || false,
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   function save() {
     if (!form.name) return
     if (pot) {
-      updateSatiPot(pot.id, { name: form.name, icon: form.icon, startYM: form.startYM, noCompensazione: form.noCompensazione })
+      updateSatiPot(pot.id, { name: form.name, icon: form.icon, startYM: form.startYM })
     } else {
       addSatiPot({
         ...form,
@@ -378,15 +377,6 @@ function PotFormModal({ pot, onClose }) {
           <input type="month" value={form.startYM} onChange={e=>set('startYM',e.target.value)}
             style={{width:'100%',padding:'8px 10px',borderRadius:8,border:'1px solid var(--border)',
               background:'var(--bg)',color:'var(--text)',fontSize:14,fontFamily:'var(--font-sans)'}}/>
-        </div>
-        <div style={{marginBottom:20,display:'flex',alignItems:'center',gap:10,padding:'10px 12px',
-          background:'var(--surface2)',borderRadius:8,cursor:'pointer'}}
-          onClick={()=>set('noCompensazione',!form.noCompensazione)}>
-          <input type="checkbox" checked={form.noCompensazione} readOnly style={{cursor:'pointer'}}/>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:'var(--text1)'}}>Fondo risparmio (no compensazione)</div>
-            <div style={{fontSize:11,color:'var(--text3)'}}>Nasconde le sezioni "Spese da compensare" e "Uscite Satispay"</div>
-          </div>
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
           <button className="btn btn-ghost" onClick={onClose}>Annulla</button>
@@ -3833,7 +3823,7 @@ export default function SatispayPage() {
       {currentPot && (
         <>
           <FundCard pot={currentPot} allPots={satiPots}/>
-          {currentPot.noCompensazione
+          {currentPot.name?.toLowerCase() === 'cecilia'
             ? <FundProjectionKPIs pot={currentPot}/>
             : <>
                 <SatiIncomeSection satiIncome={satiIncome} transactions={transactions} pot={currentPot}/>
