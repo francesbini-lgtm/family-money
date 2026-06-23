@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 // ── Hardcoded git log (updated with each push) ────────────
 const DEVLOG = [
+  { date:'2026-06-23', desc:'Satispay spese da compensare: stato colonna basato su residual reale — ✅ compensata (residual=0), ≈ parziale (residual>0), ⏳ da confermare solo se non già compensato' },
   { date:'2026-06-23', desc:'Satispay: chart spese non compensate mostra sempre tutti i 12 mesi (rimosso filter b.total>0)' },
   { date:'2026-06-23', desc:'Satispay: fix colonna Importo compensato — re-idrata compensatedAmt da income tx per match storici con valore 0; fallback lookup diretto in table render' },
   { date:'2026-06-23', desc:'Flag _nonRecurring per transazione: toggle ⚡ in modal Satispay, Uscite e pulsante in riga Transazioni; Satispay istogramma → barre verticali standard; Uscite: filtri spostati sopra tabella, riga "di cui non ricorrenti" italica sotto il totale, toggle "mostra non ricorrenti"' },

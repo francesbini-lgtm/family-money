@@ -2390,14 +2390,25 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                     )}
                   </td>
                   <td style={{padding:'9px 14px'}}>
-                    {status === 'matched' ? (
+                    {residual < 0.01 ? (
+                      /* Fully compensated — regardless of satiMatches status */
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
                         </span>
-                        <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
-                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>
+                        {(status === 'matched') && <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
+                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>}
+                      </div>
+                    ) : residual < origAmt ? (
+                      /* Partially compensated */
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
+                          background:'rgba(200,160,0,.12)',color:'var(--gold)',border:'1px solid var(--gold)55'}}>
+                          ≈ parziale
+                        </span>
+                        {(status === 'matched') && <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
+                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>}
                       </div>
                     ) : status === 'pending_approval' ? (
                       <button onClick={e => { e.stopPropagation(); setPendingModal(t.txId) }}
