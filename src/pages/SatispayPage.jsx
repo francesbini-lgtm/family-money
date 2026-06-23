@@ -2341,7 +2341,7 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr>
-              {['Data','Descrizione','Categoria','Stato','Importo originale','Importo compensato'].map(h => (
+              {['Data','Descrizione','Categoria','Stato','Importo originale','Residuo'].map(h => (
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                   textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                   borderBottom:'1px solid var(--border)',
@@ -2434,9 +2434,9 @@ function SatiIncomeSection({ satiIncome, transactions, pot }) {
                   <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
                     color: residual < 0.01 ? 'var(--green)' : residual < origAmt ? 'var(--gold,#b8942a)' : 'var(--text2)'}}>
                     {residual < 0.01
-                      ? <span style={{color:'var(--green)'}}>✅ €{fmtIT(origAmt,2)}</span>
+                      ? <span style={{color:'var(--green)'}}>✅ — €0</span>
                       : residual < origAmt
-                        ? <span><span style={{color:'var(--green)',fontSize:11}}>−€{fmtIT(compensatedAmt,2)} / </span>−€{fmtIT(residual,2)}</span>
+                        ? <span title={`Compensato: €${fmtIT(compensatedAmt,2)}`}>−€{fmtIT(residual,2)}</span>
                         : `−€ ${fmtIT(origAmt,2)}`}
                   </td>
                 </tr>
