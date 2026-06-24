@@ -1014,25 +1014,21 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                         </span>
                       </td>
 
-                      {/* Veicolo — editable for auto rows */}
+                      {/* Veicolo — select for both auto and manual */}
                       <td style={{ padding: '7px 12px', fontSize: 12 }}>
-                        {r._type === 'auto' ? (
-                          <select value={r.vehicleId}
-                            onChange={e => setTxVehicle(r.txId, e.target.value)}
-                            onClick={e => e.stopPropagation()}
-                            style={{ padding: '3px 7px', border: '1px solid var(--border)', borderRadius: 6,
-                              fontSize: 11, background: 'var(--surface2)', color: r.vehicleId ? 'var(--text)' : 'var(--text3)',
-                              fontFamily: 'var(--font-sans)', cursor: 'pointer' }}>
-                            <option value="">— Assegna —</option>
-                            {vehicles.map(v => <option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
-                          </select>
-                        ) : veh ? (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            {renderIcon(veh.icon, 16)} {veh.name}
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--text3)' }}>—</span>
-                        )}
+                        <select value={r.vehicleId || ''}
+                          onChange={e => {
+                            e.stopPropagation()
+                            if (r._type === 'auto') setTxVehicle(r.txId, e.target.value)
+                            else updateVehExpense(r.id, { vehicleId: e.target.value })
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          style={{ padding: '3px 7px', border: '1px solid var(--border)', borderRadius: 6,
+                            fontSize: 11, background: 'var(--surface2)', color: r.vehicleId ? 'var(--text)' : 'var(--text3)',
+                            fontFamily: 'var(--font-sans)', cursor: 'pointer' }}>
+                          <option value="">— Assegna —</option>
+                          {vehicles.map(v => <option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+                        </select>
                       </td>
 
                       {/* Importo */}
@@ -1437,7 +1433,8 @@ export default function VeicoliRegistroPage() {
   // Per-vehicle spending last 12 months
   const vehSpending12m = useMemo(() => {
     const now = new Date()
-    const cutoff = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    // Cutoff = 1st of same month last year (includes all 12 calendar months incl. current)
+    const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), 1)
     const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-01`
     const result = {}
     mergedVehRows.forEach(r => {
