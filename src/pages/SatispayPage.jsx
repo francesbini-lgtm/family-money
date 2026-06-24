@@ -449,7 +449,7 @@ function AbbinaModal({ pot, ym, currentLinked, onClose, onLink, allPots, onLinkO
     ? Math.abs(delta - selectedOtherPot.monthTotal) < 0.01
     : false
 
-  const deltaOk = Math.abs(delta) < 0.01 || (delta > 0 && deltaMatchesOther)
+  const deltaOk = delta >= -0.01  // ok se delta ≥ 0 (selezione sufficiente); negativo = hai selezionato troppo poco
 
   function toggleTx(txId) {
     setSelected(prev=>{
@@ -818,8 +818,8 @@ function FundProjectionKPIs({ pot }) {
   const voci = (pot.voci || []).map(migrateVoce)
   const allYMs = monthsRange(pot.startYM || nowYM())
 
-  // Saldo accumulato ad oggi
-  const totalAcc = allYMs.filter(m => m <= now).reduce((s, ym) => {
+  // Saldo accumulato ad oggi — solo mesi con abbinamento confermato
+  const totalAcc = allYMs.filter(m => m <= now && pot.data?.[m]?.linked && !pot.data?.[m]?.explicitUnlinked).reduce((s, ym) => {
     const cells = pot.data?.[ym]?.cells || {}
     return s + voci.reduce((vs, v) => vs + (parseFloat(cells[v.id]) || 0), 0)
   }, 0)
@@ -909,9 +909,9 @@ function FundCard({ pot, allPots }) {
       .filter(ym => ym >= (pot.startYM || nowYM()))
   , [viewYear, pot.startYM])
 
-  // Cumulated expected (sum of cells, any month up to now)
+  // Cumulated: solo mesi con abbinamento confermato (linked + non explicitUnlinked)
   const totalAcc = useMemo(()=>{
-    return allYMs.filter(m=>m<=now).reduce((s,ym)=>{
+    return allYMs.filter(m => m <= now && pot.data?.[m]?.linked && !pot.data?.[m]?.explicitUnlinked).reduce((s,ym)=>{
       const cells = pot.data?.[ym]?.cells || {}
       return s + voci.reduce((vs,v)=>vs+(parseFloat(cells[v.id])||0),0)
     }, 0)
