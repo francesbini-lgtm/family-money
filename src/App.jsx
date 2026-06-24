@@ -170,6 +170,16 @@ function AppShell() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [menuOpen, setMenu] = useState(false)
 
+  // Auto-refresh after 5 minutes of inactivity
+  useEffect(() => {
+    const TIMEOUT = 5 * 60 * 1000
+    let timer = setTimeout(() => window.location.reload(), TIMEOUT)
+    const reset = () => { clearTimeout(timer); timer = setTimeout(() => window.location.reload(), TIMEOUT) }
+    const events = ['mousemove','mousedown','keydown','touchstart','scroll','click']
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }))
+    return () => { clearTimeout(timer); events.forEach(e => window.removeEventListener(e, reset)) }
+  }, [])
+
   useEffect(() => {
     if (householdId && user && !isDemoMode) {
       setHouseholdId(householdId)
