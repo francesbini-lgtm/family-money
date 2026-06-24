@@ -13,7 +13,7 @@ import {
 function expTotal(transactions, ym) {
   let total = 0
   transactions.forEach(t => {
-    if (t.excluded || t.amount >= 0) return
+    if (t.excluded || t.amount >= 0 || t.cat1 === 'Entrate') return
     if (!(t._effDate || t.date || '').startsWith(ym)) return
     if (t._satiLinked && t.splits?.length > 0) {
       t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
