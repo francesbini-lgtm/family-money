@@ -1095,7 +1095,7 @@ function FundCard({ pot, allPots }) {
         linked: txIds,
         linkedAmt: amt,
         // Mark explicitly unlinked so auto-detection is suppressed
-        explicitUnlinked: !txIds ? true : undefined
+        explicitUnlinked: !txIds ? true : false
       }
     }})
 
