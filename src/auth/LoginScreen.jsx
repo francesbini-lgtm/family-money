@@ -9,7 +9,7 @@ export const APP_VERSION = '3.5.1'
 export const BUILD_TIME  = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '—'
 
 // ── Digit input (6 boxes) ─────────────────────────────────────────────────────
-function CodeInput({ onComplete, disabled, error, label, autoFocus: af = false }) {
+function CodeInput({ onComplete, onSubmit, disabled, error, label, autoFocus: af = false }) {
   const [digits, setDigits] = useState(['','','','','',''])
   const refs = [useRef(),useRef(),useRef(),useRef(),useRef(),useRef()]
 
@@ -29,6 +29,7 @@ function CodeInput({ onComplete, disabled, error, label, autoFocus: af = false }
       refs[i-1].current?.focus()
       const d = [...digits]; d[i-1] = ''; setDigits(d)
     }
+    if (e.key === 'Enter') onSubmit?.()
   }
 
   return (
@@ -159,6 +160,7 @@ function VerifyStep() {
       <CodeInput
         label="Codice accesso"
         onComplete={val => setPin(val)}
+        onSubmit={handleSubmit}
         disabled={loading}
         error={error && !needTotp ? error : null}
         autoFocus
@@ -169,6 +171,7 @@ function VerifyStep() {
           <CodeInput
             label="Codice Authenticator"
             onComplete={val => setTotp(val)}
+            onSubmit={handleSubmit}
             disabled={loading}
             error={null}
           />
