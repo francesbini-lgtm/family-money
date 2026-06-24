@@ -932,6 +932,9 @@ function FundCard({ pot, allPots }) {
       const exact = linkedAmt!=null ? Math.abs(linkedAmt-mt)<0.01 : true
       return { linked, exact }
     }
+    // If user explicitly unlinked this month, skip auto-detection
+    if (pot.data?.[ym]?.explicitUnlinked) return null
+
     const mt = monthTotal(ym)
     if (mt <= 0) return null
 
@@ -984,6 +987,7 @@ function FundCard({ pot, allPots }) {
     // Use allYMs (all months from pot start to today) so past years are included
     allYMs.filter(ym => ym <= now).forEach(ym => {
       if (pot.data?.[ym]?.linked) return // already linked
+      if (pot.data?.[ym]?.explicitUnlinked) return // user explicitly removed link
       const mt = monthTotal(ym)
       if (mt <= 0) return
 
@@ -1085,7 +1089,13 @@ function FundCard({ pot, allPots }) {
     const prev = pot.data?.[ym] || {}
     updateSatiPot(pot.id, { data:{
       ...(pot.data||{}),
-      [ym]: { ...prev, linked: txIds, linkedAmt: amt }
+      [ym]: {
+        ...prev,
+        linked: txIds,
+        linkedAmt: amt,
+        // Mark explicitly unlinked so auto-detection is suppressed
+        explicitUnlinked: !txIds ? true : undefined
+      }
     }})
 
     // Auto-generate category splits on linked transactions
