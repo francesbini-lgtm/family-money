@@ -925,6 +925,9 @@ function FundCard({ pot, allPots }) {
 
   // Reconciliation status per month
   function reconcStatus(ym) {
+    // If user explicitly unlinked this month, NEVER auto-detect (check this FIRST)
+    if (pot.data?.[ym]?.explicitUnlinked) return null
+
     const linked = pot.data?.[ym]?.linked
     if (linked) {
       const linkedAmt = pot.data?.[ym]?.linkedAmt
@@ -932,8 +935,6 @@ function FundCard({ pot, allPots }) {
       const exact = linkedAmt!=null ? Math.abs(linkedAmt-mt)<0.01 : true
       return { linked, exact }
     }
-    // If user explicitly unlinked this month, skip auto-detection
-    if (pot.data?.[ym]?.explicitUnlinked) return null
 
     const mt = monthTotal(ym)
     if (mt <= 0) return null
