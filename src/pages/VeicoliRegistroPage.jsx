@@ -111,7 +111,7 @@ function renderIcon(icon, size = 36) {
   if (icon && icon.startsWith('svg:')) return SVG_ICONS[icon] || '🚗'
   return <span style={{fontSize: size}}>{icon || '🚗'}</span>
 }
-const VEH_CATS  = ['Carburante','Assicurazione','Tagliando','Revisione','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Extra','Altro']
+const VEH_CATS  = ['Carburante','Assicurazione','Tagliando','Revisione','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Ormeggio','Extra','Altro']
 const VEH_COLORS = ['#2a5c8a','#c8622a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#f39c12','#1abc9c','#8e44ad','#2980b9','#27ae60']
 const CAT_COLORS = {
   Carburante:'#2a5c8a',Assicurazione:'#c8622a',Tagliando:'#2a7a4a',Revisione:'#b8942a',

@@ -1,7 +1,7 @@
 export const CATS = {
   'Entrate':           { color: '#2a7a4a', sub: ['Fra','Sofi','Prestiti','Altro'] },
   'Casa':              { color: '#b8942a', sub: ['Affitto','Spese Condominio','Utenze','Tari','Garage','Assicurazione','Acquisti','Colf','Altro'] },
-  'Veicoli':           { color: '#2a5c8a', sub: ['Assicurazione','Carburante','Revisione','Tagliando','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Extra','Altro'] },
+  'Veicoli':           { color: '#2a5c8a', sub: ['Assicurazione','Carburante','Revisione','Tagliando','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Ormeggio','Extra','Altro'] },
   'Spesa e Alimentari':{ color: '#c8622a', sub: ['Spesa','Pranzo/Cene Lavoro','Altro'] },
   'Tempo Libero':      { color: '#9a4ab8', sub: ['Sport','Cene / Pranzi','Aperitivi','Altro'] },
   'Weekend e Vacanze': { color: '#2a9aa0', sub: ['Weekend','Vacanze','Altro'] },
