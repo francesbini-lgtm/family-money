@@ -2696,7 +2696,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       {pendingModal && (() => {
         const exp = speseDaComp.find(t => t.txId === pendingModal)
         const m   = exp && satiMatches[exp.txId]
-        const inc = m?.pendingIncomeTxId ? satiIncome.find(t => t.txId === m.pendingIncomeTxId) : null
+        // Search in satiIncome first; fallback to all transactions in case the tx was excluded
+        const inc = m?.pendingIncomeTxId
+          ? (satiIncome.find(t => t.txId === m.pendingIncomeTxId) || transactions.find(t => t.txId === m.pendingIncomeTxId))
+          : null
         if (!exp || !inc) return null
         const allPending = speseDaComp.filter(t => satiMatches[t.txId]?.status === 'pending_approval')
         const currentIdx = allPending.findIndex(t => t.txId === pendingModal) + 1
