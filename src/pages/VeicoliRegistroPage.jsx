@@ -723,6 +723,19 @@ function VehicleCharts({ vehicles, allRows = [] }) {
 
   const DONUT_COLORS = ['#c8622a','#2a5c8a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#1abc9c']
 
+  const RADIAN = Math.PI / 180
+  const renderPieLabel = ({ cx, cy, midAngle, outerRadius, value, name }) => {
+    const radius = outerRadius + 22
+    const x = cx + radius * Math.cos(-midAngle * RADIAN)
+    const y = cy + radius * Math.sin(-midAngle * RADIAN)
+    return (
+      <text x={x} y={y} fill="var(--text2)" textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central" fontSize={9} fontFamily="var(--font-mono)">
+        €{fmtIT(Math.round(value),0)}
+      </text>
+    )
+  }
+
   const ChartCard = ({title, children}) => (
     <div className="card" style={{padding:'16px 18px'}}>
       <div style={{fontSize:13,fontWeight:700,marginBottom:10,color:'var(--text)'}}>{title}</div>
@@ -793,10 +806,11 @@ function VehicleCharts({ vehicles, allRows = [] }) {
         {vehTotals.length === 0
           ? empty
           : <>
-            <ResponsiveContainer width="100%" height={160}>
+            <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie data={vehTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
-                  dataKey="value" paddingAngle={2}>
+                  dataKey="value" paddingAngle={2}
+                  label={renderPieLabel} labelLine={false}>
                   {vehTotals.map((v,i)=><Cell key={i} fill={v.color}/>)}
                 </Pie>
                 <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
@@ -812,10 +826,11 @@ function VehicleCharts({ vehicles, allRows = [] }) {
         {catTotals.length === 0
           ? empty
           : <>
-            <ResponsiveContainer width="100%" height={160}>
+            <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
-                  dataKey="value" paddingAngle={2}>
+                  dataKey="value" paddingAngle={2}
+                  label={renderPieLabel} labelLine={false}>
                   {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
                 </Pie>
                 <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
