@@ -513,7 +513,91 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
 }
 
 // ── Vehicle Compact Card ──────────────────────────────────
+// ── Vehicle Trips Modal ───────────────────────────────────
+function TripsModal({ vehicle, onClose }) {
+  const { appPrefs, setAppPref } = useStore()
+  const [newDate, setNewDate] = useState(new Date().toISOString().slice(0,10))
+
+  const allTrips = useMemo(() => {
+    const raw = appPrefs?.vehicleTrips?.[vehicle.id] || []
+    return [...raw].sort((a,b) => b.date.localeCompare(a.date))
+  }, [appPrefs?.vehicleTrips, vehicle.id])
+
+  const thisYear = new Date().getFullYear().toString()
+
+  function addTrip() {
+    if (!newDate) return
+    const existing = appPrefs?.vehicleTrips?.[vehicle.id] || []
+    const trip = { id: uid(), date: newDate }
+    setAppPref('vehicleTrips', { ...(appPrefs?.vehicleTrips || {}), [vehicle.id]: [...existing, trip] })
+    setNewDate(new Date().toISOString().slice(0,10))
+  }
+
+  function deleteTrip(id) {
+    const existing = appPrefs?.vehicleTrips?.[vehicle.id] || []
+    setAppPref('vehicleTrips', { ...(appPrefs?.vehicleTrips || {}), [vehicle.id]: existing.filter(t => t.id !== id) })
+  }
+
+  const tripsThisYear = allTrips.filter(t => t.date.startsWith(thisYear))
+
+  return (
+    <Modal title={`🗓 Uscite ${vehicle.name}`} onClose={onClose} width={420}>
+      <div style={{marginBottom:16,padding:'10px 14px',background:'var(--surface2)',borderRadius:8,display:'flex',alignItems:'center',gap:12}}>
+        <span style={{fontSize:28}}>{renderIcon(vehicle.icon, 28)}</span>
+        <div>
+          <div style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{tripsThisYear.length}</div>
+          <div style={{fontSize:11,color:'var(--text3)'}}>uscite nel {thisYear}</div>
+        </div>
+        {allTrips.length > tripsThisYear.length && (
+          <div style={{marginLeft:'auto',textAlign:'right'}}>
+            <div style={{fontSize:16,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>{allTrips.length}</div>
+            <div style={{fontSize:11,color:'var(--text3)'}}>totale storico</div>
+          </div>
+        )}
+      </div>
+
+      {/* Add new trip */}
+      <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
+        <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)}
+          style={{flex:1,padding:'7px 10px',border:'1px solid var(--border)',borderRadius:7,
+            fontSize:13,background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-sans)'}}/>
+        <button className="btn btn-primary" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={addTrip}>
+          + Aggiungi uscita
+        </button>
+      </div>
+
+      {/* Trip list */}
+      {allTrips.length === 0
+        ? <div style={{textAlign:'center',padding:'20px 0',fontSize:13,color:'var(--text3)'}}>Nessuna uscita registrata.</div>
+        : <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:320,overflowY:'auto'}}>
+            {allTrips.map((t,i) => (
+              <div key={t.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                padding:'7px 12px',borderRadius:7,background:'var(--surface2)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',fontFamily:'var(--font-mono)',minWidth:18,textAlign:'right'}}>{allTrips.length - i}</span>
+                  <span style={{fontSize:13,fontFamily:'var(--font-mono)'}}>{fmtDate(t.date)}</span>
+                  {t.date.startsWith(thisYear) && (
+                    <span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:'var(--accent-l,var(--blue-l))',color:'var(--accent)',fontWeight:700}}>{thisYear}</span>
+                  )}
+                </div>
+                <button onClick={()=>deleteTrip(t.id)} style={{background:'none',border:'none',cursor:'pointer',
+                  color:'var(--text3)',opacity:0.5,padding:2,lineHeight:1}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=0.5}>
+                  <Trash2 size={12}/>
+                </button>
+              </div>
+            ))}
+          </div>
+      }
+    </Modal>
+  )
+}
+
 function VehicleChip({ vehicle, onEdit, onDelete }) {
+  const { appPrefs } = useStore()
+  const [showTrips, setShowTrips] = useState(false)
+
   const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
     .filter(([k]) => vehicle[k])
     .map(([k,icon]) => {
@@ -523,7 +607,11 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
       return { key:k, icon, color, bg, label: days < 0 ? '⚠ scaduta' : days < 90 ? `${days}gg` : '✓', date: vehicle[k] }
     })
 
+  const thisYear = new Date().getFullYear().toString()
+  const tripsThisYear = (appPrefs?.vehicleTrips?.[vehicle.id] || []).filter(t => t.date.startsWith(thisYear)).length
+
   return (
+    <>
     <div className="card" style={{padding:'14px 16px',display:'flex',alignItems:'flex-start',gap:14,position:'relative'}}>
       {/* Edit pencil — top right corner */}
       <button onClick={onEdit} title="Modifica" style={{
@@ -552,7 +640,7 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
           {[vehicle.targa, vehicle.marca, vehicle.anno].filter(Boolean).join(' · ')}
         </div>
         {scadenze.length > 0 && (
-          <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+          <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:6}}>
             {scadenze.map(s=>(
               <span key={s.key} style={{fontSize:10,padding:'2px 7px',borderRadius:5,background:s.bg,color:s.color,fontWeight:700}}>
                 {s.icon} {s.key.slice(0,4)}: {s.date?.slice(5).replace('-','/')} {s.label}
@@ -560,8 +648,20 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
             ))}
           </div>
         )}
+        {/* Uscite counter */}
+        <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
+          style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
+            border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
+            cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
+            transition:'background .12s'}}
+          onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
+          onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
+          🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
+        </button>
       </div>
     </div>
+    {showTrips && <TripsModal vehicle={vehicle} onClose={()=>setShowTrips(false)}/>}
+    </>
   )
 }
 
