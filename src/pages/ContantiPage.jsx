@@ -475,14 +475,10 @@ export default function ContantiPage() {
   const [showAdd, setShowAdd] = useState(false)
   const [linksTx, setLinksTx] = useState(null)
   const [atmOffset, setAtmOffset] = useState(0)
-  const [showAddUtil, setShowAddUtil] = useState(false)
-  const [utilForm, setUtilForm] = useState({ date: new Date().toISOString().slice(0,10), label: '', cat: 'Veicoli', amount: '', atmTxId: '' })
   const [form, setForm] = useState({
-    date:   new Date().toISOString().slice(0,10),
-    cat1:   'Spesa e Alimentari',
-    cat2:   '',
-    amount: '',
-    note:   '',
+    date: new Date().toISOString().slice(0,10),
+    cat1: 'Spesa e Alimentari', cat2: '',
+    amount: '', note: '', atmTxId: '',
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -519,87 +515,60 @@ export default function ContantiPage() {
     }).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   , [atmTxsAll, atmWindowStart, atmWindowEnd])
 
-  // ── Utilizzo Contanti rows ────────────────────────────────
-  const nannyName  = appPrefs?.nannyName  || 'Nanny'
-  const colfName   = appPrefs?.colfName   || 'Colf'
-  const nannyRecon = appPrefs?.nannyRecon || {}
-  const colfRecon  = appPrefs?.colfRecon  || {}
+  // ── Utilizzo Contanti — unified rows ─────────────────────
+  const nannyName   = appPrefs?.nannyName  || 'Nanny'
+  const colfName    = appPrefs?.colfName   || 'Colf'
+  const nannyRecon  = appPrefs?.nannyRecon || {}
+  const colfRecon   = appPrefs?.colfRecon  || {}
   const satiMatches = appPrefs?.satiMatches || {}
-  const cashUtilizzo = appPrefs?.cashUtilizzo || []
 
   const utilizzoRows = useMemo(() => {
     const rows = []
+    const fmtAtmDate = tx => tx ? (tx._effDate || tx.date || '').slice(0,10) : null
 
-    // Nanny auto-rows (solo voci con recon)
+    // Nanny — ALL timesheet entries
     ;(nannyTS || []).forEach(entry => {
-      const recon = nannyRecon[entry.id]
-      if (!recon) return
-      const atmTx = atmTxsAll.find(t => t.txId === recon.txId)
-      const satiM = recon.txId ? satiMatches[recon.txId] : null
+      const recon  = nannyRecon[entry.id]
+      const atmTx  = recon?.txId ? atmTxsAll.find(t => t.txId === recon.txId) : null
+      const satiM  = recon?.txId ? satiMatches[recon.txId] : null
       rows.push({
-        _id:     'nanny-' + entry.id,
-        tipo:    'nanny',
-        label:   nannyName,
-        date:    entry.mese + '-01',
-        amount:  recon.nannyAmt,
-        atmTxId: recon.txId || null,
-        atmDate: atmTx ? (atmTx._effDate || atmTx.date || '').slice(0,10) : null,
-        satiMatched: satiM?.status === 'matched',
-        readonly: true,
+        _id: 'nanny-' + entry.id, tipo: 'nanny', label: nannyName,
+        date: (entry.mese || '') + '-01', amount: recon ? recon.nannyAmt : entry.totale,
+        atmTxId: recon?.txId || null, atmDate: fmtAtmDate(atmTx),
+        satiMatched: satiM?.status === 'matched', readonly: true,
       })
     })
 
-    // Colf auto-rows
+    // Colf — ALL timesheet entries
     ;(colfTS || []).forEach(entry => {
-      const recon = colfRecon[entry.id]
-      if (!recon) return
-      const atmTx = atmTxsAll.find(t => t.txId === recon.txId)
-      const satiM = recon.txId ? satiMatches[recon.txId] : null
+      const recon  = colfRecon[entry.id]
+      const atmTx  = recon?.txId ? atmTxsAll.find(t => t.txId === recon.txId) : null
+      const satiM  = recon?.txId ? satiMatches[recon.txId] : null
       rows.push({
-        _id:     'colf-' + entry.id,
-        tipo:    'colf',
-        label:   colfName,
-        date:    entry.mese + '-01',
-        amount:  recon.nannyAmt,
-        atmTxId: recon.txId || null,
-        atmDate: atmTx ? (atmTx._effDate || atmTx.date || '').slice(0,10) : null,
-        satiMatched: satiM?.status === 'matched',
-        readonly: true,
+        _id: 'colf-' + entry.id, tipo: 'colf', label: colfName,
+        date: (entry.mese || '') + '-01', amount: recon ? recon.nannyAmt : entry.totale,
+        atmTxId: recon?.txId || null, atmDate: fmtAtmDate(atmTx),
+        satiMatched: satiM?.status === 'matched', readonly: true,
       })
     })
 
-    // Manual rows from appPrefs.cashUtilizzo
-    ;(cashUtilizzo || []).forEach(r => {
-      const atmTx = r.atmTxId ? atmTxsAll.find(t => t.txId === r.atmTxId) : null
-      const satiM = r.atmTxId ? satiMatches[r.atmTxId] : null
+    // Manual cashEntries (Spese in Contanti → merged here)
+    ;(cashEntries || []).forEach(e => {
+      const atmTx = e.atmTxId ? atmTxsAll.find(t => t.txId === e.atmTxId) : null
+      const satiM = e.atmTxId ? satiMatches[e.atmTxId] : null
+      const l1 = e.cat1 || e.cat || '—'; const l2 = e.cat2 || ''
       rows.push({
-        _id:     r.id,
-        tipo:    'manual',
-        label:   r.label || r.cat || '—',
-        cat:     r.cat,
-        date:    r.date,
-        amount:  r.amount,
-        atmTxId: r.atmTxId || null,
-        atmDate: atmTx ? (atmTx._effDate || atmTx.date || '').slice(0,10) : null,
-        satiMatched: satiM?.status === 'matched',
-        readonly: false,
+        _id: e.id, tipo: 'manual',
+        label: e.note || (l1 + (l2 ? ` › ${l2}` : '')),
+        cat1: l1, cat2: l2,
+        date: e.date, amount: e.amount,
+        atmTxId: e.atmTxId || null, atmDate: fmtAtmDate(atmTx),
+        satiMatched: satiM?.status === 'matched', readonly: false,
       })
     })
 
     return rows.sort((a,b) => (b.date||'').localeCompare(a.date||''))
-  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashUtilizzo, atmTxsAll, satiMatches, nannyName, colfName])
-
-  function addUtilizzo() {
-    if (!utilForm.amount || !utilForm.label) return
-    const item = { id: Date.now().toString(), ...utilForm, amount: parseFloat(utilForm.amount) }
-    setAppPref('cashUtilizzo', [...cashUtilizzo, item])
-    setShowAddUtil(false)
-    setUtilForm({ date: new Date().toISOString().slice(0,10), label: '', cat: 'Veicoli', amount: '', atmTxId: '' })
-  }
-
-  function deleteUtilizzo(id) {
-    setAppPref('cashUtilizzo', cashUtilizzo.filter(r => r.id !== id))
-  }
+  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashEntries, atmTxsAll, satiMatches, nannyName, colfName])
 
   const totalWithdrawn = Math.abs(atmTxsAll.reduce((s,t)=>s+t.amount,0))
   const totalSpent     = cashEntries.reduce((s,e)=>s+(e.amount||0),0)
@@ -639,7 +608,7 @@ export default function ContantiPage() {
     if (!form.amount||!form.cat1) return
     addCashEntry({...form, amount:parseFloat(form.amount)})
     setShowAdd(false)
-    setForm({date:new Date().toISOString().slice(0,10),cat1:'Spesa e Alimentari',cat2:'',amount:'',note:''})
+    setForm({date:new Date().toISOString().slice(0,10),cat1:'Spesa e Alimentari',cat2:'',amount:'',note:'',atmTxId:''})
   }
 
   return (
@@ -769,7 +738,7 @@ export default function ContantiPage() {
       {/* ── Utilizzo Contanti ── */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
         <div style={{fontSize:15,fontWeight:700}}>📋 Utilizzo Contanti</div>
-        <button className="btn btn-primary" onClick={()=>setShowAddUtil(true)} style={{fontSize:12,padding:'5px 14px'}}>
+        <button className="btn btn-primary" onClick={()=>setShowAdd(true)} style={{fontSize:12,padding:'5px 14px'}}>
           <Plus size={13}/> Aggiungi
         </button>
       </div>
@@ -831,7 +800,7 @@ export default function ContantiPage() {
                       </td>
                       <td style={{padding:'6px 10px',textAlign:'center'}}>
                         {!row.readonly && (
-                          <button className="btn btn-ghost" onClick={()=>deleteUtilizzo(row._id)}>
+                          <button className="btn btn-ghost" onClick={()=>deleteCashEntry(row._id)}>
                             <Trash2 size={12}/>
                           </button>
                         )}
@@ -910,92 +879,12 @@ export default function ContantiPage() {
         </>
       )}
 
-      {/* Manual entries */}
-      <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>📝 Spese in Contanti</div>
-      {cashEntries.length === 0 ? (
-        <div className="cash-empty">
-          <Wallet size={32} color="var(--text3)" style={{marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Nessuna spesa registrata</div>
-          <div style={{fontSize:13,color:'var(--text3)',marginBottom:16}}>Registra le spese in contanti per sapere dove vanno i prelievi ATM.</div>
-          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={14}/> Aggiungi Spesa</button>
-        </div>
-      ) : (
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <table style={{width:'100%',borderCollapse:'collapse'}}>
-            <thead><tr>
-              {['Data','Categoria','Nota','Importo',''].map(h=>(
-                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {[...cashEntries].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')).map(e=>{
-                const l1 = e.cat1||e.cat||'—'
-                const l2 = e.cat2||''
-                const color = CATS[l1]?.color||'#888'
-                return (
-                  <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(e.date||'').slice(5).replace('-','/')}</td>
-                    <td style={{padding:'9px 14px'}}>
-                      <span style={{display:'inline-flex',alignItems:'center',gap:5,padding:'2px 9px',borderRadius:12,fontSize:11,fontWeight:700,background:color+'18',color,border:`1px solid ${color}33`}}>
-                        <span style={{width:6,height:6,borderRadius:'50%',background:color}}/>
-                        {l1}{l2?` › ${l2}`:''}
-                      </span>
-                    </td>
-                    <td style={{padding:'9px 14px',fontSize:13,color:'var(--text2)'}}>{e.note||'—'}</td>
-                    <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--red)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(e.amount||0, 2)}</td>
-                    <td style={{padding:'6px 10px'}}><button className="btn btn-ghost" onClick={()=>deleteCashEntry(e.id)}><Trash2 size={12}/></button></td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Utilizzo modal */}
-      {showAddUtil && (
-        <Modal title="+ Utilizzo Contanti" onClose={()=>setShowAddUtil(false)}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
-            <FormRow label="Data">
-              <Input type="date" value={utilForm.date} onChange={e=>setUtilForm(f=>({...f,date:e.target.value}))}/>
-            </FormRow>
-            <FormRow label="Importo (€)">
-              <Input type="number" value={utilForm.amount} onChange={e=>setUtilForm(f=>({...f,amount:e.target.value}))} placeholder="0" autoFocus/>
-            </FormRow>
-          </div>
-          <FormRow label="Categoria">
-            <select value={utilForm.cat} onChange={e=>setUtilForm(f=>({...f,cat:e.target.value}))}
-              style={{width:'100%',padding:'9px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
-              {['Veicoli','Spesa e Alimentari','Casa','Colf','Nanny','Tempo Libero','Shopping','Salute e Cura','Altro'].map(c=><option key={c}>{c}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Descrizione / Nota" style={{marginTop:12}}>
-            <Input value={utilForm.label} onChange={e=>setUtilForm(f=>({...f,label:e.target.value}))} placeholder="Es. Tagliando auto, Farmacia…"/>
-          </FormRow>
-          <FormRow label="Abbina a Prelievo ATM (opzionale)" style={{marginTop:12}}>
-            <select value={utilForm.atmTxId} onChange={e=>setUtilForm(f=>({...f,atmTxId:e.target.value}))}
-              style={{width:'100%',padding:'9px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
-              <option value="">— Nessuno —</option>
-              {atmTxsAll.slice(0,30).map(t=>{
-                const d = (t._effDate||t.date||'').slice(0,10)
-                const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
-                return <option key={t.txId} value={t.txId}>{disp} — € {fmtIT(Math.abs(t.amount),2)}</option>
-              })}
-            </select>
-          </FormRow>
-          <ModalFooter>
-            <button className="btn btn-primary" onClick={addUtilizzo} disabled={!utilForm.amount||!utilForm.label}>Salva</button>
-            <button className="btn btn-secondary" onClick={()=>setShowAddUtil(false)}>Annulla</button>
-          </ModalFooter>
-        </Modal>
-      )}
-
       {/* Links modal */}
       {linksTx && <LinksModal tx={linksTx} onClose={()=>setLinksTx(null)}/>}
 
       {/* Add modal */}
       {showAdd && (
-        <Modal title="+ Spesa in Contanti" onClose={()=>setShowAdd(false)}>
+        <Modal title="+ Aggiungi Utilizzo Contanti" onClose={()=>setShowAdd(false)}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
             <FormRow label="Data">
               <Input type="date" value={form.date} onChange={e=>set('date',e.target.value)}/>
@@ -1015,6 +904,18 @@ export default function ContantiPage() {
 
           <FormRow label="Note" style={{marginTop:14}}>
             <Input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="Descrizione opzionale"/>
+          </FormRow>
+
+          <FormRow label="Abbina a Prelievo ATM (opzionale)" style={{marginTop:14}}>
+            <select value={form.atmTxId} onChange={e=>set('atmTxId',e.target.value)}
+              style={{width:'100%',padding:'9px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
+              <option value="">— Nessuno —</option>
+              {atmTxsAll.slice(0,30).map(t=>{
+                const d = (t._effDate||t.date||'').slice(0,10)
+                const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
+                return <option key={t.txId} value={t.txId}>{disp} — € {fmtIT(Math.abs(t.amount),2)}</option>
+              })}
+            </select>
           </FormRow>
 
           <ModalFooter>
