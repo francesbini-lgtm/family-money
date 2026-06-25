@@ -462,11 +462,19 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
   )
 }
 
+// ── Helper: linked amount for one ATM tx ─────────────────
+function linkedAmt(tx) {
+  const autoLinks   = getAutoLinks(tx.txId)
+  const manualLinks = (getAtmMeta()[tx.txId]?.links) || []
+  return [...autoLinks, ...manualLinks].reduce((s,l)=>s+l.amount,0)
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function ContantiPage() {
   const { cashEntries, addCashEntry, deleteCashEntry, transactions } = useStore()
   const [showAdd, setShowAdd] = useState(false)
   const [linksTx, setLinksTx] = useState(null) // tx for LinksModal
+  const [atmOffset, setAtmOffset] = useState(0) // 0 = ultimi 6 mesi, 1 = 6 mesi precedenti, …
   const [form, setForm] = useState({
     date:   new Date().toISOString().slice(0,10),
     cat1:   'Spesa e Alimentari',
@@ -486,18 +494,36 @@ export default function ContantiPage() {
     })
   }, [])
 
+  // 6-month window for ATM table
+  const atmWindow = useMemo(() => {
+    const n = new Date()
+    return Array.from({length:6}, (_,i) => {
+      const d = new Date(n.getFullYear(), n.getMonth() - (5-i) - atmOffset*6, 1)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    })
+  }, [atmOffset])
+  const atmWindowStart = atmWindow[0]
+  const atmWindowEnd   = atmWindow[5]
+
   // ATM withdrawals from imported transactions
-  const atmTxs = useMemo(() =>
+  const atmTxsAll = useMemo(() =>
     transactions.filter(t => !t.excluded && t.cat1 === 'Contanti' && t.amount < 0)
   , [transactions])
 
-  const totalWithdrawn = Math.abs(atmTxs.reduce((s,t)=>s+t.amount,0))
+  const atmTxs = useMemo(() =>
+    atmTxsAll.filter(t => {
+      const d = (t._effDate || t.date || '').slice(0,7)
+      return d >= atmWindowStart && d <= atmWindowEnd
+    }).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+  , [atmTxsAll, atmWindowStart, atmWindowEnd])
+
+  const totalWithdrawn = Math.abs(atmTxsAll.reduce((s,t)=>s+t.amount,0))
   const totalSpent     = cashEntries.reduce((s,e)=>s+(e.amount||0),0)
   const cashOnHand     = totalWithdrawn - totalSpent
 
   const chartData = last12.map(ym=>({
     label:    ymLabel(ym),
-    prelievi: Math.abs(atmTxs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)),
+    prelievi: Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)),
     speso:    cashEntries.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0),
   }))
 
@@ -522,7 +548,7 @@ export default function ContantiPage() {
     return Object.values(counts).sort((a,b)=>b.count-a.count).slice(0,5)
   }, [cashEntries])
 
-  const thisAtm   = Math.abs(atmTxs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
+  const thisAtm   = Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
   const thisSpent = cashEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
 
   function saveEntry() {
@@ -657,40 +683,67 @@ export default function ContantiPage() {
       </div>
 
       {/* ATM withdrawals */}
-      {atmTxs.length > 0 && (
+      {atmTxsAll.length > 0 && (
         <>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>🏧 Prelievi ATM</div>
+          {/* Header + period filter */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+            <div style={{fontSize:15,fontWeight:700}}>🏧 Prelievi ATM</div>
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <button onClick={()=>setAtmOffset(o=>o+1)}
+                style={{width:28,height:28,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text2)'}}>‹</button>
+              <span style={{fontSize:12,fontWeight:600,color:'var(--text2)',minWidth:120,textAlign:'center'}}>
+                {ymLabel(atmWindowStart)} – {ymLabel(atmWindowEnd)}
+              </span>
+              <button onClick={()=>setAtmOffset(o=>Math.max(0,o-1))} disabled={atmOffset===0}
+                style={{width:28,height:28,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',cursor:atmOffset===0?'default':'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',color:atmOffset===0?'var(--text3)':'var(--text2)',opacity:atmOffset===0?.4:1}}>›</button>
+            </div>
+          </div>
+
           <div className="card" style={{padding:0,overflow:'hidden',marginBottom:20}}>
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
-              <thead><tr>
-                {['Data valuta','Data rettificata','Carta','Utente','Collegato a','Importo'].map(h=>(
-                  <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {atmTxs.map(t=>(
-                  <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateValutaCell tx={t}/></td>
-                    <td style={{padding:'9px 14px',fontSize:12}}><DateRettCell tx={t}/></td>
-                    <td style={{padding:'9px 14px'}}>
-                      {(t.card && t.card!=='null')
-                        ? <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',fontWeight:700}}>*{t.card}</span>
-                        : <span style={{color:'var(--text3)',opacity:.3}}>—</span>}
-                    </td>
-                    <td style={{padding:'6px 14px'}}>
-                      {(()=>{
-                        const nick = resolveMemberFromTx(t)
-                        return nick
-                          ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{nick}</span>
-                          : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>
-                      })()}
-                    </td>
-                    <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
-                    <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(Math.abs(t.amount), 2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {atmTxs.length === 0
+              ? <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>Nessun prelievo in questo periodo</div>
+              : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead><tr>
+                    {['Data valuta','Data rettificata','Carta','Utente','Collegato a','Di cui abbinato','Importo'].map(h=>(
+                      <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Di cui abbinato','Importo'].includes(h)?'right':'left'}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {atmTxs.map(t=>{
+                      const txAmt   = Math.abs(t.amount)
+                      const linked  = Math.round(linkedAmt(t)*100)/100
+                      const pct     = txAmt > 0 ? Math.round(linked/txAmt*100) : 0
+                      const color   = pct >= 100 ? 'var(--green)' : pct > 0 ? 'var(--gold)' : 'var(--text3)'
+                      return (
+                        <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateValutaCell tx={t}/></td>
+                          <td style={{padding:'9px 14px',fontSize:12}}><DateRettCell tx={t}/></td>
+                          <td style={{padding:'9px 14px'}}>
+                            {(t.card && t.card!=='null')
+                              ? <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',fontWeight:700}}>*{t.card}</span>
+                              : <span style={{color:'var(--text3)',opacity:.3}}>—</span>}
+                          </td>
+                          <td style={{padding:'6px 14px'}}>
+                            {(()=>{
+                              const nick = resolveMemberFromTx(t)
+                              return nick
+                                ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{nick}</span>
+                                : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>
+                            })()}
+                          </td>
+                          <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
+                          <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color}}>
+                            {linked > 0
+                              ? <>€ {fmtIT(linked,2)} <span style={{fontSize:10,opacity:.7}}>({pct}%)</span></>
+                              : <span style={{opacity:.3}}>—</span>}
+                          </td>
+                          <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(txAmt, 2)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+            }
           </div>
         </>
       )}
