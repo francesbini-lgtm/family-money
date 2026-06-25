@@ -471,10 +471,11 @@ function linkedAmt(tx) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function ContantiPage() {
-  const { cashEntries, addCashEntry, deleteCashEntry, transactions, nannyTS, colfTS, appPrefs, setAppPref } = useStore()
+  const { cashEntries, addCashEntry, deleteCashEntry, updateCashEntry, transactions, nannyTS, colfTS, vehExpenses, vehicles, appPrefs, setAppPref } = useStore()
   const [showAdd, setShowAdd] = useState(false)
   const [linksTx, setLinksTx] = useState(null)
   const [atmOffset, setAtmOffset] = useState(0)
+  const [abbinaTx, setAbbinaTx] = useState(null) // { rowId, tipo } — row waiting for ATM link
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0,10),
     cat1: 'Spesa e Alimentari', cat2: '',
@@ -552,6 +553,25 @@ export default function ContantiPage() {
       })
     })
 
+    // Veicoli cash expenses
+    ;(vehExpenses || []).filter(e => e.payMethod === 'cash').forEach(e => {
+      const veh = (vehicles || []).find(v => v.id === e.vehicleId)
+      const vehName = veh ? (veh.nickname || veh.model || veh.targa || 'Veicolo') : 'Veicolo'
+      // reconRef for cash is a label string "💵 … · date · €…", not a txId — extract what we can
+      const hasAtm = e.reconType === 'cash' && e.reconRef
+      const satiM = e.satiTxId ? satiMatches[e.satiTxId] : null
+      rows.push({
+        _id: 'veh-' + e.id, tipo: 'veicoli',
+        label: e.desc || e.note || '—',
+        sublabel: vehName,
+        date: e.date, amount: e.amount,
+        atmTxId: null,                       // veh uses label-based reconRef, not txId
+        atmDate: hasAtm ? (e.reconRef.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null : null,
+        atmLabel: hasAtm ? e.reconRef : null, // raw label for display
+        satiMatched: satiM?.status === 'matched', readonly: true,
+      })
+    })
+
     // Manual cashEntries (Spese in Contanti → merged here)
     ;(cashEntries || []).forEach(e => {
       const atmTx = e.atmTxId ? atmTxsAll.find(t => t.txId === e.atmTxId) : null
@@ -568,7 +588,7 @@ export default function ContantiPage() {
     })
 
     return rows.sort((a,b) => (b.date||'').localeCompare(a.date||''))
-  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashEntries, atmTxsAll, satiMatches, nannyName, colfName])
+  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashEntries, vehExpenses, vehicles, atmTxsAll, satiMatches, nannyName, colfName])
 
   const totalWithdrawn = Math.abs(atmTxsAll.reduce((s,t)=>s+t.amount,0))
   const totalSpent     = cashEntries.reduce((s,e)=>s+(e.amount||0),0)
@@ -618,9 +638,17 @@ export default function ContantiPage() {
           <h1 className="cash-title">💵 Contanti</h1>
           <div className="cash-sub">Prelievi ATM e tracking spese in contanti</div>
         </div>
-        <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
-          <Plus size={14}/> Aggiungi Spesa
-        </button>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-ghost" onClick={async()=>{
+            const r = await useStore.getState().syncCashTransactions()
+            alert(`Sync completata: +${r.added} aggiunte, -${r.removed} rimosse`)
+          }} title="Sincronizza le transazioni cash verso il DB principale">
+            🔄 Sync Cash
+          </button>
+          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
+            <Plus size={14}/> Aggiungi Spesa
+          </button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -757,39 +785,46 @@ export default function ContantiPage() {
                 {utilizzoRows.map(row => {
                   const fmtD = d => d && d.length>=10 ? `${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}` : '—'
                   const tipoBadge = {
-                    nanny: {color:'#2a7a4a', bg:'#2a7a4a18', label: nannyName},
-                    colf:  {color:'#b8942a', bg:'#b8942a18', label: colfName},
-                    manual:{color:'#2a5c8a', bg:'#2a5c8a18', label: row.cat || 'Altro'},
+                    nanny:   {color:'#2a7a4a', bg:'#2a7a4a18', label: nannyName},
+                    colf:    {color:'#b8942a', bg:'#b8942a18', label: colfName},
+                    veicoli: {color:'#6a3da8', bg:'#6a3da818', label: '🚗 Veicoli'},
+                    manual:  {color:'#2a5c8a', bg:'#2a5c8a18', label: row.cat1 || 'Altro'},
                   }[row.tipo] || {}
+                  const hasAtmLink = row.atmDate || row.atmTxId || row.atmLabel
+                  const canAbbina  = row.tipo === 'manual' && !hasAtmLink
                   return (
                     <tr key={row._id} style={{borderBottom:'1px solid var(--border)',background:row.readonly?'var(--surface2)':undefined}}>
                       <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)',color:'var(--text3)'}}>
-                        {row.tipo !== 'manual'
+                        {row.tipo === 'nanny' || row.tipo === 'colf'
                           ? row.date.slice(0,7).split('-').reverse().join('/')
                           : fmtD(row.date)}
                       </td>
                       <td style={{padding:'9px 14px'}}>
-                        <div style={{display:'flex',alignItems:'center',gap:7}}>
+                        <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}>
                           <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:12,background:tipoBadge.bg,color:tipoBadge.color,border:`1px solid ${tipoBadge.color}33`,whiteSpace:'nowrap'}}>
                             {tipoBadge.label}
                           </span>
-                          {row.tipo==='manual' && row.label !== row.cat && (
-                            <span style={{fontSize:12,color:'var(--text2)'}}>{row.label}</span>
-                          )}
-                          {row.readonly && <span style={{fontSize:9,color:'var(--text3)',marginLeft:2}}>auto</span>}
+                          <span style={{fontSize:12,color:'var(--text2)'}}>{row.label}</span>
+                          {row.sublabel && <span style={{fontSize:11,color:'var(--text3)'}}>· {row.sublabel}</span>}
+                          {row.readonly && row.tipo !== 'veicoli' && <span style={{fontSize:9,color:'var(--text3)',marginLeft:2}}>auto</span>}
                         </div>
                       </td>
                       <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>
                         € {fmtIT(row.amount||0,2)}
                       </td>
                       <td style={{padding:'9px 14px'}}>
-                        {row.atmDate
-                          ? <span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,fontWeight:600,color:'var(--green)'}}>
-                              ✅ {fmtD(row.atmDate)}
-                            </span>
-                          : row.atmTxId
-                            ? <span style={{fontSize:11,color:'var(--text3)'}}>ID: {row.atmTxId.slice(-6)}</span>
-                            : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
+                        {row.atmLabel
+                          ? <span style={{fontSize:11,color:'var(--green)',fontWeight:600}} title={row.atmLabel}>✅ {fmtD(row.atmDate)||'(abbinato)'}</span>
+                          : row.atmDate
+                            ? <span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,fontWeight:600,color:'var(--green)'}}>✅ {fmtD(row.atmDate)}</span>
+                            : row.atmTxId
+                              ? <span style={{fontSize:11,color:'var(--text3)'}}>ID: {row.atmTxId.slice(-6)}</span>
+                              : canAbbina
+                                ? <button onClick={()=>setAbbinaTx({rowId:row._id,tipo:'manual'})}
+                                    style={{display:'inline-flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700,border:'1px dashed var(--border)',background:'none',cursor:'pointer',color:'var(--accent)',fontFamily:'var(--font-sans)'}}>
+                                    🔗 Abbina
+                                  </button>
+                                : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
                         }
                       </td>
                       <td style={{padding:'9px 14px'}}>
@@ -877,6 +912,43 @@ export default function ContantiPage() {
             }
           </div>
         </>
+      )}
+
+      {/* Abbina Prelievo modal */}
+      {abbinaTx && (
+        <Modal title="🔗 Abbina a Prelievo ATM" onClose={()=>setAbbinaTx(null)} width={500}>
+          <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>Seleziona il prelievo ATM corrispondente a questa spesa in contanti.</div>
+          <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:340,overflowY:'auto',marginBottom:4}}>
+            {atmTxsAll.length === 0
+              ? <div style={{textAlign:'center',padding:24,color:'var(--text3)',fontSize:13}}>Nessun prelievo ATM trovato</div>
+              : atmTxsAll.slice(0,40).map(t => {
+                  const d = (t._effDate||t.date||'').slice(0,10)
+                  const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
+                  const lkd  = Math.round(linkedAmt(t)*100)/100
+                  const txAmt= Math.abs(t.amount)
+                  const pct  = txAmt>0?Math.round(lkd/txAmt*100):0
+                  return (
+                    <button key={t.txId}
+                      onClick={()=>{ updateCashEntry(abbinaTx.rowId,{atmTxId:t.txId}); setAbbinaTx(null) }}
+                      style={{padding:'10px 14px',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',background:'var(--surface)',cursor:'pointer',textAlign:'left',fontFamily:'var(--font-sans)',display:'flex',alignItems:'center',gap:12}}>
+                      <span style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:14,color:'var(--blue)',flexShrink:0}}>
+                        € {fmtIT(txAmt,2)}
+                      </span>
+                      <span style={{flex:1,fontSize:12,color:'var(--text2)'}}>
+                        {disp} · {t.descAI||(t.description||'').slice(0,30)||'Prelievo ATM'}
+                      </span>
+                      {pct>0 && <span style={{fontSize:11,fontWeight:600,color:pct>=100?'var(--red)':'var(--gold)',flexShrink:0}}>
+                        {pct}% usato
+                      </span>}
+                    </button>
+                  )
+                })
+            }
+          </div>
+          <ModalFooter>
+            <button className="btn btn-secondary" onClick={()=>setAbbinaTx(null)}>Annulla</button>
+          </ModalFooter>
+        </Modal>
       )}
 
       {/* Links modal */}

@@ -1,9 +1,9 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, getMergedCats } from '../data/categories'
+import { getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
 
-const SEEN_KEY = 'fm-discovery-seen' // { txId: timestamp }
+const SEEN_KEY = 'fm-discovery-seen'
 
 function loadSeen()        { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
 function markSeen(txId)    { const s = loadSeen(); s[txId] = Date.now(); localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
@@ -49,6 +49,41 @@ function EditDescModal({ tx, onSave, onClose }) {
 function CatPickerModal({ onSelect, onClose, customCats }) {
   const merged = getMergedCats(customCats)
   const cats = Object.entries(merged).filter(([n]) => n !== 'Entrate' && n !== 'Non Categorizzato')
+  const [selL1, setSelL1] = useState(null)
+
+  if (selL1) {
+    const info = merged[selL1] || {}
+    const subs = info.sub || []
+    return (
+      <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+        <div className="m-modal">
+          <div className="m-modal-handle"/>
+          <button onClick={() => setSelL1(null)}
+            style={{ background:'none', border:'none', color:'var(--accent)', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:10, fontFamily:'var(--font-sans)' }}>
+            ← {selL1}
+          </button>
+          <div className="m-modal-title">📂 Sottocategoria</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <button onClick={() => { onSelect(selL1, ''); onClose() }}
+              style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px',
+                border:'1px solid var(--border)', borderRadius:10, background:'var(--surface)',
+                cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left' }}>
+              <span style={{ fontSize:13, color:'var(--text3)', fontStyle:'italic' }}>— Nessuna sottocategoria</span>
+            </button>
+            {subs.map(sub => (
+              <button key={sub} onClick={() => { onSelect(selL1, sub); onClose() }}
+                style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px',
+                  border:'1px solid var(--border)', borderRadius:10, background:'var(--surface)',
+                  cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left' }}>
+                <span style={{ fontSize:14, fontWeight:600, color:'var(--text1)' }}>{sub}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="m-modal">
@@ -56,12 +91,18 @@ function CatPickerModal({ onSelect, onClose, customCats }) {
         <div className="m-modal-title">📂 Seleziona Categoria</div>
         <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
           {cats.map(([name, info]) => (
-            <button key={name} onClick={() => { onSelect(name); onClose() }}
+            <button key={name} onClick={() => setSelL1(name)}
               style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px',
                 border:'1px solid var(--border)', borderRadius:10, background:'var(--surface)',
-                cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left' }}>
-              <div style={{ width:10, height:10, borderRadius:'50%', background:info.color, flexShrink:0 }}/>
-              <span style={{ fontSize:14, fontWeight:600, color:'var(--text1)' }}>{name}</span>
+                cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left',
+                justifyContent:'space-between' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <div style={{ width:10, height:10, borderRadius:'50%', background:info.color, flexShrink:0 }}/>
+                <span style={{ fontSize:14, fontWeight:600, color:'var(--text1)' }}>{name}</span>
+              </div>
+              {(info.sub || []).length > 0 && (
+                <span style={{ fontSize:11, color:'var(--text3)' }}>›</span>
+              )}
             </button>
           ))}
         </div>
@@ -79,6 +120,10 @@ export default function MobileDiscovery() {
   const [undoStack,     setUndoStack]     = useState([])
   const [showEditDesc,  setShowEditDesc]  = useState(false)
   const [showCatPicker, setShowCatPicker] = useState(false)
+  // Pending L1 for L2 selection (inline)
+  const [pendingL1,     setPendingL1]     = useState(null)
+
+  const merged = getMergedCats(customCats)
 
   // ── Queue ─────────────────────────────────────────────────
   const queue = useMemo(() => {
@@ -108,7 +153,7 @@ export default function MobileDiscovery() {
     return [...new Set([...sorted, ...defaults])].slice(0, 8)
   }, [transactions])
 
-  // ── Top 6 quick locations (most used) ────────────────────
+  // ── Top 5 quick locations ─────────────────────────────────
   const quickCities = useMemo(() => {
     const freq = {}
     transactions.filter(t => t.city).forEach(t => { freq[t.city] = (freq[t.city] || 0) + 1 })
@@ -119,17 +164,18 @@ export default function MobileDiscovery() {
   function pushUndo() {
     if (!current) return
     setUndoStack(s => [{
-      txId: current.txId, prevCat1: current.cat1, prevDescAI: current.descAI,
-      prevUserEditedCat: current.userEditedCat, prevFlagged: current._flagged
+      txId: current.txId, prevCat1: current.cat1, prevCat2: current.cat2,
+      prevDescAI: current.descAI, prevUserEditedCat: current.userEditedCat, prevFlagged: current._flagged
     }, ...s].slice(0, 10))
   }
 
-  function applyCategory(cat1) {
+  // Apply category WITHOUT advancing to next tx
+  function applyCategory(cat1, cat2 = '') {
     if (!current) return
     pushUndo()
-    updateTransaction(current.txId, { cat1, cat2: null, userEditedCat: true })
-    removeSeen(current.txId)
-    setSeenVer(v => v + 1)
+    updateTransaction(current.txId, { cat1, cat2: cat2 || null, userEditedCat: true })
+    setPendingL1(null)
+    // Do NOT call removeSeen / setSeenVer — user must explicitly press OK/SALTA/FLAGGA
   }
 
   function applyCity(city) {
@@ -138,27 +184,32 @@ export default function MobileDiscovery() {
     updateTransaction(current.txId, { city })
   }
 
+  // Only these three advance the queue
+  function advance() {
+    removeSeen(current.txId)
+    setSeenVer(v => v + 1)
+    setPendingL1(null)
+  }
+
   function skipCurrent() {
     if (!current) return
     markSeen(current.txId)
     setSeenVer(v => v + 1)
+    setPendingL1(null)
   }
 
   function confirmCurrent() {
     if (!current) return
     pushUndo()
     updateTransaction(current.txId, { userEditedCat: true })
-    removeSeen(current.txId)
-    setSeenVer(v => v + 1)
+    advance()
   }
 
   function toggleFlag() {
     if (!current) return
     pushUndo()
     updateTransaction(current.txId, { _flagged: !current._flagged })
-    // Move to next (flag = quick action, don't keep staring at it)
-    removeSeen(current.txId)
-    setSeenVer(v => v + 1)
+    advance()
   }
 
   function handleUndo() {
@@ -166,12 +217,13 @@ export default function MobileDiscovery() {
     const [last, ...rest] = undoStack
     setUndoStack(rest)
     updateTransaction(last.txId, {
-      cat1: last.prevCat1, descAI: last.prevDescAI,
-      userEditedCat: last.prevUserEditedCat || false,
+      cat1: last.prevCat1, cat2: last.prevCat2 || null,
+      descAI: last.prevDescAI, userEditedCat: last.prevUserEditedCat || false,
       _flagged: last.prevFlagged || false
     })
     removeSeen(last.txId)
     setSeenVer(v => v + 1)
+    setPendingL1(null)
   }
 
   function handleSaveDesc(newDesc) {
@@ -180,7 +232,7 @@ export default function MobileDiscovery() {
     setShowEditDesc(false)
   }
 
-  const catColor = cat => getMergedCats(customCats)[cat]?.color || '#888'
+  const catColor = cat => merged[cat]?.color || '#888'
 
   // ── Empty state ───────────────────────────────────────────
   if (queue.length === 0) {
@@ -195,8 +247,11 @@ export default function MobileDiscovery() {
     )
   }
 
+  const pendingL1Subs = pendingL1 ? (merged[pendingL1]?.sub || []) : []
+
   return (
-    <div className="m-content" style={{ paddingBottom:20 }}>
+    // paddingBottom grande per non sovrapporre i bottoni sticky
+    <div className="m-content" style={{ paddingBottom:120 }}>
 
       {/* Progress + Undo */}
       <div className="m-disc-progress">
@@ -219,20 +274,15 @@ export default function MobileDiscovery() {
       {/* Main card */}
       {current && (
         <div className="m-disc-card">
-          {/* Amount + flag indicator */}
           <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:4 }}>
             <div className="m-disc-amount">{fmtAmt(current.amount)}</div>
-            {current._flagged && (
-              <span style={{ fontSize:18, title:'Flaggata per revisione' }}>🚩</span>
-            )}
+            {current._flagged && <span style={{ fontSize:18 }}>🚩</span>}
           </div>
 
-          {/* Merchant */}
           <div className="m-disc-merchant">
             {current.merchant || current.descAI || 'Transazione'}
           </div>
 
-          {/* AI description (editable) */}
           <div onClick={() => setShowEditDesc(true)}
             style={{ fontSize:13, color:'var(--text3)', marginBottom:6,
               cursor:'pointer', textDecoration:'underline dotted', lineHeight:1.4 }}>
@@ -240,7 +290,6 @@ export default function MobileDiscovery() {
             <span style={{ marginLeft:5, fontSize:10, color:'var(--accent)' }}>✏️</span>
           </div>
 
-          {/* Original description — always visible */}
           {current.description && (
             <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10,
               padding:'6px 10px', background:'var(--surface2)', borderRadius:8,
@@ -265,7 +314,7 @@ export default function MobileDiscovery() {
               <span className="m-disc-tag"
                 style={{ background: catColor(current.cat1) + '22', color: catColor(current.cat1),
                   borderColor: catColor(current.cat1) + '44' }}>
-                {current.cat1}
+                {current.cat1}{current.cat2 ? ` › ${current.cat2}` : ''}
               </span>
             )}
             {!current.aiEnriched && (
@@ -277,19 +326,34 @@ export default function MobileDiscovery() {
         </div>
       )}
 
-      {/* Category quick buttons */}
+      {/* L1 category quick buttons */}
       <div style={{ padding:'10px 14px 4px' }}>
         <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', textTransform:'uppercase',
           letterSpacing:'.04em', marginBottom:8 }}>Assegna categoria</div>
         <div className="m-quickcat-grid">
           {quickCats.map(cat => {
             const color    = catColor(cat)
-            const isActive = current?.cat1 === cat
+            const isActive = current?.cat1 === cat && !pendingL1
+            const isPending = pendingL1 === cat
             return (
-              <button key={cat} className="m-quickcat-btn" onClick={() => applyCategory(cat)}
-                style={ isActive ? { background: color+'22', borderColor:color, color } : {} }>
+              <button key={cat} className="m-quickcat-btn"
+                onClick={() => {
+                  if (pendingL1 === cat) { setPendingL1(null); return }
+                  const subs = merged[cat]?.sub || []
+                  if (subs.length > 0) {
+                    setPendingL1(cat)
+                  } else {
+                    applyCategory(cat, '')
+                  }
+                }}
+                style={ isPending
+                  ? { background: color+'33', borderColor:color, color, fontWeight:800 }
+                  : isActive
+                    ? { background: color+'22', borderColor:color, color }
+                    : {} }>
                 <span style={{ width:7, height:7, borderRadius:'50%', background:color, flexShrink:0 }}/>
                 {cat}
+                {(merged[cat]?.sub||[]).length > 0 && <span style={{ fontSize:9, opacity:.6 }}>›</span>}
               </button>
             )
           })}
@@ -300,7 +364,33 @@ export default function MobileDiscovery() {
         </div>
       </div>
 
-      {/* Location quick buttons (only if no city set or change) */}
+      {/* L2 subcategory buttons (shown when L1 pending) */}
+      {pendingL1 && (
+        <div style={{ padding:'4px 14px 8px', margin:'0 14px', background:'var(--surface2)', borderRadius:10, border:'1px solid var(--border)' }}>
+          <div style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.04em', padding:'8px 0 6px' }}>
+            Sottocategoria · {pendingL1}
+          </div>
+          <div className="m-quickcat-grid">
+            <button className="m-quickcat-btn"
+              onClick={() => applyCategory(pendingL1, '')}
+              style={{ fontStyle:'italic', color:'var(--text3)' }}>
+              — Nessuna
+            </button>
+            {pendingL1Subs.map(sub => {
+              const isActive = current?.cat1 === pendingL1 && current?.cat2 === sub
+              return (
+                <button key={sub} className="m-quickcat-btn"
+                  onClick={() => applyCategory(pendingL1, sub)}
+                  style={ isActive ? { background:'var(--accent)22', borderColor:'var(--accent)', color:'var(--accent)' } : {} }>
+                  {sub}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Location quick buttons */}
       {quickCities.length > 0 && (
         <div style={{ padding:'8px 14px 4px' }}>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', textTransform:'uppercase',
@@ -319,27 +409,42 @@ export default function MobileDiscovery() {
         </div>
       )}
 
-      {/* Action buttons */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, padding:'12px 14px 0' }}>
-        <button className="m-btn m-btn-ghost" onClick={skipCurrent} style={{ fontSize:12 }}>
-          ⏭ Salta
-        </button>
-        <button className="m-btn m-btn-green" onClick={confirmCurrent} style={{ fontSize:12 }}>
-          ✓ OK
-        </button>
-        <button className="m-btn" onClick={toggleFlag}
-          style={{ fontSize:12, background: current?._flagged ? 'rgba(220,50,50,.12)' : 'rgba(200,150,0,.1)',
-            color: current?._flagged ? 'var(--red)' : 'var(--gold)',
-            border: `1px solid ${current?._flagged ? 'rgba(220,50,50,.2)' : 'rgba(200,150,0,.2)'}` }}>
-          {current?._flagged ? '🚩 Flaggata' : '🚩 Flagga'}
-        </button>
+      {/* ── Sticky bottom action bar ─────────────────────────── */}
+      <div style={{
+        position: 'fixed',
+        bottom: 0, left: '50%', transform: 'translateX(-50%)',
+        width: '100%', maxWidth: 430,
+        padding: `10px 14px calc(10px + env(safe-area-inset-bottom, 0px) + 72px)`,
+        background: 'var(--surface)',
+        borderTop: '1px solid var(--border)',
+        zIndex: 15,
+      }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+          <button className="m-btn m-btn-ghost" onClick={skipCurrent} style={{ fontSize:13 }}>
+            ⏭ Salta
+          </button>
+          <button className="m-btn m-btn-green" onClick={confirmCurrent} style={{ fontSize:13, fontWeight:800 }}>
+            ✓ OK
+          </button>
+          <button className="m-btn" onClick={toggleFlag}
+            style={{ fontSize:13,
+              background: current?._flagged ? 'rgba(220,50,50,.12)' : 'rgba(200,150,0,.1)',
+              color: current?._flagged ? 'var(--red)' : 'var(--gold)',
+              border: `1px solid ${current?._flagged ? 'rgba(220,50,50,.2)' : 'rgba(200,150,0,.2)'}` }}>
+            {current?._flagged ? '🚩 Flaggata' : '🚩 Flagga'}
+          </button>
+        </div>
       </div>
 
       {showEditDesc && (
         <EditDescModal tx={current} onSave={handleSaveDesc} onClose={() => setShowEditDesc(false)}/>
       )}
       {showCatPicker && (
-        <CatPickerModal onSelect={applyCategory} onClose={() => setShowCatPicker(false)} customCats={customCats}/>
+        <CatPickerModal
+          onSelect={(cat1, cat2) => applyCategory(cat1, cat2 || '')}
+          onClose={() => setShowCatPicker(false)}
+          customCats={customCats}
+        />
       )}
     </div>
   )
