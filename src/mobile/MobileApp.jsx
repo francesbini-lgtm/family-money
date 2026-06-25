@@ -96,7 +96,7 @@ export default function MobileApp() {
       </div>
 
       {/* Page content */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+      <div className="m-content">
         {tab === 'overview'  && <MobileOverview />}
         {tab === 'contanti'  && <MobileContanti showAdd={showAdd} onCloseAdd={() => setShowAdd(false)} />}
         {tab === 'nanny'     && (
@@ -119,7 +119,7 @@ export default function MobileApp() {
         </button>
       )}
 
-      {/* Bottom nav */}
+      {/* Bottom nav — floating pill */}
       <nav className="m-nav">
         {TABS.map(t => {
           const isActive = tab === t.id

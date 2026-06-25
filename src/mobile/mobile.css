@@ -36,22 +36,27 @@
   margin-top: 1px;
 }
 
-/* Tab content */
+/* Tab content — scrollable, padding-bottom leaves room for floating nav */
 .m-content {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 0 0 16px;
+  padding: 0 0 calc(80px + env(safe-area-inset-bottom, 0px));
 }
 
-/* Bottom nav */
+/* Bottom nav — floating pill */
 .m-nav {
+  position: absolute;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  left: 12px;
+  right: 12px;
   display: flex;
   background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  flex-shrink: 0;
-  z-index: 10;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.08);
+  z-index: 20;
+  overflow: hidden;
 }
 .m-nav-btn {
   flex: 1;
@@ -59,8 +64,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  padding: 10px 4px;
+  gap: 2px;
+  padding: 8px 4px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -69,8 +74,8 @@
 }
 .m-nav-btn.active .m-nav-icon { color: var(--accent); }
 .m-nav-btn.active .m-nav-label { color: var(--accent); font-weight: 700; }
-.m-nav-icon { font-size: 20px; line-height: 1; }
-.m-nav-label { font-size: 10px; color: var(--text3); font-weight: 500; letter-spacing: .01em; }
+.m-nav-icon { font-size: 18px; line-height: 1; }
+.m-nav-label { font-size: 9px; color: var(--text3); font-weight: 500; letter-spacing: .01em; }
 
 /* KPI card grid */
 .m-kpi-grid {
@@ -262,7 +267,7 @@
 /* FAB — absolute within .m-app so it respects the 430px container */
 .m-fab-inner {
   position: absolute;
-  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
   right: 20px;
   width: 54px;
   height: 54px;
