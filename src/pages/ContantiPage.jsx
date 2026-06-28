@@ -559,15 +559,16 @@ export default function ContantiPage() {
       const vehName = veh ? (veh.nickname || veh.model || veh.targa || 'Veicolo') : 'Veicolo'
       // reconRef for cash is a label string "💵 … · date · €…", not a txId — extract what we can
       const hasAtm = e.reconType === 'cash' && e.reconRef
-      const satiM = e.satiTxId ? satiMatches[e.satiTxId] : null
+      // Satispay match is keyed by "veh-<id>" in satiMatches (same synthetic id used in SatispayPage)
+      const satiM = satiMatches[`veh-${e.id}`]
       rows.push({
         _id: 'veh-' + e.id, tipo: 'veicoli',
         label: e.desc || e.note || '—',
         sublabel: vehName,
         date: e.date, amount: e.amount,
-        atmTxId: null,                       // veh uses label-based reconRef, not txId
+        atmTxId: null,
         atmDate: hasAtm ? (e.reconRef.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null : null,
-        atmLabel: hasAtm ? e.reconRef : null, // raw label for display
+        atmLabel: hasAtm ? e.reconRef : null,
         satiMatched: satiM?.status === 'matched', readonly: true,
       })
     })
