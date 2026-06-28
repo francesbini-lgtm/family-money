@@ -92,9 +92,10 @@ function callGemini(prompt, key) {
       generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
     })
     const isOAuth = key.startsWith('AQ.') || key.startsWith('ya29.')
+    const model = 'gemini-2.0-flash'
     const path = isOAuth
-      ? '/v1beta/models/gemini-1.5-flash:generateContent'
-      : `/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`
+      ? `/v1beta/models/${model}:generateContent`
+      : `/v1beta/models/${model}:generateContent?key=${key}`
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
       path,
@@ -108,7 +109,17 @@ function callGemini(prompt, key) {
       let data = ''
       r.on('data', c => data += c)
       r.on('end', () => {
-        try { resolve(JSON.parse(data)) } catch(e) { reject(e) }
+        try {
+          const json = JSON.parse(data)
+          if (r.statusCode >= 400) {
+            // Gemini returned an error — propagate it clearly
+            const msg = json?.error?.message || `Gemini HTTP ${r.statusCode}`
+            return reject(new Error(msg))
+          }
+          resolve(json)
+        } catch(e) {
+          reject(new Error(`Gemini parse error (status ${r.statusCode}): ${data.slice(0,200)}`))
+        }
       })
     })
     req.on('error', reject)
