@@ -502,18 +502,16 @@ export default function MobileDiscovery() {
                     </div>
                   </button>
                 )}
-                {/* Descrizione originale — full text, scrollable, large */}
+                {/* Descrizione originale — prende tutto lo spazio rimanente */}
                 {current.description && !showEditDesc && (
-                  <div style={{ flex:1, minHeight:90, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-                    <div style={{ flex:1, overflowY:'auto', padding:'10px 14px', borderRadius:12,
-                      background:'var(--bg)', border:'1px solid var(--border)',
-                      borderLeft:'4px solid var(--border)' }}>
-                      <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.08em',
-                        textTransform:'uppercase', color:'var(--text3)', marginBottom:7 }}>ORIGINALE</div>
-                      <div style={{ fontSize:14, color:'var(--text2)', lineHeight:1.65,
-                        wordBreak:'break-word', whiteSpace:'pre-wrap' }}>
-                        {current.description}
-                      </div>
+                  <div style={{ flex:1, minHeight:140, overflowY:'auto', padding:'10px 14px',
+                    borderRadius:12, background:'var(--bg)', border:'1px solid var(--border)',
+                    borderLeft:'4px solid rgba(100,100,200,.3)' }}>
+                    <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.08em',
+                      textTransform:'uppercase', color:'var(--text3)', marginBottom:8 }}>ORIGINALE</div>
+                    <div style={{ fontSize:14, color:'var(--text2)', lineHeight:1.7,
+                      wordBreak:'break-word', whiteSpace:'pre-wrap' }}>
+                      {current.description}
                     </div>
                   </div>
                 )}
