@@ -229,7 +229,9 @@ export default function MobileDiscovery() {
   function applyCategory(cat1, cat2 = '') {
     if (!current) return
     pushUndo()
-    updateTransaction(current.txId, { cat1, cat2: cat2 || null, userEditedCat: true })
+    // NON setta userEditedCat: true — lo fa solo OK (confirmCurrent)
+    // Altrimenti isLowConfidence() ritorna false e la tx sparisce dalla coda
+    updateTransaction(current.txId, { cat1, cat2: cat2 || null })
     setActiveMode(null)
   }
 
@@ -500,15 +502,15 @@ export default function MobileDiscovery() {
                     </div>
                   </button>
                 )}
-                {/* Descrizione originale — full text, scrollable */}
+                {/* Descrizione originale — full text, scrollable, large */}
                 {current.description && !showEditDesc && (
-                  <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-                    <div style={{ flex:1, overflowY:'auto', padding:'8px 12px', borderRadius:10,
+                  <div style={{ flex:1, minHeight:90, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                    <div style={{ flex:1, overflowY:'auto', padding:'10px 14px', borderRadius:12,
                       background:'var(--bg)', border:'1px solid var(--border)',
-                      borderLeft:'3px solid var(--border)' }}>
-                      <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.06em',
-                        textTransform:'uppercase', color:'var(--text3)', marginBottom:5 }}>ORIGINALE</div>
-                      <div style={{ fontSize:13, color:'var(--text2)', lineHeight:1.55,
+                      borderLeft:'4px solid var(--border)' }}>
+                      <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.08em',
+                        textTransform:'uppercase', color:'var(--text3)', marginBottom:7 }}>ORIGINALE</div>
+                      <div style={{ fontSize:14, color:'var(--text2)', lineHeight:1.65,
                         wordBreak:'break-word', whiteSpace:'pre-wrap' }}>
                         {current.description}
                       </div>
