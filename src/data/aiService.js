@@ -117,8 +117,11 @@ export async function callGemini(prompt) {
   }
 }
 
-// ── Merchant lookup — quick Gemini call ──────────────────
+// ── Merchant lookup — direct OpenAI call (bypasses proxy to avoid Vercel timeout) ──
 export async function lookupMerchantInfo(merchant, description, amount) {
+  const key = getApiKey()
+  if (!key) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
+
   const prompt = `Sei un assistente finanziario italiano. Fornisci informazioni BREVI (max 2 frasi) su questa attività commerciale o transazione bancaria. Rispondi SOLO con la descrizione, niente altro.
 
 Merchant/Descrizione: "${merchant || description}"
@@ -127,6 +130,28 @@ Importo: €${Math.abs(amount || 0).toFixed(2)}
 Esempio risposta: "Supermercato della catena Esselunga. Vendita prodotti alimentari e per la casa."
 
 Risposta:`
+
+  // OpenAI key → chiama direttamente (evita timeout Vercel)
+  if (key.startsWith('sk-')) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 150,
+      })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content?.trim() || ''
+  }
+
+  // Gemini key → usa proxy come prima
   return callGemini(prompt)
 }
 
