@@ -241,7 +241,8 @@ export default function MobileDiscovery() {
   }
 
   function advance() {
-    removeSeen(current.txId)
+    // markSeen (not remove) → tx goes to back of seenTxs queue, not front
+    markSeen(current.txId)
     setSeenVer(v => v + 1)
     setActiveMode(null)
     setAiInfo(null)
@@ -374,7 +375,7 @@ export default function MobileDiscovery() {
 
           {/* Merchant */}
           <div style={{ padding:'4px 16px 0', fontSize:15, fontWeight:700, color:'var(--text1)',
-            flexShrink:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+            flexShrink:0, wordBreak:'break-word', lineHeight:1.3 }}>
             {current.merchant || current.descAI || 'Transazione'}
           </div>
 
@@ -429,46 +430,15 @@ export default function MobileDiscovery() {
             )}
           </div>
 
-          {/* AI descr (editable) OR original desc — compact */}
-          <div style={{ padding:'6px 14px 0', flexShrink:0 }}>
-            {showEditDesc ? (
-              <div style={{ display:'flex', gap:6 }}>
-                <input value={descEdit} onChange={e => setDescEdit(e.target.value)}
-                  autoFocus
-                  style={{ flex:1, padding:'6px 10px', borderRadius:8, border:'1.5px solid var(--accent)',
-                    background:'var(--bg)', color:'var(--text1)', fontSize:13,
-                    fontFamily:'var(--font-sans)', outline:'none' }}/>
-                <button onClick={saveDesc}
-                  style={{ padding:'6px 12px', borderRadius:8, border:'none',
-                    background:'var(--accent)', color:'#fff', fontSize:12, fontWeight:700,
-                    cursor:'pointer', fontFamily:'var(--font-sans)' }}>✓</button>
-                <button onClick={() => setShowEditDesc(false)}
-                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)',
-                    background:'var(--bg)', color:'var(--text3)', fontSize:12, cursor:'pointer',
-                    fontFamily:'var(--font-sans)' }}>✕</button>
-              </div>
-            ) : (
-              <button onClick={() => { setShowEditDesc(true); setDescEdit(current.descAI || '') }}
-                style={{ background:'none', border:'none', cursor:'pointer', padding:0, textAlign:'left',
-                  fontFamily:'var(--font-sans)', width:'100%' }}>
-                <span style={{ fontSize:12, color:'var(--text3)', lineHeight:1.4,
-                  display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {current.descAI || current.description?.slice(0,80) || '—'}
-                  <span style={{ marginLeft:5, fontSize:9, color:'var(--accent)' }}>✏️</span>
-                </span>
-              </button>
-            )}
-          </div>
-
-          {/* ── Inline picker area — takes remaining space ─ */}
-          <div style={{ flex:1, overflow:'hidden', padding:'8px 14px 10px' }}>
+          {/* ── Inline picker area OR description — takes remaining space ─ */}
+          <div style={{ flex:1, overflow:'hidden', padding:'6px 14px 8px', display:'flex', flexDirection:'column', gap:6 }}>
             {activeMode === 'cat' && (
-              <div style={{ height:'100%', overflow:'hidden' }}>
+              <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:'.06em',
-                  textTransform:'uppercase', color:'var(--text3)', marginBottom:6 }}>
+                  textTransform:'uppercase', color:'var(--text3)', marginBottom:6, flexShrink:0 }}>
                   Seleziona categoria
                 </div>
-                <div style={{ overflowY:'auto', height:'calc(100% - 22px)' }}>
+                <div style={{ flex:1, overflowY:'auto' }}>
                   <CatPickerInline
                     current={current}
                     merged={merged}
@@ -479,12 +449,12 @@ export default function MobileDiscovery() {
               </div>
             )}
             {activeMode === 'loc' && (
-              <div style={{ height:'100%', overflow:'hidden' }}>
+              <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:'.06em',
-                  textTransform:'uppercase', color:'var(--text3)', marginBottom:6 }}>
+                  textTransform:'uppercase', color:'var(--text3)', marginBottom:6, flexShrink:0 }}>
                   Seleziona location
                 </div>
-                <div style={{ overflowY:'auto', height:'calc(100% - 22px)' }}>
+                <div style={{ flex:1, overflowY:'auto' }}>
                   <LocPickerInline
                     currentCity={current.city}
                     quickCities={quickCities}
@@ -494,14 +464,57 @@ export default function MobileDiscovery() {
                 </div>
               </div>
             )}
-            {activeMode === null && current.description && (
-              <div style={{ fontSize:11, color:'var(--text3)', padding:'4px 8px',
-                background:'var(--surface2)', borderRadius:8, borderLeft:'2px solid var(--border)',
-                lineHeight:1.4, wordBreak:'break-word', overflow:'hidden',
-                display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
-                <span style={{ fontSize:9, fontWeight:700, letterSpacing:'.06em',
-                  textTransform:'uppercase', marginRight:5 }}>ORIGINALE</span>
-                {current.description.slice(0, 160)}
+            {activeMode === null && (
+              <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', gap:6 }}>
+                {/* descAI — editable, large box */}
+                {showEditDesc ? (
+                  <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
+                    <textarea value={descEdit} onChange={e => setDescEdit(e.target.value)}
+                      autoFocus rows={4}
+                      style={{ flex:1, padding:'8px 12px', borderRadius:10, border:'1.5px solid var(--accent)',
+                        background:'var(--bg)', color:'var(--text1)', fontSize:13, resize:'none',
+                        fontFamily:'var(--font-sans)', outline:'none', lineHeight:1.5 }}/>
+                    <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                      <button onClick={saveDesc}
+                        style={{ flex:1, padding:'8px', borderRadius:8, border:'none',
+                          background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:700,
+                          cursor:'pointer', fontFamily:'var(--font-sans)' }}>✓ Salva</button>
+                      <button onClick={() => setShowEditDesc(false)}
+                        style={{ padding:'8px 14px', borderRadius:8, border:'1px solid var(--border)',
+                          background:'var(--bg)', color:'var(--text3)', fontSize:13, cursor:'pointer',
+                          fontFamily:'var(--font-sans)' }}>✕</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setShowEditDesc(true); setDescEdit(current.descAI || '') }}
+                    style={{ background:'none', border:'none', cursor:'pointer', padding:0, textAlign:'left',
+                      fontFamily:'var(--font-sans)', width:'100%', flexShrink:0 }}>
+                    <div style={{ padding:'8px 12px', borderRadius:10, background:'var(--surface2)',
+                      border:'1px solid var(--border)' }}>
+                      <div style={{ fontSize:10, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase',
+                        color:'var(--accent)', marginBottom:4 }}>descAI ✏️</div>
+                      <div style={{ fontSize:14, color:'var(--text1)', lineHeight:1.5, fontWeight:500,
+                        wordBreak:'break-word', whiteSpace:'pre-wrap' }}>
+                        {current.descAI || '—'}
+                      </div>
+                    </div>
+                  </button>
+                )}
+                {/* Descrizione originale — full text, scrollable */}
+                {current.description && !showEditDesc && (
+                  <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                    <div style={{ flex:1, overflowY:'auto', padding:'8px 12px', borderRadius:10,
+                      background:'var(--bg)', border:'1px solid var(--border)',
+                      borderLeft:'3px solid var(--border)' }}>
+                      <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.06em',
+                        textTransform:'uppercase', color:'var(--text3)', marginBottom:5 }}>ORIGINALE</div>
+                      <div style={{ fontSize:13, color:'var(--text2)', lineHeight:1.55,
+                        wordBreak:'break-word', whiteSpace:'pre-wrap' }}>
+                        {current.description}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
