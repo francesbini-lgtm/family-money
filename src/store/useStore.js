@@ -67,7 +67,8 @@ export const useStore = create((set, get) => ({
   onboardingDone: false, // set true after first import or skip
   ceciliaGoals:  [],   // Cecilia savings goals
   cashEntries:   [],   // manual cash spending log
-  notePrelievi:  [],   // mobile ATM withdrawal notes (for future matching)
+  notePrelievi:        [],   // mobile ATM withdrawal notes (for future matching)
+  discoverySkipRules:  [],   // descAI strings permanently skipped in Discovery
   energyBills:   [],   // utility bills (luce/gas/acqua)
   salaries:      [],   // RAL e netto annui per persona
   aiChatHistory: [],   // persisted chat (overrides previous definition)
@@ -112,7 +113,7 @@ export const useStore = create((set, get) => ({
 
   // ── Load all from Firestore ───────────────────────────
   loadAllData: async (userId) => {
-    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi] = await Promise.all([
+    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi, skipRules] = await Promise.all([
       loadCollection('transactions'),
       loadCollection('loans'),
       loadCollection('scadenze'),
@@ -132,6 +133,7 @@ export const useStore = create((set, get) => ({
       loadCollection('salaries'),
       loadUserAccounts(userId),
       loadCollection('note_prelievi'),
+      loadCollection('discovery_skip_rules'),
     ])
     set({
       transactions: txs.map(enrichTx).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')),
@@ -139,7 +141,7 @@ export const useStore = create((set, get) => ({
       vehExpenses: vehExp, vacations: vac,
       nannyTS: nan, colfTS: col, portfolios: port, satiPots: sati,
       ceciliaGoals: cec, cashEntries: cash, energyBills: energy,
-      notePrelievi,
+      notePrelievi, discoverySkipRules: skipRules,
       aiChatHistory: chat.sort((a,b)=>a.ts-b.ts),
       aiRules: rules,
       rimborsiCosts: rimb,
@@ -649,6 +651,18 @@ export const useStore = create((set, get) => ({
   deleteNotaPrelievo: (id) => {
     set(s=>({notePrelievi:s.notePrelievi.filter(x=>x.id!==id)}))
     deleteDocument('note_prelievi',id)
+  },
+
+  // ── Discovery skip rules ──────────────────────────────
+  addDiscoverySkipRule: (descAI) => {
+    const item = { id: uid(), descAI, addedAt: new Date().toISOString() }
+    set(s=>({discoverySkipRules:[...s.discoverySkipRules, item]}))
+    saveDocument('discovery_skip_rules', item.id, item)
+    return item
+  },
+  removeDiscoverySkipRule: (id) => {
+    set(s=>({discoverySkipRules:s.discoverySkipRules.filter(r=>r.id!==id)}))
+    deleteDocument('discovery_skip_rules', id)
   },
 
   // ── Energy bills ──────────────────────────────────────

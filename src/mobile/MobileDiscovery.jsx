@@ -1,13 +1,14 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
+import { lookupMerchantInfo } from '../data/aiService'
 
+// ── Seen-key helpers (localStorage) ──────────────────────
 const SEEN_KEY = 'fm-discovery-seen'
-
-function loadSeen()        { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
-function markSeen(txId)    { const s = loadSeen(); s[txId] = Date.now(); localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
-function removeSeen(txId)  { const s = loadSeen(); delete s[txId]; localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
+function loadSeen()       { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
+function markSeen(txId)   { const s = loadSeen(); s[txId] = Date.now(); localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
+function removeSeen(txId) { const s = loadSeen(); delete s[txId]; localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
 
 function isLowConfidence(t) {
   if (t.excluded) return false
@@ -17,147 +18,202 @@ function isLowConfidence(t) {
   return !cat || cat === 'Non Categorizzato' || cat === 'Altro' || !t.aiEnriched
 }
 
+function isCommission(t) {
+  return t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
+}
+
 const fmtAmt = n => '€ ' + fmtIT(Math.abs(n), 2)
 
-function dateLabel(d) {
+function dateValuta(t) {
+  // Always show data valuta (t.date), NOT competenza/_effDate
+  const d = t.date || ''
   if (!d) return ''
-  return new Date(d).toLocaleDateString('it-IT', { day:'numeric', month:'short', year:'2-digit' })
+  return new Date(d).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: '2-digit' })
 }
 
-// ── Edit description modal ────────────────────────────────
-function EditDescModal({ tx, onSave, onClose }) {
-  const [val, setVal] = useState(tx.descAI || '')
-  return (
-    <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="m-modal">
-        <div className="m-modal-handle"/>
-        <div className="m-modal-title">✏️ Modifica Descrizione AI</div>
-        <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10, lineHeight:1.5 }}>
-          Originale: {tx.description?.slice(0, 100)}
-        </div>
-        <input className="m-input" value={val} onChange={e => setVal(e.target.value)} autoFocus style={{ marginBottom:16 }}/>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-          <button className="m-btn m-btn-ghost" onClick={onClose}>Annulla</button>
-          <button className="m-btn m-btn-primary" onClick={() => onSave(val)}>✓ Salva</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Full category picker modal ────────────────────────────
-function CatPickerModal({ onSelect, onClose, customCats }) {
-  const merged = getMergedCats(customCats)
+// ── Inline category picker (L1 → L2) ─────────────────────
+function CatPickerInline({ current, merged, onSelect, onClose }) {
+  const [selL1, setSelL1] = useState(current?.cat1 || null)
   const cats = Object.entries(merged).filter(([n]) => n !== 'Entrate' && n !== 'Non Categorizzato')
-  const [selL1, setSelL1] = useState(null)
 
   if (selL1) {
-    const info = merged[selL1] || {}
-    const subs = info.sub || []
+    const subs = merged[selL1]?.sub || []
+    const color = merged[selL1]?.color || '#888'
     return (
-      <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-        <div className="m-modal">
-          <div className="m-modal-handle"/>
-          <button onClick={() => setSelL1(null)}
-            style={{ background:'none', border:'none', color:'var(--accent)', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:10, fontFamily:'var(--font-sans)' }}>
-            ← {selL1}
+      <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+        <button onClick={() => setSelL1(null)}
+          style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, fontWeight:700,
+            color:'var(--accent)', fontFamily:'var(--font-sans)', textAlign:'left',
+            padding:'4px 0', display:'flex', alignItems:'center', gap:4 }}>
+          ← {selL1}
+        </button>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+          <button onClick={() => { onSelect(selL1, ''); onClose() }}
+            style={{ padding:'5px 12px', borderRadius:16, border:'1px solid var(--border)',
+              background: !current?.cat2 && current?.cat1===selL1 ? color+'22' : 'var(--surface)',
+              color: 'var(--text3)', fontSize:12, fontWeight:600, cursor:'pointer',
+              fontFamily:'var(--font-sans)', fontStyle:'italic' }}>
+            — Nessuna
           </button>
-          <div className="m-modal-title">📂 Sottocategoria</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            <button onClick={() => { onSelect(selL1, ''); onClose() }}
-              style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px',
-                border:'1px solid var(--border)', borderRadius:10, background:'var(--surface)',
-                cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left' }}>
-              <span style={{ fontSize:13, color:'var(--text3)', fontStyle:'italic' }}>— Nessuna sottocategoria</span>
-            </button>
-            {subs.map(sub => (
+          {subs.map(sub => {
+            const isAct = current?.cat1 === selL1 && current?.cat2 === sub
+            return (
               <button key={sub} onClick={() => { onSelect(selL1, sub); onClose() }}
-                style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px',
-                  border:'1px solid var(--border)', borderRadius:10, background:'var(--surface)',
-                  cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left' }}>
-                <span style={{ fontSize:14, fontWeight:600, color:'var(--text1)' }}>{sub}</span>
+                style={{ padding:'5px 12px', borderRadius:16, border:`1px solid ${isAct ? color : 'var(--border)'}`,
+                  background: isAct ? color+'22' : 'var(--surface)', color: isAct ? color : 'var(--text2)',
+                  fontSize:12, fontWeight: isAct ? 700 : 500, cursor:'pointer', fontFamily:'var(--font-sans)' }}>
+                {sub}
               </button>
-            ))}
-          </div>
+            )
+          })}
         </div>
       </div>
     )
   }
 
   return (
-    <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="m-modal">
-        <div className="m-modal-handle"/>
-        <div className="m-modal-title">📂 Seleziona Categoria</div>
-        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-          {cats.map(([name, info]) => (
-            <button key={name} onClick={() => setSelL1(name)}
-              style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px',
-                border:'1px solid var(--border)', borderRadius:10, background:'var(--surface)',
-                cursor:'pointer', fontFamily:'var(--font-sans)', textAlign:'left',
-                justifyContent:'space-between' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                <div style={{ width:10, height:10, borderRadius:'50%', background:info.color, flexShrink:0 }}/>
-                <span style={{ fontSize:14, fontWeight:600, color:'var(--text1)' }}>{name}</span>
-              </div>
-              {(info.sub || []).length > 0 && (
-                <span style={{ fontSize:11, color:'var(--text3)' }}>›</span>
-              )}
+    <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+      {cats.map(([name, info]) => {
+        const isAct = current?.cat1 === name
+        return (
+          <button key={name}
+            onClick={() => {
+              if ((info.sub || []).length === 0) { onSelect(name, ''); onClose() }
+              else setSelL1(name)
+            }}
+            style={{ padding:'5px 12px', borderRadius:16,
+              border:`1px solid ${isAct ? info.color : 'var(--border)'}`,
+              background: isAct ? info.color+'22' : 'var(--surface)',
+              color: isAct ? info.color : 'var(--text2)',
+              fontSize:12, fontWeight: isAct ? 700 : 500, cursor:'pointer', fontFamily:'var(--font-sans)',
+              display:'flex', alignItems:'center', gap:5 }}>
+            <span style={{ width:6, height:6, borderRadius:'50%', background:info.color, flexShrink:0 }}/>
+            {name}
+            {(info.sub||[]).length > 0 && <span style={{ fontSize:9, opacity:.5 }}>›</span>}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Inline location picker ────────────────────────────────
+function LocPickerInline({ currentCity, quickCities, onSelect, onClose }) {
+  const [custom, setCustom] = useState('')
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+        {/* No location */}
+        <button onClick={() => { onSelect(''); onClose() }}
+          style={{ padding:'5px 12px', borderRadius:16, border:'1px solid var(--border)',
+            background: !currentCity ? 'rgba(200,50,50,.12)' : 'var(--surface)',
+            color: !currentCity ? 'var(--red)' : 'var(--text3)',
+            fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'var(--font-sans)', fontStyle:'italic' }}>
+          ✕ No location
+        </button>
+        {/* Known cities */}
+        {quickCities.map(city => {
+          const isAct = city === currentCity
+          return (
+            <button key={city} onClick={() => { onSelect(city); onClose() }}
+              style={{ padding:'5px 12px', borderRadius:16,
+                border:`1px solid ${isAct ? 'var(--blue)' : 'var(--border)'}`,
+                background: isAct ? 'rgba(59,130,246,.15)' : 'var(--surface)',
+                color: isAct ? 'var(--blue)' : 'var(--text2)',
+                fontSize:12, fontWeight: isAct ? 700 : 500, cursor:'pointer', fontFamily:'var(--font-sans)' }}>
+              📍 {city}
             </button>
-          ))}
-        </div>
+          )
+        })}
+      </div>
+      {/* Custom city input */}
+      <div style={{ display:'flex', gap:6 }}>
+        <input value={custom} onChange={e => setCustom(e.target.value)}
+          placeholder="Altra città…"
+          onKeyDown={e => { if (e.key === 'Enter' && custom.trim()) { onSelect(custom.trim()); onClose() } }}
+          style={{ flex:1, padding:'7px 12px', borderRadius:10, border:'1.5px solid var(--border)',
+            background:'var(--bg)', color:'var(--text1)', fontSize:13, fontFamily:'var(--font-sans)',
+            outline:'none' }}/>
+        <button onClick={() => { if (custom.trim()) { onSelect(custom.trim()); onClose() } }}
+          style={{ padding:'7px 14px', borderRadius:10, border:'none', background:'var(--accent)',
+            color:'#fff', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'var(--font-sans)' }}>
+          ✓
+        </button>
       </div>
     </div>
   )
 }
 
-export default function MobileDiscovery() {
-  const transactions      = useStore(s => s.transactions)
-  const updateTransaction = useStore(s => s.updateTransaction)
-  const customCats        = useStore(s => s.customCats)
+// ── AI merchant info result ───────────────────────────────
+function AiInfoBubble({ info, onClose }) {
+  return (
+    <div style={{ padding:'10px 14px', background:'rgba(100,120,220,.08)', borderRadius:10,
+      border:'1px solid rgba(100,120,220,.2)', fontSize:13, color:'var(--text2)', lineHeight:1.5,
+      display:'flex', gap:8, alignItems:'flex-start' }}>
+      <span style={{ fontSize:16, flexShrink:0 }}>🤖</span>
+      <div style={{ flex:1 }}>{info}</div>
+      <button onClick={onClose}
+        style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text3)', fontSize:14, padding:0, flexShrink:0 }}>✕</button>
+    </div>
+  )
+}
 
-  const [seenVer,       setSeenVer]       = useState(0)
-  const [undoStack,     setUndoStack]     = useState([])
-  const [showEditDesc,  setShowEditDesc]  = useState(false)
-  const [showCatPicker, setShowCatPicker] = useState(false)
-  // Pending L1 for L2 selection (inline)
-  const [pendingL1,     setPendingL1]     = useState(null)
+export default function MobileDiscovery() {
+  const transactions           = useStore(s => s.transactions)
+  const updateTransaction      = useStore(s => s.updateTransaction)
+  const customCats             = useStore(s => s.customCats)
+  const discoverySkipRules     = useStore(s => s.discoverySkipRules) || []
+  const addDiscoverySkipRule   = useStore(s => s.addDiscoverySkipRule)
+  const removeDiscoverySkipRule = useStore(s => s.removeDiscoverySkipRule)
+
+  const [seenVer,      setSeenVer]      = useState(0)
+  const [undoStack,    setUndoStack]    = useState([])
+  const [activeMode,   setActiveMode]   = useState(null) // null | 'cat' | 'loc'
+  const [showEditDesc, setShowEditDesc] = useState(false)
+  const [aiInfo,       setAiInfo]       = useState(null)  // string | null
+  const [aiLoading,    setAiLoading]    = useState(false)
+  const [descEdit,     setDescEdit]     = useState('')
 
   const merged = getMergedCats(customCats)
+  const skipSet = useMemo(() => new Set(discoverySkipRules.map(r => r.descAI)), [discoverySkipRules])
 
   // ── Queue ─────────────────────────────────────────────────
   const queue = useMemo(() => {
     const seen = loadSeen()
-    const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
-    const cands = transactions.filter(t => isLowConfidence(t) && !isComm(t))
+    const cands = transactions
+      .filter(t => isLowConfidence(t) && !isCommission(t) && !skipSet.has(t.descAI))
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId])
       .sort((a, b) => (seen[a.txId] || 0) - (seen[b.txId] || 0))
     return [...unseen, ...seenTxs]
-  }, [transactions, seenVer])
+  }, [transactions, seenVer, skipSet])
 
-  const total   = transactions.filter(t => isLowConfidence(t) && !(t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca')).length
+  const total   = transactions.filter(t => isLowConfidence(t) && !isCommission(t) && !skipSet.has(t.descAI)).length
   const done    = Math.max(0, total - queue.length)
   const current = queue[0] || null
 
-  useMemo(() => { if (current) markSeen(current.txId) }, [current?.txId])
+  // Mark seen without re-render
+  useEffect(() => { if (current) markSeen(current.txId) }, [current?.txId])
 
-  // ── Top 8 quick categories (learned) ─────────────────────
+  // Reset mode when current changes
+  useEffect(() => { setActiveMode(null); setAiInfo(null) }, [current?.txId])
+
+  // Top 8 learned categories
   const quickCats = useMemo(() => {
     const freq = {}
     transactions.filter(t => t.userEditedCat && t.amount < 0 && t.cat1)
       .forEach(t => { freq[t.cat1] = (freq[t.cat1] || 0) + 1 })
-    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([c]) => c)
-    const defaults = ['Casa','Spesa e Alimentari','Tempo Libero','Shopping','Veicoli','Altro']
-    return [...new Set([...sorted, ...defaults])].slice(0, 8)
+    const sorted = Object.entries(freq).sort((a,b) => b[1]-a[1]).map(([c]) => c)
+    return [...new Set([...sorted, 'Casa','Spesa e Alimentari','Tempo Libero','Shopping','Veicoli','Altro'])].slice(0,8)
   }, [transactions])
 
-  // ── Top 5 quick locations ─────────────────────────────────
+  // Top 8 locations
   const quickCities = useMemo(() => {
     const freq = {}
     transactions.filter(t => t.city).forEach(t => { freq[t.city] = (freq[t.city] || 0) + 1 })
-    return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c]) => c)
+    return Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0,8).map(([c]) => c)
   }, [transactions])
 
   // ── Actions ───────────────────────────────────────────────
@@ -165,38 +221,33 @@ export default function MobileDiscovery() {
     if (!current) return
     setUndoStack(s => [{
       txId: current.txId, prevCat1: current.cat1, prevCat2: current.cat2,
-      prevDescAI: current.descAI, prevUserEditedCat: current.userEditedCat, prevFlagged: current._flagged
+      prevDescAI: current.descAI, prevCity: current.city,
+      prevUserEditedCat: current.userEditedCat, prevFlagged: current._flagged,
     }, ...s].slice(0, 10))
   }
 
-  // Apply category WITHOUT advancing to next tx
   function applyCategory(cat1, cat2 = '') {
     if (!current) return
     pushUndo()
     updateTransaction(current.txId, { cat1, cat2: cat2 || null, userEditedCat: true })
-    setPendingL1(null)
-    // Do NOT call removeSeen / setSeenVer — user must explicitly press OK/SALTA/FLAGGA
+    setActiveMode(null)
   }
 
   function applyCity(city) {
     if (!current) return
     pushUndo()
-    updateTransaction(current.txId, { city })
+    updateTransaction(current.txId, { city: city || null })
+    setActiveMode(null)
   }
 
-  // Only these three advance the queue
   function advance() {
     removeSeen(current.txId)
     setSeenVer(v => v + 1)
-    setPendingL1(null)
+    setActiveMode(null)
+    setAiInfo(null)
   }
 
-  function skipCurrent() {
-    if (!current) return
-    markSeen(current.txId)
-    setSeenVer(v => v + 1)
-    setPendingL1(null)
-  }
+  function skipCurrent() { if (!current) return; markSeen(current.txId); setSeenVer(v=>v+1); setActiveMode(null) }
 
   function confirmCurrent() {
     if (!current) return
@@ -218,17 +269,37 @@ export default function MobileDiscovery() {
     setUndoStack(rest)
     updateTransaction(last.txId, {
       cat1: last.prevCat1, cat2: last.prevCat2 || null,
-      descAI: last.prevDescAI, userEditedCat: last.prevUserEditedCat || false,
-      _flagged: last.prevFlagged || false
+      descAI: last.prevDescAI, city: last.prevCity || null,
+      userEditedCat: last.prevUserEditedCat || false,
+      _flagged: last.prevFlagged || false,
     })
     removeSeen(last.txId)
     setSeenVer(v => v + 1)
-    setPendingL1(null)
   }
 
-  function handleSaveDesc(newDesc) {
-    if (!current) return
-    updateTransaction(current.txId, { descAI: newDesc, userEditedDesc: true })
+  function saltaSempre() {
+    if (!current?.descAI) return
+    addDiscoverySkipRule(current.descAI)
+    advance()
+  }
+
+  async function handleAiLookup() {
+    if (!current || aiLoading) return
+    setAiLoading(true)
+    setAiInfo(null)
+    try {
+      const info = await lookupMerchantInfo(current.merchant || current.descAI, current.description, current.amount)
+      setAiInfo(info)
+    } catch(e) {
+      setAiInfo('Impossibile ottenere informazioni: ' + (e.message || 'errore AI'))
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  function saveDesc() {
+    if (!current || !descEdit.trim()) return
+    updateTransaction(current.txId, { descAI: descEdit.trim(), userEditedDesc: true })
     setShowEditDesc(false)
   }
 
@@ -237,215 +308,235 @@ export default function MobileDiscovery() {
   // ── Empty state ───────────────────────────────────────────
   if (queue.length === 0) {
     return (
-      <div className="m-content">
-        <div className="m-empty" style={{ marginTop:60 }}>
-          <div className="m-empty-icon">✅</div>
-          <div className="m-empty-title">Tutto in ordine!</div>
-          <div className="m-empty-sub">Nessuna transazione da revisionare. Ottimo lavoro!</div>
+      <div style={{ height:'100%', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <div style={{ textAlign:'center', padding:24 }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>✅</div>
+          <div style={{ fontSize:17, fontWeight:700, color:'var(--text1)', marginBottom:8 }}>Tutto in ordine!</div>
+          <div style={{ fontSize:13, color:'var(--text3)' }}>Nessuna transazione da revisionare.</div>
         </div>
       </div>
     )
   }
 
-  const pendingL1Subs = pendingL1 ? (merged[pendingL1]?.sub || []) : []
+  const curCatColor = current ? catColor(current.cat1) : '#888'
+  const hasCategory = current?.cat1 && current.cat1 !== 'Non Categorizzato' && current.cat1 !== 'Altro'
 
   return (
-    // paddingBottom grande per non sovrapporre i bottoni sticky
-    <div className="m-content" style={{ paddingBottom:120 }}>
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      // bottom padding for nav pill
+      paddingBottom: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+    }}>
 
-      {/* Progress + Undo */}
-      <div className="m-disc-progress">
-        <span style={{ fontWeight:700, color:'var(--text2)', flexShrink:0 }}>{queue.length} da rivedere</span>
-        <div className="m-disc-progress-bar">
-          <div className="m-disc-progress-fill"
-            style={{ width: total > 0 ? `${Math.round(done / total * 100)}%` : '0%' }}/>
+      {/* ── Progress bar ─────────────────────────────────── */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 14px 8px', flexShrink:0 }}>
+        <span style={{ fontWeight:700, color:'var(--text2)', fontSize:12, flexShrink:0 }}>{queue.length} rimaste</span>
+        <div style={{ flex:1, height:4, background:'var(--border)', borderRadius:2, overflow:'hidden' }}>
+          <div style={{ height:'100%', borderRadius:2, background:'var(--green)',
+            width: total > 0 ? `${Math.round(done/total*100)}%` : '0%', transition:'width .3s' }}/>
         </div>
-        <span style={{ flexShrink:0 }}>{total > 0 ? Math.round(done / total * 100) : 0}%</span>
+        <span style={{ fontSize:11, color:'var(--text3)', flexShrink:0 }}>{total > 0 ? Math.round(done/total*100) : 0}%</span>
         {undoStack.length > 0 && (
           <button onClick={handleUndo}
-            style={{ marginLeft:4, padding:'3px 10px', borderRadius:8, border:'1px solid var(--border)',
+            style={{ padding:'3px 10px', borderRadius:8, border:'1px solid var(--border)',
               background:'var(--surface)', fontSize:11, fontWeight:700, cursor:'pointer',
               color:'var(--blue)', fontFamily:'var(--font-sans)', flexShrink:0 }}>
-            ↩ Undo
+            ↩
           </button>
         )}
       </div>
 
-      {/* Main card */}
+      {/* ── Main card (flex: 1, no scroll) ───────────────── */}
       {current && (
-        <div className="m-disc-card">
-          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:4 }}>
-            <div className="m-disc-amount">{fmtAmt(current.amount)}</div>
-            {current._flagged && <span style={{ fontSize:18 }}>🚩</span>}
+        <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column',
+          margin:'0 14px', background:'var(--surface)', borderRadius:16,
+          border:'1px solid var(--border)', boxShadow:'0 4px 20px rgba(0,0,0,.07)' }}>
+
+          {/* Amount + flag */}
+          <div style={{ padding:'14px 16px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', flexShrink:0 }}>
+            <div style={{ fontSize:28, fontWeight:900, color:'var(--red)', letterSpacing:'-.04em', lineHeight:1 }}>
+              {fmtAmt(current.amount)}
+            </div>
+            <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+              {current._flagged && <span style={{ fontSize:16 }}>🚩</span>}
+              <button onClick={handleAiLookup} disabled={aiLoading}
+                style={{ padding:'4px 10px', borderRadius:10, border:'1px solid var(--border)',
+                  background: aiLoading ? 'var(--surface2)' : 'var(--bg)',
+                  fontSize:11, fontWeight:700, cursor: aiLoading ? 'default' : 'pointer',
+                  color:'var(--accent)', fontFamily:'var(--font-sans)', display:'flex', alignItems:'center', gap:4 }}>
+                {aiLoading ? '⏳' : '🔍'} AI
+              </button>
+            </div>
           </div>
 
-          <div className="m-disc-merchant">
+          {/* Merchant */}
+          <div style={{ padding:'4px 16px 0', fontSize:15, fontWeight:700, color:'var(--text1)',
+            flexShrink:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
             {current.merchant || current.descAI || 'Transazione'}
           </div>
 
-          <div onClick={() => setShowEditDesc(true)}
-            style={{ fontSize:13, color:'var(--text3)', marginBottom:6,
-              cursor:'pointer', textDecoration:'underline dotted', lineHeight:1.4 }}>
-            {current.descAI || '— nessuna descrizione AI —'}
-            <span style={{ marginLeft:5, fontSize:10, color:'var(--accent)' }}>✏️</span>
-          </div>
-
-          {current.description && (
-            <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10,
-              padding:'6px 10px', background:'var(--surface2)', borderRadius:8,
-              borderLeft:'2px solid var(--border)', lineHeight:1.4, wordBreak:'break-word' }}>
-              <span style={{ fontSize:9, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase',
-                color:'var(--text3)', marginRight:6 }}>ORIGINALE</span>
-              {current.description.slice(0, 120)}
+          {/* AI info bubble */}
+          {aiInfo && (
+            <div style={{ padding:'6px 12px 0', flexShrink:0 }}>
+              <AiInfoBubble info={aiInfo} onClose={() => setAiInfo(null)}/>
             </div>
           )}
 
-          {/* Meta tags */}
-          <div className="m-disc-meta">
-            <span className="m-disc-tag">{dateLabel(current.date)}</span>
-            {current.account && <span className="m-disc-tag">{current.account}</span>}
-            {current.city && (
-              <span className="m-disc-tag" style={{ background:'rgba(59,130,246,.1)', color:'var(--blue)', borderColor:'rgba(59,130,246,.2)' }}>
-                📍 {current.city}
+          {/* Tags row: cat + date + location — all clickable */}
+          <div style={{ padding:'8px 12px 0', display:'flex', flexWrap:'wrap', gap:5, flexShrink:0 }}>
+            {/* Category tag — click to open picker */}
+            <button onClick={() => setActiveMode(m => m === 'cat' ? null : 'cat')}
+              style={{ padding:'4px 10px', borderRadius:12, fontSize:12, fontWeight:700, cursor:'pointer',
+                border:`1px solid ${curCatColor}44`, background:`${curCatColor}18`, color: curCatColor,
+                fontFamily:'var(--font-sans)', display:'flex', alignItems:'center', gap:4 }}>
+              <span style={{ width:6, height:6, borderRadius:'50%', background:curCatColor, flexShrink:0 }}/>
+              {current.cat1 || '?'}{current.cat2 ? ` › ${current.cat2}` : ''}
+              <span style={{ fontSize:9, opacity:.6 }}>▼</span>
+            </button>
+
+            {/* Date valuta — always t.date */}
+            <span style={{ padding:'4px 10px', borderRadius:12, fontSize:12, fontWeight:600,
+              border:'1px solid var(--border)', background:'var(--surface2)', color:'var(--text2)' }}>
+              {dateValuta(current)}
+            </span>
+
+            {/* Location tag — click to open picker */}
+            <button onClick={() => setActiveMode(m => m === 'loc' ? null : 'loc')}
+              style={{ padding:'4px 10px', borderRadius:12, fontSize:12, fontWeight:600, cursor:'pointer',
+                border:`1px solid ${current.city ? 'rgba(59,130,246,.3)' : 'var(--border)'}`,
+                background: current.city ? 'rgba(59,130,246,.1)' : 'var(--surface2)',
+                color: current.city ? 'var(--blue)' : 'var(--text3)',
+                fontFamily:'var(--font-sans)', display:'flex', alignItems:'center', gap:4 }}>
+              📍 {current.city || 'Luogo?'}
+              <span style={{ fontSize:9, opacity:.6 }}>▼</span>
+            </button>
+
+            {current.time && (
+              <span style={{ padding:'4px 10px', borderRadius:12, fontSize:12, fontWeight:600,
+                border:'1px solid var(--border)', background:'var(--surface2)', color:'var(--text3)' }}>
+                🕐 {current.time}
               </span>
             )}
-            {current.time && <span className="m-disc-tag">🕐 {current.time}</span>}
-            {current.cat1 && (
-              <span className="m-disc-tag"
-                style={{ background: catColor(current.cat1) + '22', color: catColor(current.cat1),
-                  borderColor: catColor(current.cat1) + '44' }}>
-                {current.cat1}{current.cat2 ? ` › ${current.cat2}` : ''}
-              </span>
-            )}
+
             {!current.aiEnriched && (
-              <span className="m-disc-tag" style={{ background:'rgba(230,150,0,.12)', color:'var(--gold)', borderColor:'rgba(230,150,0,.2)' }}>
+              <span style={{ padding:'4px 8px', borderRadius:12, fontSize:11, fontWeight:700,
+                border:'1px solid rgba(230,150,0,.2)', background:'rgba(230,150,0,.1)', color:'var(--gold)' }}>
                 ⚠️ Non AI
               </span>
             )}
           </div>
-        </div>
-      )}
 
-      {/* L1 category quick buttons */}
-      <div style={{ padding:'10px 14px 4px' }}>
-        <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', textTransform:'uppercase',
-          letterSpacing:'.04em', marginBottom:8 }}>Assegna categoria</div>
-        <div className="m-quickcat-grid">
-          {quickCats.map(cat => {
-            const color    = catColor(cat)
-            const isActive = current?.cat1 === cat && !pendingL1
-            const isPending = pendingL1 === cat
-            return (
-              <button key={cat} className="m-quickcat-btn"
-                onClick={() => {
-                  if (pendingL1 === cat) { setPendingL1(null); return }
-                  const subs = merged[cat]?.sub || []
-                  if (subs.length > 0) {
-                    setPendingL1(cat)
-                  } else {
-                    applyCategory(cat, '')
-                  }
-                }}
-                style={ isPending
-                  ? { background: color+'33', borderColor:color, color, fontWeight:800 }
-                  : isActive
-                    ? { background: color+'22', borderColor:color, color }
-                    : {} }>
-                <span style={{ width:7, height:7, borderRadius:'50%', background:color, flexShrink:0 }}/>
-                {cat}
-                {(merged[cat]?.sub||[]).length > 0 && <span style={{ fontSize:9, opacity:.6 }}>›</span>}
+          {/* AI descr (editable) OR original desc — compact */}
+          <div style={{ padding:'6px 14px 0', flexShrink:0 }}>
+            {showEditDesc ? (
+              <div style={{ display:'flex', gap:6 }}>
+                <input value={descEdit} onChange={e => setDescEdit(e.target.value)}
+                  autoFocus
+                  style={{ flex:1, padding:'6px 10px', borderRadius:8, border:'1.5px solid var(--accent)',
+                    background:'var(--bg)', color:'var(--text1)', fontSize:13,
+                    fontFamily:'var(--font-sans)', outline:'none' }}/>
+                <button onClick={saveDesc}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'none',
+                    background:'var(--accent)', color:'#fff', fontSize:12, fontWeight:700,
+                    cursor:'pointer', fontFamily:'var(--font-sans)' }}>✓</button>
+                <button onClick={() => setShowEditDesc(false)}
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)',
+                    background:'var(--bg)', color:'var(--text3)', fontSize:12, cursor:'pointer',
+                    fontFamily:'var(--font-sans)' }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => { setShowEditDesc(true); setDescEdit(current.descAI || '') }}
+                style={{ background:'none', border:'none', cursor:'pointer', padding:0, textAlign:'left',
+                  fontFamily:'var(--font-sans)', width:'100%' }}>
+                <span style={{ fontSize:12, color:'var(--text3)', lineHeight:1.4,
+                  display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {current.descAI || current.description?.slice(0,80) || '—'}
+                  <span style={{ marginLeft:5, fontSize:9, color:'var(--accent)' }}>✏️</span>
+                </span>
               </button>
-            )
-          })}
-          <button className="m-quickcat-btn" onClick={() => setShowCatPicker(true)}
-            style={{ color:'var(--accent)', borderColor:'var(--accent)', background:'rgba(100,120,200,.08)' }}>
-            ＋ Altra
-          </button>
-        </div>
-      </div>
-
-      {/* L2 subcategory buttons (shown when L1 pending) */}
-      {pendingL1 && (
-        <div style={{ padding:'4px 14px 8px', margin:'0 14px', background:'var(--surface2)', borderRadius:10, border:'1px solid var(--border)' }}>
-          <div style={{ fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.04em', padding:'8px 0 6px' }}>
-            Sottocategoria · {pendingL1}
+            )}
           </div>
-          <div className="m-quickcat-grid">
-            <button className="m-quickcat-btn"
-              onClick={() => applyCategory(pendingL1, '')}
-              style={{ fontStyle:'italic', color:'var(--text3)' }}>
-              — Nessuna
-            </button>
-            {pendingL1Subs.map(sub => {
-              const isActive = current?.cat1 === pendingL1 && current?.cat2 === sub
-              return (
-                <button key={sub} className="m-quickcat-btn"
-                  onClick={() => applyCategory(pendingL1, sub)}
-                  style={ isActive ? { background:'var(--accent)22', borderColor:'var(--accent)', color:'var(--accent)' } : {} }>
-                  {sub}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* Location quick buttons */}
-      {quickCities.length > 0 && (
-        <div style={{ padding:'8px 14px 4px' }}>
-          <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', textTransform:'uppercase',
-            letterSpacing:'.04em', marginBottom:8 }}>Assegna location</div>
-          <div className="m-quickcat-grid">
-            {quickCities.map(city => {
-              const isActive = current?.city === city
-              return (
-                <button key={city} className="m-quickcat-btn" onClick={() => applyCity(city)}
-                  style={ isActive ? { background:'rgba(59,130,246,.15)', borderColor:'var(--blue)', color:'var(--blue)' } : {} }>
-                  📍 {city}
-                </button>
-              )
-            })}
+          {/* ── Inline picker area — takes remaining space ─ */}
+          <div style={{ flex:1, overflow:'hidden', padding:'8px 14px 10px' }}>
+            {activeMode === 'cat' && (
+              <div style={{ height:'100%', overflow:'hidden' }}>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:'.06em',
+                  textTransform:'uppercase', color:'var(--text3)', marginBottom:6 }}>
+                  Seleziona categoria
+                </div>
+                <div style={{ overflowY:'auto', height:'calc(100% - 22px)' }}>
+                  <CatPickerInline
+                    current={current}
+                    merged={merged}
+                    onSelect={applyCategory}
+                    onClose={() => setActiveMode(null)}
+                  />
+                </div>
+              </div>
+            )}
+            {activeMode === 'loc' && (
+              <div style={{ height:'100%', overflow:'hidden' }}>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:'.06em',
+                  textTransform:'uppercase', color:'var(--text3)', marginBottom:6 }}>
+                  Seleziona location
+                </div>
+                <div style={{ overflowY:'auto', height:'calc(100% - 22px)' }}>
+                  <LocPickerInline
+                    currentCity={current.city}
+                    quickCities={quickCities}
+                    onSelect={applyCity}
+                    onClose={() => setActiveMode(null)}
+                  />
+                </div>
+              </div>
+            )}
+            {activeMode === null && current.description && (
+              <div style={{ fontSize:11, color:'var(--text3)', padding:'4px 8px',
+                background:'var(--surface2)', borderRadius:8, borderLeft:'2px solid var(--border)',
+                lineHeight:1.4, wordBreak:'break-word', overflow:'hidden',
+                display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
+                <span style={{ fontSize:9, fontWeight:700, letterSpacing:'.06em',
+                  textTransform:'uppercase', marginRight:5 }}>ORIGINALE</span>
+                {current.description.slice(0, 160)}
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── Sticky bottom action bar ─────────────────────────── */}
-      <div style={{
-        position: 'fixed',
-        bottom: 0, left: '50%', transform: 'translateX(-50%)',
-        width: '100%', maxWidth: 430,
-        padding: `10px 14px calc(10px + env(safe-area-inset-bottom, 0px) + 72px)`,
-        background: 'var(--surface)',
-        borderTop: '1px solid var(--border)',
-        zIndex: 15,
-      }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
-          <button className="m-btn m-btn-ghost" onClick={skipCurrent} style={{ fontSize:13 }}>
+      {/* ── Bottom action bar (sticky) ────────────────────── */}
+      <div style={{ flexShrink:0, padding:'8px 14px 4px' }}>
+        {/* Main action buttons */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:6 }}>
+          <button className="m-btn m-btn-ghost" onClick={skipCurrent} style={{ fontSize:13, padding:'11px 0' }}>
             ⏭ Salta
           </button>
-          <button className="m-btn m-btn-green" onClick={confirmCurrent} style={{ fontSize:13, fontWeight:800 }}>
+          <button className="m-btn m-btn-green" onClick={confirmCurrent} style={{ fontSize:13, padding:'11px 0', fontWeight:800 }}>
             ✓ OK
           </button>
           <button className="m-btn" onClick={toggleFlag}
-            style={{ fontSize:13,
+            style={{ fontSize:13, padding:'11px 0',
               background: current?._flagged ? 'rgba(220,50,50,.12)' : 'rgba(200,150,0,.1)',
               color: current?._flagged ? 'var(--red)' : 'var(--gold)',
               border: `1px solid ${current?._flagged ? 'rgba(220,50,50,.2)' : 'rgba(200,150,0,.2)'}` }}>
             {current?._flagged ? '🚩 Flaggata' : '🚩 Flagga'}
           </button>
         </div>
+        {/* Secondary: Salta sempre */}
+        {current?.descAI && (
+          <button onClick={saltaSempre}
+            style={{ width:'100%', padding:'6px', background:'none',
+              border:'1px dashed var(--border)', borderRadius:8,
+              fontSize:11, fontWeight:600, cursor:'pointer', color:'var(--text3)',
+              fontFamily:'var(--font-sans)' }}>
+            🚫 Salta sempre "{current.descAI?.slice(0,30)}{current.descAI?.length > 30 ? '…' : ''}"
+          </button>
+        )}
       </div>
-
-      {showEditDesc && (
-        <EditDescModal tx={current} onSave={handleSaveDesc} onClose={() => setShowEditDesc(false)}/>
-      )}
-      {showCatPicker && (
-        <CatPickerModal
-          onSelect={(cat1, cat2) => applyCategory(cat1, cat2 || '')}
-          onClose={() => setShowCatPicker(false)}
-          customCats={customCats}
-        />
-      )}
     </div>
   )
 }

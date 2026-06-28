@@ -117,6 +117,19 @@ export async function callGemini(prompt) {
   }
 }
 
+// ── Merchant lookup — quick Gemini call ──────────────────
+export async function lookupMerchantInfo(merchant, description, amount) {
+  const prompt = `Sei un assistente finanziario italiano. Fornisci informazioni BREVI (max 2 frasi) su questa attività commerciale o transazione bancaria. Rispondi SOLO con la descrizione, niente altro.
+
+Merchant/Descrizione: "${merchant || description}"
+Importo: €${Math.abs(amount || 0).toFixed(2)}
+
+Esempio risposta: "Supermercato della catena Esselunga. Vendita prodotti alimentari e per la casa."
+
+Risposta:`
+  return callGemini(prompt)
+}
+
 // ── Category validators ───────────────────────────────────
 function validCat1(cat1) {
   return CAT_NAMES.includes(cat1) ? cat1 : null

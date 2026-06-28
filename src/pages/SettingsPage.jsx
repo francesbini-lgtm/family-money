@@ -2117,6 +2117,52 @@ function AIEnrichmentTab() {
   )
 }
 
+// ── Discovery Skip Rules Tab ──────────────────────────────
+function DiscoverySkipTab() {
+  const discoverySkipRules     = useStore(s => s.discoverySkipRules) || []
+  const removeDiscoverySkipRule = useStore(s => s.removeDiscoverySkipRule)
+
+  return (
+    <div>
+      <h2 style={{fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,marginBottom:4}}>🚫 Discovery — Regole di esclusione</h2>
+      <p style={{fontSize:13,color:'var(--text3)',marginBottom:20,lineHeight:1.5}}>
+        Le transazioni con queste descrizioni AI vengono automaticamente saltate nella sezione Discovery.
+        Puoi aggiungere una regola dal bottone "Salta sempre" nella schermata Discovery mobile.
+      </p>
+      {discoverySkipRules.length === 0 ? (
+        <div style={{padding:'24px 20px',background:'var(--surface)',borderRadius:12,
+          border:'1px solid var(--border)',textAlign:'center',color:'var(--text3)',fontSize:13}}>
+          Nessuna regola di esclusione. Usa "Salta sempre" nella Discovery mobile per aggiungerne una.
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {discoverySkipRules.map(rule => (
+            <div key={rule.id} style={{display:'flex',alignItems:'center',gap:12,
+              padding:'10px 14px',background:'var(--surface)',borderRadius:10,
+              border:'1px solid var(--border)'}}>
+              <span style={{flex:1,fontSize:14,color:'var(--text1)',fontWeight:500}}>
+                {rule.descAI || '—'}
+              </span>
+              {rule.createdAt && (
+                <span style={{fontSize:11,color:'var(--text3)',flexShrink:0}}>
+                  {new Date(rule.createdAt.toDate ? rule.createdAt.toDate() : rule.createdAt)
+                    .toLocaleDateString('it-IT')}
+                </span>
+              )}
+              <button onClick={() => removeDiscoverySkipRule(rule.id)}
+                style={{padding:'5px 10px',borderRadius:8,border:'1px solid var(--red)',
+                  background:'rgba(220,50,50,.08)',color:'var(--red)',fontSize:12,
+                  fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)',flexShrink:0}}>
+                🗑 Rimuovi
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState("profile")
   const TABS=[
@@ -2131,22 +2177,24 @@ export default function SettingsPage() {
     {id:"danger",        icon:"⚠️", label:"Danger Zone"},
     {id:"ai-prompt",     icon:"🤖", label:"AI Prompt"},
     {id:"ai-enrichment", icon:"✨", label:"AI Enrichment"},
+    {id:"discovery-skip",icon:"🚫", label:"Discovery"},
   ]
   return (
     <div style={{padding:"28px 32px",maxWidth:900}}>
       <h1 style={{fontFamily:"var(--font-serif)",fontSize:26,fontWeight:600,marginBottom:24}}>⚙️ Impostazioni</h1>
       <Tabs tabs={TABS} active={tab} onChange={setTab}/>
-      {tab==="security"      && <SecurityTab/>}
-      {tab==="profile"       && <ProfileTab/>}
-      {tab==="categories"    && <CategoriesTab/>}
-      {tab==="ai-rules"      && <AiRulesTab/>}
-      {tab==="excluded"      && <ExcludedTab/>}
-      {tab==="cash-cats"     && <CashCatsTab/>}
-      {tab==="notifications" && <NotificationsTab/>}
-      {tab==="nav-sections"  && <NavSectionsTab/>}
-      {tab==="danger"        && <DangerZoneTab/>}
-      {tab==="ai-prompt"     && <AIPromptTab/>}
-      {tab==="ai-enrichment" && <AIEnrichmentTab/>}
+      {tab==="security"       && <SecurityTab/>}
+      {tab==="profile"        && <ProfileTab/>}
+      {tab==="categories"     && <CategoriesTab/>}
+      {tab==="ai-rules"       && <AiRulesTab/>}
+      {tab==="excluded"       && <ExcludedTab/>}
+      {tab==="cash-cats"      && <CashCatsTab/>}
+      {tab==="notifications"  && <NotificationsTab/>}
+      {tab==="nav-sections"   && <NavSectionsTab/>}
+      {tab==="danger"         && <DangerZoneTab/>}
+      {tab==="ai-prompt"      && <AIPromptTab/>}
+      {tab==="ai-enrichment"  && <AIEnrichmentTab/>}
+      {tab==="discovery-skip" && <DiscoverySkipTab/>}
     </div>
   )
 }
