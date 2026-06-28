@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
@@ -10,6 +10,8 @@ function loadSeen()       { try { return JSON.parse(localStorage.getItem(SEEN_KE
 function markSeen(txId)   { const s = loadSeen(); s[txId] = Date.now(); localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
 function removeSeen(txId) { const s = loadSeen(); delete s[txId]; localStorage.setItem(SEEN_KEY, JSON.stringify(s)) }
 
+// Usata SOLO per determinare l'ingresso nella coda al primo caricamento.
+// NON usata per rimuovere la tx dalla coda — quello lo fa solo userEditedCat via queuedSet.
 function isLowConfidence(t) {
   if (t.excluded) return false
   if (t.amount >= 0) return false
@@ -174,28 +176,58 @@ export default function MobileDiscovery() {
   const [aiInfo,       setAiInfo]       = useState(null)  // string | null
   const [aiLoading,    setAiLoading]    = useState(false)
   const [descEdit,     setDescEdit]     = useState('')
+  const [forceFront,   setForceFront]   = useState(null)  // txId da mostrare per primo dopo undo
+
+  // ── queuedSet: le tx entrano al mount (isLowConfidence) ed escono solo con OK ──
+  // Questo evita che assegnare una categoria "buona" faccia sparire la tx dalla coda
+  const queuedSet = useRef(new Set())
+  useEffect(() => {
+    transactions.forEach(t => {
+      if (isLowConfidence(t) && !isCommission(t)) queuedSet.current.add(t.txId)
+    })
+  }, []) // solo al mount — nuove tx si aggiungono con skipSet
 
   const merged = getMergedCats(customCats)
   const skipSet = useMemo(() => new Set(discoverySkipRules.map(r => r.descAI)), [discoverySkipRules])
 
-  // ── Queue ─────────────────────────────────────────────────
+  // ── Queue: usa queuedSet come gate di uscita, non isLowConfidence ─────────────
   const queue = useMemo(() => {
     const seen = loadSeen()
     const cands = transactions
-      .filter(t => isLowConfidence(t) && !isCommission(t) && !skipSet.has(t.descAI))
+      .filter(t =>
+        queuedSet.current.has(t.txId) &&   // era low-confidence al mount
+        !t.userEditedCat &&                  // non ancora confermato con OK
+        !isCommission(t) &&
+        !skipSet.has(t.descAI)
+      )
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+    // forceFront: metti quella tx in testa (dopo undo)
+    if (forceFront) {
+      const idx = cands.findIndex(t => t.txId === forceFront)
+      if (idx > 0) {
+        const [item] = cands.splice(idx, 1)
+        cands.unshift(item)
+      }
+    }
+
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId])
       .sort((a, b) => (seen[a.txId] || 0) - (seen[b.txId] || 0))
     return [...unseen, ...seenTxs]
-  }, [transactions, seenVer, skipSet])
+  }, [transactions, seenVer, skipSet, forceFront])
 
-  const total   = transactions.filter(t => isLowConfidence(t) && !isCommission(t) && !skipSet.has(t.descAI)).length
+  const total   = queuedSet.current.size
   const done    = Math.max(0, total - queue.length)
   const current = queue[0] || null
 
   // Mark seen without re-render
   useEffect(() => { if (current) markSeen(current.txId) }, [current?.txId])
+
+  // Quando la tx forzata arriva in testa, resetta forceFront
+  useEffect(() => {
+    if (forceFront && current?.txId === forceFront) setForceFront(null)
+  }, [current?.txId, forceFront])
 
   // Reset mode when current changes
   useEffect(() => { setActiveMode(null); setAiInfo(null) }, [current?.txId])
@@ -255,6 +287,7 @@ export default function MobileDiscovery() {
   function confirmCurrent() {
     if (!current) return
     pushUndo()
+    queuedSet.current.delete(current.txId)   // rimuovi dalla coda permanentemente
     updateTransaction(current.txId, { userEditedCat: true })
     advance()
   }
@@ -270,13 +303,18 @@ export default function MobileDiscovery() {
     if (!undoStack.length) return
     const [last, ...rest] = undoStack
     setUndoStack(rest)
+    // Ripristina valori precedenti
     updateTransaction(last.txId, {
       cat1: last.prevCat1, cat2: last.prevCat2 || null,
       descAI: last.prevDescAI, city: last.prevCity || null,
       userEditedCat: last.prevUserEditedCat || false,
       _flagged: last.prevFlagged || false,
     })
+    // Rimetti in coda se era stata confermata (OK)
+    queuedSet.current.add(last.txId)
+    // Forza quella tx in testa + resetta seen so che appaia prima
     removeSeen(last.txId)
+    setForceFront(last.txId)
     setSeenVer(v => v + 1)
   }
 
@@ -292,9 +330,12 @@ export default function MobileDiscovery() {
     setAiInfo(null)
     try {
       const info = await lookupMerchantInfo(current.merchant || current.descAI, current.description, current.amount)
-      setAiInfo(info)
+      setAiInfo(info || '(nessuna risposta)')
     } catch(e) {
-      setAiInfo('Impossibile ottenere informazioni: ' + (e.message || 'errore AI'))
+      // Mostra errore completo per debug
+      const msg = e.message || 'errore sconosciuto'
+      console.error('[AI lookup]', msg)
+      setAiInfo(`⚠️ ${msg}`)
     } finally {
       setAiLoading(false)
     }
