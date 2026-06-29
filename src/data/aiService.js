@@ -155,6 +155,73 @@ Risposta:`
   return callGemini(prompt)
 }
 
+// ── Merchant + Places lookup (Discovery AI button) ────────
+// Returns: { merchantName, merchantType, category, notes, place: { name, city, address, lat, lng } | null }
+export async function lookupMerchantAndPlace(merchant, description, amount) {
+  const aiKey = getApiKey()
+  if (!aiKey) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
+
+  const prompt = `Sei un assistente finanziario italiano. Analizza questa transazione bancaria e rispondi SOLO con un JSON valido (nessun testo extra):
+
+{
+  "merchantName": "nome esatto dell'attività commerciale (es. Esselunga, Amazon, McDonald's)",
+  "merchantType": "tipo di attività (es. Supermercato, E-commerce, Ristorante)",
+  "category": "categoria di spesa suggerita in italiano",
+  "notes": "una frase utile sull'attività o sulla transazione"
+}
+
+Merchant/Descrizione: "${merchant || description}"
+Importo: €${Math.abs(amount || 0).toFixed(2)}`
+
+  let aiResult = {}
+  if (aiKey.startsWith('sk-')) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 200,
+        response_format: { type: 'json_object' },
+      })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    try { aiResult = JSON.parse(data.choices?.[0]?.message?.content || '{}') } catch { aiResult = {} }
+  } else {
+    const text = await callGemini(prompt)
+    try {
+      const match = text.match(/\{[\s\S]*\}/)
+      aiResult = match ? JSON.parse(match[0]) : { notes: text }
+    } catch { aiResult = { notes: text } }
+  }
+
+  // Step 2: Google Places lookup via proxy (CORS blocked direct)
+  const placesKey = getPlacesKey()
+  let place = null
+  if (placesKey && aiResult.merchantName) {
+    try {
+      const res = await fetch(proxyUrl('/places'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: aiResult.merchantName, key: placesKey }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.error && (data.lat || data.address)) place = data
+      }
+    } catch(e) {
+      console.warn('[places lookup]', e.message)
+    }
+  }
+
+  return { ...aiResult, place }
+}
+
 // ── Category validators ───────────────────────────────────
 function validCat1(cat1) {
   return CAT_NAMES.includes(cat1) ? cat1 : null

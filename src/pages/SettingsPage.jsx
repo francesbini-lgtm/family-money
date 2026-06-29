@@ -2140,13 +2140,16 @@ function DiscoverySkipTab() {
             <div key={rule.id} style={{display:'flex',alignItems:'center',gap:12,
               padding:'10px 14px',background:'var(--surface)',borderRadius:10,
               border:'1px solid var(--border)'}}>
-              <span style={{flex:1,fontSize:14,color:'var(--text1)',fontWeight:500}}>
-                {rule.descAI || '—'}
-              </span>
-              {rule.createdAt && (
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,color:'var(--text1)',fontWeight:500}}>{rule.descAI || '—'}</div>
+                {rule.note && <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{rule.note}</div>}
+              </div>
+              {(rule.addedAt || rule.createdAt) && (
                 <span style={{fontSize:11,color:'var(--text3)',flexShrink:0}}>
-                  {new Date(rule.createdAt.toDate ? rule.createdAt.toDate() : rule.createdAt)
-                    .toLocaleDateString('it-IT')}
+                  {new Date((rule.addedAt || rule.createdAt).toDate
+                    ? (rule.addedAt || rule.createdAt).toDate()
+                    : (rule.addedAt || rule.createdAt)
+                  ).toLocaleDateString('it-IT')}
                 </span>
               )}
               <button onClick={() => removeDiscoverySkipRule(rule.id)}

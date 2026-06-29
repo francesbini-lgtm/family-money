@@ -654,8 +654,10 @@ export const useStore = create((set, get) => ({
   },
 
   // ── Discovery skip rules ──────────────────────────────
-  addDiscoverySkipRule: (descAI) => {
-    const item = { id: uid(), descAI, addedAt: new Date().toISOString() }
+  addDiscoverySkipRule: (arg) => {
+    const descAI = typeof arg === 'string' ? arg : (arg?.descAI || '')
+    const note   = typeof arg === 'string' ? '' : (arg?.note || '')
+    const item = { id: uid(), descAI, note, addedAt: new Date().toISOString() }
     set(s=>({discoverySkipRules:[...s.discoverySkipRules, item]}))
     saveDocument('discovery_skip_rules', item.id, item)
     return item
