@@ -1191,6 +1191,9 @@ function NoteCell({ tx, updateTransaction }) {
   const [val,  setVal]  = useState(tx.note || '')
   const hasNote = !!(tx.note && tx.note.trim())
 
+  // Keep editing draft in sync if tx.note changes externally (e.g. from another session)
+  useEffect(() => { if (!open) setVal(tx.note || '') }, [tx.note, open])
+
   function commit() {
     const note = val.trim() || null
     updateTransaction(tx.txId, { note })
@@ -1206,9 +1209,10 @@ function NoteCell({ tx, updateTransaction }) {
           display:'flex', alignItems:'center', justifyContent:'center' }}>
         <span style={{
           width: 8, height: 8, borderRadius: '50%',
-          background: hasNote ? 'var(--text1)' : 'var(--border)',
+          background: hasNote ? 'var(--text1)' : 'transparent',
           display: 'inline-block', flexShrink: 0,
-          border: hasNote ? 'none' : '1.5px solid var(--text3)',
+          border: `1.5px solid ${hasNote ? 'var(--text1)' : 'var(--text3)'}`,
+          boxSizing: 'border-box',
         }}/>
       </button>
       {open && (
