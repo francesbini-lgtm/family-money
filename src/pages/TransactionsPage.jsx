@@ -1950,7 +1950,6 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           onChange={e=>{const next=new Set(selected||[]);e.target.checked?next.add(tx.txId):next.delete(tx.txId);setSelected?.(next)}}/>
       </td>
       <td style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
-        {tx._flagged && <span title="Flaggata per revisione" style={{marginRight:4,fontSize:11}}>🚩</span>}
         <button
           onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_nonRecurring:!tx._nonRecurring})}}
           title={tx._nonRecurring?'Non ricorrente — clicca per rimuovere':'Segna come non ricorrente'}
@@ -1958,7 +1957,10 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
             opacity:tx._nonRecurring?1:0.2,color:tx._nonRecurring?'#6366f1':'var(--text3)',
             verticalAlign:'middle'}}>⚡</button>
         <span style={{fontSize:10,fontFamily:'var(--font-mono)',padding:'2px 5px',borderRadius:4,
-          background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',
+          background: tx._flagged ? 'rgba(220,50,50,0.12)' : 'var(--surface2)',
+          border: tx._flagged ? '1.5px solid rgba(220,50,50,0.5)' : '1px solid var(--border)',
+          color: tx._flagged ? 'var(--red)' : 'var(--text3)',
+          fontWeight: tx._flagged ? 700 : 400,
           ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</span>
       </td>
 
@@ -2000,7 +2002,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           </td>
         )
         if(id==='note') return (
-          <td key={id} style={{ textAlign:'center', width:36, padding:'0 4px' }}>
+          <td key={id} className="tx-note-cell">
             <NoteCell tx={tx} updateTransaction={updateTransaction}/>
           </td>
         )
@@ -2676,6 +2678,7 @@ export default function TransactionsPage() {
                   if(id==='description') return <th key={id} className="tx-th" style={{minWidth:140}}>Desc. Originale</th>
                   if(id==='counterpart') return <th key={id} className="tx-th" style={{minWidth:100}}>Controparte{filterBtn('counterpart')}</th>
                   if(id==='merchant')    return <th key={id} className="tx-th" style={{minWidth:100}}>Merchant{filterBtn('merchant')}</th>
+                  if(id==='note')        return <th key={id} className="tx-th" style={{width:36,textAlign:'center',padding:'0 4px'}}>📝</th>
                   if(id==='city')        return <th key={id} className="tx-th" style={{width:90}}>Città{filterBtn('city')}</th>
                   if(id==='time')        return <th key={id} className="tx-th" style={{width:60}}>Ora</th>
                   if(id==='card')        return <th key={id} className="tx-th" style={{width:70}}>Carta{filterBtn('card')}</th>

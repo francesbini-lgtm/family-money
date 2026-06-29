@@ -491,6 +491,7 @@
 .tx-counterpart-cell  { min-width:130px; padding:10px 10px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tx-city-cell         { width:100px; padding:10px 8px; white-space:nowrap; }
 .tx-time-cell         { width:60px;  padding:10px 8px; white-space:nowrap; }
+.tx-note-cell         { width:36px;  padding:0 4px; text-align:center; }
 
 /* ── AI desc editable cell ──────────────────────────────── */
 .tx-ai-label {
