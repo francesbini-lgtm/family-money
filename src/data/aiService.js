@@ -157,21 +157,25 @@ Risposta:`
 
 // ── Merchant + Places lookup (Discovery AI button) ────────
 // Returns: { merchantName, merchantType, category, notes, place: { name, city, address, lat, lng } | null }
-export async function lookupMerchantAndPlace(merchant, description, amount) {
+export async function lookupMerchantAndPlace(merchant, description, amount, city) {
   const aiKey = getApiKey()
   if (!aiKey) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
 
-  const prompt = `Sei un assistente finanziario italiano. Analizza questa transazione bancaria e rispondi SOLO con un JSON valido (nessun testo extra):
+  // Use full original description for best merchant extraction
+  const fullDesc = [merchant, description].filter(Boolean).join(' | ')
+  const prompt = `Sei un assistente finanziario italiano. Analizza questa transazione bancaria e rispondi SOLO con un JSON valido (nessun testo extra).
+
+IMPORTANTE: estrai il nome REALE del negozio o attività commerciale dalla descrizione originale della transazione. Non interpretare parole italiane generiche come nomi di categorie — "Bolli Blu" è un nome di negozio, non una tassa.
 
 {
-  "merchantName": "nome esatto dell'attività commerciale (es. Esselunga, Amazon, McDonald's)",
-  "merchantType": "tipo di attività (es. Supermercato, E-commerce, Ristorante)",
+  "merchantName": "nome esatto del negozio/attività come appare nella transazione (es. 'Bolli Blu', 'Esselunga', 'Amazon')",
+  "merchantType": "tipo di attività reale (es. Abbigliamento bambini, Supermercato, E-commerce)",
   "category": "categoria di spesa suggerita in italiano",
-  "notes": "una frase utile sull'attività o sulla transazione"
+  "notes": "una frase descrittiva sull'attività commerciale"
 }
 
-Merchant/Descrizione: "${merchant || description}"
-Importo: €${Math.abs(amount || 0).toFixed(2)}`
+Descrizione transazione: "${fullDesc}"
+Importo: €${Math.abs(amount || 0).toFixed(2)}${city ? `\nCittà: ${city}` : ''}`
 
   let aiResult = {}
   if (aiKey.startsWith('sk-')) {
@@ -208,7 +212,8 @@ Importo: €${Math.abs(amount || 0).toFixed(2)}`
       const res = await fetch(proxyUrl('/places'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: aiResult.merchantName, key: placesKey }),
+        // Include city in query for better local match (e.g. "Bolli Blu Como")
+        body: JSON.stringify({ query: [aiResult.merchantName, city].filter(Boolean).join(' '), key: placesKey }),
       })
       if (res.ok) {
         const data = await res.json()

@@ -527,7 +527,8 @@ export default function MobileDiscovery() {
       const result = await lookupMerchantAndPlace(
         current.merchant || current.descAI,
         current.description,
-        current.amount
+        current.amount,
+        current.city || ''
       )
       setAiResult(result)
     } catch(e) {
