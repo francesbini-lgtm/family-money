@@ -4,6 +4,13 @@ import { useAuth }    from '../auth/AuthContext'
 import { getMergedCats } from '../data/categories'
 import { fmtIT }     from '../utils/format'
 import { lookupMerchantAndPlace } from '../data/aiService'
+import {
+  learnException,
+  autoDetectMatch,
+  txMatchesRule,
+  generateSmartRule,
+  RuleApplyPopup,
+} from '../pages/TransactionsPage'
 
 // ── localStorage helpers ──────────────────────────────────
 const SEEN_KEY = 'fm-disc-seen-v2'
@@ -225,6 +232,53 @@ function AiResultBox({ result, onClose }) {
   )
 }
 
+// ── CatRulePopup ──────────────────────────────────────────
+function CatRulePopup({ tx, cat1, cat2, transactions, onSave, onClose }) {
+  const match   = autoDetectMatch(tx)
+  const others  = transactions.filter(t => t.txId !== tx.txId && !t.excluded && txMatchesRule(t, match))
+  const future  = others.filter(t => (t.date || '') >= (tx.date || ''))
+
+  const btnBase = {
+    width:'100%', padding:'12px 14px', borderRadius:12,
+    fontSize:13, fontWeight:700, cursor:'pointer',
+    fontFamily:'var(--font-sans)', textAlign:'left',
+  }
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.55)',
+      display:'flex',alignItems:'flex-end'}}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
+      <div style={{background:'var(--surface)',borderRadius:'18px 18px 0 0',
+        padding:'20px 16px',width:'100%',boxSizing:'border-box',
+        paddingBottom:'calc(16px + env(safe-area-inset-bottom,0px))'}}>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🏷️ Regola categoria</div>
+        <div style={{fontSize:13,color:'var(--text2)',marginBottom:10}}>
+          Applicare <strong>{cat1}{cat2 ? ` › ${cat2}` : ''}</strong> alle transazioni simili?
+        </div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:16,
+          padding:'8px 12px',borderRadius:8,background:'var(--surface2)',
+          border:'1px solid var(--border)'}}>
+          Match: <em>{match.label}</em> include <em>"{match.value}"</em>
+          {' — '}<strong>{others.length}</strong> altre tx ({future.length} future)
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          <button style={{...btnBase,border:'none',background:'var(--green)',color:'#fff'}}
+            onClick={()=>onSave('all', match)}>
+            ✅ Applica a tutti ({others.length + 1}) — anche retroattivamente
+          </button>
+          <button style={{...btnBase,border:'1px solid var(--border)',background:'var(--surface2)',color:'var(--text2)'}}
+            onClick={()=>onSave('future', match)}>
+            ⏩ Solo i prossimi ({future.length + 1})
+          </button>
+          <button style={{...btnBase,border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text3)'}}
+            onClick={onClose}>
+            🔒 Solo questa transazione
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── StartScreen ───────────────────────────────────────────
 function StartScreen({ modeCounts, selectedModes, onToggleMode, onStart, discLog }) {
   const total = MODES.filter(m=>selectedModes.has(m.id)).reduce((acc,m)=>acc+(modeCounts[m.id]||0),0)
@@ -322,6 +376,8 @@ export default function MobileDiscovery() {
   const setCustomCats        = useStore(s => s.setCustomCats)
   const addDiscoverySkipRule  = useStore(s => s.addDiscoverySkipRule)
   const discoverySkipRules    = useStore(s => s.discoverySkipRules) || []
+  const appPrefs              = useStore(s => s.appPrefs) || {}
+  const setAppPref            = useStore(s => s.setAppPref)
   const { user }              = useAuth()
 
   const skipSet = useMemo(
@@ -356,6 +412,10 @@ export default function MobileDiscovery() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult]   = useState(null)
   const [aiError, setAiError]     = useState(null)
+
+  // ── Rule popups ───────────────────────────────────────────
+  const [descRulePopup, setDescRulePopup] = useState(null) // { tx, match, newDesc }
+  const [catRulePopup,  setCatRulePopup]  = useState(null) // { tx, cat1, cat2 }
 
   // ── Discovery log ─────────────────────────────────────────
   const [discLog] = useState(() => loadLog())
@@ -445,10 +505,84 @@ export default function MobileDiscovery() {
     }, ...s].slice(0, 10))
   }
 
+  async function saveDescAI(newDesc) {
+    if (!newDesc.trim() || !current) return
+    const txSnapshot = { ...current }
+    updateTransaction(current.txId, { descAI: newDesc.trim(), userEditedDesc: true })
+    setEditingDesc(false)
+    await learnException(txSnapshot, newDesc.trim())
+    const match = autoDetectMatch(txSnapshot)
+    setDescRulePopup({ tx: { ...txSnapshot, descAI: newDesc.trim() }, match, newDesc: newDesc.trim() })
+  }
+
+  function handleApplyDescRule(mode, ruleText, cat1, cat2, updateDescAI) {
+    if (!descRulePopup || mode === 'none') { setDescRulePopup(null); return }
+    const { tx, match, newDesc } = descRulePopup
+    // Save naming rule
+    const existingRules = appPrefs?.aiNamingRules || []
+    const newRule = {
+      id: `nr-${Date.now()}`,
+      matchField: match.field,
+      matchValue: match.value,
+      matchLabel: ruleText,
+      description: newDesc,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+    }
+    setAppPref('aiNamingRules', [...existingRules, newRule])
+    // Apply to matching transactions
+    const now = tx.date || ''
+    const targets = transactions.filter(t => {
+      if (t.txId === tx.txId || t.excluded) return false
+      if (!txMatchesRule(t, match)) return false
+      if (mode === 'future') return (t.date || '') >= now
+      return true
+    })
+    targets.forEach(t => {
+      const patch = {}
+      if (updateDescAI) { patch.descAI = newDesc; patch.userEditedDesc = true }
+      if (cat1) { patch.cat1 = cat1; if (cat2) patch.cat2 = cat2 }
+      if (Object.keys(patch).length) updateTransaction(t.txId, patch)
+    })
+    setDescRulePopup(null)
+  }
+
   function applyCategory(cat1, cat2 = '') {
     if (!current) return
+    const prevCat1 = current.cat1
+    const prevCat2 = current.cat2
     updateTransaction(current.txId, { cat1, cat2: cat2 || null })
     setActiveSection(null)
+    // Show cat rule popup if meaningful category change
+    if (cat1 && (cat1 !== prevCat1 || (cat2 || '') !== (prevCat2 || ''))) {
+      setCatRulePopup({ tx: { ...current, cat1, cat2 }, cat1, cat2 })
+    }
+  }
+
+  function handleSaveCatRule(mode, match) {
+    if (!catRulePopup) { setCatRulePopup(null); return }
+    const { tx, cat1, cat2 } = catRulePopup
+    // Save cat rule
+    const existingRules = appPrefs?.catRules || []
+    const newRule = {
+      id: `cr-${Date.now()}`,
+      matchField: match.field,
+      matchValue: match.value,
+      cat1, cat2: cat2 || '',
+      enabled: true,
+      createdAt: new Date().toISOString(),
+    }
+    setAppPref('catRules', [...existingRules, newRule])
+    // Apply to matching transactions
+    const now = tx.date || ''
+    const targets = transactions.filter(t => {
+      if (t.txId === tx.txId || t.excluded) return false
+      if (!txMatchesRule(t, match)) return false
+      if (mode === 'future') return (t.date || '') >= now
+      return true
+    })
+    targets.forEach(t => updateTransaction(t.txId, { cat1, cat2: cat2 || null }))
+    setCatRulePopup(null)
   }
 
   function applyCity(city) {
@@ -642,10 +776,7 @@ export default function MobileDiscovery() {
                   value={descDraft}
                   onChange={e=>setDescDraft(e.target.value)}
                   onKeyDown={e=>{
-                    if(e.key==='Enter'&&descDraft.trim()){
-                      updateTransaction(current.txId,{descAI:descDraft.trim(),userEditedDesc:true})
-                      setEditingDesc(false)
-                    }
+                    if(e.key==='Enter'&&descDraft.trim()) saveDescAI(descDraft.trim())
                     if(e.key==='Escape') setEditingDesc(false)
                   }}
                   style={{flex:1,padding:'6px 10px',borderRadius:8,
@@ -653,10 +784,7 @@ export default function MobileDiscovery() {
                     color:'var(--text1)',fontSize:16,fontWeight:700,
                     fontFamily:'var(--font-sans)',outline:'none'}}
                 />
-                <button onClick={()=>{
-                    if(descDraft.trim()) updateTransaction(current.txId,{descAI:descDraft.trim(),userEditedDesc:true})
-                    setEditingDesc(false)
-                  }}
+                <button onClick={()=>{ if(descDraft.trim()) saveDescAI(descDraft.trim()) }}
                   style={{padding:'7px 12px',borderRadius:8,border:'none',background:'var(--accent)',
                     color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)',flexShrink:0}}>
                   ✓
@@ -672,7 +800,7 @@ export default function MobileDiscovery() {
               <div style={{display:'flex',alignItems:'flex-start',gap:6}}>
                 <div style={{flex:1,fontSize:16,fontWeight:700,color:'var(--text1)',
                   wordBreak:'break-word',lineHeight:1.35}}>
-                  {current.merchant || current.descAI || 'Transazione'}
+                  {current.descAI || current.merchant || 'Transazione'}
                 </div>
                 <button onClick={()=>{setDescDraft(current.descAI||current.merchant||'');setEditingDesc(true)}}
                   style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',
@@ -781,6 +909,29 @@ export default function MobileDiscovery() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ── Popups ── */}
+      {descRulePopup && (
+        <RuleApplyPopup
+          tx={descRulePopup.tx}
+          match={descRulePopup.match}
+          newDesc={descRulePopup.newDesc}
+          txId={descRulePopup.tx.txId}
+          txDate={descRulePopup.tx.date}
+          onApply={handleApplyDescRule}
+          onClose={()=>setDescRulePopup(null)}
+        />
+      )}
+      {catRulePopup && (
+        <CatRulePopup
+          tx={catRulePopup.tx}
+          cat1={catRulePopup.cat1}
+          cat2={catRulePopup.cat2}
+          transactions={transactions}
+          onSave={(mode, match) => handleSaveCatRule(mode, match)}
+          onClose={()=>setCatRulePopup(null)}
+        />
       )}
 
       {/* ── Bottom bar ── */}

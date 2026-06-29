@@ -799,7 +799,7 @@ function DescModal({ text, onClose }) {
 
 
 // ── Learn from user correction ────────────────────────────
-async function learnException(tx, userDescAI) {
+export async function learnException(tx, userDescAI) {
   if (!userDescAI || !tx.description) return
   // Add exception to AI Prompt for descAI
   const { getAIPrompts, saveAIPrompts } = await import('../data/aiPrompts')
@@ -954,7 +954,7 @@ function EditColonneModal({ visibleCols, colOrder, onApply, onClose }) {
 
 
 // ── Smart match detection ────────────────────────────────
-function autoDetectMatch(tx) {
+export function autoDetectMatch(tx) {
   const candidates = [
     { field: 'merchant',     label: 'Merchant',     val: tx.merchant },
     { field: 'description',  label: 'Descrizione',  val: tx.description },
@@ -970,7 +970,7 @@ function autoDetectMatch(tx) {
   return { field: 'description', label: 'Descrizione', value: (tx.description||'').slice(0, 40) }
 }
 
-function txMatchesRule(tx, match) {
+export function txMatchesRule(tx, match) {
   const val = (match.value||'').toLowerCase()
   if (!val) return false
   const hay = (tx[match.field]||'').toLowerCase()
@@ -978,7 +978,7 @@ function txMatchesRule(tx, match) {
 }
 
 // ── AI smart rule generator ───────────────────────────────
-async function generateSmartRule(tx, newDesc) {
+export async function generateSmartRule(tx, newDesc) {
   const fields = [
     tx.merchant    && tx.merchant    !== 'null' ? `Merchant: "${tx.merchant}"`       : null,
     tx.description && tx.description !== 'null' ? `Descrizione: "${tx.description.slice(0,100)}"` : null,
@@ -1041,7 +1041,7 @@ Rispondi SOLO con questo JSON (nessun altro testo):
 }
 
 // ── Rule apply popup (shown after user renames AI description) ────
-function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) {
+export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) {
   const allTxs    = useStore(s => s.transactions)
   const customCats = useStore(s => s.customCats)
   const ruleAllCats     = getMergedCats(customCats)
