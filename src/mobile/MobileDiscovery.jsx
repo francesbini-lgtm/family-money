@@ -27,7 +27,7 @@ function dateValuta(t) {
 const MODES = [
   { id:'nocat',   emoji:'❓', label:'Senza categoria',     filter: t => !t.cat1 || t.cat1==='Non Categorizzato' },
   { id:'noloc',   emoji:'📍', label:'Senza location',      filter: t => !t.city },
-  { id:'altro',   emoji:'📦', label:'In "Altro"',          filter: t => t.cat1==='Altro' && !isCommission(t) },
+  { id:'altro',   emoji:'📦', label:'In "Altro › Altro"',   filter: t => t.cat1==='Altro' && t.cat2==='Altro' },
   { id:'flagged', emoji:'🚩', label:'Flaggate (to review)', filter: t => t._flagged },
 ]
 function matchesAnyMode(t, modeSet) {
