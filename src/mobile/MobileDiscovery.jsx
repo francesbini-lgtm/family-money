@@ -381,10 +381,18 @@ export default function MobileDiscovery() {
   const setAppPref            = useStore(s => s.setAppPref)
   const { user }              = useAuth()
 
-  const skipSet = useMemo(
-    () => new Set(discoverySkipRules.map(r => r.descAI).filter(Boolean)),
-    [discoverySkipRules]
-  )
+  // Token-based skip matching: rule "Ksny6fu Satispay" extracts tokens ["Ksny6fu","Satispay"]
+  // → matches any tx whose descAI or merchant contains ANY of those tokens (case-insensitive)
+  const skipMatchFn = useMemo(() => {
+    const tokenLists = discoverySkipRules
+      .map(r => (r.descAI || '').split(/[\s,\-\/]+/).filter(t => t.length >= 3).map(t => t.toLowerCase()))
+      .filter(toks => toks.length > 0)
+    if (!tokenLists.length) return () => false
+    return (t) => {
+      const txText = `${t.descAI || ''} ${t.merchant || ''}`.toLowerCase()
+      return tokenLists.some(tokens => tokens.some(tok => txText.includes(tok)))
+    }
+  }, [discoverySkipRules])
 
   const merged = getMergedCats(customCats)
 
@@ -435,12 +443,12 @@ export default function MobileDiscovery() {
     if (phase !== 'review') return []
     const seen = loadSeen()
     const cands = transactions.filter(t =>
-      queuedIds.has(t.txId) && !t.userEditedCat && !skipSet.has(t.descAI)
+      queuedIds.has(t.txId) && !t.userEditedCat && !skipMatchFn(t)
     )
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId]).sort((a,b)=>(seen[a.txId]||0)-(seen[b.txId]||0))
     return [...unseen, ...seenTxs]
-  }, [transactions, queuedIds, seenVer, phase, skipSet])
+  }, [transactions, queuedIds, seenVer, phase, skipMatchFn])
 
   const total = queuedIds.size
 
