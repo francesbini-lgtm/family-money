@@ -343,6 +343,8 @@ export default function MobileDiscovery() {
   const [saltaSempreOpen, setSaltaSempreOpen] = useState(false)
   const [saltaSempreText, setSaltaSempreText] = useState('')
   const [saltaSempreNote, setSaltaSempreNote] = useState('')
+  const [editingDesc, setEditingDesc]         = useState(false)
+  const [descDraft, setDescDraft]             = useState('')
 
   // ── AI ────────────────────────────────────────────────────
   const [aiLoading, setAiLoading] = useState(false)
@@ -395,6 +397,7 @@ export default function MobileDiscovery() {
     setAiResult(null)
     setAiError(null)
     setSaltaSempreOpen(false)
+    setEditingDesc(false)
   }, [current?.txId])
 
   // ── Actions ───────────────────────────────────────────────
@@ -620,10 +623,54 @@ export default function MobileDiscovery() {
             </button>
           </div>
 
-          {/* Merchant / descAI */}
-          <div style={{flexShrink:0,padding:'6px 16px 0',fontSize:16,fontWeight:700,
-            color:'var(--text1)',wordBreak:'break-word',lineHeight:1.35}}>
-            {current.merchant || current.descAI || 'Transazione'}
+          {/* Merchant / descAI — editable */}
+          <div style={{flexShrink:0,padding:'6px 16px 0'}}>
+            {editingDesc ? (
+              <div style={{display:'flex',gap:6,alignItems:'flex-start'}}>
+                <input
+                  autoFocus
+                  value={descDraft}
+                  onChange={e=>setDescDraft(e.target.value)}
+                  onKeyDown={e=>{
+                    if(e.key==='Enter'&&descDraft.trim()){
+                      updateTransaction(current.txId,{descAI:descDraft.trim(),userEditedDesc:true})
+                      setEditingDesc(false)
+                    }
+                    if(e.key==='Escape') setEditingDesc(false)
+                  }}
+                  style={{flex:1,padding:'6px 10px',borderRadius:8,
+                    border:'1.5px solid var(--accent)',background:'var(--bg)',
+                    color:'var(--text1)',fontSize:16,fontWeight:700,
+                    fontFamily:'var(--font-sans)',outline:'none'}}
+                />
+                <button onClick={()=>{
+                    if(descDraft.trim()) updateTransaction(current.txId,{descAI:descDraft.trim(),userEditedDesc:true})
+                    setEditingDesc(false)
+                  }}
+                  style={{padding:'7px 12px',borderRadius:8,border:'none',background:'var(--accent)',
+                    color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)',flexShrink:0}}>
+                  ✓
+                </button>
+                <button onClick={()=>setEditingDesc(false)}
+                  style={{padding:'7px 10px',borderRadius:8,border:'1px solid var(--border)',
+                    background:'var(--bg)',color:'var(--text3)',fontSize:13,cursor:'pointer',
+                    fontFamily:'var(--font-sans)',flexShrink:0}}>
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div style={{display:'flex',alignItems:'flex-start',gap:6}}>
+                <div style={{flex:1,fontSize:16,fontWeight:700,color:'var(--text1)',
+                  wordBreak:'break-word',lineHeight:1.35}}>
+                  {current.merchant || current.descAI || 'Transazione'}
+                </div>
+                <button onClick={()=>{setDescDraft(current.descAI||current.merchant||'');setEditingDesc(true)}}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',
+                    fontSize:14,padding:'2px 4px',flexShrink:0,marginTop:1}}>
+                  ✏️
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Scrollable body */}
