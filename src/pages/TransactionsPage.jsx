@@ -866,6 +866,7 @@ const ALL_COLUMNS = [
   { id:'description', label:'📄 Desc. Originale'                       },
   { id:'counterpart', label:'🔄 Controparte'                            },
   { id:'merchant',    label:'🏪 Merchant'                               },
+  { id:'note',        label:'📝 Note'                                   },
   { id:'city',        label:'🏙️ Città'                                 },
   { id:'time',        label:'🕐 Ora'                                    },
   { id:'card',        label:'💳 Carta'                                  },
@@ -875,7 +876,7 @@ const ALL_COLUMNS = [
   { id:'isBonifico',  label:'🔵 Bonifico'                               },
   { id:'amount',      label:'💰 Importo',              alwaysOn:true  },
 ]
-const DEFAULT_VISIBLE = new Set(['date','descAI','city','time','card','user','cat','amount'])
+const DEFAULT_VISIBLE = new Set(['date','descAI','note','city','time','card','user','cat','amount'])
 const DEFAULT_ORDER   = ALL_COLUMNS.map(c=>c.id)
 
 function EditColonneModal({ visibleCols, colOrder, onApply, onClose }) {
@@ -1180,6 +1181,70 @@ function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) 
           La regola viene salvata in Impostazioni → Regole AI solo se scegli una delle prime due opzioni.
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── NoteCell — pallino nero → textarea inline ─────────────
+function NoteCell({ tx, updateTransaction }) {
+  const [open, setOpen] = useState(false)
+  const [val,  setVal]  = useState(tx.note || '')
+  const hasNote = !!(tx.note && tx.note.trim())
+
+  function commit() {
+    const note = val.trim() || null
+    updateTransaction(tx.txId, { note })
+    setOpen(false)
+  }
+
+  return (
+    <div style={{ position:'relative' }}>
+      <button
+        onClick={() => { setVal(tx.note || ''); setOpen(o => !o) }}
+        title={hasNote ? tx.note : 'Aggiungi nota'}
+        style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 6px',
+          display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: hasNote ? 'var(--text1)' : 'var(--border)',
+          display: 'inline-block', flexShrink: 0,
+          border: hasNote ? 'none' : '1.5px solid var(--text3)',
+        }}/>
+      </button>
+      {open && (
+        <div style={{ position:'fixed', zIndex:200, background:'var(--surface)',
+          border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)',
+          padding:12, width:260, display:'flex', flexDirection:'column', gap:8 }}
+          onClick={e => e.stopPropagation()}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', letterSpacing:'.06em', textTransform:'uppercase' }}>
+            Nota transazione
+          </div>
+          <textarea
+            autoFocus
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            rows={4}
+            placeholder="Scrivi una nota…"
+            style={{ padding:'8px 10px', borderRadius:8, border:'1.5px solid var(--accent)',
+              background:'var(--bg)', color:'var(--text1)', fontSize:13, resize:'vertical',
+              fontFamily:'var(--font-sans)', outline:'none', lineHeight:1.5 }}
+          />
+          <div style={{ display:'flex', gap:6 }}>
+            <button onClick={commit}
+              style={{ flex:1, padding:'6px', borderRadius:8, border:'none',
+                background:'var(--accent)', color:'#fff', fontSize:12, fontWeight:700,
+                cursor:'pointer', fontFamily:'var(--font-sans)' }}>✓ Salva</button>
+            <button onClick={() => setOpen(false)}
+              style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)',
+                background:'var(--bg)', color:'var(--text3)', fontSize:12,
+                cursor:'pointer', fontFamily:'var(--font-sans)' }}>✕</button>
+            {hasNote && <button onClick={() => { setVal(''); updateTransaction(tx.txId, { note: null }); setOpen(false) }}
+              style={{ padding:'6px 8px', borderRadius:8, border:'1px solid var(--red)',
+                background:'rgba(220,50,50,.08)', color:'var(--red)', fontSize:11,
+                cursor:'pointer', fontFamily:'var(--font-sans)' }}>🗑</button>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1932,6 +1997,11 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
             {merchantDisplay
               ? <span style={{fontSize:12,fontWeight:600,color:'var(--text2)'}}>{merchantDisplay}</span>
               : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>}
+          </td>
+        )
+        if(id==='note') return (
+          <td key={id} style={{ textAlign:'center', width:36, padding:'0 4px' }}>
+            <NoteCell tx={tx} updateTransaction={updateTransaction}/>
           </td>
         )
         if(id==='city') return (
