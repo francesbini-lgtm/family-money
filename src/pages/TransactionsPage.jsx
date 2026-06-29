@@ -1059,6 +1059,10 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
   const [aiError,       setAiError]       = useState(false)
   const [updateDescAI,  setUpdateDescAI]  = useState(true)
 
+  // Duplicate-rule conflict state
+  const [pending,    setPending]    = useState(null)   // { mode, ruleText, cat1, cat2, updateDescAI }
+  const [conflicts,  setConflicts]  = useState([])     // similar existing rules
+
   useMemo(() => {
     setLoading(true)
     setAiError(false)
@@ -1077,6 +1081,91 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
 
   const cat2Options = cat1 ? (ruleAllCats[cat1]?.sub || []) : []
 
+  // Find rules with similar matchField + matchValue
+  function findConflicts() {
+    const existing = useStore.getState()?.appPrefs?.aiNamingRules || []
+    const val = (match.value || '').toLowerCase()
+    return existing.filter(r => {
+      if (!r.enabled) return false
+      const rv = (r.matchValue || '').toLowerCase()
+      return r.matchField === match.field && (rv.includes(val) || val.includes(rv))
+    })
+  }
+
+  function requestSave(mode, rt, c1, c2, upd) {
+    if (mode === 'none') { onApply('none'); onClose(); return }
+    const found = findConflicts()
+    if (found.length > 0) {
+      setPending({ mode, ruleText: rt, cat1: c1, cat2: c2, updateDescAI: upd })
+      setConflicts(found)
+    } else {
+      onApply(mode, rt, c1, c2, upd)
+      onClose()
+    }
+  }
+
+  function resolveConflict(resolution) {
+    if (resolution === 'replace') {
+      const existing = useStore.getState()?.appPrefs?.aiNamingRules || []
+      const ids = new Set(conflicts.map(r => r.id))
+      useStore.getState()?.setAppPref?.('aiNamingRules', existing.filter(r => !ids.has(r.id)))
+    }
+    // 'keep_both' → just proceed without deleting
+    onApply(pending.mode, pending.ruleText, pending.cat1, pending.cat2, pending.updateDescAI)
+    onClose()
+  }
+
+  // ── Conflict resolution view ──────────────────────────────
+  if (pending && conflicts.length > 0) {
+    return (
+      <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'}}
+        onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
+        <div style={{background:'var(--surface)',borderRadius:14,padding:'28px 32px',maxWidth:520,width:'94%',
+          boxShadow:'0 16px 48px rgba(0,0,0,.25)'}}>
+          <div style={{fontSize:18,fontWeight:800,marginBottom:8}}>⚠️ Regola già esistente</div>
+          <div style={{fontSize:13,color:'var(--text2)',marginBottom:14}}>
+            Esiste già {conflicts.length === 1 ? 'una regola simile' : `${conflicts.length} regole simili`} con la stessa condizione di match:
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:20}}>
+            {conflicts.map(r => (
+              <div key={r.id} style={{padding:'10px 14px',borderRadius:10,
+                background:'rgba(250,180,0,.08)',border:'1.5px solid rgba(250,180,0,.35)'}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--text1)',marginBottom:2}}>
+                  "{r.description}"
+                </div>
+                <div style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>
+                  {r.matchLabel || `${r.matchField} includes "${r.matchValue}"`}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:12,color:'var(--text2)',marginBottom:16,padding:'10px 14px',
+            borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)'}}>
+            Nuova regola: <strong>"{newDesc}"</strong>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <button className="btn btn-primary"
+              style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
+              onClick={()=>resolveConflict('replace')}>
+              🔄 Sostituisci la vecchia con quella nuova
+            </button>
+            <button className="btn btn-secondary"
+              style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
+              onClick={()=>resolveConflict('keep_both')}>
+              📋 Tieni entrambe
+            </button>
+            <button className="btn btn-ghost"
+              style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
+              onClick={()=>{ setPending(null); setConflicts([]) }}>
+              ← Torna indietro
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Normal popup ──────────────────────────────────────────
   return (
     <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'}}
       onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
@@ -1162,12 +1251,12 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           <button className="btn btn-primary" disabled={loading}
             style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
-            onClick={()=>{ onApply('all', ruleText, cat1, cat2, updateDescAI); onClose() }}>
+            onClick={()=>requestSave('all', ruleText, cat1, cat2, updateDescAI)}>
             ✅ Salva regola + applica a tutti ({allOthers.length + 1}) — anche retroattivamente
           </button>
           <button className="btn btn-secondary" disabled={loading}
             style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
-            onClick={()=>{ onApply('future', ruleText, cat1, cat2, updateDescAI); onClose() }}>
+            onClick={()=>requestSave('future', ruleText, cat1, cat2, updateDescAI)}>
             ⏩ Salva regola + questo e i prossimi ({future.length + 1})
           </button>
           <button className="btn btn-ghost"
