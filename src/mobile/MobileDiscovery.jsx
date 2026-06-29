@@ -336,9 +336,9 @@ export default function MobileDiscovery() {
   const [selectedModes, setSelectedModes] = useState(() => new Set(['nocat']))
 
   // ── Queue ─────────────────────────────────────────────────
-  const [queuedIds, setQueuedIds]       = useState(() => new Set())
-  const [seenVer, setSeenVer]           = useState(0)
-  const [forceFront, setForceFront]     = useState(null)
+  const [queuedIds, setQueuedIds]         = useState(() => new Set())
+  const [seenVer, setSeenVer]             = useState(0)
+  const [currentTxId, setCurrentTxId]     = useState(null) // explicit nav — NOT driven by queue[0]
   const [resolvedCount, setResolvedCount] = useState(0)
 
   // ── Undo ──────────────────────────────────────────────────
@@ -369,24 +369,25 @@ export default function MobileDiscovery() {
     return c
   }, [transactions])
 
-  // ── Computed queue ────────────────────────────────────────
+  // ── Computed queue (ordering only — does NOT drive current) ──
   const queue = useMemo(() => {
     if (phase !== 'review') return []
     const seen = loadSeen()
-    let cands = transactions.filter(t =>
+    const cands = transactions.filter(t =>
       queuedIds.has(t.txId) && !t.userEditedCat && !skipSet.has(t.descAI)
     )
-    if (forceFront) {
-      const idx = cands.findIndex(t => t.txId === forceFront)
-      if (idx > 0) { const [item] = cands.splice(idx, 1); cands.unshift(item) }
-    }
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId]).sort((a,b)=>(seen[a.txId]||0)-(seen[b.txId]||0))
     return [...unseen, ...seenTxs]
-  }, [transactions, queuedIds, seenVer, forceFront, phase, skipSet])
+  }, [transactions, queuedIds, seenVer, phase, skipSet])
 
-  const total   = queuedIds.size
-  const current = queue[0] || null
+  const total = queuedIds.size
+
+  // current is ALWAYS the live data of currentTxId — never driven by queue position
+  const current = useMemo(
+    () => (currentTxId ? transactions.find(t => t.txId === currentTxId) || null : null),
+    [transactions, currentTxId]
+  )
 
   // ── Quick cities ──────────────────────────────────────────
   const quickCities = useMemo(() => {
@@ -397,9 +398,6 @@ export default function MobileDiscovery() {
 
   // ── Effects ───────────────────────────────────────────────
   useEffect(() => { if (current) markSeen(current.txId) }, [current?.txId])
-  useEffect(() => {
-    if (forceFront && current?.txId === forceFront) setForceFront(null)
-  }, [current?.txId, forceFront])
   useEffect(() => {
     setActiveSection(null)
     setAiResult(null)
@@ -423,10 +421,10 @@ export default function MobileDiscovery() {
     )
     if (!ids.size) return
     setQueuedIds(ids)
+    setCurrentTxId(transactions.find(t => ids.has(t.txId))?.txId || null)
     setResolvedCount(0)
     setUndoStack([])
     setSeenVer(0)
-    setForceFront(null)
     setActiveSection(null)
     setAiResult(null)
     setAiError(null)
@@ -468,7 +466,10 @@ export default function MobileDiscovery() {
   function advance() {
     if (!current) return
     markSeen(current.txId)
-    setSeenVer(v => v + 1)
+    // Pick next from queue (excluding current) — use snapshot of current queue
+    const next = queue.find(t => t.txId !== current.txId)
+    setCurrentTxId(next?.txId || null)
+    setSeenVer(v => v + 1) // force queue recompute for ordering
     setActiveSection(null)
     setAiResult(null)
     setAiError(null)
@@ -526,7 +527,7 @@ export default function MobileDiscovery() {
     // Re-add to queue (in case it was removed by OK)
     setQueuedIds(prev => { const n = new Set(prev); n.add(last.txId); return n })
     removeSeen(last.txId)
-    setForceFront(last.txId)
+    setCurrentTxId(last.txId) // jump directly to restored tx
     setSeenVer(v => v + 1)
   }
 
@@ -575,8 +576,8 @@ export default function MobileDiscovery() {
     )
   }
 
-  // ── Render: done ──────────────────────────────────────────
-  if (queue.length === 0) {
+  // ── Render: done (no more txs in queue, or currentTxId is gone) ──
+  if (!current || queue.length === 0) {
     return <DoneScreen resolved={resolvedCount} onBack={exitReview} />
   }
 
@@ -822,9 +823,9 @@ export default function MobileDiscovery() {
               style={{padding:'11px 4px',borderRadius:10,
                 border:'1px solid var(--border)',background:'var(--surface)',
                 color:undoStack.length?'var(--blue)':'var(--text3)',
-                fontSize:11,fontWeight:700,cursor:undoStack.length?'pointer':'default',
+                fontSize:18,fontWeight:700,cursor:undoStack.length?'pointer':'default',
                 fontFamily:'var(--font-sans)',opacity:undoStack.length?1:.35}}>
-              ↩ Undo
+              ←
             </button>
             <button onClick={handleSalta}
               style={{padding:'11px 4px',borderRadius:10,
