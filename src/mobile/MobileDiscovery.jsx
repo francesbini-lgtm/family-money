@@ -320,8 +320,14 @@ export default function MobileDiscovery() {
   const updateTransaction    = useStore(s => s.updateTransaction)
   const customCats           = useStore(s => s.customCats)
   const setCustomCats        = useStore(s => s.setCustomCats)
-  const addDiscoverySkipRule = useStore(s => s.addDiscoverySkipRule)
-  const { user }             = useAuth()
+  const addDiscoverySkipRule  = useStore(s => s.addDiscoverySkipRule)
+  const discoverySkipRules    = useStore(s => s.discoverySkipRules) || []
+  const { user }              = useAuth()
+
+  const skipSet = useMemo(
+    () => new Set(discoverySkipRules.map(r => r.descAI).filter(Boolean)),
+    [discoverySkipRules]
+  )
 
   const merged = getMergedCats(customCats)
 
@@ -367,7 +373,9 @@ export default function MobileDiscovery() {
   const queue = useMemo(() => {
     if (phase !== 'review') return []
     const seen = loadSeen()
-    let cands = transactions.filter(t => queuedIds.has(t.txId) && !t.userEditedCat)
+    let cands = transactions.filter(t =>
+      queuedIds.has(t.txId) && !t.userEditedCat && !skipSet.has(t.descAI)
+    )
     if (forceFront) {
       const idx = cands.findIndex(t => t.txId === forceFront)
       if (idx > 0) { const [item] = cands.splice(idx, 1); cands.unshift(item) }
@@ -375,7 +383,7 @@ export default function MobileDiscovery() {
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId]).sort((a,b)=>(seen[a.txId]||0)-(seen[b.txId]||0))
     return [...unseen, ...seenTxs]
-  }, [transactions, queuedIds, seenVer, forceFront, phase])
+  }, [transactions, queuedIds, seenVer, forceFront, phase, skipSet])
 
   const total   = queuedIds.size
   const current = queue[0] || null
@@ -491,8 +499,9 @@ export default function MobileDiscovery() {
   function confirmSaltaSempre() {
     if (!saltaSempreText.trim()) return
     addDiscoverySkipRule({ descAI: saltaSempreText.trim(), note: saltaSempreNote.trim() })
-    setSaltaSempreOpen(false)
-    // Non avanza: utente sceglie esplicitamente Salta o OK dopo
+    // La regola è ora in store → la tx sparirà dal queue al prossimo render.
+    // Avanziamo subito così la prossima tx viene caricata (già filtrata da skipSet).
+    advance()
   }
 
   function handleFlagga() {
@@ -803,7 +812,7 @@ export default function MobileDiscovery() {
                   background:saltaSempreText.trim()?'rgba(220,50,50,.85)':'var(--border)',
                   color:'#fff',fontSize:13,fontWeight:700,
                   cursor:saltaSempreText.trim()?'pointer':'default',fontFamily:'var(--font-sans)'}}>
-                🚫 Salva regola
+                🚫 Salta sempre
               </button>
             </div>
           </div>
