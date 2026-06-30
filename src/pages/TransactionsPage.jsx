@@ -2545,14 +2545,6 @@ export default function TransactionsPage() {
   const [filterPopup,    setFilterPopup]    = useState(null)
   const [hideComm,       setHideComm]       = useState(true)
 
-  // Default date filter: last 6 months (only if no filter already set)
-  useEffect(() => {
-    if (!store.filters.dateFrom) {
-      const d = new Date(); d.setMonth(d.getMonth() - 6)
-      store.setFilter('dateFrom', d.toISOString().split('T')[0])
-    }
-  }, [])
-
   // Close cat dropdown on click outside
   useEffect(() => {
     function handleClick(e) {

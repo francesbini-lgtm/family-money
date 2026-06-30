@@ -1255,9 +1255,11 @@ export const useStore = create((set, get) => ({
   // ── Filters ───────────────────────────────────────────
   setFilter:    (k,v) => set(s=>({ filters:{...s.filters,[k]:v} })),
   resetFilters: () => {
-    const d = new Date(); d.setMonth(d.getMonth() - 6)
-    const df = d.toISOString().split('T')[0]
-    set({ filters:{search:'',cat1:'',accounts:[],dateFrom:df,dateTo:'',type:'',conf:''} })
+    set({ filters:{search:'',cat1:'',accounts:[],dateFrom:'',dateTo:'',type:'',conf:''} })
+    get()._recomputeFiltered()
+  },
+  clearFilters: () => {
+    set({ filters:{search:'',cat1:'',accounts:[],dateFrom:'',dateTo:'',type:'',conf:''} })
     get()._recomputeFiltered()
   },
 
