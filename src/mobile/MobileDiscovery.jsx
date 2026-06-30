@@ -427,6 +427,9 @@ export default function MobileDiscovery() {
   const [editingDesc, setEditingDesc]         = useState(false)
   const [descDraft, setDescDraft]             = useState('')
 
+  // ── Similar txs panel ────────────────────────────────────
+  const [similarOpen, setSimilarOpen] = useState(false)
+
   // ── AI ────────────────────────────────────────────────────
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult]   = useState(null)
@@ -475,6 +478,14 @@ export default function MobileDiscovery() {
     return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([c])=>c)
   }, [transactions])
 
+  // ── Transactions with same descAI (for "simili" panel) ───
+  const sameNameTxs = useMemo(() => {
+    if (!current?.descAI) return []
+    return transactions
+      .filter(t => t.txId !== current.txId && t.descAI === current.descAI)
+      .sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
+  }, [transactions, current?.txId, current?.descAI])
+
   // ── Effects ───────────────────────────────────────────────
   useEffect(() => { if (current) markSeen(current.txId) }, [current?.txId])
   useEffect(() => {
@@ -483,6 +494,7 @@ export default function MobileDiscovery() {
     setAiError(null)
     setSaltaSempreOpen(false)
     setEditingDesc(false)
+    setSimilarOpen(false)
   }, [current?.txId])
 
   // ── Actions ───────────────────────────────────────────────
@@ -779,8 +791,60 @@ export default function MobileDiscovery() {
         </span>
       </div>
 
+      {/* ── Similar txs panel (overlays the card) ── */}
+      {similarOpen && current && (
+        <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column',
+          margin:'0 12px',background:'var(--surface)',borderRadius:16,
+          border:'1px solid var(--border)',boxShadow:'0 4px 20px rgba(0,0,0,.07)'}}>
+          {/* Header */}
+          <div style={{flexShrink:0,padding:'14px 16px 10px',borderBottom:'1px solid var(--border)',
+            display:'flex',alignItems:'center',gap:10}}>
+            <button onClick={()=>setSimilarOpen(false)}
+              style={{background:'none',border:'none',cursor:'pointer',color:'var(--accent)',
+                fontSize:13,fontWeight:700,fontFamily:'var(--font-sans)',padding:0,flexShrink:0}}>
+              ← Indietro
+            </button>
+            <div style={{flex:1,fontSize:13,fontWeight:700,color:'var(--text1)',
+              overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+              {current.descAI || current.merchant}
+            </div>
+            <span style={{fontSize:11,color:'var(--text3)',flexShrink:0}}>
+              {sameNameTxs.length} tx
+            </span>
+          </div>
+          {/* List */}
+          <div style={{flex:1,overflowY:'auto'}}>
+            {sameNameTxs.map(t => {
+              const d = (t._effDate || t.date || '').slice(0,10)
+              const disp = d.length >= 10
+                ? `${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`
+                : d
+              const isNeg = t.amount < 0
+              return (
+                <div key={t.txId} style={{display:'flex',alignItems:'center',
+                  padding:'11px 16px',borderBottom:'1px solid var(--border)',gap:10}}>
+                  <span style={{fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',
+                    flexShrink:0,minWidth:70}}>{disp}</span>
+                  {t.city && (
+                    <span style={{fontSize:12,color:'var(--text2)',flex:1,
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      📍 {t.city}
+                    </span>
+                  )}
+                  {!t.city && <span style={{flex:1}}/>}
+                  <span style={{fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',
+                    color:isNeg?'var(--red)':'var(--green)',flexShrink:0}}>
+                    {isNeg ? '-' : '+'}€ {fmtIT(Math.abs(t.amount), 2)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Main card ── */}
-      {current && (
+      {current && !similarOpen && (
         <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column',
           margin:'0 12px',background:'var(--surface)',borderRadius:16,
           border:'1px solid var(--border)',boxShadow:'0 4px 20px rgba(0,0,0,.07)'}}>
@@ -840,9 +904,20 @@ export default function MobileDiscovery() {
               </div>
             ) : (
               <div style={{display:'flex',alignItems:'flex-start',gap:6}}>
-                <div style={{flex:1,fontSize:16,fontWeight:700,color:'var(--text1)',
-                  wordBreak:'break-word',lineHeight:1.35}}>
-                  {current.descAI || current.merchant || 'Transazione'}
+                <div style={{flex:1}}>
+                  <div style={{fontSize:16,fontWeight:700,color:'var(--text1)',
+                    wordBreak:'break-word',lineHeight:1.35}}>
+                    {current.descAI || current.merchant || 'Transazione'}
+                  </div>
+                  {sameNameTxs.length > 0 && (
+                    <button onClick={()=>setSimilarOpen(true)}
+                      style={{marginTop:4,padding:'2px 8px',borderRadius:10,
+                        border:'1px solid rgba(100,100,220,.3)',background:'rgba(100,100,220,.07)',
+                        color:'var(--accent)',fontSize:11,fontWeight:700,cursor:'pointer',
+                        fontFamily:'var(--font-sans)'}}>
+                      ×{sameNameTxs.length} simili →
+                    </button>
+                  )}
                 </div>
                 <button onClick={()=>{setDescDraft(current.descAI||current.merchant||'');setEditingDesc(true)}}
                   style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',
@@ -908,8 +983,25 @@ export default function MobileDiscovery() {
             {/* LOCATION */}
             <div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <span style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',
-                  textTransform:'uppercase',color:'var(--text3)'}}>Location</span>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                    textTransform:'uppercase',color:'var(--text3)'}}>Location</span>
+                  {/* Google search button */}
+                  {(current.merchant || current.descAI || current.city || current.counterpart) && (() => {
+                    const q = [current.merchant || current.descAI, current.city, current.counterpart]
+                      .filter(Boolean).join(' ')
+                    return (
+                      <a href={`https://www.google.com/search?q=${encodeURIComponent(q)}`}
+                        target="_blank" rel="noreferrer"
+                        style={{padding:'2px 7px',borderRadius:8,
+                          border:'1px solid rgba(66,133,244,.3)',background:'rgba(66,133,244,.07)',
+                          color:'#4285f4',fontSize:10,fontWeight:700,textDecoration:'none',
+                          display:'flex',alignItems:'center',gap:3}}>
+                        🔍 Google
+                      </a>
+                    )
+                  })()}
+                </div>
                 {activeSection==='loc' && (
                   <button onClick={()=>setActiveSection(null)}
                     style={{background:'none',border:'none',cursor:'pointer',fontSize:11,
