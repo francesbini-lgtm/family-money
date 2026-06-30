@@ -32,7 +32,7 @@ function dateValuta(t) {
 
 // ── Mode definitions ──────────────────────────────────────
 const MODES = [
-  { id:'nocat',   emoji:'❓', label:'Senza categoria',     filter: t => (!t.cat1 || t.cat1==='Non Categorizzato') && !t._flagged },
+  { id:'nocat',   emoji:'❓', label:'Senza categoria',     filter: t => (!t.cat1 || t.cat1==='Non Categorizzato' || !t.cat2 || t.cat2==='') && !t._flagged },
   { id:'noloc',   emoji:'📍', label:'Senza location',      filter: t => !t.city && !t._flagged },
   { id:'altro',   emoji:'📦', label:'In "Altro › Altro"',   filter: t => t.cat1==='Altro' && t.cat2==='Altro' && !t._flagged },
   { id:'flagged', emoji:'🚩', label:'Flaggate (to review)', filter: t => t._flagged },
