@@ -57,7 +57,7 @@ function callOpenAI(prompt, key, images) {
       model,
       messages: [{ role: 'user', content: messageContent }],
       temperature: 0.1,
-      max_tokens: hasImages ? 4096 : 8192,
+      max_tokens: hasImages ? 4096 : 1500,  // 1500 is plenty for any enrichBatch response
     })
     const req = https.request({
       hostname: 'api.openai.com',
@@ -77,11 +77,15 @@ function callOpenAI(prompt, key, images) {
           if (r.statusCode >= 400) {
             // OpenAI returned an error — propagate the real message
             const msg = json?.error?.message || `OpenAI HTTP ${r.statusCode}`
+            console.error('[gemini proxy] OpenAI error:', r.statusCode, msg)
             return reject(new Error(msg))
           }
           resolve(json)
         } catch(e) { reject(new Error(`OpenAI parse error (status ${r.statusCode}): ${data.slice(0,200)}`)) }
       })
+    })
+    req.setTimeout(9000, () => {
+      req.destroy(new Error('OpenAI request timed out (9s)'))
     })
     req.on('error', reject)
     req.write(postData)
@@ -125,6 +129,9 @@ function callGemini(prompt, key) {
           reject(new Error(`Gemini parse error (status ${r.statusCode}): ${data.slice(0,200)}`))
         }
       })
+    })
+    req.setTimeout(9000, () => {
+      req.destroy(new Error('Gemini request timed out (9s)'))
     })
     req.on('error', reject)
     req.write(postData)
