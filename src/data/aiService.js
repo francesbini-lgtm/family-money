@@ -70,13 +70,45 @@ function proxyUrl(path) {
 }
 
 // ── Gemini call via proxy ─────────────────────────────────
+// For OpenAI keys (sk-*): calls OpenAI directly from the browser to bypass
+// Vercel's 10s hobby-plan timeout. For Gemini keys: uses the proxy (needed for CORS).
 export async function callGemini(prompt) {
   const key = getApiKey()
   if (!key) throw new Error('GEMINI_KEY_MISSING')
 
+  // ── OpenAI key: direct browser → OpenAI (no Vercel proxy, no 10s timeout) ──
+  if (key.startsWith('sk-')) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 1500,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      const text = data.choices?.[0]?.message?.content?.trim() || ''
+      if (!text) throw new Error('Empty response from AI')
+      return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    } catch(e) {
+      if (e.message.includes('fetch') || e.message.includes('Failed to fetch')) {
+        throw new Error('PROXY_NOT_RUNNING')
+      }
+      throw e
+    }
+  }
+
+  // ── Gemini key: go through proxy (CORS not allowed direct) ──
   try {
     const controller = new AbortController()
-    const timeoutId  = setTimeout(() => controller.abort(), 60_000) // 60s timeout
+    const timeoutId  = setTimeout(() => controller.abort(), 60_000)
 
     let response
     try {
@@ -98,12 +130,7 @@ export async function callGemini(prompt) {
     }
 
     const data = await response.json()
-    // OpenAI format: choices[0].message.content
-    // Gemini format: candidates[0].content.parts[0].text
-    const text = data.choices?.[0]?.message?.content
-               || data.candidates?.[0]?.content?.parts?.[0]?.text
-               || ''
-    console.log('[callGemini] response keys:', Object.keys(data), '| text length:', text.length)
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
     if (!text) throw new Error('Empty response from AI')
     return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
 
