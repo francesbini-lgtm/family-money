@@ -708,7 +708,7 @@ function getColValueStr(tx, colId, userAccounts) {
                           ? `${tx.cat1}${tx.cat2 ? ' › ' + tx.cat2 : ''}`
                           : 'Non Categorizzato'
     case 'user': {
-      const u = resolveUserByCard(tx.card, userAccounts, tx.merchant, tx.description, tx.cat2)
+      const u = tx.user || resolveUserByCard(tx.card, userAccounts, tx.merchant, tx.description, tx.cat2)
       return u || '—'
     }
     case 'isBonifico':  return tx.isBonifico ? 'Sì' : 'No'
@@ -2120,9 +2120,12 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
         )
         if(id==='user') return (
           <td key={id} className="tx-user-cell">
-            {(()=>{const u=resolveUserByCard(tx.card,userAccounts,tx.merchant,tx.description,tx.cat2);return u
-              ?<span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{u}</span>
-              :<span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>})()}
+            {(()=>{
+              const u = tx.user || resolveUserByCard(tx.card,userAccounts,tx.merchant,tx.description,tx.cat2)
+              return u
+                ?<span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{u}</span>
+                :<span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>
+            })()}
           </td>
         )
         if(id==='cat') {

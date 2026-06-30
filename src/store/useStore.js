@@ -7,6 +7,40 @@ import {
 import { generateDescAI, parseRow } from '../data/csvParser'
 
 
+// ── Resolve user from card → member mapping (pure, no store) ─
+export function computeUser(t, userAccounts, appPrefs) {
+  const accounts  = userAccounts || []
+  const family    = appPrefs?.family || []
+  const ownerNick = appPrefs?.ownerNickname || null
+
+  // 1. Card match
+  if (t.card) {
+    const acc = accounts.find(a => a.card4 === t.card)
+    if (acc?.memberId) {
+      if (acc.memberId === 'owner') return ownerNick || 'Admin'
+      const member = family.find(m => String(m.id) === String(acc.memberId))
+      if (member) return member.nickname || member.name?.split(' ')[0] || null
+    }
+  }
+  // 2. cat2 match vs family nicknames
+  if (t.cat2) {
+    for (const m of family) {
+      const nick = m.nickname || m.name?.split(' ')[0] || ''
+      if (nick && nick.toLowerCase() === t.cat2.toLowerCase()) return nick
+    }
+  }
+  // 3. Text match in merchant / description
+  const hay = `${t.merchant||''} ${t.description||''}`.toLowerCase()
+  if (hay.trim()) {
+    if (ownerNick && hay.includes(ownerNick.toLowerCase())) return ownerNick
+    for (const m of family) {
+      const nick = m.nickname || m.name?.split(' ')[0] || ''
+      if (nick && hay.includes(nick.toLowerCase())) return nick
+    }
+  }
+  return null
+}
+
 // ── Enrich legacy transactions missing merchant/city/time ─
 function enrichTx(t) {
   // _effDate: competenza (user-overridden date) wins over bank date in all analytics
@@ -170,6 +204,8 @@ export const useStore = create((set, get) => ({
     }
     // Historical cash-sync: push any already-linked cash transactions to DB
     setTimeout(() => get().syncCashTransactions(), 500)
+    // Compute/backfill user field for all transactions (after prefs + accounts are loaded)
+    setTimeout(() => get().recomputeUsers(), 800)
   },
 
   // ── Realtime sync ─────────────────────────────────────
@@ -299,7 +335,11 @@ export const useStore = create((set, get) => ({
     // Run regex enrichment immediately — fast, deterministic, no AI needed.
     // This fills descAI, city, time, card, counterpart from the raw description.
     // AI Enrichment (✨ button) will later refine category and ambiguous merchants.
-    const newTxs = rawNew.map(t => enrichTx({...t, aiEnriched: false}))
+    const { userAccounts: ua, appPrefs: ap } = get()
+    const newTxs = rawNew.map(t => {
+      const enriched = enrichTx({...t, aiEnriched: false})
+      return { ...enriched, user: computeUser(enriched, ua, ap) || null }
+    })
     set(s=>({
       transactions: [...newTxs,...s.transactions].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
     }))
@@ -325,8 +365,12 @@ export const useStore = create((set, get) => ({
     }
     set(s=>({ transactions: s.transactions.map(t=>t.txId===txId?{...t,...patch}:t) }))
     const t = get().transactions.find(t=>t.txId===txId)
-    // Always save the full enriched object so all fields persist
-    if(t) saveDocument('transactions', txId, enrichTx({...t,...patch}))
+    // Always save the full enriched object so all fields persist (includes computed user)
+    if(t) {
+      const { userAccounts, appPrefs } = get()
+      const user = t.user || computeUser(t, userAccounts, appPrefs) || null
+      saveDocument('transactions', txId, enrichTx({...t,...patch, user}))
+    }
     get()._recomputeFiltered()
   },
 
@@ -1189,6 +1233,23 @@ export const useStore = create((set, get) => ({
   setUserAccounts: async (userId, accounts) => {
     set({ userAccounts: accounts })
     await saveUserAccounts(userId, accounts)
+    // Recompute user field for all transactions when card mappings change
+    get().recomputeUsers()
+  },
+
+  recomputeUsers: () => {
+    const { transactions, userAccounts, appPrefs } = get()
+    const toSave = []
+    const updated = transactions.map(t => {
+      const newUser = computeUser(t, userAccounts, appPrefs) || null
+      if (newUser === (t.user ?? null)) return t          // unchanged
+      toSave.push({ id: t.txId, data: { ...t, user: newUser } })
+      return { ...t, user: newUser }
+    })
+    if (!toSave.length) return
+    set({ transactions: updated })
+    // Batch-persist only the changed documents
+    batchSaveDocuments('transactions', toSave)
   },
 
   // ── Filters ───────────────────────────────────────────
