@@ -693,7 +693,7 @@ export default function MobileDiscovery() {
     setAiError(null)
     try {
       // Full enrichment (same logic as TransactionsPage desktop)
-      const enriched = await enrichBatch([current], { force: true })
+      const enriched = await enrichBatch([current], { force: true, throwOnError: true })
       if (!enriched.length) throw new Error('Nessun risultato')
       const tx = enriched[0]
 

@@ -92,7 +92,7 @@ export async function callGemini(prompt) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
-      const msg = err?.error?.message || `HTTP ${response.status}`
+      const msg = err?.error?.message || (typeof err?.error === 'string' ? err.error : null) || `HTTP ${response.status}`
       console.error('[callGemini] proxy error:', msg)
       throw new Error('PROXY_ERROR: ' + msg)
     }
@@ -263,7 +263,7 @@ const CAT_LIST = CAT_NAMES
   .join('\n')
 
 // ── Batch enrichment — MAIN FUNCTION ─────────────────────
-export async function enrichBatch(transactions, { force = false } = {}) {
+export async function enrichBatch(transactions, { force = false, throwOnError = false } = {}) {
   if (!transactions.length) return []
 
   // Step 1 — Regex pre-enrichment (instant, no API)
@@ -432,6 +432,7 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
       if (e.message === 'PROXY_NOT_RUNNING')  throw e
       if (e.message === 'PROXY_TIMEOUT')      throw e
       console.warn('[enrichBatch] AI failed, falling back to regex:', e.message)
+      if (throwOnError) throw e
       // Fall through: return regex results only (no aiEnriched flag — so user can retry)
     }
   }
