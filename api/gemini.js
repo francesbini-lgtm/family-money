@@ -74,9 +74,13 @@ function callOpenAI(prompt, key, images) {
       r.on('end', () => {
         try {
           const json = JSON.parse(data)
-          // Return raw OpenAI format so callers can use choices[0].message.content
+          if (r.statusCode >= 400) {
+            // OpenAI returned an error — propagate the real message
+            const msg = json?.error?.message || `OpenAI HTTP ${r.statusCode}`
+            return reject(new Error(msg))
+          }
           resolve(json)
-        } catch(e) { reject(e) }
+        } catch(e) { reject(new Error(`OpenAI parse error (status ${r.statusCode}): ${data.slice(0,200)}`)) }
       })
     })
     req.on('error', reject)
