@@ -500,7 +500,9 @@ export default function MobileDiscovery() {
     )
     if (!ids.size) return
     setQueuedIds(ids)
-    setCurrentTxId(transactions.find(t => ids.has(t.txId))?.txId || null)
+    // Start at first tx NOT matched by a skip rule (respect "Salta sempre" immediately)
+    const firstTx = transactions.find(t => ids.has(t.txId) && !skipMatchFn(t))
+    setCurrentTxId(firstTx?.txId || null)
     setResolvedCount(0)
     setUndoStack([])
     setSeenVer(0)
