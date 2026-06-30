@@ -891,12 +891,9 @@ export default function ContantiPage() {
                               : <span style={{color:'var(--text3)',opacity:.3}}>—</span>}
                           </td>
                           <td style={{padding:'6px 14px'}}>
-                            {(()=>{
-                              const nick = resolveMemberFromTx(t)
-                              return nick
-                                ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{nick}</span>
-                                : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>
-                            })()}
+                            {t.user
+                              ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{t.user}</span>
+                              : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>}
                           </td>
                           <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
                           <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color}}>

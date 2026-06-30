@@ -3,7 +3,7 @@ import { useStore }   from '../store/useStore'
 import { useAuth }    from '../auth/AuthContext'
 import { getMergedCats } from '../data/categories'
 import { fmtIT }     from '../utils/format'
-import { lookupMerchantAndPlace } from '../data/aiService'
+import { enrichBatch, lookupPlaceForMerchant } from '../data/aiService'
 import {
   learnException,
   autoDetectMatch,
@@ -188,46 +188,56 @@ function LocPickerInline({ currentCity, quickCities, onSelect, onClose }) {
 
 // ── AiResultBox ───────────────────────────────────────────
 function AiResultBox({ result, onClose }) {
+  const hasMap = !!(result.place?.lat && result.place?.lng)
   return (
-    <div style={{padding:'10px 14px',background:'rgba(80,120,220,.07)',borderRadius:10,
-      border:'1px solid rgba(80,120,220,.2)',fontSize:13,color:'var(--text2)'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
-        <div style={{fontWeight:700,color:'var(--text1)',fontSize:14}}>
-          🤖 {result.merchantName || '—'}
+    <div style={{background:'rgba(80,120,220,.07)',borderRadius:10,
+      border:'1px solid rgba(80,120,220,.2)',fontSize:13,color:'var(--text2)',overflow:'hidden'}}>
+      {/* Info row */}
+      <div style={{padding:'10px 14px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
+          <div style={{fontWeight:700,color:'var(--text1)',fontSize:14}}>
+            🤖 {result.merchantName || '—'}
+          </div>
+          <button onClick={onClose}
+            style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',
+              fontSize:14,padding:0,flexShrink:0,marginLeft:8}}>✕</button>
         </div>
-        <button onClick={onClose}
-          style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',
-            fontSize:14,padding:0,flexShrink:0,marginLeft:8}}>✕</button>
+        {result.category && (
+          <div style={{fontSize:12,color:'var(--text3)',marginBottom:result.city?2:0}}>
+            {result.category}
+          </div>
+        )}
+        {result.city && (
+          <div style={{fontSize:12,color:'var(--text3)',display:'flex',alignItems:'center',gap:4}}>
+            <span>📍 {result.city}</span>
+            {result.place?.address && <span style={{opacity:.7}}>— {result.place.address}</span>}
+            {hasMap && (
+              <a href={`https://maps.google.com/?q=${result.place.lat},${result.place.lng}`}
+                target="_blank" rel="noreferrer"
+                style={{color:'var(--accent)',fontWeight:600,fontSize:11,flexShrink:0,marginLeft:4}}>
+                Apri ↗
+              </a>
+            )}
+          </div>
+        )}
       </div>
-      {(result.merchantType || result.category) && (
-        <div style={{fontSize:12,color:'var(--text3)',marginBottom:6}}>
-          {result.merchantType}{result.category ? ` • ${result.category}` : ''}
-        </div>
-      )}
-      {result.notes && (
-        <div style={{fontSize:13,lineHeight:1.5,marginBottom:6}}>{result.notes}</div>
-      )}
-      {result.place?.address && (
-        <div style={{fontSize:12,color:'var(--text3)',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
-          <span>📍 {result.place.address}</span>
-          {result.place.lat && result.place.lng && (
-            <a href={`https://maps.google.com/?q=${result.place.lat},${result.place.lng}`}
-              target="_blank" rel="noreferrer"
-              style={{color:'var(--accent)',fontWeight:600,fontSize:11,flexShrink:0}}>
-              Apri ↗
-            </a>
-          )}
-        </div>
-      )}
-      {result.place?.lat && result.place?.lng && (
+      {/* Map panel — always shown */}
+      {hasMap ? (
         <iframe
           title="merchant-map"
           src={`https://maps.google.com/maps?q=${result.place.lat},${result.place.lng}&z=15&output=embed`}
-          width="100%" height="160" frameBorder="0"
-          style={{borderRadius:8,border:'1px solid var(--border)',display:'block',marginTop:4}}
+          width="100%" height="180" frameBorder="0"
+          style={{display:'block',borderTop:'1px solid rgba(80,120,220,.2)'}}
           loading="lazy"
           referrerPolicy="no-referrer-when-downgrade"
         />
+      ) : (
+        <div style={{borderTop:'1px solid rgba(80,120,220,.2)',padding:'12px 14px',
+          textAlign:'center',fontSize:12,color:'var(--text3)',
+          background:'rgba(0,0,0,.03)',display:'flex',alignItems:'center',
+          justifyContent:'center',gap:6,minHeight:60}}>
+          🗺️ No geolocalization
+        </div>
       )}
     </div>
   )
@@ -680,13 +690,31 @@ export default function MobileDiscovery() {
     setAiResult(null)
     setAiError(null)
     try {
-      const result = await lookupMerchantAndPlace(
-        current.merchant || current.descAI,
-        current.description,
-        current.amount,
-        current.city || ''
-      )
-      setAiResult(result)
+      // Full enrichment (same logic as TransactionsPage desktop)
+      const enriched = await enrichBatch([current], { force: true })
+      if (!enriched.length) throw new Error('Nessun risultato')
+      const tx = enriched[0]
+
+      // Save enriched fields to DB
+      const patch = {}
+      if (tx.merchant    != null) patch.merchant    = tx.merchant
+      if (tx.counterpart != null) patch.counterpart = tx.counterpart
+      if (tx.descAI      != null) patch.descAI      = tx.descAI
+      if (tx.city        != null) patch.city        = tx.city
+      if (tx.cat1        != null) patch.cat1        = tx.cat1
+      if (tx.cat2        != null) patch.cat2        = tx.cat2
+      if (Object.keys(patch).length) updateTransaction(current.txId, patch)
+
+      // Places lookup for map
+      const merchantForPlace = tx.merchant || tx.descAI || current.merchant || current.descAI
+      const place = await lookupPlaceForMerchant(merchantForPlace, tx.city || current.city)
+
+      setAiResult({
+        merchantName: tx.merchant || tx.descAI || '—',
+        category: tx.cat1 && tx.cat2 ? `${tx.cat1} › ${tx.cat2}` : (tx.cat1 || null),
+        city: tx.city || null,
+        place: place || null,
+      })
     } catch(e) {
       setAiError(e.message || 'Errore sconosciuto')
     } finally {
@@ -761,8 +789,11 @@ export default function MobileDiscovery() {
               <div style={{fontSize:28,fontWeight:900,color:'var(--red)',letterSpacing:'-.04em',lineHeight:1}}>
                 {fmtAmt(current.amount)}
               </div>
-              <div style={{fontSize:11,color:'var(--text3)',marginTop:3}}>
-                data valuta: {dateValuta(current)}
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:3,display:'flex',alignItems:'center',gap:8}}>
+                <span>data valuta: {dateValuta(current)}</span>
+                {current.user && (
+                  <span style={{fontWeight:700,color:'var(--accent)'}}>👤 {current.user}</span>
+                )}
               </div>
             </div>
             {current._flagged && <span style={{fontSize:16,flexShrink:0}}>🚩</span>}

@@ -227,6 +227,25 @@ Importo: €${Math.abs(amount || 0).toFixed(2)}${city ? `\nCittà: ${city}` : ''
   return { ...aiResult, place }
 }
 
+// ── Standalone Places lookup (for post-enrichBatch map display) ─────────────
+export async function lookupPlaceForMerchant(merchantName, city) {
+  const placesKey = getPlacesKey()
+  if (!placesKey || !merchantName) return null
+  try {
+    const res = await fetch(proxyUrl('/places'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: [merchantName, city].filter(Boolean).join(' '), key: placesKey }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return (!data.error && (data.lat || data.address)) ? data : null
+  } catch(e) {
+    console.warn('[lookupPlaceForMerchant]', e.message)
+    return null
+  }
+}
+
 // ── Category validators ───────────────────────────────────
 function validCat1(cat1) {
   return CAT_NAMES.includes(cat1) ? cat1 : null
