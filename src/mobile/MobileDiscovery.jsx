@@ -430,6 +430,10 @@ export default function MobileDiscovery() {
   // ── Similar txs panel ────────────────────────────────────
   const [similarOpen, setSimilarOpen] = useState(false)
 
+  // ── Note ──────────────────────────────────────────────────
+  const [editingNote, setEditingNote] = useState(false)
+  const [noteDraft,   setNoteDraft]   = useState('')
+
   // ── AI ────────────────────────────────────────────────────
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult]   = useState(null)
@@ -495,6 +499,7 @@ export default function MobileDiscovery() {
     setSaltaSempreOpen(false)
     setEditingDesc(false)
     setSimilarOpen(false)
+    setEditingNote(false)
   }, [current?.txId])
 
   // ── Actions ───────────────────────────────────────────────
@@ -1028,6 +1033,61 @@ export default function MobileDiscovery() {
                 </button>
               )}
             </div>
+
+            {/* NOTE */}
+            {activeSection === null && (
+              <div>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                  <span style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                    textTransform:'uppercase',color:'var(--text3)'}}>Nota</span>
+                  {!editingNote && (
+                    <button onClick={()=>{setNoteDraft(current.note||'');setEditingNote(true)}}
+                      style={{background:'none',border:'none',cursor:'pointer',
+                        color:'var(--accent)',fontSize:11,fontWeight:700,padding:0,
+                        fontFamily:'var(--font-sans)'}}>
+                      {current.note ? '✏️ modifica' : '+ aggiungi'}
+                    </button>
+                  )}
+                </div>
+                {editingNote ? (
+                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                    <textarea
+                      autoFocus
+                      value={noteDraft}
+                      onChange={e=>setNoteDraft(e.target.value)}
+                      rows={3}
+                      placeholder="Scrivi una nota…"
+                      style={{width:'100%',padding:'8px 12px',borderRadius:10,
+                        border:'1.5px solid var(--accent)',background:'var(--bg)',
+                        color:'var(--text1)',fontSize:13,fontFamily:'var(--font-sans)',
+                        outline:'none',resize:'vertical',boxSizing:'border-box',lineHeight:1.5}}
+                    />
+                    <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
+                      <button onClick={()=>setEditingNote(false)}
+                        style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--border)',
+                          background:'var(--bg)',color:'var(--text3)',fontSize:12,cursor:'pointer',
+                          fontFamily:'var(--font-sans)'}}>Annulla</button>
+                      <button onClick={()=>{
+                        updateTransaction(current.txId, { note: noteDraft.trim() || null })
+                        setEditingNote(false)
+                      }}
+                        style={{padding:'6px 14px',borderRadius:8,border:'none',background:'var(--accent)',
+                          color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+                        ✓ Salva
+                      </button>
+                    </div>
+                  </div>
+                ) : current.note ? (
+                  <div
+                    onClick={()=>{setNoteDraft(current.note||'');setEditingNote(true)}}
+                    style={{padding:'8px 12px',borderRadius:10,background:'rgba(100,100,220,.06)',
+                      border:'1px solid rgba(100,100,220,.15)',fontSize:13,color:'var(--text2)',
+                      lineHeight:1.5,wordBreak:'break-word',whiteSpace:'pre-wrap',cursor:'pointer'}}>
+                    {current.note}
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {/* Descrizione originale (solo se nessun picker aperto) */}
             {activeSection === null && current.description && (
