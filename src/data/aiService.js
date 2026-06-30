@@ -255,20 +255,62 @@ Importo: €${Math.abs(amount || 0).toFixed(2)}${city ? `\nCittà: ${city}` : ''
 }
 
 // ── Standalone Places lookup (for post-enrichBatch map display) ─────────────
+// First tries Google Places (if key configured), then falls back to OpenAI direct.
 export async function lookupPlaceForMerchant(merchantName, city) {
+  if (!merchantName) return null
+  const query = [merchantName, city].filter(Boolean).join(' ')
+
+  // 1. Try Google Places (fast, accurate — needs placesKey)
   const placesKey = getPlacesKey()
-  if (!placesKey || !merchantName) return null
+  if (placesKey) {
+    try {
+      const res = await fetch(proxyUrl('/places'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, key: placesKey }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.error && (data.lat || data.address)) return data
+      }
+    } catch(e) {
+      console.warn('[lookupPlaceForMerchant] Places failed, falling back to AI:', e.message)
+    }
+  }
+
+  // 2. Fallback: ask OpenAI directly for location (no proxy, no timeout issue)
+  const aiKey = getApiKey()
+  if (!aiKey?.startsWith('sk-')) return null
   try {
-    const res = await fetch(proxyUrl('/places'), {
+    const prompt = `Given this Italian merchant/business transaction:
+Merchant: "${merchantName}"${city ? `\nCity: "${city}"` : ''}
+
+Find the most likely physical address and GPS coordinates for this business in Italy.
+Return ONLY valid JSON (no other text):
+{"name":"exact business name","address":"full street address, city","lat":45.123,"lng":9.456}
+
+If you cannot determine the exact location with confidence, return:
+{"name":null,"address":null,"lat":null,"lng":null}`
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: [merchantName, city].filter(Boolean).join(' '), key: placesKey }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 150,
+        response_format: { type: 'json_object' },
+      }),
     })
     if (!res.ok) return null
     const data = await res.json()
-    return (!data.error && (data.lat || data.address)) ? data : null
+    const text = data.choices?.[0]?.message?.content || '{}'
+    const parsed = JSON.parse(text)
+    if (parsed.lat && parsed.lng) return parsed
+    return null
   } catch(e) {
-    console.warn('[lookupPlaceForMerchant]', e.message)
+    console.warn('[lookupPlaceForMerchant] AI fallback failed:', e.message)
     return null
   }
 }
