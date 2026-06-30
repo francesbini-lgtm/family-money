@@ -261,11 +261,16 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
   const addAiRule         = useStore(s=>s.addAiRule)
   const allTxs        = useStore(s=>s.transactions)
   const customCats    = useStore(s=>s.customCats)
+  const setCustomCats = useStore(s=>s.setCustomCats)
   const allCats       = getMergedCats(customCats)
   const allCatNames   = getMergedCatNames(customCats)
   const [sel1, setSel1]       = useState(cat1)
   const [sel2, setSel2]       = useState(cat2 || '')
   const [rulesOpen, setRulesOpen] = useState(false)
+  const [addingL1, setAddingL1] = useState(false)
+  const [newL1,    setNewL1]    = useState('')
+  const [addingL2, setAddingL2] = useState(false)
+  const [newL2,    setNewL2]    = useState('')
   const [applied,   setApplied]   = useState(false)
   const [descEdit,  setDescEdit]  = useState(tx?.descAI || '')
 
@@ -297,6 +302,25 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
   function updateCond(idx, nc) { setConditions(cs => cs.map((c,i) => i===idx ? nc : c)) }
   function removeCond(idx)     { setConditions(cs => cs.filter((_,i) => i!==idx)) }
   function addCond()           { setConditions(cs => [...cs, {field:'merchant', op:'contiene', value:''}]) }
+
+  function confirmAddL1() {
+    const name = newL1.trim()
+    if (!name || allCatNames.includes(name)) return
+    setCustomCats({ ...customCats, [name]: { color: '#888', sub: [] } })
+    setSel1(name); setSel2('')
+    setNewL1(''); setAddingL1(false)
+  }
+
+  function confirmAddL2() {
+    const sub = newL2.trim()
+    if (!sub || !sel1) return
+    const existing = allCats[sel1]?.sub || []
+    if (existing.includes(sub)) { setSel2(sub); setNewL2(''); setAddingL2(false); return }
+    const updatedSub = [...existing, sub]
+    setCustomCats({ ...customCats, [sel1]: { ...(customCats[sel1]||{}), color: allCats[sel1]?.color||'#888', sub: updatedSub } })
+    setSel2(sub)
+    setNewL2(''); setAddingL2(false)
+  }
 
   function save() {
     const patch = { cat1: sel1, cat2: sel2, conf: 100, ...(descEdit.trim() ? { descAI: descEdit.trim(), aiEnriched: true } : {}) }
@@ -346,25 +370,77 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
         <div style={{display:'flex', flex:1, overflow:'hidden'}}>
 
           {/* L1 — categories */}
-          <div className="cat-dropdown-l1" style={{flex:'0 0 160px',borderRight:'1px solid var(--border)'}}>
-            {allCatNames.map(name=>(
-              <button key={name} className={'cat-dropdown-item'+(name===sel1?' active':'')}
-                style={{'--cat-color':allCats[name]?.color||'#888'}} onClick={()=>{setSel1(name);setSel2('')}}>
-                <span className="cat-dot"/>{name}
+          <div className="cat-dropdown-l1" style={{flex:'0 0 160px',borderRight:'1px solid var(--border)',display:'flex',flexDirection:'column'}}>
+            <div style={{flex:1,overflowY:'auto'}}>
+              {allCatNames.map(name=>(
+                <button key={name} className={'cat-dropdown-item'+(name===sel1?' active':'')}
+                  style={{'--cat-color':allCats[name]?.color||'#888'}} onClick={()=>{setSel1(name);setSel2('');setAddingL2(false)}}>
+                  <span className="cat-dot"/>{name}
+                </button>
+              ))}
+            </div>
+            {/* + nuova categoria L1 */}
+            {addingL1 ? (
+              <div style={{padding:'6px 8px',borderTop:'1px solid var(--border)',display:'flex',gap:4}}>
+                <input autoFocus value={newL1} onChange={e=>setNewL1(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e=>{ if(e.key==='Enter') confirmAddL1(); if(e.key==='Escape'){setAddingL1(false);setNewL1('')} }}
+                  style={{flex:1,padding:'4px 7px',borderRadius:6,border:'1.5px solid var(--accent)',
+                    background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
+                    fontFamily:'var(--font-sans)',minWidth:0}}/>
+                <button onClick={confirmAddL1}
+                  style={{padding:'4px 8px',borderRadius:6,border:'none',background:'var(--accent)',
+                    color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>✓</button>
+                <button onClick={()=>{setAddingL1(false);setNewL1('')}}
+                  style={{padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',
+                    background:'none',color:'var(--text3)',fontSize:12,cursor:'pointer',flexShrink:0}}>✕</button>
+              </div>
+            ) : (
+              <button onClick={()=>setAddingL1(true)}
+                style={{padding:'7px 10px',borderTop:'1px solid var(--border)',background:'none',
+                  border:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,fontWeight:600,
+                  textAlign:'left',fontFamily:'var(--font-sans)',width:'100%',flexShrink:0}}>
+                + nuova categoria
               </button>
-            ))}
+            )}
           </div>
 
           {/* L2 — subcategories */}
-          <div className="cat-dropdown-l2" style={{flex:1, minWidth:0, padding:'8px 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none'}}>
-            {(allCats[sel1]?.sub||[]).length > 0 ? allCats[sel1].sub.map(s=>(
-              <button key={s} className={'cat-dropdown-sub'+(s===sel2?' active':'')}
-                onClick={()=>setSel2(s===sel2?'':s)} style={{display:'block',width:'100%',textAlign:'left'}}>
-                {sel2===s ? '✓ ' : ''}{s}
+          <div className="cat-dropdown-l2" style={{flex:1, minWidth:0, padding:'8px 0 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none', display:'flex', flexDirection:'column'}}>
+            <div style={{flex:1,overflowY:'auto',padding:'0 0 4px'}}>
+              {(allCats[sel1]?.sub||[]).length > 0 ? allCats[sel1].sub.map(s=>(
+                <button key={s} className={'cat-dropdown-sub'+(s===sel2?' active':'')}
+                  onClick={()=>setSel2(s===sel2?'':s)} style={{display:'block',width:'100%',textAlign:'left'}}>
+                  {sel2===s ? '✓ ' : ''}{s}
+                </button>
+              )) : (
+                <div style={{padding:'12px 16px',fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>Nessuna sottocategoria</div>
+              )}
+            </div>
+            {/* + nuova subcategoria L2 */}
+            {sel1 && (addingL2 ? (
+              <div style={{padding:'6px 8px',borderTop:'1px solid var(--border)',display:'flex',gap:4}}>
+                <input autoFocus value={newL2} onChange={e=>setNewL2(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e=>{ if(e.key==='Enter') confirmAddL2(); if(e.key==='Escape'){setAddingL2(false);setNewL2('')} }}
+                  style={{flex:1,padding:'4px 7px',borderRadius:6,border:'1.5px solid var(--accent)',
+                    background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
+                    fontFamily:'var(--font-sans)',minWidth:0}}/>
+                <button onClick={confirmAddL2}
+                  style={{padding:'4px 8px',borderRadius:6,border:'none',background:'var(--accent)',
+                    color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>✓</button>
+                <button onClick={()=>{setAddingL2(false);setNewL2('')}}
+                  style={{padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',
+                    background:'none',color:'var(--text3)',fontSize:12,cursor:'pointer',flexShrink:0}}>✕</button>
+              </div>
+            ) : (
+              <button onClick={()=>setAddingL2(true)}
+                style={{padding:'7px 10px',borderTop:'1px solid var(--border)',background:'none',
+                  border:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,fontWeight:600,
+                  textAlign:'left',fontFamily:'var(--font-sans)',width:'100%',flexShrink:0}}>
+                + nuova sottocategoria
               </button>
-            )) : (
-              <div style={{padding:'12px 16px',fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>Nessuna sottocategoria</div>
-            )}
+            ))}
           </div>
 
           {/* Rules panel — shown only when rulesOpen */}
