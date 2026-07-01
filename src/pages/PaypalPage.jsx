@@ -863,8 +863,9 @@ export default function PaypalPage() {
       i.id === importId ? { ...i, status: 'matched', matchedTxId: imp.pendingTxId, pendingTxId: null } : i
     )
     setAppPref('paypalImports', updated)
-    setPendingModal(null)
-    showToast('Abbinamento approvato', 'success')
+    const next = updated.find(i => i.status === 'pending_approval' && i.id !== importId)
+    setPendingModal(next || null)
+    showToast(next ? 'Approvato — prossimo abbinamento' : 'Abbinamento approvato', 'success')
   }
 
   function handleRejectPending(importId) {
@@ -872,8 +873,9 @@ export default function PaypalPage() {
       i.id === importId ? { ...i, status: 'unmatched', pendingTxId: null } : i
     )
     setAppPref('paypalImports', updated)
-    setPendingModal(null)
-    showToast('Abbinamento rifiutato', 'info')
+    const next = updated.find(i => i.status === 'pending_approval' && i.id !== importId)
+    setPendingModal(next || null)
+    showToast(next ? 'Rifiutato — prossimo abbinamento' : 'Abbinamento rifiutato', 'info')
   }
 
   function handleLinkTxToImport(txId, importId) {
