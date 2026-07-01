@@ -60,6 +60,7 @@ import './App.css'
 
 
 const NAV = [
+  { id:'quality',          icon:'📊', label:'Dashboard',          group:null },
   { id:'ai',              icon:'✨', label:'AI Assistant',       group:'AI' },
   { id:'dashboard',       icon:'🏠', label:'Summary',           group:'Overview' },
   { id:'transactions',    icon:'💳', label:'Transazioni',        group:null },
@@ -85,7 +86,6 @@ const NAV = [
   { id:'contanti',        icon:'💵', label:'Contanti',            group:null },
   { id:'mutuo',          icon:'🏠', label:'Mutuo',              group:null },
   { id:'stipendio',      icon:'💼', label:'Stipendi',            group:null },
-  { id:'quality',          icon:'📊', label:'Qualità Dati',        group:'Sistema' },
   { id:'settings',        icon:'⚙️', label:'Impostazioni',       group:null },
   { id:'devlog',          icon:'🛠', label:'Sviluppo',            group:null },
 ]

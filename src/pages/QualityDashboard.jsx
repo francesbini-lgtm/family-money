@@ -294,10 +294,10 @@ export default function QualityDashboard() {
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-serif)' }}>
-          📊 Dashboard Qualità
+          📊 Dashboard
         </div>
         <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 4 }}>
-          Stato della categorizzazione e completezza dei dati
+          Qualità dati · categorizzazione · abbinamenti
         </div>
       </div>
 
