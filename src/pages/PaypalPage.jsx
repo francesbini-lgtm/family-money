@@ -681,6 +681,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
       flagged: false,
     }))
   )
+  const [vehOpenIdx, setVehOpenIdx] = useState(null)
 
   const upd = (i, patch) => setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r))
 
@@ -715,7 +716,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                 <th style={{padding:'6px 8px'}}>Banca Merchant</th>
                 <th style={{padding:'6px 8px'}}>Data Banca</th>
                 <th style={{padding:'6px 8px'}}>L1</th>
-                <th style={{padding:'6px 8px'}}>L2 / Veicolo</th>
+                <th style={{padding:'6px 8px'}}>L2</th>
                 <th style={{padding:'6px 8px',textAlign:'center'}}>🚩</th>
               </tr>
             </thead>
@@ -749,16 +750,30 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                         {catNames.map(n => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </td>
-                    {/* L2 / Veicolo */}
+                    {/* L2 */}
                     <td style={{padding:'6px 4px'}}>
-                      {isVeicoli
-                        ? <VehicleQuickPicker txId={tx.txId} cat1={cat1} />
-                        : <select value={cat2} style={sel({maxWidth:120})}
-                            onChange={e => upd(i, {cat2:e.target.value})}>
-                            <option value="">— nessuna —</option>
-                            {subs.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                      }
+                      <div style={{display:'flex',alignItems:'center',gap:4}}>
+                        <select value={cat2} style={sel({maxWidth:120})}
+                          onChange={e => upd(i, {cat2:e.target.value})}>
+                          <option value="">— nessuna —</option>
+                          {subs.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                        {isVeicoli && (
+                          <button
+                            onClick={() => setVehOpenIdx(v => v === i ? null : i)}
+                            title="Assegna veicolo"
+                            style={{
+                              width:18, height:18, borderRadius:'50%', border:'1.5px solid',
+                              display:'flex', alignItems:'center', justifyContent:'center',
+                              cursor:'pointer', fontSize:10, fontWeight:800, lineHeight:1, padding:0,
+                              flexShrink:0,
+                              background: vehOpenIdx===i ? 'var(--accent)' : 'var(--surface)',
+                              borderColor: vehOpenIdx===i ? 'var(--accent)' : 'var(--border)',
+                              color: vehOpenIdx===i ? '#fff' : 'var(--text3)',
+                              transition:'all .12s',
+                            }}>!</button>
+                        )}
+                      </div>
                     </td>
                     {/* Flag */}
                     <td style={{padding:'6px 4px',textAlign:'center'}}>
@@ -774,6 +789,14 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                         }}>🚩</button>
                     </td>
                   </tr>
+                  {/* Vehicle picker sub-row */}
+                  {isVeicoli && vehOpenIdx === i && (
+                    <tr style={{background:'rgba(59,130,246,.04)'}}>
+                      <td colSpan={8} style={{padding:'8px 12px 10px',borderBottom:'1px solid var(--border)'}}>
+                        <VehicleQuickPicker txId={tx.txId} cat1={cat1} />
+                      </td>
+                    </tr>
+                  )}
                 )
               })}
             </tbody>
