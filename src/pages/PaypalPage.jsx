@@ -682,8 +682,30 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
     }))
   )
   const [vehOpenIdx, setVehOpenIdx] = useState(null)
+  const [propagatePrompt, setPropagatePrompt] = useState(null) // {merchant, cat1, cat2, count}
 
   const upd = (i, patch) => setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r))
+
+  function handleCatChange(i, patch) {
+    upd(i, patch)
+    // Check for same-merchant siblings
+    const merchant = rows[i].imp.merchant
+    const siblings = rows.filter((r, j) => j !== i && r.imp.merchant === merchant)
+    if (siblings.length > 0) {
+      const newCat1 = patch.cat1 !== undefined ? patch.cat1 : rows[i].cat1
+      const newCat2 = patch.cat2 !== undefined ? patch.cat2 : (patch.cat1 !== undefined ? '' : rows[i].cat2)
+      setPropagatePrompt({ i, merchant, cat1: newCat1, cat2: newCat2, count: siblings.length })
+    }
+  }
+
+  function applyPropagate() {
+    if (!propagatePrompt) return
+    const { merchant, cat1, cat2 } = propagatePrompt
+    setRows(rs => rs.map(r =>
+      r.imp.merchant === merchant ? { ...r, cat1, cat2 } : r
+    ))
+    setPropagatePrompt(null)
+  }
 
   const sel = (style) => ({
     padding:'3px 6px', borderRadius:6, border:'1px solid var(--border)',
@@ -746,7 +768,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                     {/* L1 */}
                     <td style={{padding:'6px 4px'}}>
                       <select value={cat1} style={sel({maxWidth:110})}
-                        onChange={e => upd(i, {cat1:e.target.value, cat2:''})}>
+                        onChange={e => handleCatChange(i, {cat1:e.target.value, cat2:''})}>
                         <option value="">— nessuna —</option>
                         {catNames.map(n => <option key={n} value={n}>{n}</option>)}
                       </select>
@@ -755,7 +777,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                     <td style={{padding:'6px 4px'}}>
                       <div style={{display:'flex',alignItems:'center',gap:4}}>
                         <select value={cat2} style={sel({maxWidth:120})}
-                          onChange={e => upd(i, {cat2:e.target.value})}>
+                          onChange={e => handleCatChange(i, {cat2:e.target.value})}>
                           <option value="">— nessuna —</option>
                           {subs.map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
@@ -804,6 +826,28 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
             </tbody>
           </table>
         </div>
+
+        {/* Propagate prompt */}
+        {propagatePrompt && (
+          <div style={{
+            display:'flex',alignItems:'center',gap:10,flexShrink:0,
+            padding:'10px 14px',margin:'8px 0 0',borderRadius:8,
+            background:'rgba(var(--accent-rgb,59,130,246),.08)',
+            border:'1px solid rgba(59,130,246,.25)',fontSize:12,
+          }}>
+            <span style={{flex:1}}>
+              Applicare <strong>{propagatePrompt.cat1}{propagatePrompt.cat2 ? ' › ' + propagatePrompt.cat2 : ''}</strong> a tutte le altre {propagatePrompt.count} righe <strong>{propagatePrompt.merchant}</strong>?
+            </span>
+            <button onClick={applyPropagate}
+              style={{padding:'4px 12px',borderRadius:6,border:'none',background:'var(--accent)',color:'#fff',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+              Sì, applica
+            </button>
+            <button onClick={() => setPropagatePrompt(null)}
+              style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'none',color:'var(--text3)',fontSize:11,cursor:'pointer'}}>
+              No
+            </button>
+          </div>
+        )}
 
         {/* Footer */}
         <div style={{display:'flex',gap:10,justifyContent:'flex-end',alignItems:'center',marginTop:14,flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:12}}>
