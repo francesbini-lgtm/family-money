@@ -22,7 +22,7 @@ export function getMergedCats(customCats = {}) {
   Object.entries(customCats || {}).forEach(([name, data]) => {
     if (!merged[name]) {
       // Entirely new category
-      merged[name] = { color: data.color || '#888', sub: data.sub || [] }
+      merged[name] = { color: data.color || '#888', sub: data.sub || [], subEmojis: data.subEmojis || {} }
     } else {
       // Existing base category — if customCats has a sub array, use it directly
       // (this preserves both additions AND deletions of base subs)
@@ -30,10 +30,16 @@ export function getMergedCats(customCats = {}) {
         ...merged[name],
         color: data.color || merged[name].color,
         sub: Array.isArray(data.sub) ? data.sub : merged[name].sub,
+        subEmojis: { ...(merged[name].subEmojis || {}), ...(data.subEmojis || {}) },
       }
     }
   })
   return merged
+}
+
+/** Returns the emoji for a given L2 subcategory, or '' if none. */
+export function getSubEmoji(allCats, cat1, cat2) {
+  return allCats[cat1]?.subEmojis?.[cat2] || ''
 }
 
 export function getMergedCatNames(customCats = {}) {

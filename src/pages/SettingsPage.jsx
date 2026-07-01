@@ -851,6 +851,9 @@ function CategoriesTab() {
   const [editMode, setEditMode] = useState(false)
   const [newCatForm, setNewCatForm] = useState({name:'',color:'#c8622a',subs:''})
   const [newSub, setNewSub] = useState('')
+  const [newSubEmoji, setNewSubEmoji] = useState('')
+  const [editingEmojiFor, setEditingEmojiFor] = useState(null) // sub name being emoji-edited
+  const [emojiDraft, setEmojiDraft] = useState('')
 
   // Merge base CATS with customCats (preserves base subs + appends custom ones)
   const allCats = getMergedCats(customCats)
@@ -884,10 +887,27 @@ function CategoriesTab() {
   function addSubToCurrent() {
     if (!newSub.trim()) return
     const existing = allCats[selCat] || {color:'#888',sub:[]}
-    const updated = {...customCats, [selCat]: {...existing, sub:[...existing.sub, newSub.trim()], custom:true}}
+    const existingCustom = customCats[selCat] || {}
+    const subEmojis = { ...(existingCustom.subEmojis || existing.subEmojis || {}) }
+    if (newSubEmoji.trim()) subEmojis[newSub.trim()] = newSubEmoji.trim()
+    const updated = {
+      ...customCats,
+      [selCat]: { ...existing, ...existingCustom, sub:[...existing.sub, newSub.trim()], subEmojis, custom:true }
+    }
     setCustomCats(updated)
     setNewSub('')
+    setNewSubEmoji('')
     setShowAddSub(false)
+  }
+
+  function saveSubEmoji(sub, emoji) {
+    const existing = allCats[selCat] || {color:'#888',sub:[]}
+    const existingCustom = customCats[selCat] || {}
+    const subEmojis = { ...(existingCustom.subEmojis || existing.subEmojis || {}), [sub]: emoji.trim() }
+    if (!emoji.trim()) delete subEmojis[sub]
+    setCustomCats({ ...customCats, [selCat]: { ...existing, ...existingCustom, subEmojis, custom:true } })
+    setEditingEmojiFor(null)
+    setEmojiDraft('')
   }
 
   function removeSubFromCurrent(sub) {
@@ -952,31 +972,72 @@ function CategoriesTab() {
         </div>
 
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
-          {(cat?.sub||[]).map(s=>(
-            <span key={s} style={{
-              display:"inline-flex",alignItems:"center",gap:4,
-              padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:600,
-              background:`${cat.color}18`,color:"var(--text2)",border:`1px solid ${cat.color}33`
-            }}>
-              {s}
-              <button onClick={()=>removeSubFromCurrent(s)} style={{
-                background:"none",border:"none",cursor:"pointer",color:"var(--text3)",
-                fontSize:12,lineHeight:1,padding:0,display:"flex",alignItems:"center"
-              }}>×</button>
-            </span>
-          ))}
+          {(cat?.sub||[]).map(s=>{
+            const emoji = cat?.subEmojis?.[s] || ''
+            const isEditingEmoji = editingEmojiFor === s
+            return (
+              <span key={s} style={{
+                display:"inline-flex",alignItems:"center",gap:4,
+                padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:600,
+                background:`${cat.color}18`,color:"var(--text2)",border:`1px solid ${cat.color}33`
+              }}>
+                {isEditingEmoji ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={emojiDraft}
+                      onChange={e=>setEmojiDraft(e.target.value)}
+                      onKeyDown={e=>{
+                        if(e.key==='Enter') saveSubEmoji(s, emojiDraft)
+                        if(e.key==='Escape'){setEditingEmojiFor(null);setEmojiDraft('')}
+                      }}
+                      placeholder="emoji"
+                      style={{width:36,fontSize:16,border:'1px solid var(--accent)',borderRadius:6,
+                        padding:'1px 4px',textAlign:'center',background:'var(--bg)',outline:'none'}}
+                    />
+                    <button onClick={()=>saveSubEmoji(s, emojiDraft)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--green)',fontSize:12,padding:0}}>✓</button>
+                    <button onClick={()=>{setEditingEmojiFor(null);setEmojiDraft('')}}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,padding:0}}>✕</button>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      title="Clicca per modificare emoji"
+                      onClick={()=>{setEditingEmojiFor(s);setEmojiDraft(emoji)}}
+                      style={{cursor:'pointer',fontSize:14,minWidth:18,textAlign:'center',
+                        opacity:emoji?1:.35, userSelect:'none'}}
+                    >{emoji || '＋'}</span>
+                    <span>{s}</span>
+                    <button onClick={()=>removeSubFromCurrent(s)} style={{
+                      background:"none",border:"none",cursor:"pointer",color:"var(--text3)",
+                      fontSize:12,lineHeight:1,padding:0,display:"flex",alignItems:"center"
+                    }}>×</button>
+                  </>
+                )}
+              </span>
+            )
+          })}
           <button className="btn btn-ghost" style={{fontSize:11,padding:"3px 8px"}} onClick={()=>setShowAddSub(true)}>
             + Aggiungi
           </button>
         </div>
 
         {showAddSub && (
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center"}}>
+            <input
+              value={newSubEmoji}
+              onChange={e=>setNewSubEmoji(e.target.value)}
+              placeholder="😀"
+              title="Emoji (opzionale)"
+              style={{width:42,fontSize:18,textAlign:'center',padding:'6px 4px',borderRadius:8,
+                border:'1px solid var(--border)',background:'var(--bg)',outline:'none',flexShrink:0}}
+            />
             <input className="form-inp" value={newSub} onChange={e=>setNewSub(e.target.value)}
               placeholder="Nome sottocategoria" style={{flex:1}}
               onKeyDown={e=>e.key==='Enter'&&addSubToCurrent()}/>
             <button className="btn btn-primary" style={{fontSize:12}} onClick={addSubToCurrent}>Aggiungi</button>
-            <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setShowAddSub(false)}>✕</button>
+            <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddSub(false);setNewSubEmoji('')}}>✕</button>
           </div>
         )}
 
