@@ -1323,6 +1323,35 @@ export function txMatchesRule(tx, match) {
   return hay.includes(val)
 }
 
+// ── Rule text parser (Bug #25) ────────────────────────────
+// Parses the user-editable rule text (e.g. `Descrizione includes "AMAZON"`,
+// `descrizione contiene 'NETFLIX'`) back into a { field, label, value } match
+// object, so the saved rule reflects what the user actually sees/edits.
+const RULE_FIELD_MAP = {
+  'descrizione': 'description', 'description': 'description',
+  'merchant':    'merchant',
+  'controparte': 'counterpart', 'counterpart': 'counterpart',
+  'città':       'city', 'citta': 'city', 'city': 'city',
+}
+const RULE_FIELD_LABELS = {
+  description: 'Descrizione', merchant: 'Merchant',
+  counterpart: 'Controparte', city: 'Città',
+}
+export function parseRuleText(text, fallbackMatch) {
+  if (!text || !text.trim()) return fallbackMatch
+  // First condition of the form: CAMPO includes|contiene|include "VALORE"
+  const re = /([A-Za-zÀ-ÿ]+)\s+(?:includes|include|contiene)\s+["'“”‘’]([^"'“”‘’]+)["'“”‘’]/i
+  const m = text.match(re)
+  if (m) {
+    const field = RULE_FIELD_MAP[m[1].toLowerCase()]
+    const value = (m[2] || '').trim().slice(0, 60)
+    if (field && value) {
+      return { field, label: RULE_FIELD_LABELS[field], value }
+    }
+  }
+  return fallbackMatch
+}
+
 // ── AI smart rule generator ───────────────────────────────
 export async function generateSmartRule(tx, newDesc) {
   const fields = [
@@ -1393,7 +1422,10 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
   const ruleAllCats     = getMergedCats(customCats)
   const ruleAllCatNames = getMergedCatNames(customCats)
   const now    = txDate || ''
-  const others = allTxs.filter(t => t.txId !== txId && !t.excluded && txMatchesRule(t, match))
+  // Derive effective match from the (possibly edited) ruleText so the count + saved rule
+  // reflect what the user actually sees in the textarea, not just the auto-detected default.
+  const effectiveMatch = parseRuleText(ruleText, match)
+  const others = allTxs.filter(t => t.txId !== txId && !t.excluded && txMatchesRule(t, effectiveMatch))
   const future    = others.filter(t => (t._effDate||(t._effDate||t.date||'')) >= now)
   const allOthers = others
 
@@ -1427,25 +1459,27 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
 
   const cat2Options = cat1 ? (ruleAllCats[cat1]?.sub || []) : []
 
-  // Find rules with similar matchField + matchValue
+  // Find rules with similar matchField + matchValue (based on current edited ruleText)
   function findConflicts() {
     const existing = useStore.getState()?.appPrefs?.aiNamingRules || []
-    const val = (match.value || '').toLowerCase()
+    const em  = parseRuleText(ruleText, match)
+    const val = (em.value || '').toLowerCase()
     return existing.filter(r => {
       if (!r.enabled) return false
       const rv = (r.matchValue || '').toLowerCase()
-      return r.matchField === match.field && (rv.includes(val) || val.includes(rv))
+      return r.matchField === em.field && (rv.includes(val) || val.includes(rv))
     })
   }
 
   function requestSave(mode, rt, c1, c2, upd) {
     if (mode === 'none') { onApply('none'); onClose(); return }
+    const em = parseRuleText(rt, match)  // parse the (possibly edited) text
     const found = findConflicts()
     if (found.length > 0) {
-      setPending({ mode, ruleText: rt, cat1: c1, cat2: c2, updateDescAI: upd })
+      setPending({ mode, ruleText: rt, cat1: c1, cat2: c2, updateDescAI: upd, parsedMatch: em })
       setConflicts(found)
     } else {
-      onApply(mode, rt, c1, c2, upd)
+      onApply(mode, rt, c1, c2, upd, em)  // pass parsed match
       onClose()
     }
   }
@@ -1457,7 +1491,7 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
       useStore.getState()?.setAppPref?.('aiNamingRules', existing.filter(r => !ids.has(r.id)))
     }
     // 'keep_both' → just proceed without deleting
-    onApply(pending.mode, pending.ruleText, pending.cat1, pending.cat2, pending.updateDescAI)
+    onApply(pending.mode, pending.ruleText, pending.cat1, pending.cat2, pending.updateDescAI, pending.parsedMatch)
     onClose()
   }
 
@@ -1762,20 +1796,22 @@ function AiDescCell({ tx, updateTransaction }) {
   const [aiVal, setAiVal] = useState(() => { const v = normalizeDesc(tx.descAI)||''; return (v==='null'||v==='undefined')?'':v })
   useMemo(()=>{ if(!aiEdit) setAiVal(normalizeDesc(tx.descAI)||'') }, [tx.descAI, aiEdit])
 
-  function handleApplyRule(mode, ruleText, cat1, cat2, updateDescAI = true) {
+  function handleApplyRule(mode, ruleText, cat1, cat2, updateDescAI = true, parsedMatch = null) {
     // mode 'none' → do nothing (rule NOT created)
     if (mode === 'none') return
     const match   = rulePopup?.match
     const newDesc = rulePopup?.newDesc
     if (!match || !newDesc) return
+    // Use the parsed match from the edited rule text (if available), else fall back to auto-detected
+    const effectiveMatch = parsedMatch || parseRuleText(ruleText, match)
 
     // Create the AI naming rule (Firestore via appPrefs.aiNamingRules)
     const existingRules = useStore.getState()?.appPrefs?.aiNamingRules || []
     const newNamingRule = {
       id:          `nr-${Date.now()}`,
-      matchField:  match.field,
-      matchValue:  match.value,
-      matchLabel:  ruleText || `${match.label} includes "${match.value}"`,
+      matchField:  effectiveMatch.field,
+      matchValue:  effectiveMatch.value,
+      matchLabel:  ruleText || `${effectiveMatch.label} includes "${effectiveMatch.value}"`,
       description: newDesc,
       enabled:     true,
       createdAt:   new Date().toISOString(),
@@ -1785,7 +1821,7 @@ function AiDescCell({ tx, updateTransaction }) {
     // Apply description to other matching transactions (batched undo)
     const targets = allTxs.filter(t => {
       if (t.txId === tx.txId || t.excluded) return false
-      if (!txMatchesRule(t, match)) return false
+      if (!txMatchesRule(t, effectiveMatch)) return false
       if (mode === 'future') return (t._effDate||(t._effDate||t.date||'')) >= (tx._effDate||(tx._effDate||tx.date||''))
       return true // 'all'
     })
@@ -1889,7 +1925,14 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
     // Module-level guard — only reset when run() truly finishes, NOT in cleanup.
     // This prevents StrictMode's unmount→remount cycle from clearing the flag
     // between the two mount calls and triggering a duplicate run.
-    if (_enrichRunning) return
+    if (_enrichRunning) {
+      // Another overlay is already running — show a message then close gracefully
+      // instead of getting stuck at 0% forever.
+      setPhase('⚠️ Arricchimento già in corso. Attendi il completamento.')
+      setError('Un processo di arricchimento AI è già attivo. Attendi che finisca prima di avviarne un altro.')
+      setTimeout(onDone, 2500)
+      return
+    }
     _enrichRunning = true
     mountedRef.current = true
     abortRef.current   = false
