@@ -261,7 +261,7 @@ export default function AIChatPage() {
   }
 
   return (
-    <div className="chat-page">
+    <div className="chat-page" style={activeTab==='insights' ? {maxWidth:'100%',margin:0} : {}}>
       {/* Header */}
       <div className="chat-header">
         <div className="chat-header-left">
@@ -308,30 +308,70 @@ export default function AIChatPage() {
         </div>
       ) : (
         <>
-          {/* INSIGHTS TAB */}
+          {/* INSIGHTS TAB — 3 col layout */}
           {activeTab === 'insights' && (
-            <div style={{flex:1,overflowY:'auto',padding:'20px 28px'}}>
-              <AIInsights transactions={transactions} />
+            <div style={{flex:1,display:'grid',gridTemplateColumns:'260px 1fr 260px',overflow:'hidden'}}>
 
-              {/* Quick prompts per category */}
-              <div style={{marginTop:28}}>
-                <div style={{fontSize:14,fontWeight:700,marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
-                  <Sparkles size={15} color="var(--gold)"/>
-                  Chiedi all'AI
+              {/* LEFT — insight cards */}
+              <div style={{overflowY:'auto',padding:'16px 14px',borderRight:'1px solid var(--border)'}}>
+                <AIInsights transactions={transactions} />
+              </div>
+
+              {/* CENTER — chat */}
+              <div style={{display:'flex',flexDirection:'column',overflow:'hidden'}}>
+                <div className="chat-messages" style={{flex:1,padding:'16px 20px'}}>
+                  {aiChatHistory.length === 0 && (
+                    <div className="chat-welcome">
+                      <div className="chat-welcome-icon">💬</div>
+                      <div className="chat-welcome-title">Chiedimi qualsiasi cosa</div>
+                      <div className="chat-welcome-sub">
+                        Ho accesso alle tue {transactions.length} transazioni. Usa i prompt a destra per iniziare.
+                      </div>
+                    </div>
+                  )}
+                  {aiChatHistory.map((msg, i) => <Message key={i} msg={msg} />)}
+                  {loading && (
+                    <div className="chat-msg chat-msg-ai">
+                      <div className="chat-avatar"><Sparkles size={14} color="var(--gold)" /></div>
+                      <div className="chat-bubble bubble-ai bubble-loading"><span /><span /><span /></div>
+                    </div>
+                  )}
+                  <div ref={bottomRef} />
                 </div>
-                <div style={{display:'flex',flexDirection:'column',gap:20}}>
+                <div className="chat-input-wrap">
+                  <div className="chat-input-bar">
+                    <input ref={inputRef} className="chat-input"
+                      placeholder="Chiedi qualcosa sulle tue finanze…"
+                      value={input} onChange={e=>setInput(e.target.value)}
+                      onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendMessage()}
+                      disabled={loading}/>
+                    <button className="btn btn-primary chat-send" onClick={()=>sendMessage()} disabled={loading||!input.trim()}>
+                      <Send size={14}/>
+                    </button>
+                  </div>
+                  <div className="chat-input-hint">Invio per inviare · Gemini AI</div>
+                </div>
+              </div>
+
+              {/* RIGHT — quick prompts */}
+              <div style={{overflowY:'auto',padding:'16px 14px',borderLeft:'1px solid var(--border)'}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:14,display:'flex',alignItems:'center',gap:6}}>
+                  <Sparkles size={13} color="var(--gold)"/>Chiedi all'AI
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:16}}>
                   {QUICK_CATEGORIES.map((cat,ci)=>(
                     <div key={ci}>
-                      <div style={{fontSize:12,fontWeight:700,color:'var(--text3)',marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em'}}>
+                      <div style={{fontSize:10,fontWeight:700,color:'var(--text3)',marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>
                         {cat.label}
                       </div>
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                      <div style={{display:'flex',flexDirection:'column',gap:5}}>
                         {cat.prompts.map((p,pi)=>(
-                          <button key={pi} className="quick-prompt" style={{justifyContent:'flex-start',borderRadius:10,padding:'10px 14px',textAlign:'left',gap:8}}
+                          <button key={pi} className="quick-prompt"
+                            style={{justifyContent:'flex-start',borderRadius:8,padding:'7px 10px',textAlign:'left',gap:6,width:'100%'}}
                             onClick={()=>sendMessage(p.text)}>
                             {p.icon}
-                            <span>{p.text}</span>
-                            <ChevronRight size={12} style={{marginLeft:'auto',opacity:.4,flexShrink:0}}/>
+                            <span style={{fontSize:11}}>{p.text}</span>
+                            <ChevronRight size={10} style={{marginLeft:'auto',opacity:.4,flexShrink:0}}/>
                           </button>
                         ))}
                       </div>
@@ -367,8 +407,8 @@ export default function AIChatPage() {
         </>
       )}
 
-      {/* Input always visible */}
-      {!isEmpty && (
+      {/* Input — only for chat tab (insights has its own embedded input) */}
+      {!isEmpty && activeTab === 'chat' && (
         <div className="chat-input-wrap">
           <div className="chat-input-bar">
             <input
