@@ -49,6 +49,7 @@ import RisparmioPage        from './pages/RisparmioPage'
 import CarteCreditoPage     from './pages/CarteCreditoPage'
 import UscitePage           from './pages/UscitePage'
 import DevlogPage           from './pages/DevlogPage'
+import QualityDashboard     from './pages/QualityDashboard'
 import OnboardingWizard     from './components/OnboardingWizard'
 
 import { requestNotificationPermission, scheduleScadenzeNotifications } from './services/notifications'
@@ -84,7 +85,8 @@ const NAV = [
   { id:'contanti',        icon:'💵', label:'Contanti',            group:null },
   { id:'mutuo',          icon:'🏠', label:'Mutuo',              group:null },
   { id:'stipendio',      icon:'💼', label:'Stipendi',            group:null },
-  { id:'settings',        icon:'⚙️', label:'Impostazioni',       group:'Sistema' },
+  { id:'quality',          icon:'📊', label:'Qualità Dati',        group:'Sistema' },
+  { id:'settings',        icon:'⚙️', label:'Impostazioni',       group:null },
   { id:'devlog',          icon:'🛠', label:'Sviluppo',            group:null },
 ]
 
@@ -126,6 +128,7 @@ const PAGE_MAP = {
   analytics:         AnalyticsPage,
   risparmio:         RisparmioPage,
   carte:             CarteCreditoPage,
+  quality:           QualityDashboard,
   settings:          SettingsPage,
   devlog:            DevlogPage,
   notifiche:         NotifichePage,

@@ -6,6 +6,7 @@ import MobileOverview  from './MobileOverview'
 import MobileContanti  from './MobileContanti'
 import MobileDiscovery from './MobileDiscovery'
 import MobileStaff     from './MobileStaff'
+import MobileQuality   from './MobileQuality'
 import './mobile.css'
 
 const TABS = [
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'nanny',     icon: '👩', label: 'Nanny'     },
   { id: 'colf',      icon: '🧹', label: 'Colf'      },
   { id: 'discovery', icon: '🔍', label: 'Discovery' },
+  { id: 'quality',   icon: '📊', label: 'Qualità'   },
 ]
 
 // Tabs that expose a "+" FAB
@@ -61,13 +63,14 @@ export default function MobileApp() {
   const colfName   = appPrefs?.colfName  || 'Colf'
 
   // Tab titles
-  const TITLES = { overview: 'Overview', contanti: 'Contanti', nanny: nannyName, colf: colfName, discovery: 'Discovery' }
+  const TITLES = { overview: 'Overview', contanti: 'Contanti', nanny: nannyName, colf: colfName, discovery: 'Discovery', quality: 'Qualità Dati' }
   const SUBS   = {
     overview:  'Situazione finanziaria',
     contanti:  'Gestione contanti',
     nanny:     'Timesheet Nanny',
     colf:      'Timesheet Colf',
     discovery: 'Revisione transazioni',
+    quality:   'Accuratezza e KPIs',
   }
 
   return (
@@ -110,6 +113,7 @@ export default function MobileApp() {
             showAdd={showAdd} onCloseAdd={() => setShowAdd(false)} />
         )}
         {tab === 'discovery' && <MobileDiscovery />}
+        {tab === 'quality'   && <MobileQuality />}
       </div>
 
       {/* FAB — absolutely positioned within m-app so it stays inside the 430px container */}
