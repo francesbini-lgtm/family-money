@@ -669,6 +669,105 @@ function UnmatchedRow({ imp, paypalTxs, onManualMatch }) {
   )
 }
 
+// ── Auto Abbina results modal ─────────────────────────────
+function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose }) {
+  const allCats    = getMergedCats(customCats)
+  const catNames   = Object.keys(allCats).filter(n => n !== 'Non Categorizzato')
+  const [rows, setRows] = useState(() =>
+    pairs.map(({ imp, tx }) => ({
+      imp, tx,
+      cat1: imp.cat1_suggestion || tx.cat1 || '',
+      cat2: imp.cat2_suggestion || tx.cat2 || '',
+    }))
+  )
+
+  const sel = (style) => ({
+    padding:'3px 6px', borderRadius:6, border:'1px solid var(--border)',
+    background:'var(--bg)', color:'var(--text)', fontSize:11, cursor:'pointer', ...style
+  })
+
+  return (
+    <div className="pp-modal-overlay" onClick={onClose}>
+      <div className="pp-approval-modal"
+        style={{maxWidth:860, width:'96%', maxHeight:'80vh', display:'flex', flexDirection:'column'}}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexShrink:0}}>
+          <div style={{fontSize:16,fontWeight:700}}>
+            ⚡ Auto Abbina — {pairs.length} abbinament{pairs.length===1?'o':'i'} trovati
+          </div>
+          <button onClick={onClose}
+            style={{background:'none',border:'none',cursor:'pointer',fontSize:20,lineHeight:1,color:'var(--text3)'}}>×</button>
+        </div>
+
+        {/* Table */}
+        <div style={{overflowY:'auto',flex:1}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            <thead style={{position:'sticky',top:0,background:'var(--surface)',zIndex:1}}>
+              <tr style={{borderBottom:'2px solid var(--border)',color:'var(--text3)',textAlign:'left'}}>
+                <th style={{padding:'6px 8px'}}>PayPal Merchant</th>
+                <th style={{padding:'6px 8px'}}>Data PP</th>
+                <th style={{padding:'6px 8px',textAlign:'right'}}>Importo</th>
+                <th style={{padding:'6px 8px'}}>Banca Merchant</th>
+                <th style={{padding:'6px 8px'}}>Data Banca</th>
+                <th style={{padding:'6px 8px'}}>L1</th>
+                <th style={{padding:'6px 8px'}}>L2</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ imp, tx, cat1, cat2 }, i) => {
+                const subs = allCats[cat1]?.sub || []
+                return (
+                  <tr key={i} style={{borderBottom:'1px solid var(--border)',
+                    background: i%2===0 ? 'transparent' : 'var(--surface)'}}>
+                    <td style={{padding:'6px 8px',fontWeight:600,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {imp.merchant || '—'}
+                    </td>
+                    <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>{imp.date?.slice(0,10)}</td>
+                    <td style={{padding:'6px 8px',textAlign:'right',color:'var(--red)',fontWeight:700,whiteSpace:'nowrap'}}>
+                      −€{Math.abs(imp.amount).toFixed(2)}
+                    </td>
+                    <td style={{padding:'6px 8px',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {tx.merchant || tx.descAI || tx.description?.slice(0,30) || '—'}
+                    </td>
+                    <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>
+                      {(tx._effDate||tx.date||'').slice(0,10)}
+                    </td>
+                    <td style={{padding:'6px 4px'}}>
+                      <select value={cat1} style={sel({maxWidth:120})}
+                        onChange={e => setRows(rs => rs.map((r,j)=>j===i?{...r,cat1:e.target.value,cat2:''}:r))}>
+                        <option value="">— nessuna —</option>
+                        {catNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </td>
+                    <td style={{padding:'6px 4px'}}>
+                      <select value={cat2} style={sel({maxWidth:130})}
+                        onChange={e => setRows(rs => rs.map((r,j)=>j===i?{...r,cat2:e.target.value}:r))}>
+                        <option value="">— nessuna —</option>
+                        {subs.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginTop:14,flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:12}}>
+          <button className="btn btn-ghost" onClick={onClose}>Annulla</button>
+          <button className="btn btn-primary" style={{background:'#38a169',borderColor:'#38a169'}}
+            onClick={() => onConfirm(rows, updatedImports)}>
+            ✅ Approva tutti ({pairs.length})
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function PaypalPage() {
   const transactions      = useStore(s => s.transactions)
@@ -899,18 +998,24 @@ export default function PaypalPage() {
       return { ...imp, status: 'matched', matchedTxId: bankTx.txId, pendingTxId: null }
     })
     if (!matched.length) { showToast('Nessun abbinamento esatto trovato', 'info'); return }
-    matched.forEach(({ imp, tx }) => {
+    // Don't apply yet — open modal for review/confirm
+    setAutoAbbinaResults({ pairs: matched, updatedImports })
+  }
+
+  function handleAutoAbbinaConfirm(rows, updatedImports) {
+    rows.forEach(({ imp, tx, cat1, cat2 }) => {
       updateTransaction(tx.txId, {
         merchant: imp.merchant,
         descAI:   imp.merchant,
-        cat1:     imp.cat1_suggestion,
-        cat2:     imp.cat2_suggestion,
+        cat1:     cat1 || imp.cat1_suggestion || '',
+        cat2:     cat2 || imp.cat2_suggestion || '',
         _paypalOverride: true,
         conf: 100,
       })
     })
     setAppPref('paypalImports', updatedImports)
-    setAutoAbbinaResults(matched)
+    setAutoAbbinaResults(null)
+    showToast(`${rows.length} abbinament${rows.length===1?'o':'i'} approvati`, 'success')
   }
 
   function handleLinkTxToImport(txId, importId) {
@@ -1194,43 +1299,13 @@ export default function PaypalPage() {
       )}
 
       {autoAbbinaResults && (
-        <div className="pp-modal-overlay" onClick={() => setAutoAbbinaResults(null)}>
-          <div className="pp-approval-modal" style={{maxWidth:680, width:'90%'}}
-            onClick={e => e.stopPropagation()}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-              <div style={{fontSize:17,fontWeight:700}}>⚡ Auto Abbina — {autoAbbinaResults.length} abbinament{autoAbbinaResults.length===1?'o':'i'}</div>
-              <button onClick={() => setAutoAbbinaResults(null)}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:20,lineHeight:1,color:'var(--text3)'}}>×</button>
-            </div>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-              <thead>
-                <tr style={{borderBottom:'2px solid var(--border)',color:'var(--text3)',textAlign:'left'}}>
-                  <th style={{padding:'6px 8px'}}>PayPal Merchant</th>
-                  <th style={{padding:'6px 8px'}}>Data PP</th>
-                  <th style={{padding:'6px 8px',textAlign:'right'}}>Importo</th>
-                  <th style={{padding:'6px 8px'}}>Banca Merchant</th>
-                  <th style={{padding:'6px 8px'}}>Data Banca</th>
-                </tr>
-              </thead>
-              <tbody>
-                {autoAbbinaResults.map(({imp, tx}, i) => (
-                  <tr key={i} style={{borderBottom:'1px solid var(--border)',background:i%2===0?'transparent':'var(--surface)'}}>
-                    <td style={{padding:'7px 8px',fontWeight:600}}>{imp.merchant || '—'}</td>
-                    <td style={{padding:'7px 8px',color:'var(--text3)'}}>{imp.date?.slice(0,10)}</td>
-                    <td style={{padding:'7px 8px',textAlign:'right',color:'var(--red)',fontWeight:700}}>
-                      −€{Math.abs(imp.amount).toFixed(2)}
-                    </td>
-                    <td style={{padding:'7px 8px'}}>{tx.merchant || tx.descAI || tx.description?.slice(0,30) || '—'}</td>
-                    <td style={{padding:'7px 8px',color:'var(--text3)'}}>{(tx._effDate||tx.date||'').slice(0,10)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{marginTop:16,textAlign:'right'}}>
-              <button className="btn btn-primary" onClick={() => setAutoAbbinaResults(null)}>OK</button>
-            </div>
-          </div>
-        </div>
+        <AutoAbbinaModal
+          pairs={autoAbbinaResults.pairs}
+          updatedImports={autoAbbinaResults.updatedImports}
+          customCats={customCats}
+          onConfirm={handleAutoAbbinaConfirm}
+          onClose={() => setAutoAbbinaResults(null)}
+        />
       )}
     </div>
   )
