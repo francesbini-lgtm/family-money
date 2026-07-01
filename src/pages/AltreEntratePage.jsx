@@ -500,6 +500,7 @@ export default function AltreEntratePage() {
       const merch = (t.merchant||'').toUpperCase()
       if (t.cat1 === 'Satispay' || cat2low === 'satispay') return false
       if (desc.includes('SATISPAY') || merch.includes('SATISPAY')) return false
+      if (t._forcedBalance) return false
       return t.cat1 === 'Entrate' || t.cat2 === 'Prestiti' || t.cat2 === 'Altro'
     })
   }, [transactions, nicknames])
@@ -586,7 +587,7 @@ export default function AltreEntratePage() {
                 const compLink = compLinks[e.txId]
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(e.date||'').slice(5).replace('-','/')}</td>
+                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(d=>(d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(0,4)}`:d))(e.date||'')}</td>
                     <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
                       <div style={{fontSize:13,fontWeight:500}}>{e.descAI||e.desc||e.description?.slice(0,40)}</div>
                       <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:2}}>
