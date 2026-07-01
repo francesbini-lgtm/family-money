@@ -266,6 +266,7 @@ function BulkEditModal({ txIds, onClose }) {
   const allCats           = getMergedCats(customCats)
   const allCatNames       = getMergedCatNames(customCats)
   const setCustomCats     = useStore(s => s.setCustomCats)
+  const isKingProtected   = useStore(s => s.isKingProtected)
 
   const txList = allTxs.filter(t => txIds.has(t.txId))
   const n = txList.length
@@ -334,7 +335,9 @@ function BulkEditModal({ txIds, onClose }) {
       })
       allTxs.forEach(t => {
         if (txIds.has(t.txId) || t.excluded) return
-        if (allConditionsMatch(conditions, t)) updateTransaction(t.txId, patch)
+        if (!allConditionsMatch(conditions, t)) return
+        if (isKingProtected(t.description, t.amount)) return
+        updateTransaction(t.txId, patch)
       })
     }
     setApplied(true)
@@ -511,8 +514,9 @@ function BulkEditModal({ txIds, onClose }) {
 }
 
 function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
-  const updateTransaction = useStore(s=>s.updateTransaction)
-  const addAiRule         = useStore(s=>s.addAiRule)
+  const updateTransaction  = useStore(s=>s.updateTransaction)
+  const addAiRule          = useStore(s=>s.addAiRule)
+  const isKingProtected    = useStore(s=>s.isKingProtected)
   const allTxs        = useStore(s=>s.transactions)
   const customCats    = useStore(s=>s.customCats)
   const setCustomCats = useStore(s=>s.setCustomCats)
@@ -597,7 +601,9 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
       allTxs.forEach(t => {
         if (t.txId === txId || t.excluded) return
         if (scope === 'future' && (t._effDate||(t._effDate||t.date||'')) < txDate) return
-        if (allConditionsMatch(conditions, t)) updateTransaction(t.txId, patch)
+        if (!allConditionsMatch(conditions, t)) return
+        if (isKingProtected(t.description, t.amount)) return
+        updateTransaction(t.txId, patch)
       })
     }
     setApplied(true)

@@ -536,8 +536,11 @@ function ZustandRulesSection() {
     } finally { setAnalyzing(false) }
   }
 
-  // Grid columns: # | AI Desc | Conditions | Category | Actions | Overlap
-  const COL = '48px 120px 1fr 190px 72px 130px'
+  // King confirmation state
+  const [confirmKingId, setConfirmKingId] = useState(null)
+
+  // Grid columns: # | 👑 | AI Desc | Conditions | Category | Actions | Overlap
+  const COL = '48px 36px 120px 1fr 190px 72px 130px'
 
   const hasAiOverlaps = Object.keys(overlapAI).length > 0
 
@@ -587,6 +590,7 @@ function ZustandRulesSection() {
             background:'var(--surface2)',borderBottom:'1px solid var(--border)',
             fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.05em'}}>
             <div>#</div>
+            <div style={{textAlign:'center'}} title="Regola King — vince su tutte le altre">👑</div>
             <div>AI Desc</div>
             <div>Condizioni</div>
             <div>Categoria</div>
@@ -597,10 +601,12 @@ function ZustandRulesSection() {
           {aiRules.map((r,i) => {
             const ai = overlapAI[r.id]
             const hasOverlap = !!ai
-            const rowBg = r.enabled===false ? 'var(--surface2)'
+            const rowBg = r.isKing ? 'rgba(200,160,0,.06)'
+              : r.enabled===false ? 'var(--surface2)'
               : hasOverlap ? 'rgba(255,160,50,.07)'
               : 'var(--surface)'
-            const rowBorder = hasOverlap ? '1px solid rgba(255,160,50,.25)' : undefined
+            const rowBorder = r.isKing ? '1px solid rgba(200,160,0,.3)'
+              : hasOverlap ? '1px solid rgba(255,160,50,.25)' : undefined
 
             return (
               <div key={r.id}>
@@ -615,8 +621,20 @@ function ZustandRulesSection() {
                   transition:'background .3s',
                 }}>
                   {/* Code */}
-                  <div style={{fontSize:11,fontWeight:700,color: hasOverlap?'#b87000':'var(--text3)',fontFamily:'var(--font-mono)'}}>
+                  <div style={{fontSize:11,fontWeight:700,color:r.isKing?'#b8940a':hasOverlap?'#b87000':'var(--text3)',fontFamily:'var(--font-mono)'}}>
                     {ruleCode(i)}
+                  </div>
+
+                  {/* King toggle */}
+                  <div style={{textAlign:'center'}}>
+                    <button
+                      onClick={() => r.isKing ? updateAiRule(r.id,{isKing:false}) : setConfirmKingId(r.id)}
+                      title={r.isKing ? 'Regola King attiva — clicca per rimuovere' : 'Imposta come Regola King'}
+                      style={{background:'none',border:'none',cursor:'pointer',fontSize:15,padding:0,lineHeight:1,
+                        opacity:r.isKing?1:0.18,filter:r.isKing?'drop-shadow(0 0 3px gold)':'grayscale(1)',
+                        transition:'all .15s'}}>
+                      👑
+                    </button>
                   </div>
 
                   {/* AI Desc */}
@@ -741,6 +759,45 @@ function ZustandRulesSection() {
           })}
         </div>
       )}
+      {/* ── King confirmation dialog ── */}
+      {confirmKingId && (() => {
+        const kr = aiRules.find(r => r.id === confirmKingId)
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.5)',
+            display:'flex',alignItems:'center',justifyContent:'center'}}
+            onClick={e=>{if(e.target===e.currentTarget)setConfirmKingId(null)}}>
+            <div style={{background:'var(--surface)',borderRadius:16,padding:'28px 32px',
+              maxWidth:420,width:'90%',boxShadow:'0 12px 48px rgba(0,0,0,.22)',textAlign:'center'}}>
+              <div style={{fontSize:36,marginBottom:10}}>👑</div>
+              <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>Imposta Regola King</div>
+              <div style={{fontSize:13,color:'var(--text2)',marginBottom:6,lineHeight:1.55}}>
+                <strong style={{color:'var(--text)'}}>{kr?.name || kr?.descAI || confirmKingId}</strong>
+              </div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:20,lineHeight:1.6,
+                padding:'10px 14px',borderRadius:8,background:'rgba(200,160,0,.07)',
+                border:'1px solid rgba(200,160,0,.2)'}}>
+                Questa regola vincerà su tutte le altre in tutta l'app.<br/>
+                Le nuove regole non potranno sovrascrivere le transazioni già coperte da questa.<br/><br/>
+                <strong>Vuoi applicarla subito a tutte le transazioni?</strong>
+              </div>
+              <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+                <button className="btn btn-primary" style={{fontSize:13,background:'#b8940a',borderColor:'#b8940a'}}
+                  onClick={()=>{ updateAiRule(confirmKingId,{isKing:true}); runSingleRule(confirmKingId); setConfirmKingId(null) }}>
+                  👑 Sì, imposta e applica ora
+                </button>
+                <button className="btn btn-ghost" style={{fontSize:13}}
+                  onClick={()=>{ updateAiRule(confirmKingId,{isKing:true}); setConfirmKingId(null) }}>
+                  Solo imposta (no run)
+                </button>
+                <button className="btn btn-ghost" style={{fontSize:13,color:'var(--text3)'}}
+                  onClick={()=>setConfirmKingId(null)}>
+                  Annulla
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

@@ -898,7 +898,10 @@ export const useStore = create((set, get) => ({
   },
   applyAiRules: (description, amount, date) => {
     // Returns [{cat1, cat2, pct, action}] if a rule matches, null otherwise
-    const rules = get().aiRules.filter(r => r.enabled !== false)
+    // King rules always evaluated first — they win over all other rules
+    const rules = get().aiRules
+      .filter(r => r.enabled !== false)
+      .sort((a, b) => (b.isKing ? 1 : 0) - (a.isKing ? 1 : 0))
     const desc  = (description || '').toLowerCase()
     const amt   = Math.abs(amount || 0)
 
@@ -965,6 +968,42 @@ export const useStore = create((set, get) => ({
       }
     }
     return null
+  },
+
+  // Returns true if a KING rule matches this transaction — used to block non-king overwrites
+  isKingProtected: (description, amount) => {
+    const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false)
+    if (!kingRules.length) return false
+    const desc = (description || '').toLowerCase()
+    const amt  = Math.abs(amount || 0)
+    return kingRules.some(rule => {
+      if (!rule.conditions?.length) return false
+      return rule.conditions.every(cond => {
+        const val = (cond.value || '').toLowerCase()
+        switch (cond.field) {
+          case 'anywhere': case 'description': case 'merchant':
+            switch (cond.op) {
+              case 'contains': case 'contiene': return desc.includes(val)
+              case 'not_contains':              return !desc.includes(val)
+              case 'starts_with':               return desc.startsWith(val)
+              case 'ends_with':                 return desc.endsWith(val)
+              case 'equals': case 'è':          return desc === val
+              default: return false
+            }
+          case 'amount': case 'importo':
+            switch (cond.op) {
+              case 'gt':  case '>':  return amt > parseFloat(cond.value||0)
+              case 'gte': case '>=': return amt >= parseFloat(cond.value||0)
+              case 'lt':  case '<':  return amt < parseFloat(cond.value||0)
+              case 'lte': case '<=': return amt <= parseFloat(cond.value||0)
+              case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value||0)) < 0.01
+              case 'between': return amt >= parseFloat(cond.value||0) && amt <= parseFloat(cond.value2||0)
+              default: return false
+            }
+          default: return false
+        }
+      })
+    })
   },
 
   // ── Bulk apply all rules to entire DB ────────────────
