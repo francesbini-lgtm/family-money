@@ -2254,8 +2254,6 @@ function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideS
       if(filters.dateFrom===thisYM+'-01') store.clearFilters()
       else { store.setFilter('dateFrom',thisYM+'-01'); store.setFilter('dateTo',thisYM+'-31') }
     }},
-    {id:'hidecomm',  label:'Nascondi commissioni', active:hideComm,  action:()=>setHideComm(v=>!v)},
-    {id:'hidesmall', label:'Nascondi <1€',          active:hideSmall, action:()=>setHideSmall(v=>!v)},
   ]
 
   const selTxs = selected?.size > 0
@@ -2267,6 +2265,16 @@ function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideS
     const str = abs.toLocaleString('it-IT', {minimumFractionDigits:2,maximumFractionDigits:2})
     return v >= 0 ? `+€ ${str}` : `−€ ${str}`
   }
+
+  const hideToggle = (label, active, action) => (
+    <button onClick={action} style={{
+      padding:'3px 9px',borderRadius:10,cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,
+      border:`1px solid ${active?'var(--accent)':'var(--border)'}`,
+      background:active?'var(--accent)':'transparent',
+      color:active?'#fff':'var(--text3)',
+      fontWeight:active?700:400,transition:'all .12s',
+    }}>{label}</button>
+  )
 
   return (
     <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
@@ -2287,8 +2295,19 @@ function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideS
           </span>
         </button>
       ))}
+
+      {/* ── Nascondi group ── */}
+      <div style={{marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:5,
+        padding:'3px 8px 3px 10px',borderRadius:12,
+        border:'1px solid var(--border)',background:'var(--surface)'}}>
+        <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',letterSpacing:'.04em',
+          textTransform:'uppercase',marginRight:2}}>Nascondi</span>
+        {hideToggle('commissioni', hideComm,  ()=>setHideComm(v=>!v))}
+        {hideToggle('<1€',         hideSmall, ()=>setHideSmall(v=>!v))}
+      </div>
+
       {selTxs.length > 0 && (
-        <div style={{marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:8,
+        <div style={{display:'inline-flex',alignItems:'center',gap:8,
           padding:'5px 14px',borderRadius:20,
           border:'1px solid var(--accent)',background:'var(--accent-l)',
           fontSize:13,color:'var(--accent)',fontWeight:700}}>
