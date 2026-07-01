@@ -2232,7 +2232,7 @@ function AddManualTxModal({ onClose }) {
 }
 
 // ── Quick filters ─────────────────────────────────────────
-function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideSmall, selected }) {
+function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideSmall, filterNoCat2, setFilterNoCat2, selected }) {
   const store   = useStore()
   const filters = store.filters
   const today   = new Date()
@@ -3118,7 +3118,7 @@ export default function TransactionsPage() {
 
       <div style={{position:'sticky',top:0,zIndex:10,background:'var(--bg)',paddingBottom:8,marginBottom:0}}>
         <KPIBar txs={filtered}/>
-        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm} hideSmall={hideSmall} setHideSmall={setHideSmall} selected={selected}/>
+        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm} hideSmall={hideSmall} setHideSmall={setHideSmall} filterNoCat2={filterNoCat2} setFilterNoCat2={setFilterNoCat2} selected={selected}/>
         <FilterBar/>
       </div>
 
