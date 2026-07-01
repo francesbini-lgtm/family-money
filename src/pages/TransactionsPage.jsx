@@ -2391,12 +2391,15 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           style={{border:'none',background:'none',cursor:'pointer',padding:'0 3px 0 0',fontSize:11,lineHeight:1,
             opacity:tx._nonRecurring?1:0.2,color:tx._nonRecurring?'#6366f1':'var(--text3)',
             verticalAlign:'middle'}}>⚡</button>
-        <span style={{fontSize:10,fontFamily:'var(--font-mono)',padding:'2px 5px',borderRadius:4,
-          background: tx._flagged ? 'rgba(220,50,50,0.12)' : 'var(--surface2)',
-          border: tx._flagged ? '1.5px solid rgba(220,50,50,0.5)' : '1px solid var(--border)',
-          color: tx._flagged ? 'var(--red)' : 'var(--text3)',
-          fontWeight: tx._flagged ? 700 : 400,
-          ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</span>
+        <button
+          onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_flagged:!tx._flagged})}}
+          title={tx._flagged?'To review — clicca per rimuovere flag':'Segna come to review'}
+          style={{fontSize:10,fontFamily:'var(--font-mono)',padding:'2px 5px',borderRadius:4,cursor:'pointer',
+            background: tx._flagged ? 'rgba(220,50,50,0.12)' : 'var(--surface2)',
+            border: tx._flagged ? '1.5px solid rgba(220,50,50,0.5)' : '1px solid var(--border)',
+            color: tx._flagged ? 'var(--red)' : 'var(--text3)',
+            fontWeight: tx._flagged ? 700 : 400,
+            ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</button>
       </td>
 
       {cols.map(id => {
