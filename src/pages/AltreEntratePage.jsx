@@ -490,7 +490,7 @@ export default function AltreEntratePage() {
   // Detect non-salary income from bank transactions, excluding Satispay
   const autoEntries = useMemo(() => {
     return transactions.filter(t => {
-      if (t.excluded || t.amount <= 0) return false
+      if (t.amount <= 0) return false
       const cat2low = (t.cat2||'').toLowerCase()
       // Exclude salary / personal entries (Fra, Sofi, etc.) by nickname config AND explicit list
       if (t.cat1 === 'Entrate' && nicknames.some(n => t.cat2 === n)) return false
@@ -587,9 +587,12 @@ export default function AltreEntratePage() {
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(e.date||'').slice(5).replace('-','/')}</td>
-                    <td style={{padding:'9px 14px'}}>
+                    <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
                       <div style={{fontSize:13,fontWeight:500}}>{e.descAI||e.desc||e.description?.slice(0,40)}</div>
-                      {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:2}}>
+                        {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
+                        {e.excluded&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4}}>Esclusa</span>}
+                      </div>
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       {e.cat2 ? (
