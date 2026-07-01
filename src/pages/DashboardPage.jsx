@@ -1,4 +1,5 @@
 import { useStore } from '../store/useStore'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import { useFinancials } from '../hooks/useFinancials'
 import { IncomeExpenseChart, SavingsChart, CategoryDonut } from '../components/Charts'
 import { TrendingUp, TrendingDown, PiggyBank, Percent, ArrowUpRight, ArrowDownRight } from 'lucide-react'
@@ -288,6 +289,7 @@ function TxModal({ tx, onClose }) {
               {saved ? '✓ Salvato' : 'Salva'}
             </button>
           </div>
+          <VehicleQuickPicker txId={tx.txId} cat1={editCat1} />
         </div>
       </div>
     </div>

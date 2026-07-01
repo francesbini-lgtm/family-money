@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
@@ -178,6 +179,7 @@ function TxDetailModal({ tx, onClose, updateTransaction, customCats }) {
               {saved ? '✓ Salvato' : 'Salva'}
             </button>
           </div>
+          <VehicleQuickPicker txId={tx.txId} cat1={cat1} />
         </div>
       </div>
     </div>

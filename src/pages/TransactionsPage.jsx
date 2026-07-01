@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { CATS, CAT_NAMES, getMergedCats, getMergedCatNames } from '../data/categories'
 import { Upload, Search, X, TrendingUp, TrendingDown, Banknote, Tag, ChevronDown, Filter, Plus } from 'lucide-react'
 import ImportModal from '../components/ImportModal'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
@@ -528,6 +529,13 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
             </div>
           )}
         </div>
+
+        {/* ── Vehicle picker (when Veicoli selected) ── */}
+        {sel1 === 'Veicoli' && (
+          <div style={{padding:'4px 12px 8px'}}>
+            <VehicleQuickPicker txId={txId} cat1={sel1} />
+          </div>
+        )}
 
         {/* ── Footer ── */}
         <div className="cat-dropdown-footer" style={{borderTop:'1px solid var(--border)'}}>

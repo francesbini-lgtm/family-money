@@ -11,6 +11,7 @@ import {
   generateSmartRule,
   RuleApplyPopup,
 } from '../pages/TransactionsPage'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 
 // ── localStorage helpers ──────────────────────────────────
 const SEEN_KEY = 'fm-disc-seen-v2'
@@ -984,6 +985,11 @@ export default function MobileDiscovery() {
                 </button>
               )}
             </div>
+
+            {/* VEICOLO (solo se cat1 = Veicoli) */}
+            {current.cat1 === 'Veicoli' && activeSection === null && (
+              <VehicleQuickPicker txId={current.txId} cat1={current.cat1} />
+            )}
 
             {/* LOCATION */}
             <div>

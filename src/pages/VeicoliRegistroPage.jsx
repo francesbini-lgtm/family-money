@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import { uploadExpenseFiles, deleteExpenseFile } from '../services/storage'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -1472,6 +1473,7 @@ function TxDetailModal({ tx, onClose }) {
               {saved ? '✓ Salvato' : 'Salva'}
             </button>
           </div>
+          <VehicleQuickPicker txId={tx.txId} cat1={editCat1} />
         </div>
       </div>
     </div>

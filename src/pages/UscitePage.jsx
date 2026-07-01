@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, LabelList,
@@ -180,6 +181,7 @@ function TxDetailModal({ tx, onClose }) {
             <div style={{flex:1,minWidth:140}}>
               <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Categoria</div>
               <select value={editCat1} onChange={e=>{setEditCat1(e.target.value);setEditCat2('')}} className="uscite-modal-select">
+
                 <option value="">— Nessuna —</option>
                 {Object.keys(CATS).filter(n=>n!=='Non Categorizzato').map(n=>(
                   <option key={n} value={n}>{n}</option>
@@ -199,6 +201,7 @@ function TxDetailModal({ tx, onClose }) {
               {saved ? '✓ Salvato' : 'Salva'}
             </button>
           </div>
+          <VehicleQuickPicker txId={tx.txId} cat1={editCat1} />
         </div>
       </div>
     </div>
