@@ -2243,7 +2243,7 @@ function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideS
     all:    allTxs.filter(t=>!t.excluded).length,
     income: allTxs.filter(t=>!t.excluded&&t.amount>0).length,
     expense:allTxs.filter(t=>!t.excluded&&t.amount<0).length,
-    uncat:  allTxs.filter(t=>!t.excluded&&(!t.cat1||t.cat1==='Non Categorizzato')).length,
+    uncat:  allTxs.filter(t=>!t.excluded&&t.cat1&&t.cat1!=='Non Categorizzato'&&!t.cat2).length,
     review:  allTxs.filter(t=>(t.conf||0)<70).length,
     flagged: allTxs.filter(t=>t._flagged).length,
     thisM:   allTxs.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).length,
@@ -2253,7 +2253,7 @@ function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideS
     {id:'all',     label:'Tutte',        count:counts.all,    active:!filters.type&&!filters.cat1&&!filters.dateFrom&&!filters.conf&&!filters.flagged, action:()=>store.clearFilters()},
     {id:'income',  label:'Entrate',      count:counts.income, active:filters.type==='Income', action:()=>store.setFilter('type',filters.type==='Income'?'':'Income')},
     {id:'expense', label:'Uscite',       count:counts.expense,active:filters.type==='Expense',action:()=>store.setFilter('type',filters.type==='Expense'?'':'Expense')},
-    {id:'uncat',   label:'Non cat.',     count:counts.uncat,  active:filters.cat1==='Non Categorizzato', warn:counts.uncat>0, action:()=>store.setFilter('cat1',filters.cat1==='Non Categorizzato'?'':'Non Categorizzato')},
+    {id:'uncat',   label:'Non cat L2',   count:counts.uncat,  active:filterNoCat2, warn:counts.uncat>0, action:()=>setFilterNoCat2(v=>!v)},
     {id:'review',  label:'Da rivedere',  count:counts.review, active:filters.conf==='low',    warn:counts.review>0,action:()=>store.setFilter('conf',filters.conf==='low'?'':'low')},
     {id:'flagged', label:'🚩 To review',  count:counts.flagged,active:!!filters.flagged,        warn:counts.flagged>0,action:()=>store.setFilter('flagged',filters.flagged?'':'1')},
     {id:'thisM',   label:'Questo mese',  count:counts.thisM,  active:filters.dateFrom===thisYM+'-01', action:()=>{
@@ -2844,7 +2844,8 @@ export default function TransactionsPage() {
   const [colFilters,     setColFilters]     = useState({})
   const [filterPopup,    setFilterPopup]    = useState(null)
   const [hideComm,       setHideComm]       = useState(true)
-  const [hideSmall,      setHideSmall]      = useState(false)
+  const [hideSmall,      setHideSmall]      = useState(true)
+  const [filterNoCat2,   setFilterNoCat2]   = useState(false)
 
   // Close cat dropdown on click outside
   useEffect(() => {
@@ -2896,6 +2897,7 @@ export default function TransactionsPage() {
       if ((t._compensatedAmt || 0) > 0 && Math.abs(t.amount + t._compensatedAmt) < 0.01) return false
       return true
     })
+    if (filterNoCat2) txs = txs.filter(t => t.cat1 && t.cat1 !== 'Non Categorizzato' && !t.cat2)
     // Column filters (Excel-style)
     Object.entries(colFilters).forEach(([colId, vals]) => {
       if (!vals || vals.length === 0) return
@@ -2917,7 +2919,7 @@ export default function TransactionsPage() {
       return sortDir==='asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return txs
-  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm, hideSmall])
+  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm, hideSmall, filterNoCat2])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d==='asc'?'desc':'asc')
