@@ -671,15 +671,18 @@ function UnmatchedRow({ imp, paypalTxs, onManualMatch }) {
 
 // ── Auto Abbina results modal ─────────────────────────────
 function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose }) {
-  const allCats    = getMergedCats(customCats)
-  const catNames   = Object.keys(allCats).filter(n => n !== 'Non Categorizzato')
+  const allCats  = getMergedCats(customCats)
+  const catNames = Object.keys(allCats).filter(n => n !== 'Non Categorizzato')
   const [rows, setRows] = useState(() =>
     pairs.map(({ imp, tx }) => ({
       imp, tx,
-      cat1: imp.cat1_suggestion || tx.cat1 || '',
-      cat2: imp.cat2_suggestion || tx.cat2 || '',
+      cat1:    imp.cat1_suggestion || tx.cat1 || '',
+      cat2:    imp.cat2_suggestion || tx.cat2 || '',
+      flagged: false,
     }))
   )
+
+  const upd = (i, patch) => setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r))
 
   const sel = (style) => ({
     padding:'3px 6px', borderRadius:6, border:'1px solid var(--border)',
@@ -689,7 +692,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
   return (
     <div className="pp-modal-overlay" onClick={onClose}>
       <div className="pp-approval-modal"
-        style={{maxWidth:860, width:'96%', maxHeight:'80vh', display:'flex', flexDirection:'column'}}
+        style={{maxWidth:920, width:'96%', maxHeight:'82vh', display:'flex', flexDirection:'column'}}
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
@@ -712,41 +715,63 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                 <th style={{padding:'6px 8px'}}>Banca Merchant</th>
                 <th style={{padding:'6px 8px'}}>Data Banca</th>
                 <th style={{padding:'6px 8px'}}>L1</th>
-                <th style={{padding:'6px 8px'}}>L2</th>
+                <th style={{padding:'6px 8px'}}>L2 / Veicolo</th>
+                <th style={{padding:'6px 8px',textAlign:'center'}}>🚩</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ imp, tx, cat1, cat2 }, i) => {
-                const subs = allCats[cat1]?.sub || []
+              {rows.map(({ imp, tx, cat1, cat2, flagged }, i) => {
+                const subs      = allCats[cat1]?.sub || []
+                const isVeicoli = cat1 === 'Veicoli'
+                const rowBg     = flagged
+                  ? 'rgba(229,62,62,.06)'
+                  : i%2===0 ? 'transparent' : 'var(--surface)'
                 return (
-                  <tr key={i} style={{borderBottom:'1px solid var(--border)',
-                    background: i%2===0 ? 'transparent' : 'var(--surface)'}}>
-                    <td style={{padding:'6px 8px',fontWeight:600,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  <tr key={i} style={{borderBottom:'1px solid var(--border)', background:rowBg}}>
+                    <td style={{padding:'6px 8px',fontWeight:600,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                       {imp.merchant || '—'}
                     </td>
                     <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>{imp.date?.slice(0,10)}</td>
                     <td style={{padding:'6px 8px',textAlign:'right',color:'var(--red)',fontWeight:700,whiteSpace:'nowrap'}}>
                       −€{Math.abs(imp.amount).toFixed(2)}
                     </td>
-                    <td style={{padding:'6px 8px',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      {tx.merchant || tx.descAI || tx.description?.slice(0,30) || '—'}
+                    <td style={{padding:'6px 8px',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {tx.merchant || tx.descAI || tx.description?.slice(0,28) || '—'}
                     </td>
                     <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>
                       {(tx._effDate||tx.date||'').slice(0,10)}
                     </td>
+                    {/* L1 */}
                     <td style={{padding:'6px 4px'}}>
-                      <select value={cat1} style={sel({maxWidth:120})}
-                        onChange={e => setRows(rs => rs.map((r,j)=>j===i?{...r,cat1:e.target.value,cat2:''}:r))}>
+                      <select value={cat1} style={sel({maxWidth:110})}
+                        onChange={e => upd(i, {cat1:e.target.value, cat2:''})}>
                         <option value="">— nessuna —</option>
                         {catNames.map(n => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </td>
+                    {/* L2 / Veicolo */}
                     <td style={{padding:'6px 4px'}}>
-                      <select value={cat2} style={sel({maxWidth:130})}
-                        onChange={e => setRows(rs => rs.map((r,j)=>j===i?{...r,cat2:e.target.value}:r))}>
-                        <option value="">— nessuna —</option>
-                        {subs.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      {isVeicoli
+                        ? <VehicleQuickPicker txId={tx.txId} cat1={cat1} />
+                        : <select value={cat2} style={sel({maxWidth:120})}
+                            onChange={e => upd(i, {cat2:e.target.value})}>
+                            <option value="">— nessuna —</option>
+                            {subs.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                      }
+                    </td>
+                    {/* Flag */}
+                    <td style={{padding:'6px 4px',textAlign:'center'}}>
+                      <button
+                        onClick={() => upd(i, {flagged:!flagged})}
+                        title={flagged ? 'Rimuovi flag' : 'Segna da rivedere'}
+                        style={{
+                          background:'none', border:'none', cursor:'pointer',
+                          fontSize:15, padding:2, lineHeight:1,
+                          opacity: flagged ? 1 : 0.25,
+                          filter: flagged ? 'none' : 'grayscale(1)',
+                          transition:'all .15s',
+                        }}>🚩</button>
                     </td>
                   </tr>
                 )
@@ -756,7 +781,12 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
         </div>
 
         {/* Footer */}
-        <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginTop:14,flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:12}}>
+        <div style={{display:'flex',gap:10,justifyContent:'flex-end',alignItems:'center',marginTop:14,flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:12}}>
+          {rows.filter(r=>r.flagged).length > 0 && (
+            <span style={{fontSize:11,color:'var(--red)',marginRight:'auto'}}>
+              🚩 {rows.filter(r=>r.flagged).length} da rivedere
+            </span>
+          )}
           <button className="btn btn-ghost" onClick={onClose}>Annulla</button>
           <button className="btn btn-primary" style={{background:'#38a169',borderColor:'#38a169'}}
             onClick={() => onConfirm(rows, updatedImports)}>
@@ -1003,7 +1033,7 @@ export default function PaypalPage() {
   }
 
   function handleAutoAbbinaConfirm(rows, updatedImports) {
-    rows.forEach(({ imp, tx, cat1, cat2 }) => {
+    rows.forEach(({ imp, tx, cat1, cat2, flagged }) => {
       updateTransaction(tx.txId, {
         merchant: imp.merchant,
         descAI:   imp.merchant,
@@ -1011,6 +1041,7 @@ export default function PaypalPage() {
         cat2:     cat2 || imp.cat2_suggestion || '',
         _paypalOverride: true,
         conf: 100,
+        ...(flagged ? { _flagged: true } : {}),
       })
     })
     setAppPref('paypalImports', updatedImports)
