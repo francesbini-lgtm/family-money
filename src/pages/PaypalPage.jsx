@@ -687,6 +687,7 @@ export default function PaypalPage() {
   const [hideComm, setHideComm]           = useState(true)
   const [pendingModal, setPendingModal]   = useState(null)  // import with pending_approval
   const [abbinaTx, setAbbinaTx]           = useState(null)  // bank tx to link to an import
+  const [autoAbbinaResults, setAutoAbbinaResults] = useState(null)  // [{imp, tx}] after auto-abbina
 
   const paypalImports = useMemo(
     () => appPrefs?.paypalImports || [],
@@ -878,6 +879,40 @@ export default function PaypalPage() {
     showToast(next ? 'Rifiutato — prossimo abbinamento' : 'Abbinamento rifiutato', 'info')
   }
 
+  function handleAutoAbbina() {
+    const usedTxIds = new Set(
+      paypalImports.filter(i => i.status === 'matched').map(i => i.matchedTxId).filter(Boolean)
+    )
+    const matched = []
+    const updatedImports = paypalImports.map(imp => {
+      if (imp.status === 'matched') return imp
+      const impCents = Math.round(Math.abs(imp.amount) * 100)
+      const bankTx = transactions.find(t =>
+        isPayPal(t) &&
+        !t._paypalOverride &&
+        !usedTxIds.has(t.txId) &&
+        Math.round(Math.abs(t.amount) * 100) === impCents
+      )
+      if (!bankTx) return imp
+      usedTxIds.add(bankTx.txId)
+      matched.push({ imp, tx: bankTx })
+      return { ...imp, status: 'matched', matchedTxId: bankTx.txId, pendingTxId: null }
+    })
+    if (!matched.length) { showToast('Nessun abbinamento esatto trovato', 'info'); return }
+    matched.forEach(({ imp, tx }) => {
+      updateTransaction(tx.txId, {
+        merchant: imp.merchant,
+        descAI:   imp.merchant,
+        cat1:     imp.cat1_suggestion,
+        cat2:     imp.cat2_suggestion,
+        _paypalOverride: true,
+        conf: 100,
+      })
+    })
+    setAppPref('paypalImports', updatedImports)
+    setAutoAbbinaResults(matched)
+  }
+
   function handleLinkTxToImport(txId, importId) {
     const imp = paypalImports.find(i => i.id === importId)
     if (!imp) return
@@ -921,6 +956,10 @@ export default function PaypalPage() {
               ⚠️ Non abbinate ({unmatchedCnt})
             </button>
           )}
+          <button className="pp-import-btn" style={{background:'var(--accent)',color:'#fff',border:'none'}}
+            onClick={handleAutoAbbina}>
+            ⚡ Auto Abbina
+          </button>
           <button className="pp-import-btn" onClick={() => setShowModal(true)}>
             📤 Importa screenshot
           </button>
@@ -1152,6 +1191,46 @@ export default function PaypalPage() {
           onLink={handleLinkTxToImport}
           onClose={() => setAbbinaTx(null)}
         />
+      )}
+
+      {autoAbbinaResults && (
+        <div className="pp-modal-overlay" onClick={() => setAutoAbbinaResults(null)}>
+          <div className="pp-approval-modal" style={{maxWidth:680, width:'90%'}}
+            onClick={e => e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div style={{fontSize:17,fontWeight:700}}>⚡ Auto Abbina — {autoAbbinaResults.length} abbinament{autoAbbinaResults.length===1?'o':'i'}</div>
+              <button onClick={() => setAutoAbbinaResults(null)}
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:20,lineHeight:1,color:'var(--text3)'}}>×</button>
+            </div>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead>
+                <tr style={{borderBottom:'2px solid var(--border)',color:'var(--text3)',textAlign:'left'}}>
+                  <th style={{padding:'6px 8px'}}>PayPal Merchant</th>
+                  <th style={{padding:'6px 8px'}}>Data PP</th>
+                  <th style={{padding:'6px 8px',textAlign:'right'}}>Importo</th>
+                  <th style={{padding:'6px 8px'}}>Banca Merchant</th>
+                  <th style={{padding:'6px 8px'}}>Data Banca</th>
+                </tr>
+              </thead>
+              <tbody>
+                {autoAbbinaResults.map(({imp, tx}, i) => (
+                  <tr key={i} style={{borderBottom:'1px solid var(--border)',background:i%2===0?'transparent':'var(--surface)'}}>
+                    <td style={{padding:'7px 8px',fontWeight:600}}>{imp.merchant || '—'}</td>
+                    <td style={{padding:'7px 8px',color:'var(--text3)'}}>{imp.date?.slice(0,10)}</td>
+                    <td style={{padding:'7px 8px',textAlign:'right',color:'var(--red)',fontWeight:700}}>
+                      −€{Math.abs(imp.amount).toFixed(2)}
+                    </td>
+                    <td style={{padding:'7px 8px'}}>{tx.merchant || tx.descAI || tx.description?.slice(0,30) || '—'}</td>
+                    <td style={{padding:'7px 8px',color:'var(--text3)'}}>{(tx._effDate||tx.date||'').slice(0,10)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{marginTop:16,textAlign:'right'}}>
+              <button className="btn btn-primary" onClick={() => setAutoAbbinaResults(null)}>OK</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
