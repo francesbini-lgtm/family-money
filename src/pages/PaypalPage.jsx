@@ -676,11 +676,15 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
   const [rows, setRows] = useState(() =>
     pairs.map(({ imp, tx }) => ({
       imp, tx,
-      cat1:    imp.cat1_suggestion || tx.cat1 || '',
-      cat2:    imp.cat2_suggestion || tx.cat2 || '',
-      flagged: false,
+      cat1:     imp.cat1_suggestion || tx.cat1 || '',
+      cat2:     imp.cat2_suggestion || tx.cat2 || '',
+      flagged:  false,
+      selected: true,
     }))
   )
+  const selCount = rows.filter(r => r.selected).length
+  const allSel   = selCount === rows.length
+  const toggleAll = () => setRows(rs => rs.map(r => ({ ...r, selected: !allSel })))
   const [vehOpenIdx, setVehOpenIdx] = useState(null)
   const [propagatePrompt, setPropagatePrompt] = useState(null) // {merchant, cat1, cat2, count}
 
@@ -732,6 +736,10 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
             <thead style={{position:'sticky',top:0,background:'var(--surface)',zIndex:1}}>
               <tr style={{borderBottom:'2px solid var(--border)',color:'var(--text3)',textAlign:'left'}}>
+                <th style={{padding:'6px 8px',width:32,textAlign:'center'}}>
+                  <input type="checkbox" checked={allSel} onChange={toggleAll}
+                    style={{cursor:'pointer',accentColor:'var(--accent)'}}/>
+                </th>
                 <th style={{padding:'6px 8px'}}>PayPal Merchant</th>
                 <th style={{padding:'6px 8px'}}>Data PP</th>
                 <th style={{padding:'6px 8px',textAlign:'right'}}>Importo</th>
@@ -751,7 +759,12 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                   : i%2===0 ? 'transparent' : 'var(--surface)'
                 return (
                   <React.Fragment key={i}>
-                  <tr style={{borderBottom:'1px solid var(--border)', background:rowBg}}>
+                  <tr style={{borderBottom:'1px solid var(--border)', background:rowBg, opacity: rows[i].selected ? 1 : 0.45}}>
+                    <td style={{padding:'6px 4px',textAlign:'center',width:32}}>
+                      <input type="checkbox" checked={rows[i].selected}
+                        onChange={() => upd(i, {selected: !rows[i].selected})}
+                        style={{cursor:'pointer',accentColor:'var(--accent)'}}/>
+                    </td>
                     <td style={{padding:'6px 8px',fontWeight:600,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                       {imp.merchant || '—'}
                     </td>
@@ -851,15 +864,23 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
 
         {/* Footer */}
         <div style={{display:'flex',gap:10,justifyContent:'flex-end',alignItems:'center',marginTop:14,flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:12}}>
-          {rows.filter(r=>r.flagged).length > 0 && (
-            <span style={{fontSize:11,color:'var(--red)',marginRight:'auto'}}>
-              🚩 {rows.filter(r=>r.flagged).length} da rivedere
-            </span>
-          )}
+          <span style={{fontSize:11,color:'var(--text3)',marginRight:'auto'}}>
+            {selCount} selezionat{selCount===1?'o':'i'}
+            {rows.length - selCount > 0 && <span style={{color:'var(--text3)'}}> · {rows.length - selCount} esclus{rows.length-selCount===1?'o':'i'}</span>}
+            {rows.filter(r=>r.flagged).length > 0 && <span style={{color:'var(--red)'}}> · 🚩 {rows.filter(r=>r.flagged).length} da rivedere</span>}
+          </span>
           <button className="btn btn-ghost" onClick={onClose}>Annulla</button>
           <button className="btn btn-primary" style={{background:'#38a169',borderColor:'#38a169'}}
-            onClick={() => onConfirm(rows, updatedImports)}>
-            ✅ Approva tutti ({pairs.length})
+            disabled={selCount === 0}
+            onClick={() => {
+              // Revert deselected imports back to their original status
+              const finalImports = updatedImports.map(imp => {
+                const desel = rows.find(r => !r.selected && r.imp.id === imp.id)
+                return desel ? desel.imp : imp
+              })
+              onConfirm(rows.filter(r => r.selected), finalImports)
+            }}>
+            ✅ Approva {selCount === rows.length ? 'tutti' : 'selezionati'} ({selCount})
           </button>
         </div>
       </div>
