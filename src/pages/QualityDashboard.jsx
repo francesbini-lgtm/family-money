@@ -2,26 +2,22 @@ import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 
 /* ─── KPI card ─────────────────────────────────────────────────── */
-function KpiCard({ icon, label, value, sub, warn, color, neutral, onClick }) {
+function KpiCard({ icon, label, value, sub, warn, color, neutral }) {
   const isProb = warn && value > 0
   const numCol = neutral
     ? 'var(--text2)'
     : isProb
-      ? 'var(--red)'
+      ? 'var(--red, #ef4444)'
       : warn
-        ? 'var(--green)'
+        ? 'var(--green, #22c55e)'
         : (color || 'var(--accent)')
 
   return (
-    <div onClick={onClick} style={{
+    <div style={{
       background: 'var(--surface)',
       border: `1px solid ${isProb ? 'rgba(220,50,50,.3)' : 'var(--border)'}`,
       borderRadius: 12, padding: '16px 18px',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'box-shadow .12s',
-    }}
-    onMouseEnter={e => onClick && (e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,.08)')}
-    onMouseLeave={e => onClick && (e.currentTarget.style.boxShadow = '')}>
+    }}>
       <div style={{
         fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em',
         color: 'var(--text3)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5,
@@ -35,8 +31,53 @@ function KpiCard({ icon, label, value, sub, warn, color, neutral, onClick }) {
         <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 5 }}>{sub}</div>
       )}
       {warn && value === 0 && (
-        <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 5 }}>✅ OK</div>
+        <div style={{ fontSize: 11, color: 'var(--green, #22c55e)', marginTop: 5 }}>✅ OK</div>
       )}
+    </div>
+  )
+}
+
+/* ─── Split KPI card (two values side by side) ──────────────────── */
+function SplitKpiCard({ icon, label, leftLabel, leftValue, rightLabel, rightValue, warn }) {
+  const anyProb = warn && (leftValue > 0 || rightValue > 0)
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: `1px solid ${anyProb ? 'rgba(220,50,50,.3)' : 'var(--border)'}`,
+      borderRadius: 12, padding: '16px 18px',
+    }}>
+      <div style={{
+        fontSize: 10, textTransform: 'uppercase', letterSpacing: '.07em',
+        color: 'var(--text3)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5,
+      }}>
+        <span>{icon}</span><span>{label}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 0 }}>
+        <div style={{ flex: 1, borderRight: '1px solid var(--border)', paddingRight: 12 }}>
+          <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+            {leftLabel}
+          </div>
+          <div style={{
+            fontSize: 26, fontWeight: 800,
+            color: leftValue > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
+          }}>
+            {leftValue}
+            {leftValue === 0 && <span style={{ fontSize: 14, marginLeft: 4 }}>✅</span>}
+          </div>
+        </div>
+        <div style={{ flex: 1, paddingLeft: 12 }}>
+          <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+            {rightLabel}
+          </div>
+          <div style={{
+            fontSize: 26, fontWeight: 800,
+            color: rightValue > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
+          }}>
+            {rightValue}
+            {rightValue === 0 && <span style={{ fontSize: 14, marginLeft: 4 }}>✅</span>}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -93,9 +134,7 @@ function RulesBar({ total, king }) {
           <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 6 }}>
             {kingPct.toFixed(0)}% king
           </div>
-          <div style={{
-            height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden',
-          }}>
+          <div style={{ height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{
               height: '100%', borderRadius: 3,
               background: 'var(--gold, #f59e0b)',
@@ -115,40 +154,74 @@ export default function QualityDashboard() {
   const aiRules      = useStore(s => s.aiRules)
   const appPrefs     = useStore(s => s.appPrefs)
 
+  // nicknames used to exclude salary entries from Altre Entrate
+  const nicknames = useMemo(() => {
+    const nicks = []
+    if (appPrefs?.ownerNickname) nicks.push(appPrefs.ownerNickname)
+    ;(appPrefs?.family || []).forEach(m => { if (m.nickname) nicks.push(m.nickname) })
+    return nicks.map(n => n.toLowerCase())
+  }, [appPrefs])
+
   const stats = useMemo(() => {
     const txs = transactions.filter(t => !t.excluded && !t._forcedBalance)
     const total = txs.length
     const totalValue = txs.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    // Non categorizzate (no L1 or L1 = 'Non Categorizzato')
-    const nonCat = txs.filter(t => !t.cat1 || t.cat1 === 'Non Categorizzato')
-
-    // Senza L2 (ha L1 valido ma manca L2)
-    const noL2 = txs.filter(t =>
-      t.cat1 && t.cat1 !== 'Non Categorizzato' && !t.cat2
-    )
+    // Non cat L2 = every tx missing cat2 (includes both no-L1 and has-L1-but-no-L2)
+    const noCat2 = txs.filter(t => !t.cat2)
 
     // Altro > Altro
-    const altroAltro = txs.filter(t =>
-      t.cat1 === 'Altro' && t.cat2 === 'Altro'
-    )
+    const altroAltro = txs.filter(t => t.cat1 === 'Altro' && t.cat2 === 'Altro')
 
-    // Carta di credito (ha campo card)
+    // Carta di credito (has card field)
     const cardTxs = txs.filter(t => t.card && t.card !== 'null' && t.card !== 'undefined')
 
-    // Satispay non abbinate (expenses without matched income)
+    // ── Satispay ──
     const satiMatches = appPrefs?.satiMatches || {}
-    const satiUnmatched = Object.values(satiMatches).filter(m => m.status !== 'matched').length
 
-    // PayPal non abbinate
+    // Addebiti non abbinati: expenses in satiMatches that are not matched
+    const satiAddebitiNonAbb = Object.values(satiMatches).filter(m => m.status !== 'matched').length
+
+    // Accrediti non abbinati: income txs (cat1=Entrate, cat2=SATISPAY) not referenced as matched incomeTxId
+    const matchedIncomeIds = new Set(
+      Object.values(satiMatches)
+        .filter(m => m.status === 'matched' && m.incomeTxId)
+        .map(m => m.incomeTxId)
+    )
+    const satiAccreditiNonAbb = transactions.filter(t =>
+      t.cat1 === 'Entrate' &&
+      (t.cat2 || '').toLowerCase() === 'satispay' &&
+      !matchedIncomeIds.has(t.txId)
+    ).length
+
+    // ── PayPal ──
     const paypalImports = appPrefs?.paypalImports || []
     const ppUnmatched = paypalImports.filter(i => i.status === 'unmatched').length
     const ppPending   = paypalImports.filter(i => i.status === 'pending_approval').length
 
-    // Accuracy: weighted by |amount|, problematic = nonCat ∪ noL2 ∪ altroAltro
+    // ── Altre Entrate non abbinate ──
+    const compLinks = appPrefs?.compLinks || {}
+    const EXCL_L2   = ['satispay', ...nicknames]
+    const altreEntrateNonAbb = transactions.filter(t =>
+      t.amount > 0 &&
+      !t._forcedBalance &&
+      (t.cat1 === 'Entrate' || t.cat2 === 'Prestiti') &&
+      !EXCL_L2.includes((t.cat2 || '').toLowerCase()) &&
+      !compLinks[t.txId]
+    ).length
+
+    // ── Veicoli non abbinate (excl. Carburante + Parcheggio) ──
+    const vehTxVehicles = appPrefs?.vehTxVehicles || {}
+    const VEH_EXCL = ['Carburante', 'Parcheggio']
+    const veicNonAbb = txs.filter(t =>
+      t.cat1 === 'Veicoli' &&
+      !VEH_EXCL.includes(t.cat2) &&
+      !vehTxVehicles[t.txId]
+    ).length
+
+    // ── Accuracy: problematic = noCat2 ∪ altroAltro ──
     const problemSet = new Set([
-      ...nonCat.map(t => t.txId),
-      ...noL2.map(t => t.txId),
+      ...noCat2.map(t => t.txId),
       ...altroAltro.map(t => t.txId),
     ])
     const problemValue = txs
@@ -163,19 +236,21 @@ export default function QualityDashboard() {
 
     return {
       total,
-      nonCat:       nonCat.length,
-      noL2:         noL2.length,
-      altroAltro:   altroAltro.length,
-      cardTxs:      cardTxs.length,
-      satiUnmatched,
+      noCat2:               noCat2.length,
+      altroAltro:           altroAltro.length,
+      cardTxs:              cardTxs.length,
+      satiAddebitiNonAbb,
+      satiAccreditiNonAbb,
       ppUnmatched,
       ppPending,
+      altreEntrateNonAbb,
       accuracy,
-      problematic:  problemSet.size,
-      totalRules:   rules.length,
-      kingRules:    rules.filter(r => r.isKing).length,
+      problematic:          problemSet.size,
+      veicNonAbb,
+      totalRules:           rules.length,
+      kingRules:            rules.filter(r => r.isKing).length,
     }
-  }, [transactions, aiRules, appPrefs])
+  }, [transactions, aiRules, appPrefs, nicknames])
 
   const accColor = stats.accuracy >= 90 ? 'var(--green, #22c55e)'
                  : stats.accuracy >= 70 ? 'var(--gold, #f59e0b)'
@@ -205,18 +280,17 @@ export default function QualityDashboard() {
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Accuracy Score</div>
           <div style={{ fontSize: 13, color: 'var(--text3)', lineHeight: 1.65, maxWidth: 440 }}>
-            Rapporto ponderato sul valore transazione tra transazioni accurate e totali.
-            Sono escluse: non categorizzate, senza L2, e Altro › Altro.
+            Rapporto ponderato sul valore transazione. Problematiche: senza L2 + Altro › Altro.
           </div>
 
           <div style={{ marginTop: 14, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-            <Stat label="Totali" val={stats.total} />
-            <Stat label="Accurate" val={stats.total - stats.problematic} color="var(--green, #22c55e)" />
-            <Stat label="Problematiche" val={stats.problematic} color={stats.problematic > 0 ? 'var(--red, #ef4444)' : undefined} />
+            <Stat label="Totali"       val={stats.total} />
+            <Stat label="Accurate"     val={stats.total - stats.problematic} color="var(--green, #22c55e)" />
+            <Stat label="Problematiche" val={stats.problematic}
+              color={stats.problematic > 0 ? 'var(--red, #ef4444)' : undefined} />
           </div>
         </div>
 
-        {/* Score label */}
         <div style={{
           flexShrink: 0, textAlign: 'center',
           padding: '12px 20px', borderRadius: 10,
@@ -239,21 +313,30 @@ export default function QualityDashboard() {
         <KpiCard icon="🔢" label="Transazioni totali"
           value={stats.total} color="var(--accent)" />
 
-        <KpiCard icon="⚪" label="Non categorizzate"
-          value={stats.nonCat} warn />
-
-        <KpiCard icon="🏷️" label="Senza L2"
-          value={stats.noL2} warn />
+        <KpiCard icon="🏷️" label="Non cat. L2"
+          value={stats.noCat2} warn />
 
         <KpiCard icon="🔄" label="ALTRO › ALTRO"
           value={stats.altroAltro} warn />
 
-        <KpiCard icon="💚" label="Satispay non abbinate"
-          value={stats.satiUnmatched} warn />
+        <SplitKpiCard
+          icon="💚" label="Satispay non abbinate"
+          leftLabel="Addebiti" leftValue={stats.satiAddebitiNonAbb}
+          rightLabel="Accrediti" rightValue={stats.satiAccreditiNonAbb}
+          warn
+        />
 
         <KpiCard icon="💙" label="PayPal non abbinate"
           value={stats.ppUnmatched}
           sub={stats.ppPending > 0 ? `+ ${stats.ppPending} in attesa approvazione` : null}
+          warn />
+
+        <KpiCard icon="💸" label="Altre Entrate non abbinate"
+          value={stats.altreEntrateNonAbb} warn />
+
+        <KpiCard icon="🚗" label="Veicoli senza veicolo"
+          value={stats.veicNonAbb}
+          sub="Esclusi carburante e parcheggi"
           warn />
 
         <KpiCard icon="💳" label="Da carta di credito"

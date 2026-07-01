@@ -2,25 +2,65 @@ import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 
 /* ─── small inline stat ─── */
-function MiniStat({ label, value, warn, neutral, color }) {
+function MiniStat({ label, value, warn, neutral }) {
   const isProb = warn && value > 0
   const col = neutral ? 'var(--text2)'
             : isProb  ? 'var(--red, #ef4444)'
             : warn     ? 'var(--green, #22c55e)'
-            : (color || 'var(--text)')
+            : 'var(--text)'
   return (
     <div style={{
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      padding: '12px 16px',
+      padding: '11px 14px',
       background: 'var(--surface)',
       border: `1px solid ${isProb ? 'rgba(220,50,50,.25)' : 'var(--border)'}`,
       borderRadius: 10,
     }}>
       <span style={{ fontSize: 13, color: 'var(--text2)' }}>{label}</span>
-      <span style={{ fontSize: 20, fontWeight: 800, color: col }}>
+      <span style={{ fontSize: 18, fontWeight: 800, color: col }}>
         {value}
-        {warn && value === 0 && <span style={{ fontSize: 12, marginLeft: 6 }}>✅</span>}
+        {warn && value === 0 && <span style={{ fontSize: 12, marginLeft: 5 }}>✅</span>}
       </span>
+    </div>
+  )
+}
+
+/* ─── Split stat (two values in one row) ─── */
+function SplitStat({ icon, label, leftLabel, leftVal, rightLabel, rightVal }) {
+  const anyProb = leftVal > 0 || rightVal > 0
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: `1px solid ${anyProb ? 'rgba(220,50,50,.25)' : 'var(--border)'}`,
+      borderRadius: 10, padding: '11px 14px',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+        {icon} {label}
+      </div>
+      <div style={{ display: 'flex', gap: 0 }}>
+        <div style={{ flex: 1, borderRight: '1px solid var(--border)', paddingRight: 10 }}>
+          <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
+            {leftLabel}
+          </div>
+          <div style={{
+            fontSize: 20, fontWeight: 800,
+            color: leftVal > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
+          }}>
+            {leftVal}{leftVal === 0 && <span style={{ fontSize: 11, marginLeft: 4 }}>✅</span>}
+          </div>
+        </div>
+        <div style={{ flex: 1, paddingLeft: 10 }}>
+          <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
+            {rightLabel}
+          </div>
+          <div style={{
+            fontSize: 20, fontWeight: 800,
+            color: rightVal > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
+          }}>
+            {rightVal}{rightVal === 0 && <span style={{ fontSize: 11, marginLeft: 4 }}>✅</span>}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -70,46 +110,81 @@ export default function MobileQuality() {
   const aiRules      = useStore(s => s.aiRules)
   const appPrefs     = useStore(s => s.appPrefs)
 
+  const nicknames = useMemo(() => {
+    const nicks = []
+    if (appPrefs?.ownerNickname) nicks.push(appPrefs.ownerNickname)
+    ;(appPrefs?.family || []).forEach(m => { if (m.nickname) nicks.push(m.nickname) })
+    return nicks.map(n => n.toLowerCase())
+  }, [appPrefs])
+
   const stats = useMemo(() => {
     const txs = transactions.filter(t => !t.excluded && !t._forcedBalance)
     const total = txs.length
     const totalValue = txs.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    const nonCat     = txs.filter(t => !t.cat1 || t.cat1 === 'Non Categorizzato')
-    const noL2       = txs.filter(t => t.cat1 && t.cat1 !== 'Non Categorizzato' && !t.cat2)
+    const noCat2     = txs.filter(t => !t.cat2)
     const altroAltro = txs.filter(t => t.cat1 === 'Altro' && t.cat2 === 'Altro')
     const cardTxs    = txs.filter(t => t.card && t.card !== 'null' && t.card !== 'undefined')
 
-    const satiMatches  = appPrefs?.satiMatches || {}
-    const satiUnmatched = Object.values(satiMatches).filter(m => m.status !== 'matched').length
+    // Satispay
+    const satiMatches = appPrefs?.satiMatches || {}
+    const satiAddebitiNonAbb = Object.values(satiMatches).filter(m => m.status !== 'matched').length
+    const matchedIncomeIds = new Set(
+      Object.values(satiMatches)
+        .filter(m => m.status === 'matched' && m.incomeTxId)
+        .map(m => m.incomeTxId)
+    )
+    const satiAccreditiNonAbb = transactions.filter(t =>
+      t.cat1 === 'Entrate' &&
+      (t.cat2 || '').toLowerCase() === 'satispay' &&
+      !matchedIncomeIds.has(t.txId)
+    ).length
 
+    // PayPal
     const paypalImports = appPrefs?.paypalImports || []
     const ppUnmatched   = paypalImports.filter(i => i.status === 'unmatched').length
     const ppPending     = paypalImports.filter(i => i.status === 'pending_approval').length
 
+    // Altre Entrate non abbinate
+    const compLinks = appPrefs?.compLinks || {}
+    const EXCL_L2   = ['satispay', ...nicknames]
+    const altreEntrateNonAbb = transactions.filter(t =>
+      t.amount > 0 && !t._forcedBalance &&
+      (t.cat1 === 'Entrate' || t.cat2 === 'Prestiti') &&
+      !EXCL_L2.includes((t.cat2 || '').toLowerCase()) &&
+      !compLinks[t.txId]
+    ).length
+
+    // Veicoli senza veicolo assegnato (excl. Carburante + Parcheggio)
+    const vehTxVehicles = appPrefs?.vehTxVehicles || {}
+    const VEH_EXCL = ['Carburante', 'Parcheggio']
+    const veicNonAbb = txs.filter(t =>
+      t.cat1 === 'Veicoli' &&
+      !VEH_EXCL.includes(t.cat2) &&
+      !vehTxVehicles[t.txId]
+    ).length
+
+    // Accuracy
     const problemSet = new Set([
-      ...nonCat.map(t => t.txId),
-      ...noL2.map(t => t.txId),
+      ...noCat2.map(t => t.txId),
       ...altroAltro.map(t => t.txId),
     ])
     const problemValue = txs
       .filter(t => problemSet.has(t.txId))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0)
-
     const accuracy = totalValue > 0
       ? ((totalValue - problemValue) / totalValue) * 100
       : 100
 
     const rules = aiRules || []
-
     return {
-      total, nonCat: nonCat.length, noL2: noL2.length,
-      altroAltro: altroAltro.length, cardTxs: cardTxs.length,
-      satiUnmatched, ppUnmatched, ppPending,
+      total, noCat2: noCat2.length, altroAltro: altroAltro.length, cardTxs: cardTxs.length,
+      satiAddebitiNonAbb, satiAccreditiNonAbb, ppUnmatched, ppPending,
+      altreEntrateNonAbb, veicNonAbb,
       accuracy, problematic: problemSet.size,
       totalRules: rules.length, kingRules: rules.filter(r => r.isKing).length,
     }
-  }, [transactions, aiRules, appPrefs])
+  }, [transactions, aiRules, appPrefs, nicknames])
 
   const accLabel = stats.accuracy >= 90 ? 'Ottimo' : stats.accuracy >= 70 ? 'Da migliorare' : 'Critico'
   const accColor = stats.accuracy >= 90 ? 'var(--green, #22c55e)'
@@ -129,8 +204,7 @@ export default function MobileQuality() {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Accuracy Score</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>
-            Ponderato sul valore delle transazioni. Non categorizzate, senza L2, Altro›Altro
-            contano come errori.
+            Ponderato sul valore. Errori: senza L2 + Altro › Altro.
           </div>
           <div style={{
             marginTop: 10, display: 'inline-block',
@@ -144,19 +218,16 @@ export default function MobileQuality() {
         </div>
       </div>
 
-      {/* Totali quick row */}
-      <div style={{
-        display: 'flex', gap: 8, marginBottom: 4, marginTop: 8,
-      }}>
+      {/* Quick totals row */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         {[
-          { l: 'Totali', v: stats.total, c: 'var(--accent)' },
-          { l: 'Accurate', v: stats.total - stats.problematic, c: 'var(--green, #22c55e)' },
-          { l: 'Problemi', v: stats.problematic, c: stats.problematic > 0 ? 'var(--red, #ef4444)' : 'var(--text3)' },
+          { l: 'Totali',   v: stats.total,                       c: 'var(--accent)' },
+          { l: 'Accurate', v: stats.total - stats.problematic,   c: 'var(--green, #22c55e)' },
+          { l: 'Problemi', v: stats.problematic,                 c: stats.problematic > 0 ? 'var(--red, #ef4444)' : 'var(--text3)' },
         ].map(({ l, v, c }) => (
           <div key={l} style={{
             flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '10px 10px',
-            textAlign: 'center',
+            borderRadius: 10, padding: '10px', textAlign: 'center',
           }}>
             <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{l}</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: c }}>{v}</div>
@@ -167,24 +238,29 @@ export default function MobileQuality() {
       {/* Categorizzazione */}
       <SectionHead title="Categorizzazione" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <MiniStat label="⚪ Non categorizzate"     value={stats.nonCat}     warn />
-        <MiniStat label="🏷️ Senza L2"              value={stats.noL2}       warn />
-        <MiniStat label="🔄 ALTRO › ALTRO"          value={stats.altroAltro} warn />
+        <MiniStat label="🏷️ Non cat. L2"    value={stats.noCat2}     warn />
+        <MiniStat label="🔄 ALTRO › ALTRO"   value={stats.altroAltro} warn />
       </div>
 
       {/* Abbinamenti */}
       <SectionHead title="Abbinamenti" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <MiniStat label="💚 Satispay non abbinate"  value={stats.satiUnmatched} warn />
+        <SplitStat
+          icon="💚" label="Satispay non abbinate"
+          leftLabel="Addebiti" leftVal={stats.satiAddebitiNonAbb}
+          rightLabel="Accrediti" rightVal={stats.satiAccreditiNonAbb}
+        />
         <div>
-          <MiniStat label="💙 PayPal non abbinate"  value={stats.ppUnmatched} warn />
+          <MiniStat label="💙 PayPal non abbinate" value={stats.ppUnmatched} warn />
           {stats.ppPending > 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text3)', paddingLeft: 16, marginTop: 3 }}>
+            <div style={{ fontSize: 11, color: 'var(--text3)', paddingLeft: 14, marginTop: 3 }}>
               + {stats.ppPending} in attesa approvazione
             </div>
           )}
         </div>
-        <MiniStat label="💳 Carta di credito" value={stats.cardTxs} neutral />
+        <MiniStat label="💸 Altre Entrate non abbinate" value={stats.altreEntrateNonAbb} warn />
+        <MiniStat label="🚗 Veicoli senza veicolo"      value={stats.veicNonAbb}          warn />
+        <MiniStat label="💳 Carta di credito"            value={stats.cardTxs}             neutral />
       </div>
 
       {/* Regole */}
@@ -192,12 +268,12 @@ export default function MobileQuality() {
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
         borderRadius: 10, padding: '14px 16px',
-        display: 'flex', gap: 0,
+        display: 'flex',
       }}>
         {[
-          { l: 'Totali', v: stats.totalRules, c: 'var(--text)' },
-          { l: '👑 King', v: stats.kingRules, c: 'var(--gold, #f59e0b)' },
-          { l: 'Standard', v: stats.totalRules - stats.kingRules, c: 'var(--text2)' },
+          { l: 'Totali',    v: stats.totalRules,                        c: 'var(--text)' },
+          { l: '👑 King',   v: stats.kingRules,                         c: 'var(--gold, #f59e0b)' },
+          { l: 'Standard',  v: stats.totalRules - stats.kingRules,      c: 'var(--text2)' },
         ].map(({ l, v, c }, i) => (
           <div key={l} style={{
             flex: 1, textAlign: 'center',
@@ -209,7 +285,6 @@ export default function MobileQuality() {
         ))}
       </div>
 
-      {/* King progress bar */}
       {stats.totalRules > 0 && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>
