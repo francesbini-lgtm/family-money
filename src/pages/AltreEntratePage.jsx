@@ -225,7 +225,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                       </tr>
                     )
                   })}
-                  {filtered.length === 0 && <tr><td colSpan={4} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna transazione nell'intervallo</td></tr>}
+                  {filtered.length === 0 && <tr><td colSpan={5} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna transazione nell'intervallo</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -576,7 +576,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Descrizione','Categoria','Compensa costo','Importo','Note',''].map(h=>(
+              {['Data','Descrizione','Cat L2','Categoria','Compensa costo','Importo','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
@@ -590,6 +590,17 @@ export default function AltreEntratePage() {
                     <td style={{padding:'9px 14px'}}>
                       <div style={{fontSize:13,fontWeight:500}}>{e.descAI||e.desc||e.description?.slice(0,40)}</div>
                       {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
+                    </td>
+                    <td style={{padding:'9px 14px'}}>
+                      {e.cat2 ? (
+                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:600,
+                          background:'rgba(100,100,220,.07)',color:'var(--accent)',
+                          border:'1px solid rgba(100,100,220,.2)'}}>
+                          {e.cat2}
+                        </span>
+                      ) : (
+                        <span style={{color:'var(--text3)',fontSize:11}}>—</span>
+                      )}
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       <AeCatCell entryKey={entryKey} cats={aeCats} onSave={saveCat}/>
