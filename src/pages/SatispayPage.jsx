@@ -242,7 +242,7 @@ function addMonth(ym, n=1) {
 function monthsRange(startYM, endYM) {
   const list = [], end = endYM || nowYM()
   let cur = startYM, i = 0
-  while(cur <= end && i++ < 48){ list.push(cur); cur = addMonth(cur) }
+  while(cur <= end && i++ < 600){ list.push(cur); cur = addMonth(cur) }
   return list
 }
 const MONTH_IT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
@@ -1086,6 +1086,16 @@ function FundCard({ pot, allPots }) {
   }
 
   function linkMonth(ym, txIds, amt) {
+    // If re-linking to new txs, clear splits/_satiLinked from the previously linked txs first
+    if (txIds && pot.data?.[ym]?.linked) {
+      const prevLinked = pot.data[ym].linked
+      const prevArr = Array.isArray(prevLinked) ? prevLinked : [prevLinked]
+      const newIds = new Set(Array.isArray(txIds) ? txIds : [txIds])
+      prevArr.filter(id => id && !newIds.has(id)).forEach(oldTxId => {
+        updateTransaction(oldTxId, { splits: null, _satiLinked: null })
+      })
+    }
+
     // Save the link on the pot
     const prev = pot.data?.[ym] || {}
     updateSatiPot(pot.id, { data:{
@@ -1175,7 +1185,7 @@ function FundCard({ pot, allPots }) {
     const updates = {}
 
     allYMs.filter(ym => ym <= curNow).forEach(ym => {
-      if (pot.data?.[ym]?.linked) return // already linked
+      if (pot.data?.[ym]?.linked || pot.data?.[ym]?.explicitUnlinked) return // already linked or explicitly unlinked by user
 
       const cells = pot.data?.[ym]?.cells || {}
       const mt = potVoci.reduce((s,v) => s + (parseFloat(cells[v.id])||0), 0)
@@ -1622,6 +1632,11 @@ function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
       continue
     }
     if (existing?.status === 'pending_approval') {
+      result[exp.txId] = existing
+      continue
+    }
+    if (existing?.status === 'unmatched') {
+      // User explicitly rejected this match — do not re-propose it
       result[exp.txId] = existing
       continue
     }
@@ -2105,7 +2120,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
         })
       }
     }
-    saveMatches(computed)
+    saveMatches({ ...satiMatches, ...computed })
   }, [speseDaComp, satiIncome])
 
   // ── State ────────────────────────────────────────────────
@@ -2873,9 +2888,13 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
 
   const displayAcc = satiNetOverride !== null ? satiNetOverride : totalAcc
 
-  // Chart: all months from 2022-01 to now, per fund line (net of cumulative releases)
+  // Chart: all months from data start to now, per fund line (net of cumulative releases)
   const allChartMonths = []
-  let chartCur = '2022-01'
+  const potStarts = satiPots.map(p => p.startYM).filter(Boolean)
+  const chartStart = potStarts.length > 0
+    ? potStarts.reduce((a, b) => (a < b ? a : b))
+    : `${new Date().getFullYear() - 4}-01`
+  let chartCur = chartStart
   while (chartCur <= now) { allChartMonths.push(chartCur); chartCur = addMonth(chartCur) }
 
   const chartActual = allChartMonths.map(ym => {
@@ -2907,7 +2926,8 @@ function SatiOverviewTab({ satiPots, satiIncome, satiUscite }) {
   })()
   const forecastMonths = []
   let fc = addMonth(now, 1)
-  while (fc <= '2026-12') { forecastMonths.push(fc); fc = addMonth(fc) }
+  const forecastEnd = `${new Date().getFullYear() + 2}-12`
+  while (fc <= forecastEnd) { forecastMonths.push(fc); fc = addMonth(fc) }
   const chartForecast = forecastMonths.map((ym, i) => {
     const entry = { label: ymLabel(ym), ym }
     satiPots.forEach(p => {

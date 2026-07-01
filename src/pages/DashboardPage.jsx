@@ -298,6 +298,8 @@ function TxModal({ tx, onClose }) {
 
 // ── Spese per categoria — Pie Chart, L1+L2 toggle, no Entrate ──
 function SpeseCatChart({ transactions }) {
+  const customCats = useStore(s => s.customCats)
+  const mergedCats = useMemo(() => getMergedCats(customCats), [customCats])
   const [showL2, setShowL2]       = useState(false)
   const [period, setPeriod]       = useState('M')
   const [hoverIdx, setHoverIdx]   = useState(null)
@@ -316,7 +318,7 @@ function SpeseCatChart({ transactions }) {
 
   const catData = useMemo(() => {
     const months = getMonths()
-    return Object.entries(CATS)
+    return Object.entries(mergedCats)
       .filter(([name]) => name!=='Entrate' && name!=='Non Categorizzato')
       .map(([name, info]) => {
         const txs = transactions.filter(t=>!t.excluded&&t.amount<0&&t.cat1===name)
@@ -333,7 +335,7 @@ function SpeseCatChart({ transactions }) {
       })
       .filter(d=>d.total>0)
       .sort((a,b)=>b.total-a.total)
-  }, [transactions, period])
+  }, [transactions, period, mergedCats])
 
   // When L2 is on, expand each L1 slice into its L2 children
   const pieData = useMemo(() => {
@@ -358,7 +360,7 @@ function SpeseCatChart({ transactions }) {
     if (hoverIdx !== null) return hoverIdx
     if (selectedCat !== null) {
       const idx = pieData.findIndex(p =>
-        showL2 ? p.parent === selectedCat : p.name === selectedCat
+        p.name === selectedCat || p.parent === selectedCat
       )
       return idx >= 0 ? idx : null
     }
@@ -400,7 +402,9 @@ function SpeseCatChart({ transactions }) {
   })
 
   const handlePieClick = (_, idx) => {
-    const clickedName = showL2 ? pieData[idx]?.parent : pieData[idx]?.name
+    // In L2 mode use the L2 slice name itself, so catTxs (which filters on
+    // t.cat2 === selectedCat) shows the right transactions
+    const clickedName = pieData[idx]?.name
     setSelectedCat(prev => prev === clickedName ? null : clickedName)
   }
 
@@ -416,7 +420,7 @@ function SpeseCatChart({ transactions }) {
   }
 
   // Color for selected cat in legend
-  const selectedColor = selectedCat ? (CATS[selectedCat]?.color || 'var(--accent)') : null
+  const selectedColor = selectedCat ? (mergedCats[selectedCat]?.color || 'var(--accent)') : null
 
   return (
     <div>

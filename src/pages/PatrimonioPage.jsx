@@ -114,8 +114,11 @@ function potTotal(pot) {
   }, 0)
 }
 
-// helper: position market value
-function posVal(p) { return (p.qty||0) * (p.prezzoLive||0) * (p.currency==='$'?0.92:1) }
+// helper: position market value — positions use quantity/currentPrice (see store/CeciliaPage)
+function posVal(p) {
+  if (p.currentValue != null) return p.currentValue
+  return (p.quantity||0) * (p.currentPrice||0) * (p.currency==='$'?0.92:1)
+}
 
 export default function PatrimonioPage() {
   const { loans, portfolios, transactions, satiPots } = useStore()
@@ -139,7 +142,7 @@ export default function PatrimonioPage() {
 
   // Auto: Conto Corrente = sum of all non-excluded transactions
   const ccBalance = useMemo(() =>
-    transactions.filter(t => !t.excluded).reduce((s, t) => s + (t.amount || 0), 0)
+    transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s, t) => s + (t.amount || 0), 0)
   , [transactions])
   const ccAsset = ccBalance > 0 ? [{ id:'auto_cc', name:'Conto Corrente', cat:'Conto Corrente', value: ccBalance, type:'asset', updatedAt: new Date().toISOString().slice(0,10), readonly:true }] : []
 

@@ -175,6 +175,10 @@ function AppShell() {
   const [menuOpen, setMenu]     = useState(false)
   const [importOpen, setImportOpen] = useState(false)
 
+  const uncatCount = useMemo(() =>
+    transactions.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
+  , [transactions])
+
   const missingDays = useMemo(() => {
     const dates = transactions
       .filter(t => !t._forcedBalance && !t.excluded && t.date)
@@ -188,9 +192,10 @@ function AppShell() {
     return Math.floor((today - last) / 86400000)
   }, [transactions])
 
-  // Auto-refresh after 5 minutes of inactivity
+  // Auto-refresh after 30 minutes of inactivity (long enough to not kill
+  // long-running operations like AI enrichment or data migration)
   useEffect(() => {
-    const TIMEOUT = 5 * 60 * 1000
+    const TIMEOUT = 30 * 60 * 1000
     let timer = setTimeout(() => window.location.reload(), TIMEOUT)
     const reset = () => { clearTimeout(timer); timer = setTimeout(() => window.location.reload(), TIMEOUT) }
     const events = ['mousemove','mousedown','keydown','touchstart','scroll','click']
@@ -307,20 +312,14 @@ function AppShell() {
           >
             {darkMode ? '☀️' : '🌙'}
           </button>
-            {(() => {
-              const txs = useStore(s => s.transactions)
-              const uncatCount = txs.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
-              return (
-                <button className="icon-btn" onClick={()=>navigate('notifiche')}
-                  style={{position:'relative'}}>
-                  🔔
-                  {uncatCount > 0 && (
-                    <span style={{position:'absolute',top:0,right:0,width:8,height:8,
-                      borderRadius:'50%',background:'var(--red,#e53e3e)',border:'2px solid var(--bg)'}}/>
-                  )}
-                </button>
-              )
-            })()}
+            <button className="icon-btn" onClick={()=>navigate('notifiche')}
+              style={{position:'relative'}}>
+              🔔
+              {uncatCount > 0 && (
+                <span style={{position:'absolute',top:0,right:0,width:8,height:8,
+                  borderRadius:'50%',background:'var(--red,#e53e3e)',border:'2px solid var(--bg)'}}/>
+              )}
+            </button>
             <div className="topbar-avatar" onClick={()=>navigate('settings')} style={{cursor:'pointer'}}>
               <div className="avatar-circle" style={{background:avatarColor}}>{initials}</div>
               <span>{firstName}</span>

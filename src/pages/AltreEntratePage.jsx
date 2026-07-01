@@ -300,13 +300,16 @@ function EntryModal({ entry, onClose }) {
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
-  const { addAltreEntrata, updateAltreEntrata } = useStore()
+  const setAppPref = useStore(s => s.setAppPref)
 
   function save() {
     if (!form.desc || !form.amount) return
     const data = {...form, amount: parseFloat(form.amount)}
-    if (isEdit) updateAltreEntrata?.(entry.id, data)
-    else        useStore.getState().addAltreEntrata?.(data)
+    const list = useStore.getState()?.appPrefs?.altreEntrateManual || []
+    const next = isEdit
+      ? list.map(x => x.id === entry.id ? { ...x, ...data } : x)
+      : [...list, { ...data, id: Date.now(), manuale: true }]
+    setAppPref('altreEntrateManual', next)
     onClose()
   }
 
@@ -474,11 +477,12 @@ export default function AltreEntratePage() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [showAdd, setShowAdd] = useState(false)
-  const [entries, setEntries] = useState([]) // local entries (persisted via addAltreEntrata in store future)
-  const [compLinks, setCompLinks] = useState(() => appPrefs.compLinks || {})
+  // Manual entries + links/notes/cats read directly from appPrefs (reactive via Zustand)
+  const entries   = appPrefs?.altreEntrateManual || []
+  const compLinks = appPrefs?.compLinks || {}
   const [compensaEntry, setCompensaEntry] = useState(null)
-  const [aeNotes, setAeNotes] = useState(() => appPrefs.aeNotes || {})
-  const [aeCats, setAeCats] = useState(() => appPrefs.aeCats || {})
+  const aeNotes = appPrefs?.aeNotes || {}
+  const aeCats  = appPrefs?.aeCats || {}
   const nicknames = useMemo(() => getUserNicknames(), [])
 
   const now    = new Date()
@@ -490,7 +494,7 @@ export default function AltreEntratePage() {
   // Detect non-salary income from bank transactions, excluding Satispay
   const autoEntries = useMemo(() => {
     return transactions.filter(t => {
-      if (t.amount <= 0) return false
+      if (t.amount <= 0 || t.excluded) return false
       const cat2low = (t.cat2||'').toLowerCase()
       // Exclude salary / personal entries (Fra, Sofi, etc.) by nickname config AND explicit list
       if (t.cat1 === 'Entrate' && nicknames.some(n => t.cat2 === n)) return false
@@ -516,20 +520,26 @@ export default function AltreEntratePage() {
   const compTotal      = Object.values(compLinks).reduce((s,l)=>s+(l.compensatedAmt||0),0)
 
   function addManual(data) {
-    setEntries(e=>[...e,{...data,id:Date.now(),manuale:true}])
+    const next = [
+      ...(appPrefs?.altreEntrateManual || []),
+      { ...data, amount: parseFloat(data.amount) || 0, id: Date.now(), manuale: true },
+    ]
+    setAppPref('altreEntrateManual', next)
+  }
+
+  function deleteManual(id) {
+    setAppPref('altreEntrateManual', (appPrefs?.altreEntrateManual || []).filter(x => x.id !== id))
   }
 
   function saveNote(key, val) {
     const next = { ...aeNotes, [key]: val }
     if (!val) delete next[key]
-    setAeNotes(next)
     setAppPref('aeNotes', next)
   }
 
   function saveCat(key, val) {
     const next = { ...aeCats, [key]: val }
     if (!val) delete next[key]
-    setAeCats(next)
     setAppPref('aeCats', next)
   }
 
@@ -620,11 +630,10 @@ export default function AltreEntratePage() {
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
                           <span style={{fontSize:11,color:'var(--green)',fontWeight:600}}>✓ Abbinata</span>
                           <button onClick={()=>{
-                            const links = getCompLinks()
+                            const links = { ...getCompLinks() }
                             const expTxId = links[e.txId]?.expTxId
                             delete links[e.txId]
                             saveCompLinks(links)
-                            setCompLinks({...links})
                             if(expTxId) useStore.getState().updateTransaction(expTxId, { excluded: false, _compensatedAmt: null, _compensatedBy: null })
                           }} style={{border:'none',background:'transparent',cursor:'pointer',color:'var(--red)',fontSize:11,padding:0}}>✕</button>
                         </div>
@@ -643,7 +652,7 @@ export default function AltreEntratePage() {
                       <NoteCell entryKey={entryKey} notes={aeNotes} onSave={saveNote}/>
                     </td>
                     <td style={{padding:'6px 10px'}}>
-                      {e.manuale&&<button className="btn btn-ghost" style={{color:'var(--red)'}} onClick={()=>setEntries(es=>es.filter(x=>x.id!==e.id))}><Trash2 size={11}/></button>}
+                      {e.manuale&&<button className="btn btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteManual(e.id)}><Trash2 size={11}/></button>}
                     </td>
                   </tr>
                 )
@@ -662,10 +671,7 @@ export default function AltreEntratePage() {
         <CompensaModal
           incomeEntry={compensaEntry}
           transactions={transactions}
-          onClose={()=>{
-            setCompensaEntry(null)
-            setCompLinks(useStore.getState()?.appPrefs?.compLinks || {})
-          }}
+          onClose={()=>setCompensaEntry(null)}
         />
       )}
     </div>

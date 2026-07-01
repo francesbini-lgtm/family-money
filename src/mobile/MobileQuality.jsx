@@ -131,7 +131,7 @@ export default function MobileQuality() {
     const total  = txs.length
     const totalValue = txs.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    const noCat2List   = txs.filter(t => !t.cat2)
+    const noCat2List   = txs.filter(t => !t.cat2 && t.cat1 !== 'Entrate')
     const noCat2Val    = noCat2List.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
     const altroAltroList = txs.filter(t => t.cat1 === 'Altro' && t.cat2 === 'Altro')

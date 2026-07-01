@@ -37,6 +37,12 @@ function getLast6Months() {
 }
 
 function autoMatch(imports, transactions) {
+  const usedTxIds = new Set()
+  // Seed with transactions already claimed by matched/pending imports
+  imports.forEach(imp => {
+    if (imp.matchedTxId) usedTxIds.add(imp.matchedTxId)
+    if (imp.pendingTxId) usedTxIds.add(imp.pendingTxId)
+  })
   return imports.map(imp => {
     if (imp.status === 'matched' || imp.status === 'pending_approval') return imp
     const impDate = new Date(imp.date)
@@ -47,14 +53,21 @@ function autoMatch(imports, transactions) {
     for (const t of transactions) {
       if (!isPayPal(t)) continue
       if (t._paypalOverride) continue
+      if (usedTxIds.has(t.txId)) continue
       if (Math.abs(Math.round(Math.abs(t.amount) * 100) - amtCents) >= 2) continue
       const diff = Math.abs(new Date(t._effDate || t.date) - impDate) / 86400000
       if (diff < bestDiff) { bestDiff = diff; bestMatch = t }
     }
 
     if (!bestMatch) return imp
-    if (bestDiff <= 1) return { ...imp, status: 'matched', matchedTxId: bestMatch.txId }
-    if (bestDiff <= 6) return { ...imp, status: 'pending_approval', pendingTxId: bestMatch.txId }
+    if (bestDiff <= 1) {
+      usedTxIds.add(bestMatch.txId)
+      return { ...imp, status: 'matched', matchedTxId: bestMatch.txId }
+    }
+    if (bestDiff <= 6) {
+      usedTxIds.add(bestMatch.txId)
+      return { ...imp, status: 'pending_approval', pendingTxId: bestMatch.txId }
+    }
     return imp
   })
 }
@@ -1014,20 +1027,20 @@ export default function PaypalPage() {
 
     const afterMatch = autoMatch([...paypalImports, ...withId], transactions)
 
-    // Apply auto-matched imports
+    // Apply auto-matched imports (both new imports and previously-unmatched old ones)
     afterMatch.forEach(imp => {
       if (imp.status === 'matched' && imp.matchedTxId) {
-        const wasUnmatched = withId.find(w => w.id === imp.id)
-        const alreadyDone  = paypalImports.find(p => p.id === imp.id && p.status === 'matched')
-        if (wasUnmatched && !alreadyDone) {
-          updateTransaction(imp.matchedTxId, {
+        const alreadyDone = paypalImports.find(p => p.id === imp.id && p.status === 'matched')
+        if (!alreadyDone) {
+          const patch = {
             merchant: imp.merchant,
             descAI: imp.merchant,
-            cat1: imp.cat1_suggestion,
-            cat2: imp.cat2_suggestion,
             _paypalOverride: true,
             conf: 100,
-          })
+          }
+          if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
+          if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
+          updateTransaction(imp.matchedTxId, patch)
         }
       }
     })
@@ -1054,14 +1067,15 @@ export default function PaypalPage() {
   function handleManualMatch(importId, txId) {
     const imp = paypalImports.find(i => i.id === importId)
     if (!imp) return
-    updateTransaction(txId, {
+    const patch = {
       merchant: imp.merchant,
       descAI: imp.merchant,
-      cat1: imp.cat1_suggestion,
-      cat2: imp.cat2_suggestion,
       _paypalOverride: true,
       conf: 100,
-    })
+    }
+    if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
+    if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
+    updateTransaction(txId, patch)
     const updated = paypalImports.map(i =>
       i.id === importId ? { ...i, status: 'matched', matchedTxId: txId } : i
     )
@@ -1071,14 +1085,15 @@ export default function PaypalPage() {
   function handleApprovePending(importId) {
     const imp = paypalImports.find(i => i.id === importId)
     if (!imp || !imp.pendingTxId) return
-    updateTransaction(imp.pendingTxId, {
+    const patch = {
       merchant: imp.merchant,
       descAI: imp.merchant,
-      cat1: imp.cat1_suggestion,
-      cat2: imp.cat2_suggestion,
       _paypalOverride: true,
       conf: 100,
-    })
+    }
+    if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
+    if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
+    updateTransaction(imp.pendingTxId, patch)
     const updated = paypalImports.map(i =>
       i.id === importId ? { ...i, status: 'matched', matchedTxId: imp.pendingTxId, pendingTxId: null } : i
     )
@@ -1124,15 +1139,18 @@ export default function PaypalPage() {
 
   function handleAutoAbbinaConfirm(rows, updatedImports) {
     rows.forEach(({ imp, tx, cat1, cat2, flagged }) => {
-      updateTransaction(tx.txId, {
+      const patch = {
         merchant: imp.merchant,
         descAI:   imp.merchant,
-        cat1:     cat1 || imp.cat1_suggestion || '',
-        cat2:     cat2 || imp.cat2_suggestion || '',
         _paypalOverride: true,
         conf: 100,
         ...(flagged ? { _flagged: true } : {}),
-      })
+      }
+      const c1 = cat1 || imp.cat1_suggestion
+      const c2 = cat2 || imp.cat2_suggestion
+      if (c1) patch.cat1 = c1
+      if (c2) patch.cat2 = c2
+      updateTransaction(tx.txId, patch)
     })
     setAppPref('paypalImports', updatedImports)
     setAutoAbbinaResults(null)
@@ -1142,14 +1160,15 @@ export default function PaypalPage() {
   function handleLinkTxToImport(txId, importId) {
     const imp = paypalImports.find(i => i.id === importId)
     if (!imp) return
-    updateTransaction(txId, {
+    const patch = {
       merchant: imp.merchant,
       descAI: imp.merchant,
-      cat1: imp.cat1_suggestion,
-      cat2: imp.cat2_suggestion,
       _paypalOverride: true,
       conf: 100,
-    })
+    }
+    if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
+    if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
+    updateTransaction(txId, patch)
     const updated = paypalImports.map(i =>
       i.id === importId ? { ...i, status: 'matched', matchedTxId: txId, pendingTxId: null } : i
     )
@@ -1333,11 +1352,12 @@ export default function PaypalPage() {
                         const validSubs = allCats[t.cat1]?.sub || []
                         const isValid = !t.cat1 || validSubs.includes(t.cat2)
                         return (
-                          <span style={{
-                            fontSize: 12,
-                            color: isValid ? 'var(--text2)' : 'var(--gold)',
-                            title: isValid ? '' : `"${t.cat2}" non è valido per "${t.cat1}"`,
-                          }}>
+                          <span
+                            title={isValid ? undefined : `"${t.cat2}" non è valido per "${t.cat1}"`}
+                            style={{
+                              fontSize: 12,
+                              color: isValid ? 'var(--text2)' : 'var(--gold)',
+                            }}>
                             {!isValid && '⚠ '}
                             {t.cat2}
                           </span>

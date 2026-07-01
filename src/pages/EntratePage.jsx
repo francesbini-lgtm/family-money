@@ -289,19 +289,19 @@ export default function EntratePage() {
   const [period, setPeriod] = useState('month')
   const [tab, setTab]       = useState('stipendi')
 
-  // RAL / Netto chart state
-  const [ralData, setRalData]         = useState(() => appPrefs?.ralData || DEFAULT_RAL_DATA)
+  // RAL / Netto chart state — read directly from appPrefs (reactive via Zustand)
+  const ralData = appPrefs?.ralData || DEFAULT_RAL_DATA
   const [ralView, setRalView]         = useState('netto') // 'ral' | 'netto'
   const [ralEditPerson, setRalEditPerson] = useState(null) // 'Fra' | 'Sofi' | null
 
-  function saveRalData(newData) { setRalData(newData); setAppPref('ralData', newData) }
+  function saveRalData(newData) { setAppPref('ralData', newData) }
 
   const now    = new Date()
   const thisYM = getYM(now)
 
-  // Bonus map
-  const [bonusMap, setBonusMap] = useState(() => appPrefs.bonusMap || {})
-  function saveBonusMap(map) { setBonusMap(map); setAppPref('bonusMap', map) }
+  // Bonus map — read directly from appPrefs (reactive via Zustand)
+  const bonusMap = appPrefs?.bonusMap || {}
+  function saveBonusMap(map) { setAppPref('bonusMap', map) }
   function setBonusTx(txId, member, amt) {
     const next = { ...bonusMap }
     if (amt == null) { delete next[txId] } else { next[txId] = { member, amt: parseFloat(amt)||0 } }

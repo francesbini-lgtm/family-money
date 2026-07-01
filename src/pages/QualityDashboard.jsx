@@ -193,7 +193,7 @@ export default function QualityDashboard() {
     const totalValue = txs.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
     // Non cat L2
-    const noCat2List = txs.filter(t => !t.cat2)
+    const noCat2List = txs.filter(t => !t.cat2 && t.cat1 !== 'Entrate')
     const noCat2Val  = noCat2List.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
     // Altro > Altro

@@ -929,7 +929,7 @@ export default function ForecastPage() {
                   .map((d) => {
                     const year = parseInt(d.label)
                     const yOffset = year - now.getFullYear()
-                    const inc = avgIncome  * Math.pow(1 + growth / 100, yOffset)
+                    const inc = avgIncomeEffective * Math.pow(1 + growth / 100, yOffset)
                     const exp = effectiveExpense * Math.pow(1 + inflation / 100, yOffset)
                     const mortgageActive = mortgageOn && mortgage && year >= mortgageStartYear
                     const rataAnnua = mortgageActive ? mortgage.rata * 12 : 0

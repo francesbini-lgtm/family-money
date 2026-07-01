@@ -58,8 +58,10 @@ function ForcedBalanceModal({ currentSaldo, onClose }) {
       tappoDate = new Date().toISOString().slice(0, 10)
     }
     if (existingForced) {
+      // currentSaldo already includes the old forced amount, so the new forced
+      // amount must be the old amount plus the delta, not the delta alone.
       updateTransaction(existingForced.txId, {
-        amount: delta,
+        amount: Math.round((existingForced.amount + delta) * 100) / 100,
         description: 'Saldo forzato — obiettivo € ' + fmtIT(targetNum, 2),
         descAI: 'Saldo forzato',
         date: tappoDate,
@@ -2017,6 +2019,10 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
 
           // Fetch current tx to check manual overrides
           const curTx = useStore.getState().transactions.find(s => s.txId === t.txId)
+          // Never overwrite categories the user set manually, or king-protected txs
+          const _isKingProtected = useStore.getState().isKingProtected
+          const catProtected = !!curTx?.userEditedCat ||
+            (typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount))
           updateTransaction(t.txId, {
             descAI:        t.descAI,
             city:          curTx?.cityUserEdited ? curTx.city : t.city,  // respect manual edits
@@ -2024,9 +2030,9 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
             card:          t.card,
             merchant:      t.merchant      ?? null,
             counterpart:   t.counterpart   ?? null,
-            cat1:          t.cat1          || null,
-            cat2:          t.cat2          || '',
-            conf:          t.conf          || null,
+            cat1:          catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null),
+            cat2:          catProtected ? (curTx?.cat2 ?? '')   : (t.cat2 || ''),
+            conf:          catProtected ? (curTx?.conf ?? null) : (t.conf || null),
             aiEnriched:    true,
             aiEnrichedAt:  t.aiEnrichedAt,
             aiCategorized: true,
@@ -2877,14 +2883,14 @@ export default function TransactionsPage() {
         (t.txId||'').toLowerCase().includes(s)
       )
     }
-    if (filters.type === 'income')  txs = txs.filter(t => t.amount > 0)
-    if (filters.type === 'expense') txs = txs.filter(t => t.amount < 0)
+    if (filters.type === 'Income')  txs = txs.filter(t => t.amount > 0)
+    if (filters.type === 'Expense') txs = txs.filter(t => t.amount < 0)
     if (filters.cat1) txs = txs.filter(t => t.cat1 === filters.cat1)
     if (filters.dateFrom) txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) >= filters.dateFrom)
     if (filters.dateTo)   txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) <= filters.dateTo)
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
     if (filters.flagged)        txs = txs.filter(t => !!t._flagged)
-    if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.card))
+    if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.account))
     if (hideComm)  txs = txs.filter(t => {
       const c2 = (t.cat2 || '').toLowerCase()
       if (t.descAI === 'Commissioni') return false

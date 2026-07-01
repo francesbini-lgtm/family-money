@@ -365,11 +365,12 @@ export const useStore = create((set, get) => ({
     }
     set(s=>({ transactions: s.transactions.map(t=>t.txId===txId?{...t,...patch}:t) }))
     const t = get().transactions.find(t=>t.txId===txId)
-    // Always save the full enriched object so all fields persist (includes computed user)
+    // Save the merged object as-is — do NOT re-run enrichTx here, or regex
+    // results would overwrite fields the caller just patched (merchant, descAI, cat1, cat2, …)
     if(t) {
       const { userAccounts, appPrefs } = get()
       const user = t.user || computeUser(t, userAccounts, appPrefs) || null
-      saveDocument('transactions', txId, enrichTx({...t,...patch, user}))
+      saveDocument('transactions', txId, {...t, ...patch, user})
     }
     get()._recomputeFiltered()
   },
@@ -729,9 +730,10 @@ export const useStore = create((set, get) => ({
     saveDocument('ai_chat',item.id,item)
   },
   clearChat: () => {
+    // capture list BEFORE clearing state, then delete all chat docs
+    const toDelete = get().aiChatHistory
     set({aiChatHistory:[]})
-    // delete all chat docs
-    get().aiChatHistory.forEach(m=>deleteDocument('ai_chat',m.id))
+    toDelete.forEach(m=>deleteDocument('ai_chat',m.id))
   },
 
   // ── Custom categories ────────────────────────────────
@@ -919,17 +921,18 @@ export const useStore = create((set, get) => ({
               case 'not_contains': return !src.includes(val)
               case 'starts_with':  return src.startsWith(val)
               case 'ends_with':    return src.endsWith(val)
-              case 'equals':       return src === val
+              case 'equals': case 'è': return src === val
               default: return false
             }
           }
           case 'description':
+          case 'counterpart': // alias — evaluated against description here
             switch(cond.op) {
               case 'contains':     return desc.includes(val)
               case 'not_contains': return !desc.includes(val)
               case 'starts_with':  return desc.startsWith(val)
               case 'ends_with':    return desc.endsWith(val)
-              case 'equals':       return desc === val
+              case 'equals': case 'è': return desc === val
               default: return false
             }
           case 'amount':
@@ -946,7 +949,7 @@ export const useStore = create((set, get) => ({
           case 'merchant':
             switch(cond.op) {
               case 'contains':    return desc.includes(val)
-              case 'equals':      return desc === val
+              case 'equals': case 'è': return desc === val
               case 'starts_with': return desc.startsWith(val)
               default: return false
             }
@@ -1059,7 +1062,8 @@ export const useStore = create((set, get) => ({
       }
 
       // 3. Multi-condition rules → cat1/cat2/descAI or excluded (highest priority — always wins over catRules)
-      if (multiRules.length > 0) {
+      //    Skip transactions manually categorized by the user (same guard as step 2)
+      if (multiRules.length > 0 && !tx.userEditedCat) {
         const result = s.applyAiRules(tx.description, tx.amount, tx.date)
         if (result) {
           if (result.exclude && !tx.excluded) {
@@ -1113,6 +1117,8 @@ export const useStore = create((set, get) => ({
     for (let i = 0; i < transactions.length; i++) {
       const tx = transactions[i]
       if (onProgress) onProgress(i + 1, transactions.length)
+      // King rules always win — never let a non-king single rule overwrite them
+      if (s.isKingProtected(tx.description, tx.amount)) continue
       const patch = {}
 
       const desc = (tx.description || '').toLowerCase()
@@ -1139,15 +1145,18 @@ export const useStore = create((set, get) => ({
               case 'lt':  case '<':  return amt < parseFloat(cond.value || 0)
               case 'lte': case '<=': return amt <= parseFloat(cond.value || 0)
               case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value || 0)) < 0.01
+              case 'between': case 'tra': return amt >= parseFloat(cond.value || 0) && amt <= parseFloat(cond.value2 || 0)
               default: return false
             }
-          case 'merchant':
+          case 'merchant': {
+            const merch = (tx.merchant || '').toLowerCase()
             switch (cond.op) {
-              case 'contains':    return desc.includes(val)
-              case 'equals':      return desc === val
-              case 'starts_with': return desc.startsWith(val)
+              case 'contains':    return merch.includes(val)
+              case 'equals': case 'è': return merch === val
+              case 'starts_with': return merch.startsWith(val)
               default: return false
             }
+          }
           default: return false
         }
       })
@@ -1301,10 +1310,6 @@ export const useStore = create((set, get) => ({
     set({ filters:{search:'',cat1:'',accounts:[],dateFrom:'',dateTo:'',type:'',conf:''} })
     get()._recomputeFiltered()
   },
-
-  // ── AI Chat ───────────────────────────────────────────
-  addChatMessage: (m) => set(s=>({ aiChatHistory:[...s.aiChatHistory,m] })),
-  clearChat:      ()  => set({ aiChatHistory:[] }),
 
   // ── Computed ──────────────────────────────────────────
   filteredTx: [],   // kept in sync by setFilter/resetFilters
