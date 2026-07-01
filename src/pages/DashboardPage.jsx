@@ -959,8 +959,13 @@ export default function DashboardPage() {
           <>
             {/* Row 1 — mese corrente */}
             <div style={{marginBottom:6}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
-                📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',marginBottom:8,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <span style={{color:'var(--text3)'}}>📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE</span>
+                {thisIncome === 0 && thisExpense === 0 && (
+                  <span style={{color:'var(--red)',fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:6,background:'rgba(220,50,50,.08)',border:'1px solid rgba(220,50,50,.25)'}}>
+                    ⚠️ Dati mancanti
+                  </span>
+                )}
               </div>
               <div className="kpi-grid">
                 <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(thisIncome)} color="var(--green)" delta={deltaIncome}
