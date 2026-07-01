@@ -264,6 +264,36 @@ function AppShell() {
         <header className="topbar">
           <button className="mob-menu-btn" onClick={()=>setMenu(o=>!o)}>☰</button>
           <div className="topbar-title">{current?.label}</div>
+
+          {/* ── Missing days badge — centered ── */}
+          {missingDays !== null && (
+            <button
+              onClick={() => setImportOpen(true)}
+              title={missingDays <= 2 ? 'Dati aggiornati — clicca per importare CSV' : `Ultimo dato: ${missingDays} giorni fa — clicca per importare CSV`}
+              style={{
+                position:'absolute', left:'50%', transform:'translateX(-50%)',
+                display:'flex', alignItems:'center', gap:5,
+                padding:'5px 12px', borderRadius:8, cursor:'pointer',
+                fontSize:11, fontWeight:700, lineHeight:1,
+                border:'1px solid',
+                ...(missingDays <= 2
+                  ? { background:'rgba(56,161,105,.12)', borderColor:'rgba(56,161,105,.4)', color:'#38a169' }
+                  : missingDays < 10
+                  ? { background:'rgba(56,161,105,.12)', borderColor:'rgba(56,161,105,.4)', color:'#38a169' }
+                  : missingDays < 20
+                  ? { background:'rgba(221,107,32,.12)', borderColor:'rgba(221,107,32,.4)', color:'#dd6b20' }
+                  : { background:'rgba(229,62,62,.12)',  borderColor:'rgba(229,62,62,.4)',  color:'#e53e3e' }
+                ),
+                transition:'all .15s',
+              }}
+            >
+              {missingDays <= 2
+                ? <><span style={{fontSize:13}}>✅</span> UP TO DATE</>
+                : <><span style={{fontSize:13}}>⚠️</span> -{missingDays}d missing</>
+              }
+            </button>
+          )}
+
           <div className="topbar-right">
           <button
             onClick={()=>setDarkMode(d=>!d)}
@@ -274,25 +304,6 @@ function AppShell() {
           >
             {darkMode ? '☀️' : '🌙'}
           </button>
-          {missingDays !== null && missingDays > 0 && (
-            <button
-              onClick={() => setImportOpen(true)}
-              title={`Ultimo dato: ${missingDays} giorni fa — clicca per importare CSV`}
-              style={{
-                display:'flex', alignItems:'center', gap:4,
-                padding:'4px 10px', borderRadius:8, cursor:'pointer',
-                fontSize:11, fontWeight:700, lineHeight:1,
-                border:'1px solid',
-                background: missingDays < 10 ? 'rgba(56,161,105,.12)' : missingDays < 20 ? 'rgba(221,107,32,.12)' : 'rgba(229,62,62,.12)',
-                borderColor: missingDays < 10 ? 'rgba(56,161,105,.4)' : missingDays < 20 ? 'rgba(221,107,32,.4)' : 'rgba(229,62,62,.4)',
-                color: missingDays < 10 ? '#38a169' : missingDays < 20 ? '#dd6b20' : '#e53e3e',
-                transition:'all .15s',
-              }}
-            >
-              <span style={{fontSize:13}}>⚠️</span>
-              -{missingDays}d missing
-            </button>
-          )}
             {(() => {
               const txs = useStore(s => s.transactions)
               const uncatCount = txs.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
