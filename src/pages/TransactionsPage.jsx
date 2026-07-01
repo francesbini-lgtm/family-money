@@ -1199,6 +1199,7 @@ function DateCell({ tx, showRegDate, updateTransaction }) {
 // ── Column definitions ───────────────────────────────────
 const ALL_COLUMNS = [
   { id:'date',        label:'📅 Data',                 alwaysOn:true  },
+  { id:'emoji',       label:'😀 Emoji Cat.'                            },
   { id:'descAI',      label:'✨ AI Descrizione',        alwaysOn:true  },
   { id:'description', label:'📄 Desc. Originale'                       },
   { id:'counterpart', label:'🔄 Controparte'                            },
@@ -1213,7 +1214,7 @@ const ALL_COLUMNS = [
   { id:'isBonifico',  label:'🔵 Bonifico'                               },
   { id:'amount',      label:'💰 Importo',              alwaysOn:true  },
 ]
-const DEFAULT_VISIBLE = new Set(['date','descAI','note','city','time','card','user','cat','amount'])
+const DEFAULT_VISIBLE = new Set(['date','emoji','descAI','note','city','time','card','user','cat','amount'])
 const DEFAULT_ORDER   = ALL_COLUMNS.map(c=>c.id)
 
 function EditColonneModal({ visibleCols, colOrder, onApply, onClose }) {
@@ -2347,6 +2348,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const userAccounts      = useStore(s=>s.userAccounts)
   const satiPots          = useStore(s=>s.satiPots)
   const allTxs            = useStore(s=>s.transactions)
+  const customCats        = useStore(s=>s.customCats)
   const compensatingTx    = tx._compensatedBy ? allTxs.find(t=>t.txId===tx._compensatedBy) : null
   const compensatedLabel  = compensatingTx?.cat2?.toLowerCase()==='satispay' ? 'Compensato Satispay' : 'Compensato'
   const catOpen = openCatTxId === tx.txId
@@ -2399,6 +2401,10 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
 
       {cols.map(id => {
         if(id==='date') return <DateCell key={id} tx={tx} showRegDate={showRegDate} updateTransaction={updateTransaction}/>
+        if(id==='emoji') {
+          const em = getMergedCats(customCats)[tx.cat1]?.subEmojis?.[tx.cat2] || ''
+          return <td key={id} style={{width:28,textAlign:'center',fontSize:15,padding:'0 2px',verticalAlign:'middle'}}>{em}</td>
+        }
         if(id==='descAI') return (
           <td key={id} style={{padding:'4px 8px',maxWidth:150}}>
             <div style={{display:'flex',alignItems:'center',gap:5}}>
@@ -3114,6 +3120,7 @@ export default function TransactionsPage() {
                     }}>{colFilters[colId]?.length>0?'▼':'▽'}</button>
                   )
                   if(id==='date')        return <th key={id} className="tx-th" style={{width:80,cursor:'pointer'}} onClick={()=>toggleSort('date')}>Data {sortIcon('date')}{filterBtn('date')}</th>
+                  if(id==='emoji')       return <th key={id} className="tx-th" style={{width:28,textAlign:'center',padding:'0 2px'}} title="Emoji categoria L2">😀</th>
                   if(id==='descAI')      return <th key={id} className="tx-th" style={{minWidth:140,cursor:'pointer'}} onClick={()=>toggleSort('descAI')}>AI Descrizione {sortIcon('descAI')}{filterBtn('descAI')}</th>
                   if(id==='description') return <th key={id} className="tx-th" style={{minWidth:140}}>Desc. Originale</th>
                   if(id==='counterpart') return <th key={id} className="tx-th" style={{minWidth:100}}>Controparte{filterBtn('counterpart')}</th>
