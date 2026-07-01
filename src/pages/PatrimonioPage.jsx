@@ -107,7 +107,7 @@ function potTotal(pot) {
     return `${y}-${String(m).padStart(2,'0')}`
   }
   const list = []; let cur = pot.startYM || nowYM, i = 0
-  while(cur <= nowYM && i++ < 48){ list.push(cur); cur = addM(cur) }
+  while(cur <= nowYM && i++ < 600){ list.push(cur); cur = addM(cur) }
   return list.reduce((ms, ym) => {
     const cells = pot.data?.[ym]?.cells || {}
     return ms + voci.reduce((vs, v) => vs + (parseFloat(cells[v.id])||0), 0)
@@ -121,12 +121,12 @@ function posVal(p) {
 }
 
 export default function PatrimonioPage() {
-  const { loans, portfolios, transactions, satiPots } = useStore()
-  const [assets,      setAssets]      = useState([])
-  const [liabilities, setLiabilities] = useState([])
+  const { loans, portfolios, transactions, satiPots, appPrefs } = useStore()
+  const setAppPref = useStore(s => s.setAppPref)
+  const assets      = appPrefs?.extraAssets      || []
+  const liabilities = appPrefs?.extraLiabilities || []
   const [addModal,    setAddModal]     = useState(null) // 'asset' | 'liability' | null
   const [editItem,    setEditItem]     = useState(null)
-  const [histSnapshot, setHistSnapshot] = useState([])
 
   // Auto: loans as liabilities
   const loanLiabilities = loans.map(l => ({
@@ -203,31 +203,40 @@ export default function PatrimonioPage() {
     name, value, color: LIABILITY_COLORS[name] || '#888'
   }))
 
-  // Simulated history (last 6 months with slight variation)
+  // Real history: running balance from actual transactions at end of each of the last 6 months
   const history = useMemo(() => {
-    if (netWorth === 0) return []
-    const months = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu']
-    return months.map((m, i) => ({
-      label: m,
-      assets: Math.round(totalAssets * (0.92 + i * 0.016)),
-      liabilities: Math.round(totalLiabilities * (1.05 - i * 0.01)),
-      net: Math.round((totalAssets * (0.92 + i * 0.016)) - (totalLiabilities * (1.05 - i * 0.01)))
-    }))
-  }, [netWorth, totalAssets, totalLiabilities])
+    if (!transactions || transactions.length === 0) return []
+    const now = new Date()
+    const out = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const endOfMonth = ym + '-31' // approximate end of month (string compare)
+      const bal = transactions
+        .filter(t => (!t.excluded || t._forcedBalance) && (t.date || '') <= endOfMonth)
+        .reduce((s, t) => s + (t.amount || 0), 0)
+      out.push({
+        label: d.toLocaleDateString('it-IT', { month: 'short' }),
+        net: Math.round(bal),
+      })
+    }
+    return out
+  }, [transactions])
 
   function addItem(item) {
-    if (item.type === 'asset') setAssets(a => [...a, item])
-    else setLiabilities(l => [...l, item])
+    if (item.type === 'asset') setAppPref('extraAssets', [...assets, item])
+    else setAppPref('extraLiabilities', [...liabilities, item])
   }
 
   function deleteItem(id, type) {
-    if (type === 'asset') setAssets(a => a.filter(x => x.id !== id))
-    else setLiabilities(l => l.filter(x => x.id !== id))
+    if (type === 'asset') setAppPref('extraAssets', assets.filter(x => x.id !== id))
+    else setAppPref('extraLiabilities', liabilities.filter(x => x.id !== id))
   }
 
   function updateValue(id, type, newVal) {
-    if (type === 'asset') setAssets(a => a.map(x => x.id === id ? { ...x, value: newVal, updatedAt: new Date().toISOString().slice(0, 10) } : x))
-    else setLiabilities(l => l.map(x => x.id === id ? { ...x, value: newVal, updatedAt: new Date().toISOString().slice(0, 10) } : x))
+    const patch = x => x.id === id ? { ...x, value: newVal, updatedAt: new Date().toISOString().slice(0, 10) } : x
+    if (type === 'asset') setAppPref('extraAssets', assets.map(patch))
+    else setAppPref('extraLiabilities', liabilities.map(patch))
   }
 
   const fmt = n => '€ ' + Math.round(Math.abs(n)).toLocaleString('it-IT')
@@ -286,9 +295,9 @@ export default function PatrimonioPage() {
       {/* Charts */}
       {netWorth !== 0 && (
         <div className="pat-charts">
-          {history.length > 0 && (
-            <div className="card pat-chart-card">
-              <div className="pat-chart-title">Andamento Patrimonio</div>
+          <div className="card pat-chart-card">
+            <div className="pat-chart-title">Andamento Patrimonio</div>
+            {history.length > 0 ? (
               <ResponsiveContainer width="100%" height={180}>
                 <AreaChart data={history}>
                   <defs>
@@ -301,13 +310,13 @@ export default function PatrimonioPage() {
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text3)' }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={v => v >= 1000 ? `€${(v / 1000).toFixed(0)}K` : `€${v}`}
                     tick={{ fontSize: 11, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={55} />
-                  <Tooltip formatter={(v, n) => [`€ ${fmtIT(v, 0)}`, n === 'net' ? 'Netto' : n === 'assets' ? 'Attivi' : 'Passivi']}
+                  <Tooltip formatter={(v, n) => [`€ ${fmtIT(v, 0)}`, n === 'net' ? 'Saldo' : n]}
                     contentStyle={{ fontSize: 12, border: '1px solid var(--border)', borderRadius: 8 }} />
                   <Area type="monotone" dataKey="net" name="net" stroke="var(--green)" strokeWidth={2} fill="url(#netGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
-          )}
+            ) : <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>Dati storici non disponibili</div>}
+          </div>
 
           <div className="card pat-chart-card">
             <div className="pat-chart-title">Composizione Attivi</div>

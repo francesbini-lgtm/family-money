@@ -207,7 +207,10 @@ export default function QualityDashboard() {
     // ── Satispay ──
     const satiMatches = appPrefs?.satiMatches || {}
 
-    const satiAddEntries = Object.entries(satiMatches).filter(([, m]) => m.status !== 'matched')
+    // Only count entries whose expense tx still exists — skips deleted txs and synthetic IDs (e.g. veh-*)
+    const satiAddEntries = Object.entries(satiMatches).filter(([txId, m]) =>
+      m.status !== 'matched' && txMap.has(txId)
+    )
     const satiAddebitiCount = satiAddEntries.length
     const satiAddebitiVal   = satiAddEntries.reduce((s, [txId]) => {
       const t = txMap.get(txId)

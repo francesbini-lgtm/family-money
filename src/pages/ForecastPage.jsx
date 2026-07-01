@@ -416,16 +416,26 @@ export default function ForecastPage() {
   const forecastData = useMemo(() => {
     const now = new Date()
     const pts = []
-    const startSaldo = currentSaldo - (mortgageOn && mortgageAnticipo > 0 ? mortgageAnticipo : 0)
-    let saldo = startSaldo
+    const monthsRemaining = 12 - now.getMonth() // getMonth() is 0-based, so July = 6, remaining = 6
+    const currentYearFraction = monthsRemaining / 12
+    let saldo = currentSaldo
     let inc   = avgIncomeEffective
     let exp   = effectiveExpense
+    let anticipoApplied = false
 
     for (let y = 0; y <= years; y++) {
       const year = now.getFullYear() + y
       const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear
       const mortgageMonthly = mortgageActive ? mortgage.rata : 0
-      saldo += (inc - exp - mortgageMonthly) * 12
+      // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
+      // not unconditionally in year 0
+      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && year >= mortgageStartYear) {
+        saldo -= mortgageAnticipo
+        anticipoApplied = true
+      }
+      // Year 0: only count the fraction of the year that remains
+      const yearFraction = y === 0 ? currentYearFraction : 1
+      saldo += (inc - exp - mortgageMonthly) * 12 * yearFraction
 
       const yearsIntoMortgage = year - mortgageStartYear
       const residual = (mortgageActive && yearsIntoMortgage >= 0 && yearsIntoMortgage < mortgage.residuals.length)

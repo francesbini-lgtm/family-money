@@ -345,13 +345,19 @@ export const useStore = create((set, get) => ({
     }))
     saveBatch('transactions', newTxs, 'txId')
     get()._recomputeFiltered()
-    // Push undo entry for import
+    // Push undo entry for import — respect an open undo batch (same as _pushUndoEntry)
     if (newTxs.length > 0) {
-      const stack = get().txUndoStack
-      set({ txUndoStack: [...stack.slice(-19), {
-        entries: [{ type: 'add', txIds: newTxs.map(t => t.txId) }],
-        label: `Import ${newTxs.length} tx`,
-      }]})
+      const entry = { type: 'add', txIds: newTxs.map(t => t.txId) }
+      const batch = get()._txUndoBatch
+      if (batch !== null) {
+        set({ _txUndoBatch: [...batch, entry] })
+      } else {
+        const stack = get().txUndoStack
+        set({ txUndoStack: [...stack.slice(-19), {
+          entries: [entry],
+          label: `Import ${newTxs.length} tx`,
+        }]})
+      }
     }
     return newTxs.length
   },
