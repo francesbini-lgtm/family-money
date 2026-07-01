@@ -2859,8 +2859,18 @@ export default function TransactionsPage() {
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
     if (filters.flagged)        txs = txs.filter(t => !!t._flagged)
     if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.card))
-    if (hideComm)  txs = txs.filter(t => t.descAI !== 'Commissioni' && t.cat2 !== 'Commissione Banca')
-    if (hideSmall) txs = txs.filter(t => Math.abs(t.amount) >= 1)
+    if (hideComm)  txs = txs.filter(t => {
+      const c2 = (t.cat2 || '').toLowerCase()
+      if (t.descAI === 'Commissioni') return false
+      if (c2.includes('commissioni') || c2 === 'commissione banca') return false
+      return true
+    })
+    if (hideSmall) txs = txs.filter(t => {
+      if (Math.abs(t.amount) < 1) return false
+      // also hide fully-compensated transactions (net = 0)
+      if ((t._compensatedAmt || 0) > 0 && Math.abs(t.amount + t._compensatedAmt) < 0.01) return false
+      return true
+    })
     // Column filters (Excel-style)
     Object.entries(colFilters).forEach(([colId, vals]) => {
       if (!vals || vals.length === 0) return
