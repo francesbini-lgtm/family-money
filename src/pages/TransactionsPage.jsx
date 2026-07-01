@@ -257,6 +257,259 @@ function ConditionRow({ cond, idx, total, onChange, onRemove }) {
   )
 }
 
+// ── Bulk Edit Modal ───────────────────────────────────────
+function BulkEditModal({ txIds, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const addAiRule         = useStore(s => s.addAiRule)
+  const allTxs            = useStore(s => s.transactions)
+  const customCats        = useStore(s => s.customCats)
+  const allCats           = getMergedCats(customCats)
+  const allCatNames       = getMergedCatNames(customCats)
+  const setCustomCats     = useStore(s => s.setCustomCats)
+
+  const txList = allTxs.filter(t => txIds.has(t.txId))
+  const n = txList.length
+
+  const [descEdit,  setDescEdit]  = useState('')
+  const [sel1,      setSel1]      = useState('')
+  const [sel2,      setSel2]      = useState('')
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const [addingL1,  setAddingL1]  = useState(false)
+  const [newL1,     setNewL1]     = useState('')
+  const [addingL2,  setAddingL2]  = useState(false)
+  const [newL2,     setNewL2]     = useState('')
+  const [applied,   setApplied]   = useState(false)
+  const [conditions, setConditions] = useState([{ field: 'merchant', op: 'contiene', value: '' }])
+  const [scope,      setScope]      = useState('all')
+
+  const ruleActive = conditions.some(c => c.value.trim())
+  const matchCount = (rulesOpen && ruleActive) ? allTxs.filter(t => {
+    if (txIds.has(t.txId) || t.excluded) return false
+    return allConditionsMatch(conditions, t)
+  }).length : 0
+
+  function updateCond(idx, nc) { setConditions(cs => cs.map((c, i) => i === idx ? nc : c)) }
+  function removeCond(idx)     { setConditions(cs => cs.filter((_, i) => i !== idx)) }
+  function addCond()           { setConditions(cs => [...cs, { field: 'merchant', op: 'contiene', value: '' }]) }
+
+  function confirmAddL1() {
+    const name = newL1.trim()
+    if (!name || allCatNames.includes(name)) return
+    setCustomCats({ ...customCats, [name]: { color: '#888', sub: [] } })
+    setSel1(name); setSel2('')
+    setNewL1(''); setAddingL1(false)
+  }
+  function confirmAddL2() {
+    const sub = newL2.trim()
+    if (!sub || !sel1) return
+    const existing = allCats[sel1]?.sub || []
+    if (existing.includes(sub)) { setSel2(sub); setNewL2(''); setAddingL2(false); return }
+    const updatedSub = [...existing, sub]
+    setCustomCats({ ...customCats, [sel1]: { ...(customCats[sel1] || {}), color: allCats[sel1]?.color || '#888', sub: updatedSub } })
+    setSel2(sub)
+    setNewL2(''); setAddingL2(false)
+  }
+
+  function save() {
+    const patch = {}
+    if (descEdit.trim())  { patch.descAI = descEdit.trim(); patch.aiEnriched = true }
+    if (sel1)             { patch.cat1 = sel1; patch.cat2 = sel2; patch.conf = 100 }
+    if (Object.keys(patch).length === 0) { onClose(); return }
+
+    txList.forEach(t => updateTransaction(t.txId, patch))
+
+    if (rulesOpen && ruleActive && sel1) {
+      const opMap = { 'contiene': 'contains', 'non contiene': 'not_contains', 'inizia con': 'starts_with', 'finisce con': 'ends_with', 'uguale a': 'equals', '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte' }
+      addAiRule({
+        conditions: conditions.filter(c => c.value.trim()).map(c => ({
+          field: c.field,
+          op:    opMap[c.op] || c.op,
+          value: c.value.trim(),
+        })),
+        action: 'categorize',
+        cats:   [{ cat1: sel1, cat2: sel2 || '', pct: 100 }],
+        scope,
+        descAI: descEdit.trim() || null,
+        name:   `${sel1}${sel2 ? '/' + sel2 : ''} — ${conditions.filter(c => c.value.trim()).map(c => `${c.field} ${c.op} "${c.value}"`).join(' + ')}`,
+      })
+      allTxs.forEach(t => {
+        if (txIds.has(t.txId) || t.excluded) return
+        if (allConditionsMatch(conditions, t)) updateTransaction(t.txId, patch)
+      })
+    }
+    setApplied(true)
+    setTimeout(onClose, 600)
+  }
+
+  const modalW = rulesOpen ? 720 : 420
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,.35)' }} />
+      <div className="cat-dropdown" onClick={e => e.stopPropagation()}
+        style={{
+          position: 'fixed', top: '50%', left: '50%',
+          transform: 'translate(-50%,-50%)',
+          width: modalW, maxWidth: '96vw',
+          maxHeight: '90vh', overflowY: 'auto',
+          zIndex: 1000,
+          transition: 'width .18s ease',
+          display: 'flex', flexDirection: 'column',
+        }}>
+
+        {/* Header */}
+        <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>✏️ Modifica Multipla</span>
+          <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 600 }}>{n} transazion{n === 1 ? 'e' : 'i'} selezionate</span>
+        </div>
+
+        {/* descAI */}
+        <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text3)', marginBottom: 6 }}>
+            ✨ Descrizione AI (lascia vuoto per non modificare)
+          </div>
+          <input
+            value={descEdit}
+            onChange={e => setDescEdit(e.target.value)}
+            placeholder="Es. Spesa supermercato…"
+            style={{
+              width: '100%', padding: '6px 9px', borderRadius: 6,
+              border: `1.5px solid ${descEdit.trim() ? 'var(--accent)' : 'var(--border)'}`,
+              fontSize: 12, background: 'var(--surface)', color: 'var(--text)',
+              outline: 'none', fontFamily: 'var(--font-sans)', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Cat L1 + L2 + optional rules */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+          {/* L1 */}
+          <div className="cat-dropdown-l1" style={{ flex: '0 0 160px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '6px 10px 4px', fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+              Categoria (opzionale)
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {allCatNames.map(name => (
+                <button key={name} className={'cat-dropdown-item' + (name === sel1 ? ' active' : '')}
+                  style={{ '--cat-color': allCats[name]?.color || '#888' }}
+                  onClick={() => { setSel1(name === sel1 ? '' : name); setSel2(''); setAddingL2(false) }}>
+                  <span className="cat-dot" />{name}
+                </button>
+              ))}
+            </div>
+            {addingL1 ? (
+              <div style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', display: 'flex', gap: 4 }}>
+                <input autoFocus value={newL1} onChange={e => setNewL1(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e => { if (e.key === 'Enter') confirmAddL1(); if (e.key === 'Escape') { setAddingL1(false); setNewL1('') } }}
+                  style={{ flex: 1, padding: '4px 7px', borderRadius: 6, border: '1.5px solid var(--accent)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-sans)', minWidth: 0 }} />
+                <button onClick={confirmAddL1} style={{ padding: '4px 8px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>✓</button>
+                <button onClick={() => { setAddingL1(false); setNewL1('') }} style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'none', color: 'var(--text3)', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setAddingL1(true)} style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 12, fontWeight: 600, textAlign: 'left', fontFamily: 'var(--font-sans)', width: '100%', flexShrink: 0 }}>
+                + nuova categoria
+              </button>
+            )}
+          </div>
+
+          {/* L2 */}
+          <div className="cat-dropdown-l2" style={{ flex: 1, minWidth: 0, padding: '8px 0 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 4px' }}>
+              {sel1 ? (
+                (allCats[sel1]?.sub || []).length > 0
+                  ? allCats[sel1].sub.map(s => (
+                    <button key={s} className={'cat-dropdown-sub' + (s === sel2 ? ' active' : '')}
+                      onClick={() => setSel2(s === sel2 ? '' : s)}
+                      style={{ display: 'block', width: '100%', textAlign: 'left' }}>
+                      {sel2 === s ? '✓ ' : ''}{s}
+                    </button>
+                  ))
+                  : <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>Nessuna sottocategoria</div>
+              ) : (
+                <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>Seleziona una categoria L1</div>
+              )}
+            </div>
+            {sel1 && (addingL2 ? (
+              <div style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', display: 'flex', gap: 4 }}>
+                <input autoFocus value={newL2} onChange={e => setNewL2(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e => { if (e.key === 'Enter') confirmAddL2(); if (e.key === 'Escape') { setAddingL2(false); setNewL2('') } }}
+                  style={{ flex: 1, padding: '4px 7px', borderRadius: 6, border: '1.5px solid var(--accent)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-sans)', minWidth: 0 }} />
+                <button onClick={confirmAddL2} style={{ padding: '4px 8px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>✓</button>
+                <button onClick={() => { setAddingL2(false); setNewL2('') }} style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'none', color: 'var(--text3)', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setAddingL2(true)} style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 12, fontWeight: 600, textAlign: 'left', fontFamily: 'var(--font-sans)', width: '100%', flexShrink: 0 }}>
+                + nuova sottocategoria
+              </button>
+            ))}
+          </div>
+
+          {/* Rules panel */}
+          {rulesOpen && (
+            <div style={{ flex: '0 0 280px', padding: '14px 16px', background: 'var(--surface2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+                🔁 Applica anche ad altre transazioni
+              </div>
+              <div>
+                {conditions.map((cond, idx) => (
+                  <ConditionRow key={idx} cond={cond} idx={idx} total={conditions.length}
+                    onChange={nc => updateCond(idx, nc)} onRemove={() => removeCond(idx)} />
+                ))}
+                <button onClick={addCond} style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 5, cursor: 'pointer', fontSize: 11, color: 'var(--accent)', padding: '3px 10px', marginTop: 4, fontWeight: 600 }}>
+                  + Aggiungi condizione
+                </button>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', marginBottom: 6, letterSpacing: '.04em', textTransform: 'uppercase' }}>Applica a</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {[['future', '→ Da adesso in avanti'], ['all', '⟳ Tutte le transazioni']].map(([v, l]) => (
+                    <button key={v} onClick={() => setScope(v)} style={{
+                      padding: '6px 12px', borderRadius: 8, border: `1.5px solid ${scope === v ? 'var(--accent)' : 'var(--border)'}`,
+                      cursor: 'pointer', fontSize: 12, fontWeight: 600, textAlign: 'left',
+                      background: scope === v ? 'var(--accent)' : 'var(--surface)',
+                      color: scope === v ? '#fff' : 'var(--text2)',
+                      transition: 'all .12s',
+                    }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {ruleActive
+                ? <div style={{ fontSize: 12, fontWeight: 700, color: matchCount > 0 ? 'var(--accent)' : 'var(--text3)', marginTop: 4 }}>
+                    {matchCount > 0 ? `✓ ${matchCount} altre transazioni corrispondenti` : '⚠️ 0 transazioni corrispondenti'}
+                  </div>
+                : <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Imposta almeno una condizione sopra</div>
+              }
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="cat-dropdown-footer" style={{ borderTop: '1px solid var(--border)' }}>
+          {applied
+            ? <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 700 }}>✓ Salvato!</span>
+            : <>
+                <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={save}>
+                  Applica a {n} transazion{n === 1 ? 'e' : 'i'}{rulesOpen && ruleActive && matchCount > 0 ? ` + ${matchCount} altre` : ''}
+                </button>
+                <button onClick={() => setRulesOpen(o => !o)} style={{
+                  padding: '5px 12px', borderRadius: 8, border: `1.5px solid ${rulesOpen ? 'var(--accent)' : 'var(--border)'}`,
+                  cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'var(--surface)',
+                  color: rulesOpen ? 'var(--accent)' : 'var(--text3)',
+                }}>
+                  🔁 Regole {rulesOpen ? '◀' : '▶'}
+                </button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={onClose}>✕</button>
+              </>
+          }
+        </div>
+      </div>
+    </>
+  )
+}
+
 function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
   const updateTransaction = useStore(s=>s.updateTransaction)
   const addAiRule         = useStore(s=>s.addAiRule)
@@ -2545,6 +2798,7 @@ export default function TransactionsPage() {
   const [feedbackTx,     setFeedbackTx]     = useState(null)
   const [selected,       setSelected]       = useState(new Set())
   const [mergeTxOpen,    setMergeTxOpen]    = useState(false)
+  const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
   const [openCatTxId,    setOpenCatTxId]    = useState(null)
   const [showRegDate,    setShowRegDate]    = useState(false)
   const [colsOpen,       setColsOpen]       = useState(false)
@@ -2761,6 +3015,10 @@ export default function TransactionsPage() {
               ✨ AI Enrichment ({selected.size})
             </button>
           )}
+          <button className="btn btn-ghost" style={{fontSize:12,color:'var(--accent)',border:'1px solid var(--accent)',borderRadius:6,padding:'4px 10px',fontWeight:700}}
+            onClick={()=>setBulkEditOpen(true)}>
+            ✏️ Modifica Multipla
+          </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)',border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px'}}
             onClick={()=>{const txList=store.transactions.filter(t=>selected.has(t.txId));if(txList.length===1)setFeedbackTx(txList[0])}}>
             💬 Feedback
@@ -2793,6 +3051,13 @@ export default function TransactionsPage() {
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,marginLeft:'auto'}} onClick={()=>setSelected(new Set())}>✕ Deseleziona</button>
         </div>
+      )}
+
+      {bulkEditOpen && (
+        <BulkEditModal
+          txIds={selected}
+          onClose={() => { setBulkEditOpen(false); setSelected(new Set()) }}
+        />
       )}
 
       {mergeTxOpen && selected.size >= 2 && selected.size <= 3 && (
