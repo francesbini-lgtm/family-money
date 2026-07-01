@@ -916,6 +916,15 @@ export default function DashboardPage() {
         const prevSav  = prevInc - prevExp
         const prevRate = prevInc>0?Math.round(prevSav/prevInc*100):0
 
+        // Is the previous month fully covered by transactions?
+        const lastDayOfPrevMonth = new Date(prevD.getFullYear(), prevD.getMonth()+1, 0).getDate() // e.g. 30 for June
+        const prevMonthTxDates = transactions
+          .filter(t => !t.excluded && (t._effDate||(t.date||'')).startsWith(prevYM))
+          .map(t => parseInt((t._effDate||t.date||'').slice(8,10),10))
+          .filter(d => !isNaN(d))
+        const lastTxDay = prevMonthTxDates.length > 0 ? Math.max(...prevMonthTxDates) : 0
+        const prevMonthClosed = lastTxDay >= lastDayOfPrevMonth - 2 // allow 2-day tolerance
+
         // Savings averages
         const savgMonths = (n) => {
           let total = 0, count = 0
@@ -970,8 +979,14 @@ export default function DashboardPage() {
 
             {/* Row 2 — mese precedente */}
             <div style={{marginBottom:20}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
-                📅 {prevName.toUpperCase()} — MESE CHIUSO
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',marginBottom:8,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <span style={{color:'var(--text3)'}}>📅 {prevName.toUpperCase()} — MESE PASSATO</span>
+                {prevMonthClosed
+                  ? <span style={{color:'var(--green)',fontSize:10}}>✓ Chiuso</span>
+                  : <span style={{color:'var(--red)',fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:6,background:'rgba(220,50,50,.08)',border:'1px solid rgba(220,50,50,.25)'}}>
+                      ⚠️ Non chiuso — transazioni fino al {lastTxDay}/{prevD.getMonth()+1}, mancanti fino al {lastDayOfPrevMonth}
+                    </span>
+                }
               </div>
               <div className="kpi-grid">
                 <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(prevInc)} color="var(--green)"
