@@ -2093,6 +2093,9 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const updateTransaction = useStore(s=>s.updateTransaction)
   const userAccounts      = useStore(s=>s.userAccounts)
   const satiPots          = useStore(s=>s.satiPots)
+  const allTxs            = useStore(s=>s.transactions)
+  const compensatingTx    = tx._compensatedBy ? allTxs.find(t=>t.txId===tx._compensatedBy) : null
+  const compensatedLabel  = compensatingTx?.cat2?.toLowerCase()==='satispay' ? 'Compensato Satispay' : 'Rimborsato'
   const catOpen = openCatTxId === tx.txId
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)
   const [descOpen,    setDescOpen]    = useState(false)
@@ -2329,7 +2332,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                       <span style={{fontWeight:600,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount),2)} €</span>
                     </div>
                     <div style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
-                      <span style={{color:'var(--text2)'}}>Compensato Satispay</span>
+                      <span style={{color:'var(--text2)'}}>{compensatedLabel}</span>
                       <span style={{fontWeight:600,color:'var(--gold)'}}>− {fmtIT(tx._compensatedAmt,2)} €</span>
                     </div>
                     <div style={{borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,display:'flex',justifyContent:'space-between',gap:16}}>
