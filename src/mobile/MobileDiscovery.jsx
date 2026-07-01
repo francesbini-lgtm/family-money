@@ -429,7 +429,9 @@ export default function MobileDiscovery() {
   const [descDraft, setDescDraft]             = useState('')
 
   // ── Similar txs panel ────────────────────────────────────
-  const [similarOpen, setSimilarOpen] = useState(false)
+  const [similarOpen,     setSimilarOpen]     = useState(false)
+  const [similarSelected, setSimilarSelected] = useState(new Set()) // checked rows in simili panel
+  const [bulkEditPeers,   setBulkEditPeers]   = useState(new Set()) // txIds to co-patch with current
 
   // ── Note ──────────────────────────────────────────────────
   const [editingNote, setEditingNote] = useState(false)
@@ -500,6 +502,7 @@ export default function MobileDiscovery() {
     setSaltaSempreOpen(false)
     setEditingDesc(false)
     setSimilarOpen(false)
+    setSimilarSelected(new Set())
     setEditingNote(false)
   }, [current?.txId])
 
@@ -547,7 +550,7 @@ export default function MobileDiscovery() {
   async function saveDescAI(newDesc) {
     if (!newDesc.trim() || !current) return
     const txSnapshot = { ...current }
-    updateTransaction(current.txId, { descAI: newDesc.trim(), userEditedDesc: true })
+    patchWithPeers(current.txId, { descAI: newDesc.trim(), userEditedDesc: true })
     setEditingDesc(false)
     await learnException(txSnapshot, newDesc.trim())
     const match = autoDetectMatch(txSnapshot)
@@ -590,7 +593,7 @@ export default function MobileDiscovery() {
     if (!current) return
     const prevCat1 = current.cat1
     const prevCat2 = current.cat2
-    updateTransaction(current.txId, { cat1, cat2: cat2 || null })
+    patchWithPeers(current.txId, { cat1, cat2: cat2 || null })
     setActiveSection(null)
     // Show cat rule popup if meaningful category change
     if (cat1 && (cat1 !== prevCat1 || (cat2 || '') !== (prevCat2 || ''))) {
@@ -626,7 +629,7 @@ export default function MobileDiscovery() {
 
   function applyCity(city) {
     if (!current) return
-    updateTransaction(current.txId, { city: city || null })
+    patchWithPeers(current.txId, { city: city || null })
     setActiveSection(null)
   }
 
@@ -636,9 +639,16 @@ export default function MobileDiscovery() {
     setCustomCats({ ...customCats, [cat1]: { sub: [...existing, newSub] } })
   }
 
+  // Applies a patch to current tx AND all bulkEditPeers simultaneously
+  function patchWithPeers(txId, patch) {
+    updateTransaction(txId, patch)
+    bulkEditPeers.forEach(id => { if (id !== txId) updateTransaction(id, patch) })
+  }
+
   function advance() {
     if (!current) return
     markSeen(current.txId)
+    setBulkEditPeers(new Set())
     // Pick next from queue (excluding current) — use snapshot of current queue
     const next = queue.find(t => t.txId !== current.txId)
     setCurrentTxId(next?.txId || null)
@@ -652,9 +662,15 @@ export default function MobileDiscovery() {
   function handleOK() {
     if (!current) return
     pushUndo()
-    setQueuedIds(prev => { const n = new Set(prev); n.delete(current.txId); return n })
+    setQueuedIds(prev => {
+      const n = new Set(prev)
+      n.delete(current.txId)
+      bulkEditPeers.forEach(id => n.delete(id))
+      return n
+    })
     updateTransaction(current.txId, { userEditedCat: true })
-    setResolvedCount(c => c + 1)
+    bulkEditPeers.forEach(id => updateTransaction(id, { userEditedCat: true }))
+    setResolvedCount(c => c + 1 + bulkEditPeers.size)
     advance()
   }
 
@@ -803,9 +819,9 @@ export default function MobileDiscovery() {
           margin:'0 12px',background:'var(--surface)',borderRadius:16,
           border:'1px solid var(--border)',boxShadow:'0 4px 20px rgba(0,0,0,.07)'}}>
           {/* Header */}
-          <div style={{flexShrink:0,padding:'14px 16px 10px',borderBottom:'1px solid var(--border)',
+          <div style={{flexShrink:0,padding:'12px 14px 10px',borderBottom:'1px solid var(--border)',
             display:'flex',alignItems:'center',gap:10}}>
-            <button onClick={()=>setSimilarOpen(false)}
+            <button onClick={()=>{setSimilarOpen(false);setSimilarSelected(new Set())}}
               style={{background:'none',border:'none',cursor:'pointer',color:'var(--accent)',
                 fontSize:13,fontWeight:700,fontFamily:'var(--font-sans)',padding:0,flexShrink:0}}>
               ← Indietro
@@ -818,6 +834,36 @@ export default function MobileDiscovery() {
               {sameNameTxs.length} tx
             </span>
           </div>
+          {/* Select-all bar */}
+          <div style={{flexShrink:0,padding:'8px 14px',borderBottom:'1px solid var(--border)',
+            display:'flex',alignItems:'center',gap:10,background:'var(--surface2)'}}>
+            <label style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',flex:1,
+              fontSize:12,fontWeight:600,color:'var(--text2)',fontFamily:'var(--font-sans)'}}>
+              <input type="checkbox"
+                checked={similarSelected.size === sameNameTxs.length && sameNameTxs.length > 0}
+                onChange={e => setSimilarSelected(e.target.checked
+                  ? new Set(sameNameTxs.map(t => t.txId))
+                  : new Set()
+                )}
+                style={{width:16,height:16,cursor:'pointer',accentColor:'var(--accent)'}}
+              />
+              Seleziona tutte ({sameNameTxs.length})
+            </label>
+            {similarSelected.size > 0 && (
+              <button
+                onClick={() => {
+                  setBulkEditPeers(new Set(similarSelected))
+                  setSimilarOpen(false)
+                  setSimilarSelected(new Set())
+                }}
+                style={{padding:'6px 14px',borderRadius:10,border:'none',
+                  background:'var(--accent)',color:'#fff',
+                  fontSize:12,fontWeight:800,cursor:'pointer',fontFamily:'var(--font-sans)',
+                  flexShrink:0}}>
+                ✏️ Modifica Multipla ({similarSelected.size})
+              </button>
+            )}
+          </div>
           {/* List */}
           <div style={{flex:1,overflowY:'auto'}}>
             {sameNameTxs.map(t => {
@@ -826,11 +872,21 @@ export default function MobileDiscovery() {
                 ? `${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`
                 : d
               const isNeg = t.amount < 0
+              const isSel = similarSelected.has(t.txId)
               return (
-                <div key={t.txId} style={{display:'flex',alignItems:'center',
-                  padding:'11px 16px',borderBottom:'1px solid var(--border)',gap:10}}>
+                <div key={t.txId}
+                  onClick={() => setSimilarSelected(prev => {
+                    const n = new Set(prev); isSel ? n.delete(t.txId) : n.add(t.txId); return n
+                  })}
+                  style={{display:'flex',alignItems:'center',
+                    padding:'11px 14px',borderBottom:'1px solid var(--border)',gap:10,
+                    cursor:'pointer',
+                    background:isSel?'rgba(100,100,220,.07)':'transparent',
+                    transition:'background .1s'}}>
+                  <input type="checkbox" readOnly checked={isSel}
+                    style={{width:16,height:16,flexShrink:0,accentColor:'var(--accent)',cursor:'pointer'}}/>
                   <span style={{fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',
-                    flexShrink:0,minWidth:70}}>{disp}</span>
+                    flexShrink:0,minWidth:64}}>{disp}</span>
                   {t.city && (
                     <span style={{fontSize:12,color:'var(--text2)',flex:1,
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -854,6 +910,20 @@ export default function MobileDiscovery() {
         <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column',
           margin:'0 12px',background:'var(--surface)',borderRadius:16,
           border:'1px solid var(--border)',boxShadow:'0 4px 20px rgba(0,0,0,.07)'}}>
+
+          {/* Bulk edit banner */}
+          {bulkEditPeers.size > 0 && (
+            <div style={{flexShrink:0,margin:'10px 12px 0',padding:'8px 12px',borderRadius:10,
+              background:'rgba(100,100,220,.1)',border:'1px solid rgba(100,100,220,.25)',
+              display:'flex',alignItems:'center',gap:8}}>
+              <span style={{fontSize:12,fontWeight:700,color:'var(--accent)',flex:1}}>
+                ✏️ Modifica multipla attiva — le modifiche si applicano anche a {bulkEditPeers.size} transazion{bulkEditPeers.size===1?'e':'i'} simili
+              </span>
+              <button onClick={()=>setBulkEditPeers(new Set())}
+                style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',
+                  fontSize:14,padding:0,flexShrink:0}}>✕</button>
+            </div>
+          )}
 
           {/* Amount row */}
           <div style={{flexShrink:0,padding:'14px 16px 0',display:'flex',alignItems:'center',gap:8}}>
@@ -1074,7 +1144,7 @@ export default function MobileDiscovery() {
                           background:'var(--bg)',color:'var(--text3)',fontSize:12,cursor:'pointer',
                           fontFamily:'var(--font-sans)'}}>Annulla</button>
                       <button onClick={()=>{
-                        updateTransaction(current.txId, { note: noteDraft.trim() || null })
+                        patchWithPeers(current.txId, { note: noteDraft.trim() || null })
                         setEditingNote(false)
                       }}
                         style={{padding:'6px 14px',borderRadius:8,border:'none',background:'var(--accent)',
