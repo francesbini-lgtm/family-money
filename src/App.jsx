@@ -9,6 +9,7 @@ if (typeof window !== 'undefined') { import('./store/useStore').then(m => { wind
 import { setHouseholdId } from './services/firestore'
 import { navigateRef } from './utils/navigate'
 import NotifichePage from './pages/NotifichePage'
+import ImportModal from './components/ImportModal'
 
 import DashboardPage       from './pages/DashboardPage'
 import TransactionsPage    from './pages/TransactionsPage'
@@ -168,7 +169,21 @@ function AppShell() {
   const { loadAllData, startRealtimeSync, stopRealtimeSync, loadDemoData, isDemoMode, onboardingDone, setOnboardingDone, checkOnboarding, transactions } = useStore()
   const [page, setPage]         = useState('dashboard')
   const [showOnboarding, setShowOnboarding] = useState(false)
-  const [menuOpen, setMenu] = useState(false)
+  const [menuOpen, setMenu]     = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+
+  const missingDays = useMemo(() => {
+    const dates = transactions
+      .filter(t => !t._forcedBalance && !t.excluded && t.date)
+      .map(t => t.date)
+      .sort()
+    if (!dates.length) return null
+    const last = new Date(dates[dates.length - 1])
+    last.setHours(0, 0, 0, 0)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return Math.floor((today - last) / 86400000)
+  }, [transactions])
 
   // Auto-refresh after 5 minutes of inactivity
   useEffect(() => {
@@ -259,6 +274,25 @@ function AppShell() {
           >
             {darkMode ? '☀️' : '🌙'}
           </button>
+          {missingDays !== null && missingDays > 0 && (
+            <button
+              onClick={() => setImportOpen(true)}
+              title={`Ultimo dato: ${missingDays} giorni fa — clicca per importare CSV`}
+              style={{
+                display:'flex', alignItems:'center', gap:4,
+                padding:'4px 10px', borderRadius:8, cursor:'pointer',
+                fontSize:11, fontWeight:700, lineHeight:1,
+                border:'1px solid',
+                background: missingDays < 10 ? 'rgba(56,161,105,.12)' : missingDays < 20 ? 'rgba(221,107,32,.12)' : 'rgba(229,62,62,.12)',
+                borderColor: missingDays < 10 ? 'rgba(56,161,105,.4)' : missingDays < 20 ? 'rgba(221,107,32,.4)' : 'rgba(229,62,62,.4)',
+                color: missingDays < 10 ? '#38a169' : missingDays < 20 ? '#dd6b20' : '#e53e3e',
+                transition:'all .15s',
+              }}
+            >
+              <span style={{fontSize:13}}>⚠️</span>
+              -{missingDays}d missing
+            </button>
+          )}
             {(() => {
               const txs = useStore(s => s.transactions)
               const uncatCount = txs.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
@@ -285,6 +319,7 @@ function AppShell() {
           </ErrorBoundary>
         </main>
       </div>
+      {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
     </div>
   )
 }
