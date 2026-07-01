@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -728,7 +728,8 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                   ? 'rgba(229,62,62,.06)'
                   : i%2===0 ? 'transparent' : 'var(--surface)'
                 return (
-                  <tr key={i} style={{borderBottom:'1px solid var(--border)', background:rowBg}}>
+                  <React.Fragment key={i}>
+                  <tr style={{borderBottom:'1px solid var(--border)', background:rowBg}}>
                     <td style={{padding:'6px 8px',fontWeight:600,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                       {imp.merchant || '—'}
                     </td>
@@ -797,6 +798,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose
                       </td>
                     </tr>
                   )}
+                  </React.Fragment>
                 )
               })}
             </tbody>
