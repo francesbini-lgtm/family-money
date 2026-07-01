@@ -1,9 +1,15 @@
 import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 
-/* ─── small inline stat ─── */
-function MiniStat({ label, value, warn, neutral }) {
-  const isProb = warn && value > 0
+function fmtEur(v) {
+  if (v === 0) return '€ 0'
+  if (v >= 1000) return `€ ${(v / 1000).toFixed(1)}k`
+  return `€ ${Math.round(v).toLocaleString('it-IT')}`
+}
+
+/* ─── stat row ─── */
+function MiniStat({ label, count, euros, warn, neutral }) {
+  const isProb = warn && count > 0
   const col = neutral ? 'var(--text2)'
             : isProb  ? 'var(--red, #ef4444)'
             : warn     ? 'var(--green, #22c55e)'
@@ -16,18 +22,21 @@ function MiniStat({ label, value, warn, neutral }) {
       border: `1px solid ${isProb ? 'rgba(220,50,50,.25)' : 'var(--border)'}`,
       borderRadius: 10,
     }}>
-      <span style={{ fontSize: 13, color: 'var(--text2)' }}>{label}</span>
-      <span style={{ fontSize: 18, fontWeight: 800, color: col }}>
-        {value}
-        {warn && value === 0 && <span style={{ fontSize: 12, marginLeft: 5 }}>✅</span>}
-      </span>
+      <span style={{ fontSize: 13, color: 'var(--text2)', flex: 1 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)' }}>{fmtEur(euros)}</span>
+        <span style={{ fontSize: 18, fontWeight: 800, color: col, minWidth: 28, textAlign: 'right' }}>
+          {count}
+          {warn && count === 0 && <span style={{ fontSize: 12, marginLeft: 4 }}>✅</span>}
+        </span>
+      </div>
     </div>
   )
 }
 
-/* ─── Split stat (two values in one row) ─── */
-function SplitStat({ icon, label, leftLabel, leftVal, rightLabel, rightVal }) {
-  const anyProb = leftVal > 0 || rightVal > 0
+/* ─── Split stat (Satispay) ─── */
+function SplitStat({ icon, label, leftLabel, leftCount, leftEuros, rightLabel, rightCount, rightEuros }) {
+  const anyProb = leftCount > 0 || rightCount > 0
   return (
     <div style={{
       background: 'var(--surface)',
@@ -37,35 +46,35 @@ function SplitStat({ icon, label, leftLabel, leftVal, rightLabel, rightVal }) {
       <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
         {icon} {label}
       </div>
-      <div style={{ display: 'flex', gap: 0 }}>
-        <div style={{ flex: 1, borderRight: '1px solid var(--border)', paddingRight: 10 }}>
-          <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
-            {leftLabel}
-          </div>
-          <div style={{
-            fontSize: 20, fontWeight: 800,
-            color: leftVal > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
+      <div style={{ display: 'flex' }}>
+        {[
+          { l: leftLabel,  cnt: leftCount,  eur: leftEuros },
+          { l: rightLabel, cnt: rightCount, eur: rightEuros },
+        ].map(({ l, cnt, eur }, i) => (
+          <div key={l} style={{
+            flex: 1,
+            borderRight: i === 0 ? '1px solid var(--border)' : 'none',
+            paddingRight: i === 0 ? 10 : 0,
+            paddingLeft:  i === 1 ? 10 : 0,
           }}>
-            {leftVal}{leftVal === 0 && <span style={{ fontSize: 11, marginLeft: 4 }}>✅</span>}
+            <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
+              {l}
+            </div>
+            <div style={{
+              fontSize: 20, fontWeight: 800, lineHeight: 1,
+              color: cnt > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
+            }}>
+              {cnt}{cnt === 0 && <span style={{ fontSize: 11, marginLeft: 3 }}>✅</span>}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{fmtEur(eur)}</div>
           </div>
-        </div>
-        <div style={{ flex: 1, paddingLeft: 10 }}>
-          <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
-            {rightLabel}
-          </div>
-          <div style={{
-            fontSize: 20, fontWeight: 800,
-            color: rightVal > 0 ? 'var(--red, #ef4444)' : 'var(--green, #22c55e)',
-          }}>
-            {rightVal}{rightVal === 0 && <span style={{ fontSize: 11, marginLeft: 4 }}>✅</span>}
-          </div>
-        </div>
+        ))}
       </div>
     </div>
   )
 }
 
-/* ─── Accuracy ring (small) ─── */
+/* ─── Accuracy ring ─── */
 function Ring({ pct }) {
   const r = 38
   const circ = 2 * Math.PI * r
@@ -91,7 +100,6 @@ function Ring({ pct }) {
   )
 }
 
-/* ─── Section header ─── */
 function SectionHead({ title }) {
   return (
     <div style={{
@@ -104,7 +112,7 @@ function SectionHead({ title }) {
   )
 }
 
-/* ─── Main component ─── */
+/* ─── Main ─── */
 export default function MobileQuality() {
   const transactions = useStore(s => s.transactions)
   const aiRules      = useStore(s => s.aiRules)
@@ -118,69 +126,83 @@ export default function MobileQuality() {
   }, [appPrefs])
 
   const stats = useMemo(() => {
-    const txs = transactions.filter(t => !t.excluded && !t._forcedBalance)
-    const total = txs.length
+    const txMap = new Map(transactions.map(t => [t.txId, t]))
+    const txs   = transactions.filter(t => !t.excluded && !t._forcedBalance)
+    const total  = txs.length
     const totalValue = txs.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    const noCat2     = txs.filter(t => !t.cat2)
-    const altroAltro = txs.filter(t => t.cat1 === 'Altro' && t.cat2 === 'Altro')
-    const cardTxs    = txs.filter(t => t.card && t.card !== 'null' && t.card !== 'undefined')
+    const noCat2List   = txs.filter(t => !t.cat2)
+    const noCat2Val    = noCat2List.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    // Satispay
+    const altroAltroList = txs.filter(t => t.cat1 === 'Altro' && t.cat2 === 'Altro')
+    const altroAltroVal  = altroAltroList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
+
+    const cardList = txs.filter(t => t.card && t.card !== 'null' && t.card !== 'undefined')
+    const cardVal  = cardList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
+
     const satiMatches = appPrefs?.satiMatches || {}
-    const satiAddebitiNonAbb = Object.values(satiMatches).filter(m => m.status !== 'matched').length
+    const satiAddEntries = Object.entries(satiMatches).filter(([, m]) => m.status !== 'matched')
+    const satiAddebitiCount = satiAddEntries.length
+    const satiAddebitiVal   = satiAddEntries.reduce((s, [txId]) => {
+      const t = txMap.get(txId)
+      return s + (t ? Math.abs(t.amount || 0) : 0)
+    }, 0)
     const matchedIncomeIds = new Set(
       Object.values(satiMatches)
         .filter(m => m.status === 'matched' && m.incomeTxId)
         .map(m => m.incomeTxId)
     )
-    const satiAccreditiNonAbb = transactions.filter(t =>
+    const satiAccList  = transactions.filter(t =>
       t.cat1 === 'Entrate' &&
       (t.cat2 || '').toLowerCase() === 'satispay' &&
       !matchedIncomeIds.has(t.txId)
-    ).length
+    )
+    const satiAccCount = satiAccList.length
+    const satiAccVal   = satiAccList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    // PayPal
     const paypalImports = appPrefs?.paypalImports || []
-    const ppUnmatched   = paypalImports.filter(i => i.status === 'unmatched').length
-    const ppPending     = paypalImports.filter(i => i.status === 'pending_approval').length
+    const ppList    = paypalImports.filter(i => i.status === 'unmatched')
+    const ppPending = paypalImports.filter(i => i.status === 'pending_approval').length
+    const ppCount   = ppList.length
+    const ppVal     = ppList.reduce((s, i) => s + Math.abs(i.amount || 0), 0)
 
-    // Altre Entrate non abbinate
     const compLinks = appPrefs?.compLinks || {}
     const EXCL_L2   = ['satispay', ...nicknames]
-    const altreEntrateNonAbb = transactions.filter(t =>
+    const aeList    = transactions.filter(t =>
       t.amount > 0 && !t._forcedBalance &&
       (t.cat1 === 'Entrate' || t.cat2 === 'Prestiti') &&
       !EXCL_L2.includes((t.cat2 || '').toLowerCase()) &&
       !compLinks[t.txId]
-    ).length
+    )
+    const aeCount = aeList.length
+    const aeVal   = aeList.reduce((s, t) => s + (t.amount || 0), 0)
 
-    // Veicoli senza veicolo assegnato (excl. Carburante + Parcheggio)
     const vehTxVehicles = appPrefs?.vehTxVehicles || {}
     const VEH_EXCL = ['Carburante', 'Parcheggio']
-    const veicNonAbb = txs.filter(t =>
-      t.cat1 === 'Veicoli' &&
-      !VEH_EXCL.includes(t.cat2) &&
-      !vehTxVehicles[t.txId]
-    ).length
+    const veicList  = txs.filter(t =>
+      t.cat1 === 'Veicoli' && !VEH_EXCL.includes(t.cat2) && !vehTxVehicles[t.txId]
+    )
+    const veicCount = veicList.length
+    const veicVal   = veicList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
-    // Accuracy
     const problemSet = new Set([
-      ...noCat2.map(t => t.txId),
-      ...altroAltro.map(t => t.txId),
+      ...noCat2List.map(t => t.txId),
+      ...altroAltroList.map(t => t.txId),
     ])
-    const problemValue = txs
-      .filter(t => problemSet.has(t.txId))
-      .reduce((s, t) => s + Math.abs(t.amount || 0), 0)
-    const accuracy = totalValue > 0
-      ? ((totalValue - problemValue) / totalValue) * 100
-      : 100
+    const problemValue = txs.filter(t => problemSet.has(t.txId)).reduce((s, t) => s + Math.abs(t.amount || 0), 0)
+    const accuracy = totalValue > 0 ? ((totalValue - problemValue) / totalValue) * 100 : 100
 
     const rules = aiRules || []
     return {
-      total, noCat2: noCat2.length, altroAltro: altroAltro.length, cardTxs: cardTxs.length,
-      satiAddebitiNonAbb, satiAccreditiNonAbb, ppUnmatched, ppPending,
-      altreEntrateNonAbb, veicNonAbb,
+      total, totalValue,
+      noCat2Count: noCat2List.length, noCat2Val,
+      altroAltroCount: altroAltroList.length, altroAltroVal,
+      cardCount: cardList.length, cardVal,
+      satiAddebitiCount, satiAddebitiVal,
+      satiAccCount, satiAccVal,
+      ppCount, ppVal, ppPending,
+      aeCount, aeVal,
+      veicCount, veicVal,
       accuracy, problematic: problemSet.size,
       totalRules: rules.length, kingRules: rules.filter(r => r.isKing).length,
     }
@@ -204,7 +226,7 @@ export default function MobileQuality() {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Accuracy Score</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>
-            Ponderato sul valore. Errori: senza L2 + Altro › Altro.
+            Ponderato sul valore. Senza L2 + Altro › Altro.
           </div>
           <div style={{
             marginTop: 10, display: 'inline-block',
@@ -218,19 +240,20 @@ export default function MobileQuality() {
         </div>
       </div>
 
-      {/* Quick totals row */}
+      {/* Quick totals */}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         {[
-          { l: 'Totali',   v: stats.total,                       c: 'var(--accent)' },
-          { l: 'Accurate', v: stats.total - stats.problematic,   c: 'var(--green, #22c55e)' },
-          { l: 'Problemi', v: stats.problematic,                 c: stats.problematic > 0 ? 'var(--red, #ef4444)' : 'var(--text3)' },
-        ].map(({ l, v, c }) => (
+          { l: 'Totali',   v: stats.total,                     c: 'var(--accent)',           sub: fmtEur(stats.totalValue) },
+          { l: 'Accurate', v: stats.total - stats.problematic, c: 'var(--green, #22c55e)',   sub: null },
+          { l: 'Problemi', v: stats.problematic,               c: stats.problematic > 0 ? 'var(--red, #ef4444)' : 'var(--text3)', sub: null },
+        ].map(({ l, v, c, sub }) => (
           <div key={l} style={{
             flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 10, padding: '10px', textAlign: 'center',
           }}>
-            <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{l}</div>
+            <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>{l}</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: c }}>{v}</div>
+            {sub && <div style={{ fontSize: 10, color: 'var(--text3)' }}>{sub}</div>}
           </div>
         ))}
       </div>
@@ -238,8 +261,8 @@ export default function MobileQuality() {
       {/* Categorizzazione */}
       <SectionHead title="Categorizzazione" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <MiniStat label="🏷️ Non cat. L2"    value={stats.noCat2}     warn />
-        <MiniStat label="🔄 ALTRO › ALTRO"   value={stats.altroAltro} warn />
+        <MiniStat label="🏷️ Non cat. L2"   count={stats.noCat2Count}     euros={stats.noCat2Val}     warn />
+        <MiniStat label="🔄 ALTRO › ALTRO"  count={stats.altroAltroCount} euros={stats.altroAltroVal} warn />
       </div>
 
       {/* Abbinamenti */}
@@ -247,33 +270,32 @@ export default function MobileQuality() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <SplitStat
           icon="💚" label="Satispay non abbinate"
-          leftLabel="Addebiti" leftVal={stats.satiAddebitiNonAbb}
-          rightLabel="Accrediti" rightVal={stats.satiAccreditiNonAbb}
+          leftLabel="Addebiti"  leftCount={stats.satiAddebitiCount}  leftEuros={stats.satiAddebitiVal}
+          rightLabel="Accrediti" rightCount={stats.satiAccCount}     rightEuros={stats.satiAccVal}
         />
         <div>
-          <MiniStat label="💙 PayPal non abbinate" value={stats.ppUnmatched} warn />
+          <MiniStat label="💙 PayPal non abbinate" count={stats.ppCount} euros={stats.ppVal} warn />
           {stats.ppPending > 0 && (
             <div style={{ fontSize: 11, color: 'var(--text3)', paddingLeft: 14, marginTop: 3 }}>
-              + {stats.ppPending} in attesa approvazione
+              + {stats.ppPending} in attesa
             </div>
           )}
         </div>
-        <MiniStat label="💸 Altre Entrate non abbinate" value={stats.altreEntrateNonAbb} warn />
-        <MiniStat label="🚗 Veicoli senza veicolo"      value={stats.veicNonAbb}          warn />
-        <MiniStat label="💳 Carta di credito"            value={stats.cardTxs}             neutral />
+        <MiniStat label="💸 Altre Entrate non abbinate"     count={stats.aeCount}   euros={stats.aeVal}   warn />
+        <MiniStat label="🚗 Veicoli senza veicolo assegnato" count={stats.veicCount} euros={stats.veicVal} warn />
+        <MiniStat label="💳 Carta di credito"               count={stats.cardCount} euros={stats.cardVal} neutral />
       </div>
 
       {/* Regole */}
       <SectionHead title="Regole AI" />
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 10, padding: '14px 16px',
-        display: 'flex',
+        borderRadius: 10, padding: '14px 16px', display: 'flex',
       }}>
         {[
-          { l: 'Totali',    v: stats.totalRules,                        c: 'var(--text)' },
-          { l: '👑 King',   v: stats.kingRules,                         c: 'var(--gold, #f59e0b)' },
-          { l: 'Standard',  v: stats.totalRules - stats.kingRules,      c: 'var(--text2)' },
+          { l: 'Totali',   v: stats.totalRules,                   c: 'var(--text)' },
+          { l: '👑 King',  v: stats.kingRules,                    c: 'var(--gold, #f59e0b)' },
+          { l: 'Standard', v: stats.totalRules - stats.kingRules, c: 'var(--text2)' },
         ].map(({ l, v, c }, i) => (
           <div key={l} style={{
             flex: 1, textAlign: 'center',
