@@ -2226,7 +2226,7 @@ function AddManualTxModal({ onClose }) {
 }
 
 // ── Quick filters ─────────────────────────────────────────
-function QuickFilters({ transactions, hideComm, setHideComm, selected }) {
+function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideSmall, selected }) {
   const store   = useStore()
   const filters = store.filters
   const today   = new Date()
@@ -2254,7 +2254,8 @@ function QuickFilters({ transactions, hideComm, setHideComm, selected }) {
       if(filters.dateFrom===thisYM+'-01') store.clearFilters()
       else { store.setFilter('dateFrom',thisYM+'-01'); store.setFilter('dateTo',thisYM+'-31') }
     }},
-    {id:'hidecomm', label:'Nascondi commissioni', active:hideComm, action:()=>setHideComm(v=>!v)},
+    {id:'hidecomm',  label:'Nascondi commissioni', active:hideComm,  action:()=>setHideComm(v=>!v)},
+    {id:'hidesmall', label:'Nascondi <1€',          active:hideSmall, action:()=>setHideSmall(v=>!v)},
   ]
 
   const selTxs = selected?.size > 0
@@ -2818,6 +2819,7 @@ export default function TransactionsPage() {
   const [colFilters,     setColFilters]     = useState({})
   const [filterPopup,    setFilterPopup]    = useState(null)
   const [hideComm,       setHideComm]       = useState(true)
+  const [hideSmall,      setHideSmall]      = useState(false)
 
   // Close cat dropdown on click outside
   useEffect(() => {
@@ -2857,7 +2859,8 @@ export default function TransactionsPage() {
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
     if (filters.flagged)        txs = txs.filter(t => !!t._flagged)
     if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.card))
-    if (hideComm) txs = txs.filter(t => t.descAI !== 'Commissioni' && t.cat2 !== 'Commissione Banca')
+    if (hideComm)  txs = txs.filter(t => t.descAI !== 'Commissioni' && t.cat2 !== 'Commissione Banca')
+    if (hideSmall) txs = txs.filter(t => Math.abs(t.amount) >= 1)
     // Column filters (Excel-style)
     Object.entries(colFilters).forEach(([colId, vals]) => {
       if (!vals || vals.length === 0) return
@@ -2879,7 +2882,7 @@ export default function TransactionsPage() {
       return sortDir==='asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return txs
-  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm])
+  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm, hideSmall])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d==='asc'?'desc':'asc')
@@ -3078,7 +3081,7 @@ export default function TransactionsPage() {
 
       <div style={{position:'sticky',top:0,zIndex:10,background:'var(--bg)',paddingBottom:8,marginBottom:0}}>
         <KPIBar txs={filtered}/>
-        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm} selected={selected}/>
+        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm} hideSmall={hideSmall} setHideSmall={setHideSmall} selected={selected}/>
         <FilterBar/>
       </div>
 
