@@ -346,6 +346,29 @@ function isAlreadyImported(item, existingImports) {
   return existingImports.some(e => dupKey(e) === k)
 }
 
+// ── Build merchant→category history map for AI prompt ─────
+function buildMerchantHistory(transactions) {
+  const paypalTxs = transactions.filter(t => {
+    const h = `${t.merchant||''} ${t.description||''} ${t.descAI||''}`.toLowerCase()
+    return (h.includes('paypal') || h.includes('pay pal')) && t.cat1 && t.cat1 !== 'Non Categorizzato' && t.cat1 !== 'Altro'
+  })
+  const merchantMap = {}
+  paypalTxs.forEach(t => {
+    const m = (t.descAI || t.merchant || '').trim()
+    if (!m || m.toLowerCase().includes('paypal')) return
+    const k = `${t.cat1}||${t.cat2||''}`
+    if (!merchantMap[m]) merchantMap[m] = {}
+    merchantMap[m][k] = (merchantMap[m][k] || 0) + 1
+  })
+  const result = {}
+  Object.entries(merchantMap).forEach(([merchant, counts]) => {
+    const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+    const [cat1, cat2] = best[0].split('||')
+    result[merchant] = { cat1, cat2: cat2 || '' }
+  })
+  return result
+}
+
 // ── Merchant history category suggestion ──────────────────
 function getMerchantCatSuggestion(merchant, transactions) {
   if (!merchant || !transactions?.length) return {}
@@ -408,6 +431,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
     setProc(true)
     setResults(null)
     try {
+      const merchantHistory = buildMerchantHistory(transactions)
       const pdfs   = files.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf')
       const images = files.filter(f => !f.name.toLowerCase().endsWith('.pdf') && f.type !== 'application/pdf')
 
@@ -424,7 +448,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
             const content = await page.getTextContent()
             fullText += content.items.map(item => item.str).join(' ') + '\n'
           }
-          const parsed = await callPaypalText(fullText, apiKey, importYear)
+          const parsed = await callPaypalText(fullText, apiKey, importYear, merchantHistory)
           allResults = allResults.concat(parsed)
         }
       }
@@ -437,7 +461,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
           reader.onerror = reject
           reader.readAsDataURL(file)
         })))
-        const parsed = await callPaypalVision(base64List, apiKey, importYear)
+        const parsed = await callPaypalVision(base64List, apiKey, importYear, merchantHistory)
         allResults = allResults.concat(parsed)
       }
 
