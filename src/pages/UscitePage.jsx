@@ -87,8 +87,8 @@ function TxDetailModal({ tx, onClose }) {
   const [editCat2, setEditCat2] = useState(tx.cat2 || '')
   const [editDescAI, setEditDescAI] = useState(tx?.descAI || '')
   const [saved, setSaved] = useState(false)
-  const [toReview, setToReview] = useState(tx?._toReview || false)
-  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
+  const [toReview, setToReview] = useState(tx?._flagged || false)
+  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_flagged:n}) }
   const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
   function toggleNonRecurring() { const n=!nonRecurring; setNonRecurring(n); updateTransaction(tx.txId,{_nonRecurring:n}) }
   const _allCats = getMergedCats(customCats)

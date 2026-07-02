@@ -94,7 +94,12 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
     if (!selected) return
     const absExp = Math.abs(selected.amount)
     const isFull = absExp <= incomeEntry.amount
-    const links = getSatiComp()
+    const links = { ...getSatiComp() }
+    // If re-linking to a different expense, restore the previously linked one
+    const oldLink = links[incomeEntry.txId]
+    if (oldLink && oldLink.expTxId !== selected.txId) {
+      updateTransaction(oldLink.expTxId, { excluded: false, _compensatedAmt: null, _compensatedBy: null })
+    }
     links[incomeEntry.txId] = { expTxId: selected.txId, mode: isFull ? 'full' : 'partial', compensatedAmt: incomeEntry.amount }
     saveSatiComp(links)
     if (isFull) {
@@ -107,7 +112,7 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
   }
 
   function unlink() {
-    const links = getSatiComp()
+    const links = { ...getSatiComp() }
     if (links[incomeEntry.txId]) {
       const expTxId = links[incomeEntry.txId].expTxId
       updateTransaction(expTxId, { excluded: false, _compensatedAmt: undefined, _compensatedBy: undefined })
@@ -1043,15 +1048,39 @@ function FundCard({ pot, allPots }) {
   }, [pot.data, transactions, allYMs, allPots, now]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function autoLinkAll() {
+    // Accumulate ALL month updates into a single object and save once,
+    // otherwise each linkMonth call would spread the stale render-time
+    // pot.data and clobber the links applied in previous iterations.
+    const newData = { ...(pot.data || {}) }
+    let changed = false
+
     Object.entries(autoSuggestions).forEach(([ym, match]) => {
       const mt = monthTotal(ym)
       const txIds = Array.isArray(match) ? match : match.txIds
       const txArg = txIds.length === 1 ? txIds[0] : txIds
-      linkMonth(ym, txArg, mt)
+
+      const prev = newData[ym] || {}
+      newData[ym] = { ...prev, linked: txArg, linkedAmt: mt, explicitUnlinked: false }
+      changed = true
+
+      // Auto-generate category splits on linked transactions (same as linkMonth)
+      txIds.forEach(txId => {
+        const tx = transactions.find(t => t.txId === txId)
+        if (!tx) return
+        const splits = computeSatiSplits(ym, tx.amount, mt)
+        updateTransaction(txId, {
+          splits,
+          descAI: 'Accantonamento Satispay',
+          _satiLinked: { potId: pot.id, potName: pot.name, ym }
+        })
+      })
+
       if (!Array.isArray(match) && match.otherPotId) {
         linkOtherPot(match.otherPotId, ym, txArg, match.otherAmt)
       }
     })
+
+    if (changed) updateSatiPot(pot.id, { data: newData })
   }
 
   function setCell(ym, voceId, val) {
@@ -1880,10 +1909,10 @@ function SatiTxDetailModal({ tx, onClose }) {
   const [cat1, setCat1]   = useState(tx.cat1 || '')
   const [cat2, setCat2]   = useState(tx.cat2 || '')
   const [saved, setSaved] = useState(false)
-  const [toReview, setToReview] = useState(tx?._toReview || false)
+  const [toReview, setToReview] = useState(tx?._flagged || false)
   function toggleReview() {
     const n=!toReview; setToReview(n)
-    if (tx._source !== 'veh') updateTransaction(tx.txId,{_toReview:n})
+    if (tx._source !== 'veh') updateTransaction(tx.txId,{_flagged:n})
   }
   const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
   function toggleNonRecurring() {
@@ -2121,6 +2150,16 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       }
     }
     saveMatches({ ...satiMatches, ...computed })
+
+    // Apply newly auto-matched pairs to the transactions themselves
+    // (exclude + rename income, compensate expense — same as manual applyMatch).
+    // Skip pairs that were already matched with the same income tx.
+    Object.entries(computed).forEach(([expTxId, m]) => {
+      if (m.status !== 'matched' || !m.incomeTxId) return
+      const prev = satiMatches[expTxId]
+      if (prev?.status === 'matched' && prev?.incomeTxId === m.incomeTxId) return
+      applyMatch(expTxId, m.incomeTxId)
+    })
   }, [speseDaComp, satiIncome])
 
   // ── State ────────────────────────────────────────────────
@@ -2764,7 +2803,12 @@ function SatiUsciteSection({ satiUscite, satiPots }) {
     const map = {}
     satiPots.forEach(p => {
       Object.entries(p.data||{}).forEach(([ym, md]) => {
-        if (md?.linked) map[md.linked] = { potName: p.name, potIcon: p.icon, ym }
+        if (md?.linked) {
+          // md.linked can be an array (multi-tx link) — normalize to a txId key,
+          // otherwise the array is coerced to "id1,id2" and per-tx lookups fail
+          const key = Array.isArray(md.linked) ? md.linked[0] : md.linked
+          map[key] = { potName: p.name, potIcon: p.icon, ym }
+        }
       })
     })
     return map

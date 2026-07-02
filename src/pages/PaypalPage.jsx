@@ -98,8 +98,8 @@ function TxDetailModal({ tx, onClose, updateTransaction, customCats }) {
   const [cat1, setCat1] = useState(tx.cat1 || '')
   const [cat2, setCat2] = useState(tx.cat2 || '')
   const [saved, setSaved]  = useState(false)
-  const [toReview, setToReview] = useState(tx?._toReview || false)
-  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_toReview:n}) }
+  const [toReview, setToReview] = useState(tx?._flagged || false)
+  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_flagged:n}) }
 
   const allCats = getMergedCats(customCats)
   const cat1Options = Object.keys(allCats)
