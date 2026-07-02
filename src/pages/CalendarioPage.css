@@ -121,8 +121,15 @@
   opacity: 0.75;
 }
 
-.cal-vac-dot {
-  position: absolute; bottom: 3px; right: 3px;
-  width: 5px; height: 5px; border-radius: 50%;
-  background: #3b82f6; opacity: .7;
+.cal-day-emoji {
+  display: flex; gap: 1px; line-height: 1; margin-bottom: 1px; font-size: 9px;
 }
+
+.cal-cell.dimmed {
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+/* Legend additions */
+.boat-eg::before   { background: #fffbeb; border: 1px solid #fcd34d; }
+.vac-eg::before    { background: #dbeafe; border: 1px solid #93c5fd; }

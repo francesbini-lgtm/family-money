@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import './CalendarioPage.css'
@@ -16,14 +16,26 @@ function useVacations() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [vacations, setVacations] = useState(() => appPrefs.calendarVacations || [])
+  // Resync when async prefs arrive (avoids stale snapshot overwrite)
+  useEffect(() => { setVacations(appPrefs.calendarVacations || []) }, [appPrefs.calendarVacations])
   function save(v) { setVacations(v); setAppPref('calendarVacations', v) }
   function add(vac) { save([...vacations, { id: Date.now(), ...vac }]) }
   function remove(id) { save(vacations.filter(v => v.id !== id)) }
   return { vacations, add, remove }
 }
 
+// ── Vacation emoji helper ─────────────────────────────────
+function vacEmoji(name = '') {
+  const n = name.toLowerCase()
+  const beach = ['mare','sard','rimini','cost','bagn','lido','lignan','riccione','cattolica','riviera','tropea','sicil','calabr','puglia','salent','amalfitana','elba','capri','ischia','taormin','eolie','positano','amalfi','gallipoli','otranto','vieste']
+  const mtn   = ['mont','alp','dolomit','aosta','neve','ski','snowboard','courmayeur','livigno','madonna','sestriere','bormio','cervinia','cortina','trentino','val di fass','val garden','alta badia']
+  if (beach.some(k => n.includes(k))) return '🌴'
+  if (mtn.some(k => n.includes(k)))   return '⛰️'
+  return '🏖️'
+}
+
 // ── Day cell ──────────────────────────────────────────────
-function DayCell({ year, month, day, txs, filter, vacations, onClick }) {
+function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFilter, onClick }) {
   const isWeekend = IS_WEEKEND(year, month, day)
   const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
 
@@ -52,8 +64,16 @@ function DayCell({ year, month, day, txs, filter, vacations, onClick }) {
   }, [dayTxs])
 
   // Vacation overlap
-  const vacs = vacations.filter(v => dateStr >= v.from && dateStr <= v.to)
+  const vacs  = vacations.filter(v => dateStr >= v.from && dateStr <= v.to)
   const isVac = vacs.length > 0
+  const vacIcon = isVac ? vacEmoji(vacs[0]?.name) : null
+
+  // Boat trip
+  const isBoat = boatDaySet.has(dateStr)
+
+  // Quick-filter dimming
+  const isDimmed = (quickFilter === 'boat' && !isBoat) ||
+                   (quickFilter === 'vacation' && !isVac)
 
   const today = new Date().toISOString().slice(0,10) === dateStr
 
@@ -65,11 +85,18 @@ function DayCell({ year, month, day, txs, filter, vacations, onClick }) {
         isVac     ? 'vacation' : '',
         today     ? 'today' : '',
         hasData   ? 'has-data' : '',
+        isDimmed  ? 'dimmed' : '',
       ].filter(Boolean).join(' ')}
       onClick={() => onClick(dateStr, dayTxs, vacs)}
-      title={vacs.map(v => v.name).join(', ')}
+      title={[...vacs.map(v => v.name), isBoat ? '🚤 Uscita in barca' : ''].filter(Boolean).join(' · ')}
     >
       <div className="cal-day-num">{day}</div>
+      {(isBoat || vacIcon) && (
+        <div className="cal-day-emoji">
+          {isBoat && <span>🚤</span>}
+          {vacIcon && <span>{vacIcon}</span>}
+        </div>
+      )}
       {hasData && (
         <div className={`cal-day-total ${total >= 0 ? 'positive' : 'negative'}`}>
           {total >= 0 ? '+' : ''}{total < 0 ? '-' : ''}
@@ -79,7 +106,6 @@ function DayCell({ year, month, day, txs, filter, vacations, onClick }) {
       {dominantCity && (
         <div className="cal-day-city" title={dominantCity}>{dominantCity}</div>
       )}
-      {isVac && <div className="cal-vac-dot" title={vacs.map(v=>v.name).join(', ')}/>}
     </td>
   )
 }
@@ -155,14 +181,29 @@ function AddVacationModal({ onSave, onClose }) {
 // ── Main page ─────────────────────────────────────────────
 export default function CalendarioPage() {
   const { transactions } = useStore()
+  const customCats  = useStore(s => s.customCats)
+  const vehicles    = useStore(s => s.vehicles)
+  const appPrefs    = useStore(s => s.appPrefs)
   const { vacations, add: addVac, remove: removeVac } = useVacations()
 
   const now     = new Date()
   const [year,  setYear]  = useState(now.getFullYear())
   const [filter, setFilter] = useState({ type:'', cat1:'' })
+  const [quickFilter, setQuickFilter] = useState(null) // 'boat' | 'vacation' | null
   const [modal,  setModal]  = useState(null) // {dateStr, txs, vacs}
   const [showAddVac, setShowAddVac] = useState(false)
   const [showVacList, setShowVacList] = useState(false)
+
+  // ── Boat days set (🚤 / ⛵ / svg:motoscafo vehicles) ────
+  const boatDaySet = useMemo(() => {
+    const s = new Set()
+    ;(vehicles || [])
+      .filter(v => v.icon === '🚤' || v.icon === '⛵' || v.icon === 'svg:motoscafo')
+      .forEach(v => {
+        ;(appPrefs?.vehicleTrips?.[v.id] || []).forEach(t => s.add(t.date))
+      })
+    return s
+  }, [vehicles, appPrefs?.vehicleTrips])
 
   // Index transactions by date for fast lookup
   const txByDate = useMemo(() => {
@@ -189,6 +230,20 @@ export default function CalendarioPage() {
           <div style={{fontSize:13,color:'var(--text3)'}}>Transazioni per giorno nell'anno</div>
         </div>
         <div className="cal-header-actions">
+          {/* Quick filters */}
+          <button
+            className={'cal-filter-btn' + (quickFilter === 'boat' ? ' active' : '')}
+            onClick={() => setQuickFilter(q => q === 'boat' ? null : 'boat')}
+            title="Mostra solo giorni con uscita in barca"
+          >🚤 Barca</button>
+          <button
+            className={'cal-filter-btn' + (quickFilter === 'vacation' ? ' active' : '')}
+            onClick={() => setQuickFilter(q => q === 'vacation' ? null : 'vacation')}
+            title="Mostra solo giorni di vacanza / weekend fuori"
+          >🌴 Vacanze</button>
+
+          <div style={{width:1,height:20,background:'var(--border)',margin:'0 2px'}}/>
+
           {/* Year nav */}
           <div className="cal-year-nav">
             <button className="btn btn-ghost" onClick={()=>setYear(y=>y-1)}><ChevronLeft size={16}/></button>
@@ -237,17 +292,18 @@ export default function CalendarioPage() {
         ))}
         <select className="cal-filter-select" value={filter.cat1} onChange={e=>setFilter(f=>({...f,cat1:e.target.value}))}>
           <option value="">Tutte le categorie</option>
-          {CAT_NAMES.map(n=><option key={n} value={n}>{n}</option>)}
+          {Object.keys(getMergedCats(customCats)).map(n=><option key={n} value={n}>{n}</option>)}
         </select>
       </div>
 
       {/* Legend */}
       <div className="cal-legend">
         <span className="cal-legend-item weekend-eg">Weekend</span>
-        <span className="cal-legend-item vacation-eg">Vacanza / weekend fuori</span>
+        <span className="cal-legend-item vacation-eg">🌴/⛰️ Vacanza</span>
         <span className="cal-legend-item today-eg">Oggi</span>
         <span className="cal-legend-item positive-eg">+Entrate</span>
         <span className="cal-legend-item negative-eg">−Uscite</span>
+        {boatDaySet.size > 0 && <span style={{fontSize:11,color:'var(--text3)'}}>🚤 = uscita barca</span>}
       </div>
 
       {/* Calendar grid */}
@@ -281,6 +337,8 @@ export default function CalendarioPage() {
                         txs={allTxs}
                         filter={filter}
                         vacations={vacations}
+                        boatDaySet={boatDaySet}
+                        quickFilter={quickFilter}
                         onClick={(dateStr, txs, vacs) => setModal({dateStr, txs, vacs})}
                       />
                     )
