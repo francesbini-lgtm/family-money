@@ -1496,6 +1496,36 @@ export default function PaypalPage() {
                 <th className="pp-th">L2</th>
                 <th className="pp-th">Stato</th>
               </tr>
+              {(() => {
+                const totalExp = filteredTxs.filter(t => t.amount < 0).reduce((s,t) => s + t.amount, 0)
+                const totalInc = filteredTxs.filter(t => t.amount > 0).reduce((s,t) => s + t.amount, 0)
+                return (
+                  <tr style={{ background:'var(--surface2)', borderTop:'2px solid var(--border)' }}>
+                    <th className="pp-th" style={{ color:'var(--text3)', fontWeight:500, fontSize:11, letterSpacing:'.03em' }}>
+                      {filteredTxs.length} righe
+                    </th>
+                    <th className="pp-th"/>
+                    <th className="pp-th"/>
+                    <th className="pp-th" style={{ textAlign:'right', paddingRight:8 }}>
+                      <div style={{ display:'flex', flexDirection:'column', gap:1, alignItems:'flex-end' }}>
+                        {totalExp < 0 && (
+                          <span style={{ color:'var(--red,#d64e4e)', fontWeight:700, fontSize:12 }}>
+                            −€{fmtIT(Math.abs(totalExp), 2)}
+                          </span>
+                        )}
+                        {totalInc > 0 && (
+                          <span style={{ color:'#16a34a', fontWeight:700, fontSize:12 }}>
+                            +€{fmtIT(totalInc, 2)}
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                    <th className="pp-th"/>
+                    <th className="pp-th"/>
+                    <th className="pp-th"/>
+                  </tr>
+                )
+              })()}
             </thead>
             <tbody>
               {filteredTxs.map(t => {
