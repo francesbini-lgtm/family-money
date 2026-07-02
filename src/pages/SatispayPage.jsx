@@ -3613,7 +3613,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
       display:'flex',alignItems:'center',justifyContent:'center'}}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div style={{background:'var(--surface)',borderRadius:14,padding:'24px 28px',
-        width:680,maxHeight:'88vh',display:'flex',flexDirection:'column',
+        width:900,maxHeight:'88vh',display:'flex',flexDirection:'column',
         boxShadow:'0 16px 48px rgba(0,0,0,.2)'}}>
 
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
@@ -3654,7 +3654,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
           <table style={{borderCollapse:'collapse',width:'100%'}}>
             <thead>
               <tr style={{background:'var(--surface2)',position:'sticky',top:0,zIndex:1}}>
-                {['Data','Descrizione','Importo','Azioni'].map(h => (
+                {['Data','Descrizione','Importo','Nota','Azioni'].map(h => (
                   <th key={h} style={{padding:'6px 10px',fontSize:10,fontWeight:700,textAlign:h==='Importo'?'right':'left',
                     textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',
                     borderBottom:'1px solid var(--border)'}}>{h}</th>
@@ -3663,7 +3663,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={4} style={{padding:'24px',textAlign:'center',
+                <tr><td colSpan={5} style={{padding:'24px',textAlign:'center',
                   color:'var(--text3)',fontSize:13}}>
                   {rows.length === 0 ? '✅ Tutti gli accrediti Satispay sono abbinati!' : 'Nessun risultato'}
                 </td></tr>
@@ -3689,6 +3689,9 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
                   <td style={{padding:'6px 10px',fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',
                     textAlign:'right',color:'var(--green)',whiteSpace:'nowrap'}}>
                     + € {fmtIT(t.amount,2)}
+                  </td>
+                  <td style={{padding:'6px 10px',minWidth:140,maxWidth:200}}>
+                    <SatiNoteCell txId={t.txId} />
                   </td>
                   <td style={{padding:'6px 10px'}}>
                     <button onClick={()=>setAbbinaTx(abbinaTx?.txId===t.txId?null:t)}
