@@ -1259,6 +1259,20 @@ export default function PaypalPage() {
     showToast(`${rows.length} abbinament${rows.length===1?'o':'i'} approvati`, 'success')
   }
 
+  function handleDisabbina(txId) {
+    if (!window.confirm('Disabbinare questa transazione dall\'import PayPal?')) return
+    // Find the import matched to this tx and reset it
+    const updated = paypalImports.map(i =>
+      i.matchedTxId === txId
+        ? { ...i, status: 'unmatched', matchedTxId: null, pendingTxId: null }
+        : i
+    )
+    setAppPref('paypalImports', updated)
+    // Remove the paypal override from the transaction
+    updateTransaction(txId, { _paypalOverride: false, merchant: null })
+    showToast('Abbinamento rimosso', 'info')
+  }
+
   function handleLinkTxToImport(txId, importId) {
     const imp = paypalImports.find(i => i.id === importId)
     if (!imp) return
@@ -1426,6 +1440,7 @@ export default function PaypalPage() {
               <tr>
                 <th className="pp-th">Data</th>
                 <th className="pp-th">Merchant</th>
+                <th className="pp-th">AI descr</th>
                 <th className="pp-th">Importo</th>
                 <th className="pp-th">L1</th>
                 <th className="pp-th">L2</th>
@@ -1444,6 +1459,10 @@ export default function PaypalPage() {
                   >
                     <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
                     <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
+                    <td className="pp-td" style={{ color:'var(--text3)', fontSize:12, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+                      title={t.descAI || ''}>
+                      {t.descAI || <span style={{opacity:.4}}>—</span>}
+                    </td>
                     <td className="pp-td" style={{ fontWeight:600, color: t.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a' }}>
                       {t.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(t.amount), 2)}
                     </td>
@@ -1476,7 +1495,12 @@ export default function PaypalPage() {
                     </td>
                     <td className="pp-td">
                       {t._paypalOverride ? (
-                        <span className="pp-badge-matched">✅ abbinata</span>
+                        <button
+                          className="pp-badge-matched"
+                          style={{ cursor:'pointer', border:'none', background:'none', padding:0 }}
+                          title="Clicca per disabbinare"
+                          onClick={e => { e.stopPropagation(); handleDisabbina(t.txId) }}
+                        >✅ abbinata</button>
                       ) : pendingImp ? (
                         <button
                           className="pp-badge-pending"
