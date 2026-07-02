@@ -1024,20 +1024,36 @@ function CategoriesTab() {
         </div>
 
         {showAddSub && (
-          <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center"}}>
-            <input
-              value={newSubEmoji}
-              onChange={e=>setNewSubEmoji(e.target.value)}
-              placeholder="😀"
-              title="Emoji (opzionale)"
-              style={{width:42,fontSize:18,textAlign:'center',padding:'6px 4px',borderRadius:8,
-                border:'1px solid var(--border)',background:'var(--bg)',outline:'none',flexShrink:0}}
-            />
-            <input className="form-inp" value={newSub} onChange={e=>setNewSub(e.target.value)}
-              placeholder="Nome sottocategoria" style={{flex:1}}
-              onKeyDown={e=>e.key==='Enter'&&addSubToCurrent()}/>
-            <button className="btn btn-primary" style={{fontSize:12}} onClick={addSubToCurrent}>Aggiungi</button>
-            <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddSub(false);setNewSubEmoji('')}}>✕</button>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,flexShrink:0}}>
+                <span style={{fontSize:10,color:"var(--text3)",fontWeight:600,letterSpacing:".04em"}}>EMOJI</span>
+                <input
+                  autoFocus
+                  value={newSubEmoji}
+                  onChange={e=>setNewSubEmoji(e.target.value)}
+                  placeholder="＋"
+                  title="Inserisci un'emoji. Su Mac: ⌘+Ctrl+Spazio. Su Windows: Win+."
+                  maxLength={2}
+                  style={{width:46,fontSize:20,textAlign:'center',padding:'5px 4px',borderRadius:8,
+                    border:'2px solid var(--accent)',background:'var(--bg)',cursor:'text',flexShrink:0}}
+                />
+              </div>
+              <div style={{display:"flex",flexDirection:"column",flex:1,gap:2}}>
+                <span style={{fontSize:10,color:"var(--text3)",fontWeight:600,letterSpacing:".04em"}}>NOME</span>
+                <input className="form-inp" value={newSub} onChange={e=>setNewSub(e.target.value)}
+                  placeholder="Nome sottocategoria"
+                  onKeyDown={e=>e.key==='Enter'&&addSubToCurrent()}/>
+              </div>
+              <div style={{display:"flex",gap:4,alignItems:"flex-end",paddingBottom:1}}>
+                <button className="btn btn-primary" style={{fontSize:12}} onClick={addSubToCurrent}>Aggiungi</button>
+                <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddSub(false);setNewSubEmoji('');setNewSub('')}}>✕</button>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:"var(--text3)"}}>
+              💡 Mac: <kbd style={{fontSize:10,padding:"1px 5px",borderRadius:4,border:"1px solid var(--border)",background:"var(--surface2)"}}>⌘ Ctrl Space</kbd>&nbsp;&nbsp;
+              Windows: <kbd style={{fontSize:10,padding:"1px 5px",borderRadius:4,border:"1px solid var(--border)",background:"var(--surface2)"}}>Win .</kbd>
+            </div>
           </div>
         )}
 
