@@ -7,6 +7,40 @@ import {
 import { generateDescAI, parseRow } from '../data/csvParser'
 
 
+// ── Resolve user from card → member mapping (pure, no store) ─
+export function computeUser(t, userAccounts, appPrefs) {
+  const accounts  = userAccounts || []
+  const family    = appPrefs?.family || []
+  const ownerNick = appPrefs?.ownerNickname || null
+
+  // 1. Card match
+  if (t.card) {
+    const acc = accounts.find(a => a.card4 === t.card)
+    if (acc?.memberId) {
+      if (acc.memberId === 'owner') return ownerNick || 'Admin'
+      const member = family.find(m => String(m.id) === String(acc.memberId))
+      if (member) return member.nickname || member.name?.split(' ')[0] || null
+    }
+  }
+  // 2. cat2 match vs family nicknames
+  if (t.cat2) {
+    for (const m of family) {
+      const nick = m.nickname || m.name?.split(' ')[0] || ''
+      if (nick && nick.toLowerCase() === t.cat2.toLowerCase()) return nick
+    }
+  }
+  // 3. Text match in merchant / description
+  const hay = `${t.merchant||''} ${t.description||''}`.toLowerCase()
+  if (hay.trim()) {
+    if (ownerNick && hay.includes(ownerNick.toLowerCase())) return ownerNick
+    for (const m of family) {
+      const nick = m.nickname || m.name?.split(' ')[0] || ''
+      if (nick && hay.includes(nick.toLowerCase())) return nick
+    }
+  }
+  return null
+}
+
 // ── Enrich legacy transactions missing merchant/city/time ─
 function enrichTx(t) {
   // _effDate: competenza (user-overridden date) wins over bank date in all analytics
@@ -67,6 +101,8 @@ export const useStore = create((set, get) => ({
   onboardingDone: false, // set true after first import or skip
   ceciliaGoals:  [],   // Cecilia savings goals
   cashEntries:   [],   // manual cash spending log
+  notePrelievi:        [],   // mobile ATM withdrawal notes (for future matching)
+  discoverySkipRules:  [],   // descAI strings permanently skipped in Discovery
   energyBills:   [],   // utility bills (luce/gas/acqua)
   salaries:      [],   // RAL e netto annui per persona
   aiChatHistory: [],   // persisted chat (overrides previous definition)
@@ -111,7 +147,7 @@ export const useStore = create((set, get) => ({
 
   // ── Load all from Firestore ───────────────────────────
   loadAllData: async (userId) => {
-    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts] = await Promise.all([
+    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi, skipRules] = await Promise.all([
       loadCollection('transactions'),
       loadCollection('loans'),
       loadCollection('scadenze'),
@@ -130,6 +166,8 @@ export const useStore = create((set, get) => ({
       loadCollection('rimborsi_costs'),
       loadCollection('salaries'),
       loadUserAccounts(userId),
+      loadCollection('note_prelievi'),
+      loadCollection('discovery_skip_rules'),
     ])
     set({
       transactions: txs.map(enrichTx).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')),
@@ -137,6 +175,7 @@ export const useStore = create((set, get) => ({
       vehExpenses: vehExp, vacations: vac,
       nannyTS: nan, colfTS: col, portfolios: port, satiPots: sati,
       ceciliaGoals: cec, cashEntries: cash, energyBills: energy,
+      notePrelievi, discoverySkipRules: skipRules,
       aiChatHistory: chat.sort((a,b)=>a.ts-b.ts),
       aiRules: rules,
       rimborsiCosts: rimb,
@@ -163,6 +202,31 @@ export const useStore = create((set, get) => ({
     if (locExcDoc?.list) {
       set({ locationExclusions: locExcDoc.list })
     }
+    // Historical cash-sync: push any already-linked cash transactions to DB
+    setTimeout(() => get().syncCashTransactions(), 500)
+    // Compute/backfill user field for all transactions (after prefs + accounts are loaded)
+    setTimeout(() => get().recomputeUsers(), 800)
+    // Migrate old compensation: old code set excluded:true on fully-compensated expenses.
+    // New behavior: keep visible, show as 0* via _compensatedAmt instead.
+    setTimeout(() => {
+      const allTxs = get().transactions
+      const updateTx = get().updateTransaction
+      const incomeFixMap = {}  // incomeTxId → total compensated amount
+      allTxs.forEach(tx => {
+        if (tx.excluded && tx._compensatedBy && !tx._compensatedAmt) {
+          const compensateAmt = Math.abs(tx.amount)
+          updateTx(tx.txId, { excluded: false, _compensatedAmt: compensateAmt })
+          incomeFixMap[tx._compensatedBy] = (incomeFixMap[tx._compensatedBy] || 0) + compensateAmt
+        }
+      })
+      // Also set _compensatedAmt on income if not already set
+      Object.entries(incomeFixMap).forEach(([incomeTxId, total]) => {
+        const incomeTx = allTxs.find(t => t.txId === incomeTxId)
+        if (incomeTx && !incomeTx._compensatedAmt) {
+          updateTx(incomeTxId, { _compensatedAmt: total })
+        }
+      })
+    }, 1500)
   },
 
   // ── Realtime sync ─────────────────────────────────────
@@ -256,6 +320,10 @@ export const useStore = create((set, get) => ({
     if (!toChange.length) return 0
 
     let done = 0
+    // Two-phase migration: first save ALL new docs, then delete old IDs.
+    // Deleting inline would wipe a freshly saved doc when a later tx's old ID
+    // equals an earlier tx's NEW id.
+    const newIds = new Set(toChange.map(p => p.newId))
     for (const { tx, newId } of toChange) {
       let newTx = { ...tx, txId: newId }
       // For non-AI-enriched transactions, re-run regex enrichment to reset any
@@ -272,9 +340,12 @@ export const useStore = create((set, get) => ({
         }
       }
       await saveDocument('transactions', newId, newTx)
-      await deleteDocument('transactions', tx.txId)
       done++
       onProgress?.(done, toChange.length)
+    }
+    // Phase 2: delete only old IDs that were NOT reused as new IDs
+    for (const { tx } of toChange) {
+      if (!newIds.has(tx.txId)) await deleteDocument('transactions', tx.txId)
     }
 
     // Update in-memory state with all new IDs
@@ -287,24 +358,34 @@ export const useStore = create((set, get) => ({
   addTransactions: (txs) => {
     const existing = get().transactions
     const rawNew = txs.filter(t =>
-      !existing.some(e => e.date===t.date && Math.abs(e.amount-t.amount)<0.01 && (e.description||'').slice(0,20)===(t.description||'').slice(0,20))
+      !existing.some(e => e.date===t.date && Math.abs(e.amount-t.amount)<0.01 && (e.description||'').trim().slice(0,60)===(t.description||'').trim().slice(0,60))
     )
     // Run regex enrichment immediately — fast, deterministic, no AI needed.
     // This fills descAI, city, time, card, counterpart from the raw description.
     // AI Enrichment (✨ button) will later refine category and ambiguous merchants.
-    const newTxs = rawNew.map(t => enrichTx({...t, aiEnriched: false}))
+    const { userAccounts: ua, appPrefs: ap } = get()
+    const newTxs = rawNew.map(t => {
+      const enriched = enrichTx({...t, aiEnriched: false})
+      return { ...enriched, user: computeUser(enriched, ua, ap) || null }
+    })
     set(s=>({
       transactions: [...newTxs,...s.transactions].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
     }))
     saveBatch('transactions', newTxs, 'txId')
     get()._recomputeFiltered()
-    // Push undo entry for import
+    // Push undo entry for import — respect an open undo batch (same as _pushUndoEntry)
     if (newTxs.length > 0) {
-      const stack = get().txUndoStack
-      set({ txUndoStack: [...stack.slice(-19), {
-        entries: [{ type: 'add', txIds: newTxs.map(t => t.txId) }],
-        label: `Import ${newTxs.length} tx`,
-      }]})
+      const entry = { type: 'add', txIds: newTxs.map(t => t.txId) }
+      const batch = get()._txUndoBatch
+      if (batch !== null) {
+        set({ _txUndoBatch: [...batch, entry] })
+      } else {
+        const stack = get().txUndoStack
+        set({ txUndoStack: [...stack.slice(-19), {
+          entries: [entry],
+          label: `Import ${newTxs.length} tx`,
+        }]})
+      }
     }
     return newTxs.length
   },
@@ -318,8 +399,13 @@ export const useStore = create((set, get) => ({
     }
     set(s=>({ transactions: s.transactions.map(t=>t.txId===txId?{...t,...patch}:t) }))
     const t = get().transactions.find(t=>t.txId===txId)
-    // Always save the full enriched object so all fields persist
-    if(t) saveDocument('transactions', txId, enrichTx({...t,...patch}))
+    // Save the merged object as-is — do NOT re-run enrichTx here, or regex
+    // results would overwrite fields the caller just patched (merchant, descAI, cat1, cat2, …)
+    if(t) {
+      const { userAccounts, appPrefs } = get()
+      const user = t.user || computeUser(t, userAccounts, appPrefs) || null
+      saveDocument('transactions', txId, {...t, ...patch, user})
+    }
     get()._recomputeFiltered()
   },
 
@@ -398,6 +484,10 @@ export const useStore = create((set, get) => ({
     set(s=>({vehExpenses:s.vehExpenses.map(e=>e.id===id?{...e,...patch}:e)}))
     const e = get().vehExpenses.find(e=>e.id===id)
     if(e) saveDocument('veh_expenses', id, {...e,...patch})
+    // Trigger cash-sync when ATM link or Satispay link changes
+    if (patch.reconRef !== undefined || patch.reconType !== undefined || patch.satiTxId !== undefined) {
+      setTimeout(() => get().syncCashTransactions(), 0)
+    }
   },
   deleteVehExpense: (id) => {
     set(s=>({ vehExpenses: s.vehExpenses.filter(e=>e.id!==id) }))
@@ -625,6 +715,36 @@ export const useStore = create((set, get) => ({
     set(s=>({cashEntries:s.cashEntries.filter(x=>x.id!==id)}))
     deleteDocument('cash_entries',id)
   },
+  updateCashEntry: (id, patch) => {
+    set(s=>({cashEntries:s.cashEntries.map(x=>x.id===id?{...x,...patch}:x)}))
+    const e=get().cashEntries.find(x=>x.id===id)
+    if(e) saveDocument('cash_entries',id,{...e,...patch})
+  },
+
+  // ── Note Prelievi (mobile ATM withdrawal notes) ───────
+  addNotaPrelievo: (n) => {
+    const item={...n,id:uid()}
+    set(s=>({notePrelievi:[item,...s.notePrelievi]}))
+    saveDocument('note_prelievi',item.id,item)
+  },
+  deleteNotaPrelievo: (id) => {
+    set(s=>({notePrelievi:s.notePrelievi.filter(x=>x.id!==id)}))
+    deleteDocument('note_prelievi',id)
+  },
+
+  // ── Discovery skip rules ──────────────────────────────
+  addDiscoverySkipRule: (arg) => {
+    const descAI = typeof arg === 'string' ? arg : (arg?.descAI || '')
+    const note   = typeof arg === 'string' ? '' : (arg?.note || '')
+    const item = { id: uid(), descAI, note, addedAt: new Date().toISOString() }
+    set(s=>({discoverySkipRules:[...s.discoverySkipRules, item]}))
+    saveDocument('discovery_skip_rules', item.id, item)
+    return item
+  },
+  removeDiscoverySkipRule: (id) => {
+    set(s=>({discoverySkipRules:s.discoverySkipRules.filter(r=>r.id!==id)}))
+    deleteDocument('discovery_skip_rules', id)
+  },
 
   // ── Energy bills ──────────────────────────────────────
   addEnergyBill: (b) => {
@@ -644,9 +764,10 @@ export const useStore = create((set, get) => ({
     saveDocument('ai_chat',item.id,item)
   },
   clearChat: () => {
+    // capture list BEFORE clearing state, then delete all chat docs
+    const toDelete = get().aiChatHistory
     set({aiChatHistory:[]})
-    // delete all chat docs
-    get().aiChatHistory.forEach(m=>deleteDocument('ai_chat',m.id))
+    toDelete.forEach(m=>deleteDocument('ai_chat',m.id))
   },
 
   // ── Custom categories ────────────────────────────────
@@ -675,10 +796,124 @@ export const useStore = create((set, get) => ({
   },
 
   // ── App preferences (Firestore user_settings/app_prefs) ──
+  // ── Cash → DB sync ───────────────────────────────────────
+  // Pushes linked cash transactions (nanny/colf/veicoli) to the main
+  // transactions collection so they appear in analytics & TransactionsPage.
+  // Rules:
+  //   Nanny/Colf: push when linked to an ATM withdrawal
+  //   Veicoli:    push when linked to ATM AND NOT linked to Satispay
+  syncCashTransactions: async () => {
+    const state = get()
+    const { appPrefs, nannyTS, colfTS, vehExpenses, vehicles, transactions } = state
+    const nannyRecon  = appPrefs?.nannyRecon  || {}
+    const colfRecon   = appPrefs?.colfRecon   || {}
+    const satiMatches = appPrefs?.satiMatches || {}
+    const nannyName   = appPrefs?.nannyName   || 'Nanny'
+    const colfName    = appPrefs?.colfName    || 'Colf'
+
+    const shouldExist = new Map() // txId → data
+
+    // Nanny — push when ATM-linked
+    ;(nannyTS || []).forEach(entry => {
+      const recon = nannyRecon[entry.id]
+      if (!recon?.txId) return
+      const id = `cash-nanny-${entry.id}`
+      shouldExist.set(id, {
+        id, txId: id,
+        amount: -(recon.nannyAmt || entry.totale || 0),
+        date: (entry.mese || '') + '-01',
+        _effDate: (entry.mese || '') + '-01',
+        cat1: 'Famiglia', cat2: nannyName,
+        description: `Pagamento contanti ${nannyName} — ${entry.mese}`,
+        descAI: `${nannyName} ${entry.mese}`,
+        account: 'Contanti', excluded: false,
+        _source: 'cash-sync', _cashSyncRole: 'nanny',
+        userEditedCat: true, aiEnriched: true,
+      })
+    })
+
+    // Colf — push when ATM-linked
+    ;(colfTS || []).forEach(entry => {
+      const recon = colfRecon[entry.id]
+      if (!recon?.txId) return
+      const id = `cash-colf-${entry.id}`
+      shouldExist.set(id, {
+        id, txId: id,
+        amount: -(recon.nannyAmt || entry.totale || 0),
+        date: (entry.mese || '') + '-01',
+        _effDate: (entry.mese || '') + '-01',
+        cat1: 'Famiglia', cat2: colfName,
+        description: `Pagamento contanti ${colfName} — ${entry.mese}`,
+        descAI: `${colfName} ${entry.mese}`,
+        account: 'Contanti', excluded: false,
+        _source: 'cash-sync', _cashSyncRole: 'colf',
+        userEditedCat: true, aiEnriched: true,
+      })
+    })
+
+    // Veicoli — push when ATM-linked AND NOT Satispay-matched
+    ;(vehExpenses || []).filter(e => e.payMethod === 'cash' && e.reconType === 'cash' && e.reconRef).forEach(e => {
+      const satiId = `veh-${e.id}`
+      const hasSati = satiMatches[satiId]?.status === 'matched'
+      if (hasSati) return
+      const veh     = (vehicles || []).find(v => v.id === e.vehicleId)
+      const vehName = veh ? (veh.nickname || veh.model || 'Veicolo') : 'Veicolo'
+      const id = `cash-veh-${e.id}`
+      shouldExist.set(id, {
+        id, txId: id,
+        amount: -(e.amount || 0),
+        date: e.date || '',
+        _effDate: e.date || '',
+        cat1: 'Veicoli', cat2: e.desc || '',
+        description: `${e.desc || 'Spesa veicolo'} — ${vehName} (contanti)`,
+        descAI: e.desc || `Spesa ${vehName}`,
+        account: 'Contanti', excluded: false,
+        _source: 'cash-sync', _cashSyncRole: 'veicoli',
+        userEditedCat: true, aiEnriched: true,
+      })
+    })
+
+    // Compare with existing synthetic txs in store
+    const existing     = (transactions || []).filter(t => t._source === 'cash-sync')
+    const existingById = new Map(existing.map(t => [t.txId, t]))
+
+    const toAdd       = []
+    const toRemoveIds = []
+
+    for (const [id, data] of shouldExist) {
+      if (!existingById.has(id)) {
+        toAdd.push(data)
+        saveDocument('transactions', id, data)
+      }
+    }
+
+    for (const t of existing) {
+      if (!shouldExist.has(t.txId)) {
+        toRemoveIds.push(t.txId)
+        deleteDocument('transactions', t.txId)
+      }
+    }
+
+    if (toAdd.length > 0 || toRemoveIds.length > 0) {
+      set(s => ({
+        transactions: [
+          ...s.transactions.filter(t => !toRemoveIds.includes(t.txId)),
+          ...toAdd.map(enrichTx),
+        ].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')),
+      }))
+    }
+
+    return { added: toAdd.length, removed: toRemoveIds.length }
+  },
+
   setAppPref: (key, value) => {
     set(s => ({ appPrefs: { ...s.appPrefs, [key]: value } }))
     const updated = { ...get().appPrefs, [key]: value }
     saveDocument('user_settings', 'app_prefs', updated)
+    // Trigger cash-sync when reconciliation data changes
+    if (key === 'nannyRecon' || key === 'colfRecon' || key === 'satiMatches') {
+      setTimeout(() => get().syncCashTransactions(), 0)
+    }
   },
 
   // ── AI Rules ─────────────────────────────────────────
@@ -699,7 +934,10 @@ export const useStore = create((set, get) => ({
   },
   applyAiRules: (description, amount, date) => {
     // Returns [{cat1, cat2, pct, action}] if a rule matches, null otherwise
-    const rules = get().aiRules.filter(r => r.enabled !== false)
+    // King rules always evaluated first — they win over all other rules
+    const rules = get().aiRules
+      .filter(r => r.enabled !== false)
+      .sort((a, b) => (b.isKing ? 1 : 0) - (a.isKing ? 1 : 0))
     const desc  = (description || '').toLowerCase()
     const amt   = Math.abs(amount || 0)
 
@@ -717,17 +955,18 @@ export const useStore = create((set, get) => ({
               case 'not_contains': return !src.includes(val)
               case 'starts_with':  return src.startsWith(val)
               case 'ends_with':    return src.endsWith(val)
-              case 'equals':       return src === val
+              case 'equals': case 'è': return src === val
               default: return false
             }
           }
           case 'description':
+          case 'counterpart': // alias — evaluated against description here
             switch(cond.op) {
               case 'contains':     return desc.includes(val)
               case 'not_contains': return !desc.includes(val)
               case 'starts_with':  return desc.startsWith(val)
               case 'ends_with':    return desc.endsWith(val)
-              case 'equals':       return desc === val
+              case 'equals': case 'è': return desc === val
               default: return false
             }
           case 'amount':
@@ -744,7 +983,7 @@ export const useStore = create((set, get) => ({
           case 'merchant':
             switch(cond.op) {
               case 'contains':    return desc.includes(val)
-              case 'equals':      return desc === val
+              case 'equals': case 'è': return desc === val
               case 'starts_with': return desc.startsWith(val)
               default: return false
             }
@@ -766,6 +1005,42 @@ export const useStore = create((set, get) => ({
       }
     }
     return null
+  },
+
+  // Returns true if a KING rule matches this transaction — used to block non-king overwrites
+  isKingProtected: (description, amount) => {
+    const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false)
+    if (!kingRules.length) return false
+    const desc = (description || '').toLowerCase()
+    const amt  = Math.abs(amount || 0)
+    return kingRules.some(rule => {
+      if (!rule.conditions?.length) return false
+      return rule.conditions.every(cond => {
+        const val = (cond.value || '').toLowerCase()
+        switch (cond.field) {
+          case 'anywhere': case 'description': case 'merchant':
+            switch (cond.op) {
+              case 'contains': case 'contiene': return desc.includes(val)
+              case 'not_contains':              return !desc.includes(val)
+              case 'starts_with':               return desc.startsWith(val)
+              case 'ends_with':                 return desc.endsWith(val)
+              case 'equals': case 'è':          return desc === val
+              default: return false
+            }
+          case 'amount': case 'importo':
+            switch (cond.op) {
+              case 'gt':  case '>':  return amt > parseFloat(cond.value||0)
+              case 'gte': case '>=': return amt >= parseFloat(cond.value||0)
+              case 'lt':  case '<':  return amt < parseFloat(cond.value||0)
+              case 'lte': case '<=': return amt <= parseFloat(cond.value||0)
+              case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value||0)) < 0.01
+              case 'between': return amt >= parseFloat(cond.value||0) && amt <= parseFloat(cond.value2||0)
+              default: return false
+            }
+          default: return false
+        }
+      })
+    })
   },
 
   // ── Bulk apply all rules to entire DB ────────────────
@@ -821,7 +1096,8 @@ export const useStore = create((set, get) => ({
       }
 
       // 3. Multi-condition rules → cat1/cat2/descAI or excluded (highest priority — always wins over catRules)
-      if (multiRules.length > 0) {
+      //    Skip transactions manually categorized by the user (same guard as step 2)
+      if (multiRules.length > 0 && !tx.userEditedCat) {
         const result = s.applyAiRules(tx.description, tx.amount, tx.date)
         if (result) {
           if (result.exclude && !tx.excluded) {
@@ -875,9 +1151,11 @@ export const useStore = create((set, get) => ({
     for (let i = 0; i < transactions.length; i++) {
       const tx = transactions[i]
       if (onProgress) onProgress(i + 1, transactions.length)
+      // King rules always win — never let a non-king single rule overwrite them
+      if (s.isKingProtected(tx.description, tx.amount)) continue
       const patch = {}
 
-      const desc = (tx.description || '').toLowerCase()
+      const desc = (tx.description || tx.descAI || '').toLowerCase()
       const amt  = Math.abs(tx.amount || 0)
 
       const matches = (rule.conditions || []).every(cond => {
@@ -901,15 +1179,18 @@ export const useStore = create((set, get) => ({
               case 'lt':  case '<':  return amt < parseFloat(cond.value || 0)
               case 'lte': case '<=': return amt <= parseFloat(cond.value || 0)
               case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value || 0)) < 0.01
+              case 'between': case 'tra': return amt >= parseFloat(cond.value || 0) && amt <= parseFloat(cond.value2 || 0)
               default: return false
             }
-          case 'merchant':
+          case 'merchant': {
+            const merch = (tx.merchant || '').toLowerCase()
             switch (cond.op) {
-              case 'contains':    return desc.includes(val)
-              case 'equals':      return desc === val
-              case 'starts_with': return desc.startsWith(val)
+              case 'contains':    return merch.includes(val)
+              case 'equals': case 'è': return merch === val
+              case 'starts_with': return merch.startsWith(val)
               default: return false
             }
+          }
           default: return false
         }
       })
@@ -1034,20 +1315,35 @@ export const useStore = create((set, get) => ({
   setUserAccounts: async (userId, accounts) => {
     set({ userAccounts: accounts })
     await saveUserAccounts(userId, accounts)
+    // Recompute user field for all transactions when card mappings change
+    get().recomputeUsers()
+  },
+
+  recomputeUsers: () => {
+    const { transactions, userAccounts, appPrefs } = get()
+    const toSave = []
+    const updated = transactions.map(t => {
+      const newUser = computeUser(t, userAccounts, appPrefs) || null
+      if (newUser === (t.user ?? null)) return t          // unchanged
+      toSave.push({ id: t.txId, data: { ...t, user: newUser } })
+      return { ...t, user: newUser }
+    })
+    if (!toSave.length) return
+    set({ transactions: updated })
+    // Batch-persist only the changed documents
+    batchSaveDocuments('transactions', toSave)
   },
 
   // ── Filters ───────────────────────────────────────────
-  setFilter:    (k,v) => set(s=>({ filters:{...s.filters,[k]:v} })),
+  setFilter:    (k,v) => { set(s=>({ filters:{...s.filters,[k]:v} })); get()._recomputeFiltered() },
   resetFilters: () => {
-    const d = new Date(); d.setMonth(d.getMonth() - 6)
-    const df = d.toISOString().split('T')[0]
-    set({ filters:{search:'',cat1:'',accounts:[],dateFrom:df,dateTo:'',type:'',conf:''} })
+    set({ filters:{search:'',cat1:'',accounts:[],dateFrom:'',dateTo:'',type:'',conf:''} })
     get()._recomputeFiltered()
   },
-
-  // ── AI Chat ───────────────────────────────────────────
-  addChatMessage: (m) => set(s=>({ aiChatHistory:[...s.aiChatHistory,m] })),
-  clearChat:      ()  => set({ aiChatHistory:[] }),
+  clearFilters: () => {
+    set({ filters:{search:'',cat1:'',accounts:[],dateFrom:'',dateTo:'',type:'',conf:''} })
+    get()._recomputeFiltered()
+  },
 
   // ── Computed ──────────────────────────────────────────
   filteredTx: [],   // kept in sync by setFilter/resetFilters
@@ -1068,6 +1364,7 @@ export const useStore = create((set, get) => ({
       if(filters.dateTo   && (t._effDate||t.date||'')>filters.dateTo)   return false
       if(filters.type && t.type!==filters.type) return false
       if(filters.conf==='low' && (t.conf||0)>=70) return false
+      if(filters.flagged && !t._flagged) return false
       return true
     })
     set({ filteredTx: result })

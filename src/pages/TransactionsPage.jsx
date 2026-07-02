@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { CATS, CAT_NAMES, getMergedCats, getMergedCatNames } from '../data/categories'
 import { Upload, Search, X, TrendingUp, TrendingDown, Banknote, Tag, ChevronDown, Filter, Plus } from 'lucide-react'
 import ImportModal from '../components/ImportModal'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
@@ -57,8 +58,10 @@ function ForcedBalanceModal({ currentSaldo, onClose }) {
       tappoDate = new Date().toISOString().slice(0, 10)
     }
     if (existingForced) {
+      // currentSaldo already includes the old forced amount, so the new forced
+      // amount must be the old amount plus the delta, not the delta alone.
       updateTransaction(existingForced.txId, {
-        amount: delta,
+        amount: Math.round((existingForced.amount + delta) * 100) / 100,
         description: 'Saldo forzato — obiettivo € ' + fmtIT(targetNum, 2),
         descAI: 'Saldo forzato',
         date: tappoDate,
@@ -256,16 +259,284 @@ function ConditionRow({ cond, idx, total, onChange, onRemove }) {
   )
 }
 
+// ── Bulk Edit Modal ───────────────────────────────────────
+function BulkEditModal({ txIds, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const addAiRule         = useStore(s => s.addAiRule)
+  const allTxs            = useStore(s => s.transactions)
+  const customCats        = useStore(s => s.customCats)
+  const allCats           = getMergedCats(customCats)
+  const allCatNames       = getMergedCatNames(customCats)
+  const setCustomCats     = useStore(s => s.setCustomCats)
+  const isKingProtected   = useStore(s => s.isKingProtected)
+
+  const txList = allTxs.filter(t => txIds.has(t.txId))
+  const n = txList.length
+  const refDate = txList.reduce((min, t) => {
+    const d = t._effDate || t.date || ''
+    return (!min || (d && d < min)) ? d : min
+  }, '')
+
+  const [descEdit,  setDescEdit]  = useState('')
+  const [sel1,      setSel1]      = useState('')
+  const [sel2,      setSel2]      = useState('')
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const [addingL1,  setAddingL1]  = useState(false)
+  const [newL1,     setNewL1]     = useState('')
+  const [addingL2,  setAddingL2]  = useState(false)
+  const [newL2,     setNewL2]     = useState('')
+  const [applied,   setApplied]   = useState(false)
+  const [conditions, setConditions] = useState([{ field: 'merchant', op: 'contiene', value: '' }])
+  const [scope,      setScope]      = useState('all')
+
+  const ruleActive = conditions.some(c => c.value.trim())
+  const matchCount = (rulesOpen && ruleActive) ? allTxs.filter(t => {
+    if (txIds.has(t.txId) || t.excluded) return false
+    if (scope === 'future' && (t._effDate || t.date || '') < refDate) return false
+    return allConditionsMatch(conditions, t)
+  }).length : 0
+
+  function updateCond(idx, nc) { setConditions(cs => cs.map((c, i) => i === idx ? nc : c)) }
+  function removeCond(idx)     { setConditions(cs => cs.filter((_, i) => i !== idx)) }
+  function addCond()           { setConditions(cs => [...cs, { field: 'merchant', op: 'contiene', value: '' }]) }
+
+  function confirmAddL1() {
+    const name = newL1.trim()
+    if (!name || allCatNames.includes(name)) return
+    setCustomCats({ ...customCats, [name]: { color: '#888', sub: [] } })
+    setSel1(name); setSel2('')
+    setNewL1(''); setAddingL1(false)
+  }
+  function confirmAddL2() {
+    const sub = newL2.trim()
+    if (!sub || !sel1) return
+    const existing = allCats[sel1]?.sub || []
+    if (existing.includes(sub)) { setSel2(sub); setNewL2(''); setAddingL2(false); return }
+    const updatedSub = [...existing, sub]
+    setCustomCats({ ...customCats, [sel1]: { ...(customCats[sel1] || {}), color: allCats[sel1]?.color || '#888', sub: updatedSub } })
+    setSel2(sub)
+    setNewL2(''); setAddingL2(false)
+  }
+
+  function save() {
+    const patch = {}
+    if (descEdit.trim())  { patch.descAI = descEdit.trim(); patch.aiEnriched = true }
+    if (sel1)             { patch.cat1 = sel1; patch.cat2 = sel2; patch.conf = 100 }
+    if (Object.keys(patch).length === 0) { onClose(); return }
+
+    txList.forEach(t => updateTransaction(t.txId, patch))
+
+    if (rulesOpen && ruleActive && sel1) {
+      const opMap = { 'contiene': 'contains', 'non contiene': 'not_contains', 'inizia con': 'starts_with', 'finisce con': 'ends_with', 'uguale a': 'equals', '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte' }
+      addAiRule({
+        conditions: conditions.filter(c => c.value.trim()).map(c => ({
+          field: c.field,
+          op:    opMap[c.op] || c.op,
+          value: c.value.trim(),
+        })),
+        action: 'categorize',
+        cats:   [{ cat1: sel1, cat2: sel2 || '', pct: 100 }],
+        scope,
+        descAI: descEdit.trim() || null,
+        name:   `${sel1}${sel2 ? '/' + sel2 : ''} — ${conditions.filter(c => c.value.trim()).map(c => `${c.field} ${c.op} "${c.value}"`).join(' + ')}`,
+      })
+      allTxs.forEach(t => {
+        if (txIds.has(t.txId) || t.excluded) return
+        if (scope === 'future' && (t._effDate || t.date || '') < refDate) return
+        if (!allConditionsMatch(conditions, t)) return
+        if (isKingProtected(t.description, t.amount)) return
+        updateTransaction(t.txId, patch)
+      })
+    }
+    setApplied(true)
+    setTimeout(onClose, 600)
+  }
+
+  const modalW = rulesOpen ? 720 : 420
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,.35)' }} />
+      <div className="cat-dropdown" onClick={e => e.stopPropagation()}
+        style={{
+          position: 'fixed', top: '50%', left: '50%',
+          transform: 'translate(-50%,-50%)',
+          width: modalW, maxWidth: '96vw',
+          maxHeight: '90vh', overflowY: 'auto',
+          zIndex: 1000,
+          transition: 'width .18s ease',
+          display: 'flex', flexDirection: 'column',
+        }}>
+
+        {/* Header */}
+        <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>✏️ Modifica Multipla</span>
+          <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 600 }}>{n} transazion{n === 1 ? 'e' : 'i'} selezionate</span>
+        </div>
+
+        {/* descAI */}
+        <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text3)', marginBottom: 6 }}>
+            ✨ Descrizione AI (lascia vuoto per non modificare)
+          </div>
+          <input
+            value={descEdit}
+            onChange={e => setDescEdit(e.target.value)}
+            placeholder="Es. Spesa supermercato…"
+            style={{
+              width: '100%', padding: '6px 9px', borderRadius: 6,
+              border: `1.5px solid ${descEdit.trim() ? 'var(--accent)' : 'var(--border)'}`,
+              fontSize: 12, background: 'var(--surface)', color: 'var(--text)',
+              outline: 'none', fontFamily: 'var(--font-sans)', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Cat L1 + L2 + optional rules */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+          {/* L1 */}
+          <div className="cat-dropdown-l1" style={{ flex: '0 0 160px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '6px 10px 4px', fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+              Categoria (opzionale)
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {allCatNames.map(name => (
+                <button key={name} className={'cat-dropdown-item' + (name === sel1 ? ' active' : '')}
+                  style={{ '--cat-color': allCats[name]?.color || '#888' }}
+                  onClick={() => { setSel1(name === sel1 ? '' : name); setSel2(''); setAddingL2(false) }}>
+                  <span className="cat-dot" />{name}
+                </button>
+              ))}
+            </div>
+            {addingL1 ? (
+              <div style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', display: 'flex', gap: 4 }}>
+                <input autoFocus value={newL1} onChange={e => setNewL1(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e => { if (e.key === 'Enter') confirmAddL1(); if (e.key === 'Escape') { setAddingL1(false); setNewL1('') } }}
+                  style={{ flex: 1, padding: '4px 7px', borderRadius: 6, border: '1.5px solid var(--accent)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-sans)', minWidth: 0 }} />
+                <button onClick={confirmAddL1} style={{ padding: '4px 8px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>✓</button>
+                <button onClick={() => { setAddingL1(false); setNewL1('') }} style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'none', color: 'var(--text3)', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setAddingL1(true)} style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 12, fontWeight: 600, textAlign: 'left', fontFamily: 'var(--font-sans)', width: '100%', flexShrink: 0 }}>
+                + nuova categoria
+              </button>
+            )}
+          </div>
+
+          {/* L2 */}
+          <div className="cat-dropdown-l2" style={{ flex: 1, minWidth: 0, padding: '8px 0 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 4px' }}>
+              {sel1 ? (
+                (allCats[sel1]?.sub || []).length > 0
+                  ? allCats[sel1].sub.map(s => (
+                    <button key={s} className={'cat-dropdown-sub' + (s === sel2 ? ' active' : '')}
+                      onClick={() => setSel2(s === sel2 ? '' : s)}
+                      style={{ display: 'block', width: '100%', textAlign: 'left' }}>
+                      {sel2 === s ? '✓ ' : ''}{s}
+                    </button>
+                  ))
+                  : <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>Nessuna sottocategoria</div>
+              ) : (
+                <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>Seleziona una categoria L1</div>
+              )}
+            </div>
+            {sel1 && (addingL2 ? (
+              <div style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', display: 'flex', gap: 4 }}>
+                <input autoFocus value={newL2} onChange={e => setNewL2(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e => { if (e.key === 'Enter') confirmAddL2(); if (e.key === 'Escape') { setAddingL2(false); setNewL2('') } }}
+                  style={{ flex: 1, padding: '4px 7px', borderRadius: 6, border: '1.5px solid var(--accent)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-sans)', minWidth: 0 }} />
+                <button onClick={confirmAddL2} style={{ padding: '4px 8px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>✓</button>
+                <button onClick={() => { setAddingL2(false); setNewL2('') }} style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'none', color: 'var(--text3)', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setAddingL2(true)} style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 12, fontWeight: 600, textAlign: 'left', fontFamily: 'var(--font-sans)', width: '100%', flexShrink: 0 }}>
+                + nuova sottocategoria
+              </button>
+            ))}
+          </div>
+
+          {/* Rules panel */}
+          {rulesOpen && (
+            <div style={{ flex: '0 0 280px', padding: '14px 16px', background: 'var(--surface2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text3)' }}>
+                🔁 Applica anche ad altre transazioni
+              </div>
+              <div>
+                {conditions.map((cond, idx) => (
+                  <ConditionRow key={idx} cond={cond} idx={idx} total={conditions.length}
+                    onChange={nc => updateCond(idx, nc)} onRemove={() => removeCond(idx)} />
+                ))}
+                <button onClick={addCond} style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 5, cursor: 'pointer', fontSize: 11, color: 'var(--accent)', padding: '3px 10px', marginTop: 4, fontWeight: 600 }}>
+                  + Aggiungi condizione
+                </button>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', marginBottom: 6, letterSpacing: '.04em', textTransform: 'uppercase' }}>Applica a</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {[['future', '→ Da adesso in avanti'], ['all', '⟳ Tutte le transazioni']].map(([v, l]) => (
+                    <button key={v} onClick={() => setScope(v)} style={{
+                      padding: '6px 12px', borderRadius: 8, border: `1.5px solid ${scope === v ? 'var(--accent)' : 'var(--border)'}`,
+                      cursor: 'pointer', fontSize: 12, fontWeight: 600, textAlign: 'left',
+                      background: scope === v ? 'var(--accent)' : 'var(--surface)',
+                      color: scope === v ? '#fff' : 'var(--text2)',
+                      transition: 'all .12s',
+                    }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {ruleActive
+                ? <div style={{ fontSize: 12, fontWeight: 700, color: matchCount > 0 ? 'var(--accent)' : 'var(--text3)', marginTop: 4 }}>
+                    {matchCount > 0 ? `✓ ${matchCount} altre transazioni corrispondenti` : '⚠️ 0 transazioni corrispondenti'}
+                  </div>
+                : <div style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>Imposta almeno una condizione sopra</div>
+              }
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="cat-dropdown-footer" style={{ borderTop: '1px solid var(--border)' }}>
+          {applied
+            ? <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 700 }}>✓ Salvato!</span>
+            : <>
+                <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={save}>
+                  Applica a {n} transazion{n === 1 ? 'e' : 'i'}{rulesOpen && ruleActive && matchCount > 0 ? ` + ${matchCount} altre` : ''}
+                </button>
+                <button onClick={() => setRulesOpen(o => !o)} style={{
+                  padding: '5px 12px', borderRadius: 8, border: `1.5px solid ${rulesOpen ? 'var(--accent)' : 'var(--border)'}`,
+                  cursor: 'pointer', fontSize: 11, fontWeight: 700, background: 'var(--surface)',
+                  color: rulesOpen ? 'var(--accent)' : 'var(--text3)',
+                }}>
+                  🔁 Regole {rulesOpen ? '◀' : '▶'}
+                </button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={onClose}>✕</button>
+              </>
+          }
+        </div>
+      </div>
+    </>
+  )
+}
+
 function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
-  const updateTransaction = useStore(s=>s.updateTransaction)
-  const addAiRule         = useStore(s=>s.addAiRule)
+  const updateTransaction  = useStore(s=>s.updateTransaction)
+  const addAiRule          = useStore(s=>s.addAiRule)
+  const isKingProtected    = useStore(s=>s.isKingProtected)
   const allTxs        = useStore(s=>s.transactions)
   const customCats    = useStore(s=>s.customCats)
+  const setCustomCats = useStore(s=>s.setCustomCats)
   const allCats       = getMergedCats(customCats)
   const allCatNames   = getMergedCatNames(customCats)
   const [sel1, setSel1]       = useState(cat1)
   const [sel2, setSel2]       = useState(cat2 || '')
   const [rulesOpen, setRulesOpen] = useState(false)
+  const [addingL1, setAddingL1] = useState(false)
+  const [newL1,    setNewL1]    = useState('')
+  const [addingL2, setAddingL2] = useState(false)
+  const [newL2,    setNewL2]    = useState('')
   const [applied,   setApplied]   = useState(false)
   const [descEdit,  setDescEdit]  = useState(tx?.descAI || '')
 
@@ -298,6 +569,25 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
   function removeCond(idx)     { setConditions(cs => cs.filter((_,i) => i!==idx)) }
   function addCond()           { setConditions(cs => [...cs, {field:'merchant', op:'contiene', value:''}]) }
 
+  function confirmAddL1() {
+    const name = newL1.trim()
+    if (!name || allCatNames.includes(name)) return
+    setCustomCats({ ...customCats, [name]: { color: '#888', sub: [] } })
+    setSel1(name); setSel2('')
+    setNewL1(''); setAddingL1(false)
+  }
+
+  function confirmAddL2() {
+    const sub = newL2.trim()
+    if (!sub || !sel1) return
+    const existing = allCats[sel1]?.sub || []
+    if (existing.includes(sub)) { setSel2(sub); setNewL2(''); setAddingL2(false); return }
+    const updatedSub = [...existing, sub]
+    setCustomCats({ ...customCats, [sel1]: { ...(customCats[sel1]||{}), color: allCats[sel1]?.color||'#888', sub: updatedSub } })
+    setSel2(sub)
+    setNewL2(''); setAddingL2(false)
+  }
+
   function save() {
     const patch = { cat1: sel1, cat2: sel2, conf: 100, ...(descEdit.trim() ? { descAI: descEdit.trim(), aiEnriched: true } : {}) }
     updateTransaction(txId, patch)
@@ -319,7 +609,9 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
       allTxs.forEach(t => {
         if (t.txId === txId || t.excluded) return
         if (scope === 'future' && (t._effDate||(t._effDate||t.date||'')) < txDate) return
-        if (allConditionsMatch(conditions, t)) updateTransaction(t.txId, patch)
+        if (!allConditionsMatch(conditions, t)) return
+        if (isKingProtected(t.description, t.amount)) return
+        updateTransaction(t.txId, patch)
       })
     }
     setApplied(true)
@@ -346,25 +638,77 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
         <div style={{display:'flex', flex:1, overflow:'hidden'}}>
 
           {/* L1 — categories */}
-          <div className="cat-dropdown-l1" style={{flex:'0 0 160px',borderRight:'1px solid var(--border)'}}>
-            {allCatNames.map(name=>(
-              <button key={name} className={'cat-dropdown-item'+(name===sel1?' active':'')}
-                style={{'--cat-color':allCats[name]?.color||'#888'}} onClick={()=>{setSel1(name);setSel2('')}}>
-                <span className="cat-dot"/>{name}
+          <div className="cat-dropdown-l1" style={{flex:'0 0 160px',borderRight:'1px solid var(--border)',display:'flex',flexDirection:'column'}}>
+            <div style={{flex:1,overflowY:'auto'}}>
+              {allCatNames.map(name=>(
+                <button key={name} className={'cat-dropdown-item'+(name===sel1?' active':'')}
+                  style={{'--cat-color':allCats[name]?.color||'#888'}} onClick={()=>{setSel1(name);setSel2('');setAddingL2(false)}}>
+                  <span className="cat-dot"/>{name}
+                </button>
+              ))}
+            </div>
+            {/* + nuova categoria L1 */}
+            {addingL1 ? (
+              <div style={{padding:'6px 8px',borderTop:'1px solid var(--border)',display:'flex',gap:4}}>
+                <input autoFocus value={newL1} onChange={e=>setNewL1(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e=>{ if(e.key==='Enter') confirmAddL1(); if(e.key==='Escape'){setAddingL1(false);setNewL1('')} }}
+                  style={{flex:1,padding:'4px 7px',borderRadius:6,border:'1.5px solid var(--accent)',
+                    background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
+                    fontFamily:'var(--font-sans)',minWidth:0}}/>
+                <button onClick={confirmAddL1}
+                  style={{padding:'4px 8px',borderRadius:6,border:'none',background:'var(--accent)',
+                    color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>✓</button>
+                <button onClick={()=>{setAddingL1(false);setNewL1('')}}
+                  style={{padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',
+                    background:'none',color:'var(--text3)',fontSize:12,cursor:'pointer',flexShrink:0}}>✕</button>
+              </div>
+            ) : (
+              <button onClick={()=>setAddingL1(true)}
+                style={{padding:'7px 10px',borderTop:'1px solid var(--border)',background:'none',
+                  border:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,fontWeight:600,
+                  textAlign:'left',fontFamily:'var(--font-sans)',width:'100%',flexShrink:0}}>
+                + nuova categoria
               </button>
-            ))}
+            )}
           </div>
 
           {/* L2 — subcategories */}
-          <div className="cat-dropdown-l2" style={{flex:1, minWidth:0, padding:'8px 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none'}}>
-            {(allCats[sel1]?.sub||[]).length > 0 ? allCats[sel1].sub.map(s=>(
-              <button key={s} className={'cat-dropdown-sub'+(s===sel2?' active':'')}
-                onClick={()=>setSel2(s===sel2?'':s)} style={{display:'block',width:'100%',textAlign:'left'}}>
-                {sel2===s ? '✓ ' : ''}{s}
+          <div className="cat-dropdown-l2" style={{flex:1, minWidth:0, padding:'8px 0 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none', display:'flex', flexDirection:'column'}}>
+            <div style={{flex:1,overflowY:'auto',padding:'0 0 4px'}}>
+              {(allCats[sel1]?.sub||[]).length > 0 ? allCats[sel1].sub.map(s=>(
+                <button key={s} className={'cat-dropdown-sub'+(s===sel2?' active':'')}
+                  onClick={()=>setSel2(s===sel2?'':s)} style={{display:'block',width:'100%',textAlign:'left'}}>
+                  {sel2===s ? '✓ ' : ''}{s}
+                </button>
+              )) : (
+                <div style={{padding:'12px 16px',fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>Nessuna sottocategoria</div>
+              )}
+            </div>
+            {/* + nuova subcategoria L2 */}
+            {sel1 && (addingL2 ? (
+              <div style={{padding:'6px 8px',borderTop:'1px solid var(--border)',display:'flex',gap:4}}>
+                <input autoFocus value={newL2} onChange={e=>setNewL2(e.target.value)}
+                  placeholder="Nome…"
+                  onKeyDown={e=>{ if(e.key==='Enter') confirmAddL2(); if(e.key==='Escape'){setAddingL2(false);setNewL2('')} }}
+                  style={{flex:1,padding:'4px 7px',borderRadius:6,border:'1.5px solid var(--accent)',
+                    background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
+                    fontFamily:'var(--font-sans)',minWidth:0}}/>
+                <button onClick={confirmAddL2}
+                  style={{padding:'4px 8px',borderRadius:6,border:'none',background:'var(--accent)',
+                    color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>✓</button>
+                <button onClick={()=>{setAddingL2(false);setNewL2('')}}
+                  style={{padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',
+                    background:'none',color:'var(--text3)',fontSize:12,cursor:'pointer',flexShrink:0}}>✕</button>
+              </div>
+            ) : (
+              <button onClick={()=>setAddingL2(true)}
+                style={{padding:'7px 10px',borderTop:'1px solid var(--border)',background:'none',
+                  border:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,fontWeight:600,
+                  textAlign:'left',fontFamily:'var(--font-sans)',width:'100%',flexShrink:0}}>
+                + nuova sottocategoria
               </button>
-            )) : (
-              <div style={{padding:'12px 16px',fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>Nessuna sottocategoria</div>
-            )}
+            ))}
           </div>
 
           {/* Rules panel — shown only when rulesOpen */}
@@ -452,6 +796,13 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
             </div>
           )}
         </div>
+
+        {/* ── Vehicle picker (when Veicoli selected) ── */}
+        {sel1 === 'Veicoli' && (
+          <div style={{padding:'4px 12px 8px'}}>
+            <VehicleQuickPicker txId={txId} cat1={sel1} />
+          </div>
+        )}
 
         {/* ── Footer ── */}
         <div className="cat-dropdown-footer" style={{borderTop:'1px solid var(--border)'}}>
@@ -708,7 +1059,7 @@ function getColValueStr(tx, colId, userAccounts) {
                           ? `${tx.cat1}${tx.cat2 ? ' › ' + tx.cat2 : ''}`
                           : 'Non Categorizzato'
     case 'user': {
-      const u = resolveUserByCard(tx.card, userAccounts, tx.merchant, tx.description, tx.cat2)
+      const u = tx.user || resolveUserByCard(tx.card, userAccounts, tx.merchant, tx.description, tx.cat2)
       return u || '—'
     }
     case 'isBonifico':  return tx.isBonifico ? 'Sì' : 'No'
@@ -799,7 +1150,7 @@ function DescModal({ text, onClose }) {
 
 
 // ── Learn from user correction ────────────────────────────
-async function learnException(tx, userDescAI) {
+export async function learnException(tx, userDescAI) {
   if (!userDescAI || !tx.description) return
   // Add exception to AI Prompt for descAI
   const { getAIPrompts, saveAIPrompts } = await import('../data/aiPrompts')
@@ -862,10 +1213,12 @@ function DateCell({ tx, showRegDate, updateTransaction }) {
 // ── Column definitions ───────────────────────────────────
 const ALL_COLUMNS = [
   { id:'date',        label:'📅 Data',                 alwaysOn:true  },
+  { id:'emoji',       label:'😀 Emoji Cat.'                            },
   { id:'descAI',      label:'✨ AI Descrizione',        alwaysOn:true  },
   { id:'description', label:'📄 Desc. Originale'                       },
   { id:'counterpart', label:'🔄 Controparte'                            },
   { id:'merchant',    label:'🏪 Merchant'                               },
+  { id:'note',        label:'📝 Note'                                   },
   { id:'city',        label:'🏙️ Città'                                 },
   { id:'time',        label:'🕐 Ora'                                    },
   { id:'card',        label:'💳 Carta'                                  },
@@ -875,7 +1228,7 @@ const ALL_COLUMNS = [
   { id:'isBonifico',  label:'🔵 Bonifico'                               },
   { id:'amount',      label:'💰 Importo',              alwaysOn:true  },
 ]
-const DEFAULT_VISIBLE = new Set(['date','descAI','city','time','card','user','cat','amount'])
+const DEFAULT_VISIBLE = new Set(['date','emoji','descAI','note','city','time','card','user','cat','amount'])
 const DEFAULT_ORDER   = ALL_COLUMNS.map(c=>c.id)
 
 function EditColonneModal({ visibleCols, colOrder, onApply, onClose }) {
@@ -953,7 +1306,7 @@ function EditColonneModal({ visibleCols, colOrder, onApply, onClose }) {
 
 
 // ── Smart match detection ────────────────────────────────
-function autoDetectMatch(tx) {
+export function autoDetectMatch(tx) {
   const candidates = [
     { field: 'merchant',     label: 'Merchant',     val: tx.merchant },
     { field: 'description',  label: 'Descrizione',  val: tx.description },
@@ -969,15 +1322,48 @@ function autoDetectMatch(tx) {
   return { field: 'description', label: 'Descrizione', value: (tx.description||'').slice(0, 40) }
 }
 
-function txMatchesRule(tx, match) {
+export function txMatchesRule(tx, match) {
   const val = (match.value||'').toLowerCase()
   if (!val) return false
-  const hay = (tx[match.field]||'').toLowerCase()
+  // For description field, also check descAI (AI-generated description)
+  const raw = match.field === 'description'
+    ? (tx.description || tx.descAI || '')
+    : (tx[match.field] || '')
+  const hay = raw.toLowerCase()
   return hay.includes(val)
 }
 
+// ── Rule text parser (Bug #25) ────────────────────────────
+// Parses the user-editable rule text (e.g. `Descrizione includes "AMAZON"`,
+// `descrizione contiene 'NETFLIX'`) back into a { field, label, value } match
+// object, so the saved rule reflects what the user actually sees/edits.
+const RULE_FIELD_MAP = {
+  'descrizione': 'description', 'description': 'description',
+  'merchant':    'merchant',
+  'controparte': 'counterpart', 'counterpart': 'counterpart',
+  'città':       'city', 'citta': 'city', 'city': 'city',
+}
+const RULE_FIELD_LABELS = {
+  description: 'Descrizione', merchant: 'Merchant',
+  counterpart: 'Controparte', city: 'Città',
+}
+export function parseRuleText(text, fallbackMatch) {
+  if (!text || !text.trim()) return fallbackMatch
+  // First condition of the form: CAMPO includes|contiene|include "VALORE"
+  const re = /([A-Za-zÀ-ÿ]+)\s+(?:includes|include|contiene)\s+["'“”‘’]([^"'“”‘’]+)["'“”‘’]/i
+  const m = text.match(re)
+  if (m) {
+    const field = RULE_FIELD_MAP[m[1].toLowerCase()]
+    const value = (m[2] || '').trim().slice(0, 60)
+    if (field && value) {
+      return { field, label: RULE_FIELD_LABELS[field], value }
+    }
+  }
+  return fallbackMatch
+}
+
 // ── AI smart rule generator ───────────────────────────────
-async function generateSmartRule(tx, newDesc) {
+export async function generateSmartRule(tx, newDesc) {
   const fields = [
     tx.merchant    && tx.merchant    !== 'null' ? `Merchant: "${tx.merchant}"`       : null,
     tx.description && tx.description !== 'null' ? `Descrizione: "${tx.description.slice(0,100)}"` : null,
@@ -1040,15 +1426,12 @@ Rispondi SOLO con questo JSON (nessun altro testo):
 }
 
 // ── Rule apply popup (shown after user renames AI description) ────
-function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) {
+export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) {
   const allTxs    = useStore(s => s.transactions)
   const customCats = useStore(s => s.customCats)
   const ruleAllCats     = getMergedCats(customCats)
   const ruleAllCatNames = getMergedCatNames(customCats)
   const now    = txDate || ''
-  const others = allTxs.filter(t => t.txId !== txId && !t.excluded && txMatchesRule(t, match))
-  const future    = others.filter(t => (t._effDate||(t._effDate||t.date||'')) >= now)
-  const allOthers = others
 
   // AI-generated rule state
   const [ruleText,      setRuleText]      = useState('')
@@ -1057,6 +1440,17 @@ function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) 
   const [loading,       setLoading]       = useState(true)
   const [aiError,       setAiError]       = useState(false)
   const [updateDescAI,  setUpdateDescAI]  = useState(true)
+
+  // Derive effective match from the (possibly edited) ruleText so the count + saved rule
+  // reflect what the user actually sees in the textarea, not just the auto-detected default.
+  const effectiveMatch = parseRuleText(ruleText, match)
+  const others = allTxs.filter(t => t.txId !== txId && !t.excluded && txMatchesRule(t, effectiveMatch))
+  const future    = others.filter(t => (t._effDate||(t._effDate||t.date||'')) >= now)
+  const allOthers = others
+
+  // Duplicate-rule conflict state
+  const [pending,    setPending]    = useState(null)   // { mode, ruleText, cat1, cat2, updateDescAI }
+  const [conflicts,  setConflicts]  = useState([])     // similar existing rules
 
   useMemo(() => {
     setLoading(true)
@@ -1076,6 +1470,93 @@ function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) 
 
   const cat2Options = cat1 ? (ruleAllCats[cat1]?.sub || []) : []
 
+  // Find rules with similar matchField + matchValue (based on current edited ruleText)
+  function findConflicts() {
+    const existing = useStore.getState()?.appPrefs?.aiNamingRules || []
+    const em  = parseRuleText(ruleText, match)
+    const val = (em.value || '').toLowerCase()
+    return existing.filter(r => {
+      if (!r.enabled) return false
+      const rv = (r.matchValue || '').toLowerCase()
+      return r.matchField === em.field && (rv.includes(val) || val.includes(rv))
+    })
+  }
+
+  function requestSave(mode, rt, c1, c2, upd) {
+    if (mode === 'none') { onApply('none'); onClose(); return }
+    const em = parseRuleText(rt, match)  // parse the (possibly edited) text
+    const found = findConflicts()
+    if (found.length > 0) {
+      setPending({ mode, ruleText: rt, cat1: c1, cat2: c2, updateDescAI: upd, parsedMatch: em })
+      setConflicts(found)
+    } else {
+      onApply(mode, rt, c1, c2, upd, em)  // pass parsed match
+      onClose()
+    }
+  }
+
+  function resolveConflict(resolution) {
+    if (resolution === 'replace') {
+      const existing = useStore.getState()?.appPrefs?.aiNamingRules || []
+      const ids = new Set(conflicts.map(r => r.id))
+      useStore.getState()?.setAppPref?.('aiNamingRules', existing.filter(r => !ids.has(r.id)))
+    }
+    // 'keep_both' → just proceed without deleting
+    onApply(pending.mode, pending.ruleText, pending.cat1, pending.cat2, pending.updateDescAI, pending.parsedMatch)
+    onClose()
+  }
+
+  // ── Conflict resolution view ──────────────────────────────
+  if (pending && conflicts.length > 0) {
+    return (
+      <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'}}
+        onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
+        <div style={{background:'var(--surface)',borderRadius:14,padding:'28px 32px',maxWidth:520,width:'94%',
+          boxShadow:'0 16px 48px rgba(0,0,0,.25)'}}>
+          <div style={{fontSize:18,fontWeight:800,marginBottom:8}}>⚠️ Regola già esistente</div>
+          <div style={{fontSize:13,color:'var(--text2)',marginBottom:14}}>
+            Esiste già {conflicts.length === 1 ? 'una regola simile' : `${conflicts.length} regole simili`} con la stessa condizione di match:
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:20}}>
+            {conflicts.map(r => (
+              <div key={r.id} style={{padding:'10px 14px',borderRadius:10,
+                background:'rgba(250,180,0,.08)',border:'1.5px solid rgba(250,180,0,.35)'}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--text1)',marginBottom:2}}>
+                  "{r.description}"
+                </div>
+                <div style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>
+                  {r.matchLabel || `${r.matchField} includes "${r.matchValue}"`}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:12,color:'var(--text2)',marginBottom:16,padding:'10px 14px',
+            borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)'}}>
+            Nuova regola: <strong>"{newDesc}"</strong>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <button className="btn btn-primary"
+              style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
+              onClick={()=>resolveConflict('replace')}>
+              🔄 Sostituisci la vecchia con quella nuova
+            </button>
+            <button className="btn btn-secondary"
+              style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
+              onClick={()=>resolveConflict('keep_both')}>
+              📋 Tieni entrambe
+            </button>
+            <button className="btn btn-ghost"
+              style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
+              onClick={()=>{ setPending(null); setConflicts([]) }}>
+              ← Torna indietro
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Normal popup ──────────────────────────────────────────
   return (
     <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'}}
       onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
@@ -1161,12 +1642,12 @@ function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) 
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           <button className="btn btn-primary" disabled={loading}
             style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
-            onClick={()=>{ onApply('all', ruleText, cat1, cat2, updateDescAI); onClose() }}>
+            onClick={()=>requestSave('all', ruleText, cat1, cat2, updateDescAI)}>
             ✅ Salva regola + applica a tutti ({allOthers.length + 1}) — anche retroattivamente
           </button>
           <button className="btn btn-secondary" disabled={loading}
             style={{justifyContent:'flex-start',padding:'10px 16px',fontSize:13}}
-            onClick={()=>{ onApply('future', ruleText, cat1, cat2, updateDescAI); onClose() }}>
+            onClick={()=>requestSave('future', ruleText, cat1, cat2, updateDescAI)}>
             ⏩ Salva regola + questo e i prossimi ({future.length + 1})
           </button>
           <button className="btn btn-ghost"
@@ -1180,6 +1661,74 @@ function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onClose }) 
           La regola viene salvata in Impostazioni → Regole AI solo se scegli una delle prime due opzioni.
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── NoteCell — pallino nero → textarea inline ─────────────
+function NoteCell({ tx, updateTransaction }) {
+  const [open, setOpen] = useState(false)
+  const [val,  setVal]  = useState(tx.note || '')
+  const hasNote = !!(tx.note && tx.note.trim())
+
+  // Keep editing draft in sync if tx.note changes externally (e.g. from another session)
+  useEffect(() => { if (!open) setVal(tx.note || '') }, [tx.note, open])
+
+  function commit() {
+    const note = val.trim() || null
+    updateTransaction(tx.txId, { note })
+    setOpen(false)
+  }
+
+  return (
+    <div style={{ position:'relative' }}>
+      <button
+        onClick={() => { setVal(tx.note || ''); setOpen(o => !o) }}
+        title={hasNote ? tx.note : 'Aggiungi nota'}
+        style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 6px',
+          display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: hasNote ? 'var(--text1)' : 'transparent',
+          display: 'inline-block', flexShrink: 0,
+          border: `1.5px solid ${hasNote ? 'var(--text1)' : 'var(--text3)'}`,
+          boxSizing: 'border-box',
+        }}/>
+      </button>
+      {open && (
+        <div style={{ position:'fixed', zIndex:200, background:'var(--surface)',
+          border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)',
+          padding:12, width:260, display:'flex', flexDirection:'column', gap:8 }}
+          onClick={e => e.stopPropagation()}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', letterSpacing:'.06em', textTransform:'uppercase' }}>
+            Nota transazione
+          </div>
+          <textarea
+            autoFocus
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            rows={4}
+            placeholder="Scrivi una nota…"
+            style={{ padding:'8px 10px', borderRadius:8, border:'1.5px solid var(--accent)',
+              background:'var(--bg)', color:'var(--text1)', fontSize:13, resize:'vertical',
+              fontFamily:'var(--font-sans)', outline:'none', lineHeight:1.5 }}
+          />
+          <div style={{ display:'flex', gap:6 }}>
+            <button onClick={commit}
+              style={{ flex:1, padding:'6px', borderRadius:8, border:'none',
+                background:'var(--accent)', color:'#fff', fontSize:12, fontWeight:700,
+                cursor:'pointer', fontFamily:'var(--font-sans)' }}>✓ Salva</button>
+            <button onClick={() => setOpen(false)}
+              style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)',
+                background:'var(--bg)', color:'var(--text3)', fontSize:12,
+                cursor:'pointer', fontFamily:'var(--font-sans)' }}>✕</button>
+            {hasNote && <button onClick={() => { setVal(''); updateTransaction(tx.txId, { note: null }); setOpen(false) }}
+              style={{ padding:'6px 8px', borderRadius:8, border:'1px solid var(--red)',
+                background:'rgba(220,50,50,.08)', color:'var(--red)', fontSize:11,
+                cursor:'pointer', fontFamily:'var(--font-sans)' }}>🗑</button>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1256,22 +1805,24 @@ function AiDescCell({ tx, updateTransaction }) {
     return trimmed
   }
   const [aiVal, setAiVal] = useState(() => { const v = normalizeDesc(tx.descAI)||''; return (v==='null'||v==='undefined')?'':v })
-  useMemo(()=>{ if(!aiEdit) setAiVal(normalizeDesc(tx.descAI)||'') }, [tx.descAI, aiEdit])
+  useEffect(()=>{ if(!aiEdit) setAiVal(normalizeDesc(tx.descAI)||'') }, [tx.descAI, aiEdit])
 
-  function handleApplyRule(mode, ruleText, cat1, cat2, updateDescAI = true) {
+  function handleApplyRule(mode, ruleText, cat1, cat2, updateDescAI = true, parsedMatch = null) {
     // mode 'none' → do nothing (rule NOT created)
     if (mode === 'none') return
     const match   = rulePopup?.match
     const newDesc = rulePopup?.newDesc
     if (!match || !newDesc) return
+    // Use the parsed match from the edited rule text (if available), else fall back to auto-detected
+    const effectiveMatch = parsedMatch || parseRuleText(ruleText, match)
 
     // Create the AI naming rule (Firestore via appPrefs.aiNamingRules)
     const existingRules = useStore.getState()?.appPrefs?.aiNamingRules || []
     const newNamingRule = {
       id:          `nr-${Date.now()}`,
-      matchField:  match.field,
-      matchValue:  match.value,
-      matchLabel:  ruleText || `${match.label} includes "${match.value}"`,
+      matchField:  effectiveMatch.field,
+      matchValue:  effectiveMatch.value,
+      matchLabel:  ruleText || `${effectiveMatch.label} includes "${effectiveMatch.value}"`,
       description: newDesc,
       enabled:     true,
       createdAt:   new Date().toISOString(),
@@ -1281,7 +1832,7 @@ function AiDescCell({ tx, updateTransaction }) {
     // Apply description to other matching transactions (batched undo)
     const targets = allTxs.filter(t => {
       if (t.txId === tx.txId || t.excluded) return false
-      if (!txMatchesRule(t, match)) return false
+      if (!txMatchesRule(t, effectiveMatch)) return false
       if (mode === 'future') return (t._effDate||(t._effDate||t.date||'')) >= (tx._effDate||(tx._effDate||tx.date||''))
       return true // 'all'
     })
@@ -1385,7 +1936,14 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
     // Module-level guard — only reset when run() truly finishes, NOT in cleanup.
     // This prevents StrictMode's unmount→remount cycle from clearing the flag
     // between the two mount calls and triggering a duplicate run.
-    if (_enrichRunning) return
+    if (_enrichRunning) {
+      // Another overlay is already running — show a message then close gracefully
+      // instead of getting stuck at 0% forever.
+      setPhase('⚠️ Arricchimento già in corso. Attendi il completamento.')
+      setError('Un processo di arricchimento AI è già attivo. Attendi che finisca prima di avviarne un altro.')
+      setTimeout(onDone, 2500)
+      return
+    }
     _enrichRunning = true
     mountedRef.current = true
     abortRef.current   = false
@@ -1515,6 +2073,10 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
 
           // Fetch current tx to check manual overrides
           const curTx = useStore.getState().transactions.find(s => s.txId === t.txId)
+          // Never overwrite categories the user set manually, or king-protected txs
+          const _isKingProtected = useStore.getState().isKingProtected
+          const catProtected = !!curTx?.userEditedCat ||
+            (typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount))
           updateTransaction(t.txId, {
             descAI:        t.descAI,
             city:          curTx?.cityUserEdited ? curTx.city : t.city,  // respect manual edits
@@ -1522,9 +2084,9 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
             card:          t.card,
             merchant:      t.merchant      ?? null,
             counterpart:   t.counterpart   ?? null,
-            cat1:          t.cat1          || null,
-            cat2:          t.cat2          || '',
-            conf:          t.conf          || null,
+            cat1:          catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null),
+            cat2:          catProtected ? (curTx?.cat2 ?? '')   : (t.cat2 || ''),
+            conf:          catProtected ? (curTx?.conf ?? null) : (t.conf || null),
             aiEnriched:    true,
             aiEnrichedAt:  t.aiEnrichedAt,
             aiCategorized: true,
@@ -1560,7 +2122,7 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
       } // end inner batch loop
     } // end wave loop
     // ── Step 3: Google Places city enrichment ─────────────
-    if (!abortRef.current && localStorage.getItem('fm-places-key')) {
+    if (!abortRef.current && (useStore.getState().appPrefs?.placesKey || localStorage.getItem('fm-places-key'))) {
       if (mountedRef.current) setPlacesPhase('Ricerca città con Google Places…')
       try {
         // Get current store state for the enriched transactions
@@ -1695,6 +2257,7 @@ function AiFeedbackModal({ tx, onClose }) {
 // ── Add Manual Transaction Modal ──────────────────────────
 function AddManualTxModal({ onClose }) {
   const { addTransactions } = useStore()
+  const customCats = useStore(s => s.customCats)
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), description:'', amount:'', cat1:'Non Categorizzato', cat2:'' })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
   function save() {
@@ -1718,7 +2281,7 @@ function AddManualTxModal({ onClose }) {
       <FormRow label="Importo €"><input type="number" value={form.amount} onChange={e=>set('amount',e.target.value)} className="form-input" placeholder="−45.00 o +1200.00" step="0.01"/></FormRow>
       <FormRow label="Categoria">
         <Select value={form.cat1} onChange={e=>set('cat1',e.target.value)}>
-          {CAT_NAMES.map(n=><option key={n}>{n}</option>)}
+          {Object.keys(getMergedCats(customCats)).map(n=><option key={n}>{n}</option>)}
         </Select>
       </FormRow>
       <ModalFooter>
@@ -1730,7 +2293,7 @@ function AddManualTxModal({ onClose }) {
 }
 
 // ── Quick filters ─────────────────────────────────────────
-function QuickFilters({ transactions }) {
+function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideSmall, filterNoCat2, setFilterNoCat2, selected }) {
   const store   = useStore()
   const filters = store.filters
   const today   = new Date()
@@ -1741,7 +2304,7 @@ function QuickFilters({ transactions }) {
     all:    allTxs.filter(t=>!t.excluded).length,
     income: allTxs.filter(t=>!t.excluded&&t.amount>0).length,
     expense:allTxs.filter(t=>!t.excluded&&t.amount<0).length,
-    uncat:  allTxs.filter(t=>!t.excluded&&(!t.cat1||t.cat1==='Non Categorizzato')).length,
+    uncat:  allTxs.filter(t=>!t.excluded&&t.cat1&&t.cat1!=='Non Categorizzato'&&!t.cat2).length,
     review:  allTxs.filter(t=>(t.conf||0)<70).length,
     flagged: allTxs.filter(t=>t._flagged).length,
     thisM:   allTxs.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).length,
@@ -1751,18 +2314,37 @@ function QuickFilters({ transactions }) {
     {id:'all',     label:'Tutte',        count:counts.all,    active:!filters.type&&!filters.cat1&&!filters.dateFrom&&!filters.conf&&!filters.flagged, action:()=>store.clearFilters()},
     {id:'income',  label:'Entrate',      count:counts.income, active:filters.type==='Income', action:()=>store.setFilter('type',filters.type==='Income'?'':'Income')},
     {id:'expense', label:'Uscite',       count:counts.expense,active:filters.type==='Expense',action:()=>store.setFilter('type',filters.type==='Expense'?'':'Expense')},
-    {id:'uncat',   label:'Non cat.',     count:counts.uncat,  active:filters.cat1==='Non Categorizzato', warn:counts.uncat>0, action:()=>store.setFilter('cat1',filters.cat1==='Non Categorizzato'?'':'Non Categorizzato')},
+    {id:'uncat',   label:'Non cat L2',   count:counts.uncat,  active:filterNoCat2, warn:counts.uncat>0, action:()=>setFilterNoCat2(v=>!v)},
     {id:'review',  label:'Da rivedere',  count:counts.review, active:filters.conf==='low',    warn:counts.review>0,action:()=>store.setFilter('conf',filters.conf==='low'?'':'low')},
     {id:'flagged', label:'🚩 To review',  count:counts.flagged,active:!!filters.flagged,        warn:counts.flagged>0,action:()=>store.setFilter('flagged',filters.flagged?'':'1')},
     {id:'thisM',   label:'Questo mese',  count:counts.thisM,  active:filters.dateFrom===thisYM+'-01', action:()=>{
       if(filters.dateFrom===thisYM+'-01') store.clearFilters()
       else { store.setFilter('dateFrom',thisYM+'-01'); store.setFilter('dateTo',thisYM+'-31') }
     }},
-    {id:'hidecomm', label:'Nascondi commissioni', active:hideComm, action:()=>setHideComm(v=>!v)},
   ]
 
+  const selTxs = selected?.size > 0
+    ? transactions.filter(t => selected.has(t.txId))
+    : []
+  const selSum = selTxs.reduce((s, t) => s + (t.amount || 0), 0)
+  const fmtSel = v => {
+    const abs = Math.abs(v)
+    const str = abs.toLocaleString('it-IT', {minimumFractionDigits:2,maximumFractionDigits:2})
+    return v >= 0 ? `+€ ${str}` : `−€ ${str}`
+  }
+
+  const hideToggle = (label, active, action) => (
+    <button onClick={action} style={{
+      padding:'3px 9px',borderRadius:10,cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,
+      border:`1px solid ${active?'var(--accent)':'var(--border)'}`,
+      background:active?'var(--accent)':'transparent',
+      color:active?'#fff':'var(--text3)',
+      fontWeight:active?700:400,transition:'all .12s',
+    }}>{label}</button>
+  )
+
   return (
-    <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+    <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
       {pills.map(p => (
         <button key={p.id} onClick={p.action} style={{
           display:'inline-flex',alignItems:'center',gap:5,padding:'5px 12px',
@@ -1780,6 +2362,29 @@ function QuickFilters({ transactions }) {
           </span>
         </button>
       ))}
+
+      {/* ── Nascondi group ── */}
+      <div style={{marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:5,
+        padding:'3px 8px 3px 10px',borderRadius:12,
+        border:'1px solid var(--border)',background:'var(--surface)'}}>
+        <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',letterSpacing:'.04em',
+          textTransform:'uppercase',marginRight:2}}>Nascondi</span>
+        {hideToggle('commissioni', hideComm,  ()=>setHideComm(v=>!v))}
+        {hideToggle('<1€',         hideSmall, ()=>setHideSmall(v=>!v))}
+      </div>
+
+      {selTxs.length > 0 && (
+        <div style={{display:'inline-flex',alignItems:'center',gap:8,
+          padding:'5px 14px',borderRadius:20,
+          border:'1px solid var(--accent)',background:'var(--accent-l)',
+          fontSize:13,color:'var(--accent)',fontWeight:700}}>
+          <span>{selTxs.length} selezionate</span>
+          <span style={{width:1,height:14,background:'var(--accent)',opacity:.3}}/>
+          <span style={{color:selSum>=0?'var(--green)':'var(--red)',fontFamily:'var(--font-mono)',fontSize:12}}>
+            {fmtSel(selSum)}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -1829,10 +2434,15 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const updateTransaction = useStore(s=>s.updateTransaction)
   const userAccounts      = useStore(s=>s.userAccounts)
   const satiPots          = useStore(s=>s.satiPots)
+  const allTxs            = useStore(s=>s.transactions)
+  const customCats        = useStore(s=>s.customCats)
+  const compensatingTx    = tx._compensatedBy ? allTxs.find(t=>t.txId===tx._compensatedBy) : null
+  const compensatedLabel  = compensatingTx?.cat2?.toLowerCase()==='satispay' ? 'Compensato Satispay' : 'Compensato'
   const catOpen = openCatTxId === tx.txId
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)
   const [descOpen,    setDescOpen]    = useState(false)
   const [mixCatOpen,  setMixCatOpen]  = useState(false)
+  const [amtPopup,    setAmtPopup]    = useState(false)
   const pillRef = useRef(null)
 
   const isIncome = tx.amount > 0
@@ -1862,14 +2472,29 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           onChange={e=>{const next=new Set(selected||[]);e.target.checked?next.add(tx.txId):next.delete(tx.txId);setSelected?.(next)}}/>
       </td>
       <td style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
-        {tx._flagged && <span title="Flaggata per revisione" style={{marginRight:4,fontSize:11}}>🚩</span>}
-        <span style={{fontSize:10,fontFamily:'var(--font-mono)',padding:'2px 5px',borderRadius:4,
-          background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',
-          ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</span>
+        <button
+          onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_nonRecurring:!tx._nonRecurring})}}
+          title={tx._nonRecurring?'Non ricorrente — clicca per rimuovere':'Segna come non ricorrente'}
+          style={{border:'none',background:'none',cursor:'pointer',padding:'0 3px 0 0',fontSize:11,lineHeight:1,
+            opacity:tx._nonRecurring?1:0.2,color:tx._nonRecurring?'#6366f1':'var(--text3)',
+            verticalAlign:'middle'}}>⚡</button>
+        <button
+          onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_flagged:!tx._flagged})}}
+          title={tx._flagged?'To review — clicca per rimuovere flag':'Segna come to review'}
+          style={{fontSize:10,fontFamily:'var(--font-mono)',padding:'2px 5px',borderRadius:4,cursor:'pointer',
+            background: tx._flagged ? 'rgba(220,50,50,0.12)' : 'var(--surface2)',
+            border: tx._flagged ? '1.5px solid rgba(220,50,50,0.5)' : '1px solid var(--border)',
+            color: tx._flagged ? 'var(--red)' : 'var(--text3)',
+            fontWeight: tx._flagged ? 700 : 400,
+            ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</button>
       </td>
 
       {cols.map(id => {
         if(id==='date') return <DateCell key={id} tx={tx} showRegDate={showRegDate} updateTransaction={updateTransaction}/>
+        if(id==='emoji') {
+          const em = getMergedCats(customCats)[tx.cat1]?.subEmojis?.[tx.cat2] || ''
+          return <td key={id} style={{width:28,textAlign:'center',fontSize:15,padding:'0 2px',verticalAlign:'middle'}}>{em}</td>
+        }
         if(id==='descAI') return (
           <td key={id} style={{padding:'4px 8px',maxWidth:150}}>
             <div style={{display:'flex',alignItems:'center',gap:5}}>
@@ -1905,6 +2530,11 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
               : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>}
           </td>
         )
+        if(id==='note') return (
+          <td key={id} className="tx-note-cell">
+            <NoteCell tx={tx} updateTransaction={updateTransaction}/>
+          </td>
+        )
         if(id==='city') return (
           <td key={id} className="tx-city-cell">
             <CityCell tx={tx} updateTransaction={updateTransaction}/>
@@ -1926,9 +2556,12 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
         )
         if(id==='user') return (
           <td key={id} className="tx-user-cell">
-            {(()=>{const u=resolveUserByCard(tx.card,userAccounts,tx.merchant,tx.description,tx.cat2);return u
-              ?<span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{u}</span>
-              :<span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>})()}
+            {(()=>{
+              const u = tx.user || resolveUserByCard(tx.card,userAccounts,tx.merchant,tx.description,tx.cat2)
+              return u
+                ?<span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{u}</span>
+                :<span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>
+            })()}
           </td>
         )
         if(id==='cat') {
@@ -2027,10 +2660,39 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           </td>
         )
         if(id==='amount') return (
-          <td key={id} className={'tx-amount'+amtClass} style={tx._compensatedAmt>0?{color:'var(--blue)'}:undefined}>
-            {tx._compensatedAmt>0
-              ? <>{fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:1}}>*</span></>
-              : fmtIT(Math.abs(tx.amount), 2)}
+          <td key={id} className={'tx-amount'+amtClass} style={{position:'relative'}}>
+            {tx._compensatedAmt>0 ? (
+              <>
+                <span
+                  style={{color:'var(--gold)',cursor:'pointer'}}
+                  title="Importo rettificato — clicca per dettaglio"
+                  onClick={e=>{e.stopPropagation();setAmtPopup(v=>!v)}}>
+                  {fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:2}}>*</span>
+                </span>
+                {amtPopup && (
+                  <div onClick={e=>e.stopPropagation()} style={{
+                    position:'absolute',right:0,top:'100%',zIndex:999,
+                    background:'var(--surface)',border:'1px solid var(--border)',
+                    borderRadius:10,padding:'12px 16px',minWidth:220,
+                    boxShadow:'0 8px 24px rgba(0,0,0,.18)',fontSize:13,whiteSpace:'nowrap'}}>
+                    <div style={{fontWeight:700,marginBottom:8,fontSize:12,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.05em'}}>Importo rettificato</div>
+                    <div style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
+                      <span style={{color:'var(--text2)'}}>Originale</span>
+                      <span style={{fontWeight:600,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount),2)} €</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
+                      <span style={{color:'var(--text2)'}}>{compensatedLabel}</span>
+                      <span style={{fontWeight:600,color:'var(--gold)'}}>− {fmtIT(tx._compensatedAmt,2)} €</span>
+                    </div>
+                    <div style={{borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,display:'flex',justifyContent:'space-between',gap:16}}>
+                      <span style={{color:'var(--text2)'}}>Netto</span>
+                      <span style={{fontWeight:700,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount)-tx._compensatedAmt,2)} €</span>
+                    </div>
+                    <button onClick={()=>setAmtPopup(false)} style={{marginTop:10,width:'100%',padding:'5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',cursor:'pointer',fontSize:12,color:'var(--text2)'}}>Chiudi</button>
+                  </div>
+                )}
+              </>
+            ) : fmtIT(Math.abs(tx.amount), 2)}
           </td>
         )
         return null
@@ -2219,10 +2881,20 @@ export default function TransactionsPage() {
   const [enriching,      setEnriching]      = useState(false)
   const [reenriching,    setReenriching]    = useState(false)
   const [enrichingSelected, setEnrichingSelected] = useState(false)
+  const [aiCodePrompt,   setAiCodePrompt]   = useState(null) // null | 'enrich' | 'reenrich' | 'selected'
+  const [aiCodeInput,    setAiCodeInput]    = useState('')
+  const [aiCodeError,    setAiCodeError]    = useState(false)
+  const appPrefs_tx = useStore(s => s.appPrefs)
+  function checkAiCode(then) {
+    const code = appPrefs_tx?.aiEnrichCode || ''
+    if (!code || aiCodeInput.trim() === code) { then(); setAiCodePrompt(null); setAiCodeInput('') }
+    else { setAiCodeError(true); setTimeout(() => setAiCodeError(false), 800) }
+  }
   const [enrichSingleTx, setEnrichSingleTx] = useState(null)
   const [feedbackTx,     setFeedbackTx]     = useState(null)
   const [selected,       setSelected]       = useState(new Set())
   const [mergeTxOpen,    setMergeTxOpen]    = useState(false)
+  const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
   const [openCatTxId,    setOpenCatTxId]    = useState(null)
   const [showRegDate,    setShowRegDate]    = useState(false)
   const [colsOpen,       setColsOpen]       = useState(false)
@@ -2233,14 +2905,8 @@ export default function TransactionsPage() {
   const [colFilters,     setColFilters]     = useState({})
   const [filterPopup,    setFilterPopup]    = useState(null)
   const [hideComm,       setHideComm]       = useState(true)
-
-  // Default date filter: last 6 months (only if no filter already set)
-  useEffect(() => {
-    if (!store.filters.dateFrom) {
-      const d = new Date(); d.setMonth(d.getMonth() - 6)
-      store.setFilter('dateFrom', d.toISOString().split('T')[0])
-    }
-  }, [])
+  const [hideSmall,      setHideSmall]      = useState(true)
+  const [filterNoCat2,   setFilterNoCat2]   = useState(false)
 
   // Close cat dropdown on click outside
   useEffect(() => {
@@ -2272,15 +2938,25 @@ export default function TransactionsPage() {
         (t.txId||'').toLowerCase().includes(s)
       )
     }
-    if (filters.type === 'income')  txs = txs.filter(t => t.amount > 0)
-    if (filters.type === 'expense') txs = txs.filter(t => t.amount < 0)
+    if (filters.type === 'Income')  txs = txs.filter(t => t.amount > 0)
+    if (filters.type === 'Expense') txs = txs.filter(t => t.amount < 0)
     if (filters.cat1) txs = txs.filter(t => t.cat1 === filters.cat1)
     if (filters.dateFrom) txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) >= filters.dateFrom)
     if (filters.dateTo)   txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) <= filters.dateTo)
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
     if (filters.flagged)        txs = txs.filter(t => !!t._flagged)
-    if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.card))
-    if (hideComm) txs = txs.filter(t => t.descAI !== 'Commissioni' && t.cat2 !== 'Commissione Banca')
+    if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.account))
+    if (hideComm)  txs = txs.filter(t => {
+      const c2 = (t.cat2 || '').toLowerCase()
+      if (t.descAI === 'Commissioni') return false
+      if (c2.includes('commissioni') || c2 === 'commissione banca') return false
+      return true
+    })
+    if (hideSmall) txs = txs.filter(t => {
+      if (Math.abs(t.amount) < 1) return false
+      return true
+    })
+    if (filterNoCat2) txs = txs.filter(t => t.cat1 && t.cat1 !== 'Non Categorizzato' && !t.cat2)
     // Column filters (Excel-style)
     Object.entries(colFilters).forEach(([colId, vals]) => {
       if (!vals || vals.length === 0) return
@@ -2302,7 +2978,7 @@ export default function TransactionsPage() {
       return sortDir==='asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return txs
-  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm])
+  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm, hideSmall, filterNoCat2])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d==='asc'?'desc':'asc')
@@ -2359,21 +3035,21 @@ export default function TransactionsPage() {
               ✓ {enriched} arricchite
             </button>
           )}
-          {/* AI Enrichment — solo Admin */}
-          {isAdmin && (
+          {/* AI Enrichment */}
+          {(appPrefs_tx?.aiEnrichEnabled !== false) && (
             <button className="btn btn-secondary"
               style={{background:'var(--gold-l)',borderColor:'var(--gold)',color:'var(--gold)',fontWeight:700,
                 opacity: unenriched > 0 ? 1 : 0.45}}
-              onClick={()=>setEnriching(true)}
+              onClick={()=>{setAiCodeInput('');setAiCodeError(false);setAiCodePrompt('enrich')}}
               title={unenriched === 0 ? 'Tutte le transazioni sono già elaborate' : `${unenriched} transazioni da elaborare`}>
               ✨ AI {unenriched > 0 ? `(${unenriched})` : ''}
             </button>
           )}
-          {/* Re-enrich — solo Admin */}
-          {isAdmin && (
+          {/* Re-enrich */}
+          {(appPrefs_tx?.aiEnrichEnabled !== false) && (
             <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)'}}
               title="Forza ri-processamento AI su tutte le transazioni"
-              onClick={()=>{if(confirm('Ri-processare con AI TUTTE le transazioni?'))setReenriching(true)}}>
+              onClick={()=>{setAiCodeInput('');setAiCodeError(false);setAiCodePrompt('reenrich')}}>
               🔄 Re-enrich
             </button>
           )}
@@ -2414,16 +3090,43 @@ export default function TransactionsPage() {
       </div>
 
 
+      {/* Uncategorized alert banner */}
+      {(() => {
+        const uncatCount = store.transactions.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
+        if (!uncatCount) return null
+        return (
+          <div style={{
+            margin:'0 0 16px',padding:'12px 16px',
+            background:'#fff8f0',border:'1px solid #f59e0b',borderRadius:10,
+            display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'
+          }}>
+            <div style={{flex:1,fontSize:13,fontWeight:600,color:'#92400e'}}>
+              ⚠️ {uncatCount} transazion{uncatCount===1?'e':'i'} senza categoria
+            </div>
+            <button onClick={()=>{ store.setFilter('cat1','Non Categorizzato'); store._recomputeFiltered() }}
+              style={{padding:'5px 14px',borderRadius:7,border:'none',cursor:'pointer',
+                background:'#f59e0b',color:'#fff',fontSize:12,fontWeight:700,
+                fontFamily:'var(--font-sans)'}}>
+              Mostra
+            </button>
+          </div>
+        )
+      })()}
+
       {/* Bulk action bar */}
       {selected.size > 0 && (
         <div style={{display:'flex',gap:8,alignItems:'center',padding:'10px 14px',background:'var(--accent-l)',borderRadius:'var(--radius-sm)',marginBottom:12,flexWrap:'wrap'}}>
           <span style={{fontSize:13,fontWeight:600,color:'var(--accent)'}}>{selected.size} selezionate</span>
-          {isAdmin && (
+          {(appPrefs_tx?.aiEnrichEnabled !== false) && (
             <button className="btn btn-ghost" style={{fontSize:12,color:'var(--gold)',fontWeight:700,border:'1px solid var(--gold)',borderRadius:6,padding:'4px 10px'}}
-              onClick={()=>setEnrichingSelected(true)}>
+              onClick={()=>{setAiCodeInput('');setAiCodeError(false);setAiCodePrompt('selected')}}>
               ✨ AI Enrichment ({selected.size})
             </button>
           )}
+          <button className="btn btn-ghost" style={{fontSize:12,color:'var(--accent)',border:'1px solid var(--accent)',borderRadius:6,padding:'4px 10px',fontWeight:700}}
+            onClick={()=>setBulkEditOpen(true)}>
+            ✏️ Modifica Multipla
+          </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--text3)',border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px'}}
             onClick={()=>{const txList=store.transactions.filter(t=>selected.has(t.txId));if(txList.length===1)setFeedbackTx(txList[0])}}>
             💬 Feedback
@@ -2458,6 +3161,13 @@ export default function TransactionsPage() {
         </div>
       )}
 
+      {bulkEditOpen && (
+        <BulkEditModal
+          txIds={selected}
+          onClose={() => { setBulkEditOpen(false); setSelected(new Set()) }}
+        />
+      )}
+
       {mergeTxOpen && selected.size >= 2 && selected.size <= 3 && (
         <MergeTransactionsModal
           txs={store.transactions.filter(t => selected.has(t.txId))}
@@ -2467,7 +3177,7 @@ export default function TransactionsPage() {
 
       <div style={{position:'sticky',top:0,zIndex:10,background:'var(--bg)',paddingBottom:8,marginBottom:0}}>
         <KPIBar txs={filtered}/>
-        <QuickFilters transactions={store.transactions}/>
+        <QuickFilters transactions={store.transactions} hideComm={hideComm} setHideComm={setHideComm} hideSmall={hideSmall} setHideSmall={setHideSmall} filterNoCat2={filterNoCat2} setFilterNoCat2={setFilterNoCat2} selected={selected}/>
         <FilterBar/>
       </div>
 
@@ -2500,6 +3210,7 @@ export default function TransactionsPage() {
               <tr>
                 <th className="tx-th" style={{width:32,textAlign:'center'}}>
                   <input type="checkbox" style={{cursor:'pointer'}}
+                    checked={filtered.length>0 && filtered.every(t=>selected.has(t.txId))}
                     onChange={e=>setSelected(e.target.checked?new Set(filtered.map(t=>t.txId)):new Set())}/>
                 </th>
                 <th className="tx-th" style={{width:64,cursor:'pointer'}} onClick={()=>toggleSort('txId')}>Cod. {sortIcon('txId')}</th>
@@ -2512,10 +3223,12 @@ export default function TransactionsPage() {
                     }}>{colFilters[colId]?.length>0?'▼':'▽'}</button>
                   )
                   if(id==='date')        return <th key={id} className="tx-th" style={{width:80,cursor:'pointer'}} onClick={()=>toggleSort('date')}>Data {sortIcon('date')}{filterBtn('date')}</th>
+                  if(id==='emoji')       return <th key={id} className="tx-th" style={{width:28,textAlign:'center',padding:'0 2px'}} title="Emoji categoria L2">😀</th>
                   if(id==='descAI')      return <th key={id} className="tx-th" style={{minWidth:140,cursor:'pointer'}} onClick={()=>toggleSort('descAI')}>AI Descrizione {sortIcon('descAI')}{filterBtn('descAI')}</th>
                   if(id==='description') return <th key={id} className="tx-th" style={{minWidth:140}}>Desc. Originale</th>
                   if(id==='counterpart') return <th key={id} className="tx-th" style={{minWidth:100}}>Controparte{filterBtn('counterpart')}</th>
                   if(id==='merchant')    return <th key={id} className="tx-th" style={{minWidth:100}}>Merchant{filterBtn('merchant')}</th>
+                  if(id==='note')        return <th key={id} className="tx-th" style={{width:36,textAlign:'center',padding:'0 4px'}}>📝</th>
                   if(id==='city')        return <th key={id} className="tx-th" style={{width:90}}>Città{filterBtn('city')}</th>
                   if(id==='time')        return <th key={id} className="tx-th" style={{width:60}}>Ora</th>
                   if(id==='card')        return <th key={id} className="tx-th" style={{width:70}}>Carta{filterBtn('card')}</th>
@@ -2544,8 +3257,9 @@ export default function TransactionsPage() {
           </table>
         )}
         {filtered.some(t => t._compensatedAmt > 0) && (
-          <div style={{fontSize:11,color:'var(--blue)',padding:'8px 14px',background:'rgba(42,92,138,.05)',borderTop:'1px solid var(--border)',textAlign:'right'}}>
-            * Importo ridotto — spesa parzialmente compensata da un&#39;entrata collegata in &quot;Altre Entrate&quot;
+          <div style={{fontSize:11,color:'var(--gold)',padding:'8px 14px',background:'rgba(200,160,0,.05)',borderTop:'1px solid var(--border)',textAlign:'right',cursor:'pointer'}}
+            onClick={()=>window.location.hash='#/satispay'}>
+            * Importo rettificato — spesa compensata da entrata Satispay. Clicca per dettaglio →
           </div>
         )}
       </div>
@@ -2557,6 +3271,53 @@ export default function TransactionsPage() {
       {enriching       && <AiEnrichmentOverlay transactions={store.transactions} onDone={()=>setEnriching(false)}/>}
       {reenriching     && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions} onDone={()=>setReenriching(false)}/>}
       {enrichingSelected && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions.filter(t=>selected.has(t.txId))} onDone={()=>{setEnrichingSelected(false);setSelected(new Set())}}/>}
+
+      {/* ── AI Code Prompt ── */}
+      {aiCodePrompt && (
+        <div onClick={e=>e.target===e.currentTarget&&setAiCodePrompt(null)}
+          style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.4)',
+            display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{background:'var(--surface)',borderRadius:16,padding:'28px 32px',width:340,
+            boxShadow:'0 20px 60px rgba(0,0,0,.3)',textAlign:'center'}}>
+            <div style={{fontSize:28,marginBottom:8}}>✨</div>
+            <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Codice di conferma</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>
+              Inserisci il codice per avviare AI Enrichment
+            </div>
+            <input
+              autoFocus
+              type="password"
+              value={aiCodeInput}
+              onChange={e=>{setAiCodeInput(e.target.value);setAiCodeError(false)}}
+              onKeyDown={e=>{if(e.key==='Enter')checkAiCode(()=>{
+                if(aiCodePrompt==='enrich') setEnriching(true)
+                else if(aiCodePrompt==='reenrich') setReenriching(true)
+                else if(aiCodePrompt==='selected') setEnrichingSelected(true)
+              })}}
+              placeholder="Codice..."
+              style={{width:'100%',boxSizing:'border-box',padding:'10px 14px',
+                borderRadius:8,border:`1.5px solid ${aiCodeError?'var(--red)':'var(--border)'}`,
+                background:'var(--surface2)',color:'var(--text)',fontSize:15,
+                fontFamily:'var(--font-mono)',outline:'none',textAlign:'center',
+                transition:'border-color .2s',marginBottom:12,
+                animation: aiCodeError ? 'shake .3s' : 'none'}}
+            />
+            {aiCodeError && <div style={{fontSize:11,color:'var(--red)',marginBottom:8}}>Codice errato</div>}
+            <div style={{display:'flex',gap:8,justifyContent:'center'}}>
+              <button className="btn btn-secondary" onClick={()=>setAiCodePrompt(null)}>Annulla</button>
+              <button className="btn btn-primary"
+                style={{background:'var(--gold)',borderColor:'var(--gold)'}}
+                onClick={()=>checkAiCode(()=>{
+                  if(aiCodePrompt==='enrich') setEnriching(true)
+                  else if(aiCodePrompt==='reenrich') setReenriching(true)
+                  else if(aiCodePrompt==='selected') setEnrichingSelected(true)
+                })}>
+                Conferma
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {enrichSingleTx  && <AiEnrichmentOverlay forceAll={true} transactions={[enrichSingleTx]} onDone={()=>setEnrichSingleTx(null)}/>}
       {filterPopup && (
         <>
