@@ -346,6 +346,30 @@ function isAlreadyImported(item, existingImports) {
   return existingImports.some(e => dupKey(e) === k)
 }
 
+// ── Merchant history category suggestion ──────────────────
+function getMerchantCatSuggestion(merchant, transactions) {
+  if (!merchant || !transactions?.length) return {}
+  const norm = merchant.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const paypalTxs = transactions.filter(t => {
+    const haystack = `${t.merchant||''} ${t.description||''} ${t.descAI||''}`.toLowerCase()
+    return (haystack.includes('paypal') || haystack.includes('pay pal')) && t.cat1 && t.cat1 !== 'Non Categorizzato' && t.cat1 !== 'Altro'
+  })
+  const matched = paypalTxs.filter(t => {
+    const tNorm = (t.descAI || t.merchant || t.description || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (!tNorm) return false
+    return tNorm.includes(norm) || norm.includes(tNorm.replace('paypal', ''))
+  })
+  if (!matched.length) return {}
+  const counts = {}
+  matched.forEach(t => {
+    const k = `${t.cat1}||${t.cat2 || ''}`
+    counts[k] = (counts[k] || 0) + 1
+  })
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  const [cat1, cat2] = best[0].split('||')
+  return { cat1, cat2: cat2 || '' }
+}
+
 // ── Import Modal ──────────────────────────────────────────
 function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImports }) {
   const [files, setFiles]       = useState([])
@@ -353,6 +377,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
   const [results, setResults]   = useState(null)
   const [selected, setSelected] = useState(new Set())
   const [duplicates, setDuplicates] = useState(new Set())
+  const [importYear, setImportYear] = useState(new Date().getFullYear())
 
   function handleFiles(newFiles) {
     setFiles(prev => [...prev, ...Array.from(newFiles)])
@@ -399,7 +424,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
             const content = await page.getTextContent()
             fullText += content.items.map(item => item.str).join(' ') + '\n'
           }
-          const parsed = await callPaypalText(fullText, apiKey)
+          const parsed = await callPaypalText(fullText, apiKey, importYear)
           allResults = allResults.concat(parsed)
         }
       }
@@ -412,7 +437,7 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
           reader.onerror = reject
           reader.readAsDataURL(file)
         })))
-        const parsed = await callPaypalVision(base64List, apiKey)
+        const parsed = await callPaypalVision(base64List, apiKey, importYear)
         allResults = allResults.concat(parsed)
       }
 
@@ -454,7 +479,14 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
 
   function doImport() {
     if (!results) return
-    onImport(results.filter((_,i) => selected.has(i)))
+    const items = results.filter((_,i) => selected.has(i)).map(r => {
+      // Override AI category suggestions with merchant history if available
+      const hist = getMerchantCatSuggestion(r.merchant, transactions)
+      return hist.cat1
+        ? { ...r, cat1_suggestion: hist.cat1, cat2_suggestion: hist.cat2 || r.cat2_suggestion || '' }
+        : r
+    })
+    onImport(items)
     onClose()
   }
 
@@ -498,6 +530,25 @@ function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImpo
             ))}
           </div>
         )}
+
+        {/* Year selector */}
+        <div style={{ display:'flex', alignItems:'center', gap:10, margin:'10px 0 6px' }}>
+          <span style={{ fontSize:13, color:'var(--text2)', fontWeight:600, whiteSpace:'nowrap' }}>📅 Anno screenshot:</span>
+          <select
+            value={importYear}
+            onChange={e => setImportYear(Number(e.target.value))}
+            style={{
+              fontSize:13, padding:'4px 8px', borderRadius:6, border:'1px solid var(--border)',
+              background:'var(--surface)', color:'var(--text)', cursor:'pointer',
+              fontFamily:'var(--font-sans)',
+            }}
+          >
+            {Array.from({ length: new Date().getFullYear() - 2019 }, (_, i) => new Date().getFullYear() - i).map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <span style={{ fontSize:11, color:'var(--text3)' }}>L'anno verrà usato per interpretare le date nello screenshot</span>
+        </div>
 
         <button
           className="pp-analyze-btn"

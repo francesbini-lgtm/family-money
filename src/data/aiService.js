@@ -729,16 +729,16 @@ export async function enrichCitiesBatch(transactions, { onProgress, skipCache = 
 // Step 1: regex (instant) → Step 2: Gemini batch
 
 // ── Shared PayPal AI prompt ───────────────────────────────
-const PAYPAL_PROMPT_SUFFIX = `Per ogni transazione restituisci:
+const paypalPromptSuffix = (year) => `Per ogni transazione restituisci:
 - merchant: nome esatto del merchant/negozio/servizio (stringa)
-- date: data nel formato YYYY-MM-DD. Se l'anno non è indicato usa ${new Date().getFullYear()}. Mesi italiani: gen=01 feb=02 mar=03 apr=04 mag=05 giu=06 lug=07 ago=08 set=09 ott=10 nov=11 dic=12
+- date: data nel formato YYYY-MM-DD. Se l'anno non è indicato usa ${year || new Date().getFullYear()}. Mesi italiani: gen=01 feb=02 mar=03 apr=04 mag=05 giu=06 lug=07 ago=08 set=09 ott=10 nov=11 dic=12
 - amount: importo come numero (negativo per uscite, positivo per entrate/rimborsi)
 - type: tipo operazione originale (es. "Pagamento", "Pagamento automatico", "Rimborso", "Trasferimento")
 - cat1_suggestion: categoria L1 suggerita tra: Casa, Veicoli, Spesa e Alimentari, Tempo Libero, Weekend e Vacanze, Shopping, Salute e Cura, Figli, Altro
 - cat2_suggestion: sottocategoria L2 appropriata
 
 Rispondi SOLO con un array JSON valido, nessun testo aggiuntivo. Esempio:
-[{"merchant":"Netflix","date":"2026-06-15","amount":-15.99,"type":"Pagamento automatico","cat1_suggestion":"Tempo Libero","cat2_suggestion":"Altro"}]`
+[{"merchant":"Netflix","date":"${year || new Date().getFullYear()}-06-15","amount":-15.99,"type":"Pagamento automatico","cat1_suggestion":"Tempo Libero","cat2_suggestion":"Altro"}]`
 
 async function parsePaypalResponse(res) {
   if (!res.ok) {
@@ -754,8 +754,8 @@ async function parsePaypalResponse(res) {
 }
 
 // ── PayPal Vision — screenshots (images, direct OpenAI call) ─────────
-export async function callPaypalVision(imagesBase64, key) {
-  const prompt = `Sei un assistente finanziario. Analizza questi screenshot dell'app PayPal italiana e estrai TUTTE le transazioni visibili.\n\n${PAYPAL_PROMPT_SUFFIX}`
+export async function callPaypalVision(imagesBase64, key, year) {
+  const prompt = `Sei un assistente finanziario. Analizza questi screenshot dell'app PayPal italiana e estrai TUTTE le transazioni visibili.\n\n${paypalPromptSuffix(year)}`
   const content = [
     { type: 'text', text: prompt },
     ...imagesBase64.map(b64 => ({
@@ -782,14 +782,14 @@ export async function callPaypalVision(imagesBase64, key) {
 
 // ── PayPal Text — PDF text extraction (direct OpenAI call, no proxy) ───
 // Calls OpenAI directly from the browser — avoids Vercel proxy timeout/crash
-export async function callPaypalText(pdfText, key) {
+export async function callPaypalText(pdfText, key, year) {
   const CHUNK = 10000
   const chunks = []
   for (let i = 0; i < pdfText.length; i += CHUNK) chunks.push(pdfText.slice(i, i + CHUNK))
   const limited = chunks.slice(0, 4)
   const allResults = []
   for (const chunk of limited) {
-    const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF di cronologia PayPal italiana ed estrai TUTTE le transazioni presenti in questo estratto.\n\nTESTO:\n${chunk}\n\n${PAYPAL_PROMPT_SUFFIX}`
+    const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF di cronologia PayPal italiana ed estrai TUTTE le transazioni presenti in questo estratto.\n\nTESTO:\n${chunk}\n\n${paypalPromptSuffix(year)}`
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
