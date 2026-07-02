@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { getYM, getLast6Months, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
@@ -95,7 +95,10 @@ function UtilityMerchantsPanel({ onChange }) {
 // ── Utility Transactions Table ─────────────────────────────
 function UtilityTxSection() {
   const transactions = useStore(s => s.transactions)
+  const utilMerchantsPref = useStore(s => s.appPrefs?.utilMerchants)
   const [merchants, setMerchants] = useState(getUtilMerch)
+  // Resync when async prefs arrive (avoids stale snapshot)
+  useEffect(() => { setMerchants(utilMerchantsPref || {}) }, [utilMerchantsPref])
   const [sortKey, setSortKey] = useState('date')
   const [sortDir, setSortDir] = useState('desc')
 
@@ -129,7 +132,7 @@ function UtilityTxSection() {
       })
   }, [transactions, merchants, sortKey, sortDir])
 
-  const total = utilTxs.reduce((s,t)=>s+Math.abs(t.amount),0)
+  const total = Math.abs(utilTxs.reduce((s,t)=>s+t.amount,0))
 
   return (
     <div style={{marginTop:28}}>
@@ -335,7 +338,7 @@ function UtilityCard({ type, bills }) {
       {showAdd && (
         <Modal title={`+ Bolletta ${type.label}`} onClose={()=>setShowAdd(false)}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <FormRow label="Mese"><Input type="month" value={form.date} onChange={e=>set('date',e.target.value+'-01')}/></FormRow>
+            <FormRow label="Mese"><Input type="month" value={(form.date||'').slice(0,7)} onChange={e=>set('date',e.target.value+'-01')}/></FormRow>
             <FormRow label="Importo (\u20ac)"><Input type="number" value={form.importo} onChange={e=>set('importo',e.target.value)} placeholder="0"/></FormRow>
           </div>
           {type.unit && (
@@ -359,7 +362,7 @@ function UtilityCard({ type, bills }) {
 function CasaTxSection() {
   const transactions = useStore(s => s.transactions)
   const casaCount = transactions.filter(t => !t.excluded && t.cat1 === 'Casa').length
-  const casaTotal = transactions.filter(t => !t.excluded && t.cat1 === 'Casa').reduce((s,t)=>s+Math.abs(t.amount),0)
+  const casaTotal = Math.abs(transactions.filter(t => !t.excluded && t.cat1 === 'Casa').reduce((s,t)=>s+t.amount,0))
 
   return (
     <div style={{marginTop:32}}>
@@ -398,6 +401,8 @@ function CasaTxTable() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [attachments, setAttachments] = useState(() => appPrefs.attachments || {})
+  // Resync when async prefs arrive (avoids stale snapshot overwrite)
+  useEffect(() => { setAttachments(appPrefs.attachments || {}) }, [appPrefs.attachments])
 
   const MONTHS_IT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
   const fmtDate = d => {
@@ -510,7 +515,7 @@ function CasaTxTable() {
             <tr style={{background:'var(--surface2)',fontWeight:700}}>
               <td colSpan={4} style={{padding:'8px 12px',fontSize:12}}>Totale ({casaTxs.length} transazioni)</td>
               <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)'}}>
-                € {casaTxs.reduce((s,t)=>s+Math.abs(t.amount),0).toLocaleString('it-IT',{minimumFractionDigits:2})}
+                € {Math.abs(casaTxs.reduce((s,t)=>s+t.amount,0)).toLocaleString('it-IT',{minimumFractionDigits:2})}
               </td>
               <td/>
             </tr>

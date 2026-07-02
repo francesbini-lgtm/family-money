@@ -47,8 +47,9 @@ function buildForecast(income, expense, years, startSav) {
   const pts = []; let sav = startSav, inc = income, exp = expense
   const now = new Date()
   for (let y = 0; y <= years; y++) {
-    sav += (inc - exp) * 12
+    // Push first (year 0 = current savings), then accumulate for the next year
     pts.push({ year: String(now.getFullYear() + y), savings: Math.round(sav) })
+    sav += (inc - exp) * 12
     inc *= 1 + GROWTH / 100; exp *= 1 + INFLATION / 100
   }
   return pts

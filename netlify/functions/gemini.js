@@ -54,9 +54,14 @@ function callOpenAI(prompt, key) {
       res.on('end', () => {
         try {
           const r = JSON.parse(data)
+          if (res.statusCode >= 400) {
+            // OpenAI returned an error — propagate the real message
+            const msg = r?.error?.message || `OpenAI HTTP ${res.statusCode}`
+            return reject(new Error(msg))
+          }
           const text = r.choices?.[0]?.message?.content || ''
           resolve({ candidates: [{ content: { parts: [{ text }] } }] })
-        } catch(e) { reject(e) }
+        } catch(e) { reject(new Error(`OpenAI parse error (status ${res.statusCode}): ${data.slice(0,200)}`)) }
       })
     })
     req.on('error', reject)
@@ -74,7 +79,7 @@ function callGemini(prompt, key) {
     const isOAuth = key.startsWith('AQ.') || key.startsWith('ya29.')
     const path = isOAuth
       ? '/v1beta/models/gemini-1.5-flash:generateContent'
-      : `/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`
+      : `/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
       path,
@@ -88,7 +93,17 @@ function callGemini(prompt, key) {
       let data = ''
       res.on('data', c => data += c)
       res.on('end', () => {
-        try { resolve(JSON.parse(data)) } catch(e) { reject(e) }
+        try {
+          const json = JSON.parse(data)
+          if (res.statusCode >= 400) {
+            // Gemini returned an error — propagate it clearly
+            const msg = json?.error?.message || `Gemini HTTP ${res.statusCode}`
+            return reject(new Error(msg))
+          }
+          resolve(json)
+        } catch(e) {
+          reject(new Error(`Gemini parse error (status ${res.statusCode}): ${data.slice(0,200)}`))
+        }
       })
     })
     req.on('error', reject)

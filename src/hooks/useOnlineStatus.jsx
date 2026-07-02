@@ -5,21 +5,26 @@ export function useOnlineStatus() {
   const [wasOffline, setWasOffline] = useState(false)
 
   useEffect(() => {
+    let timer = null
     function handleOnline()  {
       setIsOnline(true)
-      if (wasOffline) setWasOffline(false)
+      // Keep wasOffline true briefly so the "Connessione ripristinata" banner shows
+      clearTimeout(timer)
+      timer = setTimeout(() => setWasOffline(false), 3000)
     }
     function handleOffline() {
+      clearTimeout(timer)
       setIsOnline(false)
       setWasOffline(true)
     }
     window.addEventListener('online',  handleOnline)
     window.addEventListener('offline', handleOffline)
     return () => {
+      clearTimeout(timer)
       window.removeEventListener('online',  handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [wasOffline])
+  }, [])
 
   return { isOnline, wasOffline }
 }

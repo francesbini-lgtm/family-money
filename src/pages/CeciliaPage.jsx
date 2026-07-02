@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { useFinancials, getLast6Months, getYM, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
@@ -294,6 +294,8 @@ function BuoniPostaliSection() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [bonds, setBonds] = useState(() => appPrefs.cecBonds || [])
+  // Resync when async prefs arrive (avoids stale snapshot overwrite)
+  useEffect(() => { setBonds(appPrefs.cecBonds || []) }, [appPrefs.cecBonds])
   const [showAdd, setShowAdd] = useState(false)
   const [form,    setForm]    = useState({ name:'', issuer:'Poste Italiane', rate:'', nominal:'', valueNow:'', maturity:'', note:'' })
 

@@ -1,6 +1,18 @@
-import { useState } from 'react'
-import { CAT_NAMES, CATS } from '../data/categories'
+import { useState, useMemo } from 'react'
+import { CAT_NAMES, CATS, getMergedCats } from '../data/categories'
 import { useStore } from '../store/useStore'
+
+// ── Proxy URL + API key resolution (mirrors src/data/aiService.js) ──
+function proxyUrl(path) {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return `http://localhost:3001${path}`
+  }
+  return `/api${path}`
+}
+function getApiKey() {
+  const k = useStore.getState().appPrefs?.geminiKey || ''
+  return k || localStorage.getItem('fm-gemini-key') || ''
+}
 
 // ── Bulk re-apply button ──────────────────────────────────────
 function BulkApplyButton() {
@@ -189,7 +201,8 @@ function HardcodedRulesSection() {
     if (!prompt.trim()) return
     setLoading(true); setResult(null); setError(null)
     try {
-      const key = localStorage.getItem('fm-gemini-key') || 'proxy'
+      const key = getApiKey()
+      if (!key) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
       const existingRules = SYSTEM_RULES.map(r => '- ' + r.label + ': ' + r.description).join('\n')
       const userRequest   = prompt.trim().replace(/"/g, "'")
 
@@ -212,7 +225,7 @@ function HardcodedRulesSection() {
         'label (stringa breve), description (max 30 parole italiano), conditionExplanation (italiano), codeEnrichment (JS snippet per TransactionsPage), codeBulkApply (JS snippet per useStore), systemRulesEntry (oggetto JS per array SYSTEM_RULES)',
       ].join('\n')
 
-      const res = await fetch('http://localhost:3001/gemini', {
+      const res = await fetch(proxyUrl('/gemini'), {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ prompt: geminiPrompt, key })
       })
@@ -354,12 +367,13 @@ function ConditionsEditor({ conds, onChange }) {
 
 // ── Category + descAI editor row ──────────────────────────────
 function CatDescEditor({ cat1, cat2, descAI, onChangeCat1, onChangeCat2, onChangeDescAI }) {
-  const subCats = CATS[cat1]?.sub || []
+  const customCats = useStore(s => s.customCats)
+  const subCats = getMergedCats(customCats)[cat1]?.sub || []
   return (
     <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
       <span style={{fontSize:12,color:'var(--text3)',flexShrink:0}}>→ Categoria:</span>
       <select value={cat1} onChange={e=>{onChangeCat1(e.target.value);onChangeCat2('')}} style={SEL}>
-        {CAT_NAMES.map(n=><option key={n}>{n}</option>)}
+        {Object.keys(getMergedCats(customCats)).filter(n=>n!=='Non Categorizzato').map(n=><option key={n}>{n}</option>)}
       </select>
       {subCats.length>0 && (
         <select value={cat2} onChange={e=>onChangeCat2(e.target.value)} style={SEL}>
@@ -376,9 +390,10 @@ function CatDescEditor({ cat1, cat2, descAI, onChangeCat1, onChangeCat2, onChang
 
 // ── Add rule form ─────────────────────────────────────────────
 function AddRuleForm({ onAdd }) {
+  const customCats = useStore(s => s.customCats)
   const [open,   setOpen]   = useState(false)
   const [conds,  setConds]  = useState([{field:'description',op:'contains',value:''}])
-  const [cat1,   setCat1]   = useState(CAT_NAMES[0]||'')
+  const [cat1,   setCat1]   = useState(() => Object.keys(getMergedCats(useStore.getState().customCats||{}))[0]||'')
   const [cat2,   setCat2]   = useState('')
   const [descAI, setDescAI] = useState('')
 
@@ -388,7 +403,7 @@ function AddRuleForm({ onAdd }) {
     onAdd({ conditions:valid, action:'categorize', cats:[{cat1,cat2:cat2||'',pct:100}],
       descAI:descAI.trim()||null, name:`${cat1}${cat2?'/'+cat2:''} — ${valid.map(c=>condLabel(c)).join(' + ')}` })
     setConds([{field:'description',op:'contains',value:''}])
-    setCat1(CAT_NAMES[0]||''); setCat2(''); setDescAI(''); setOpen(false)
+    setCat1(Object.keys(getMergedCats(useStore.getState().customCats||{}))[0]||''); setCat2(''); setDescAI(''); setOpen(false)
   }
 
   if (!open) return (
@@ -413,9 +428,78 @@ function AddRuleForm({ onAdd }) {
   )
 }
 
+// ── Live match count badge ────────────────────────────────────
+function LiveMatchCount({ conds, transactions }) {
+  const count = useMemo(() => countMatchingTx(transactions, conds), [transactions, conds])
+  if (count === null) return null
+  const color = count === 0 ? 'var(--red)' : count > 50 ? '#b87000' : 'var(--accent)'
+  const bg    = count === 0 ? 'rgba(220,50,50,.08)' : count > 50 ? 'rgba(255,160,50,.12)' : 'rgba(var(--accent-rgb,99,102,241),.08)'
+  return (
+    <div style={{display:'inline-flex',alignItems:'center',gap:6,padding:'5px 10px',
+      background:bg,border:`1px solid ${color}`,borderRadius:6,fontSize:12,color}}>
+      <span style={{fontSize:14}}>📊</span>
+      <strong>{count}</strong> transazioni corrispondenti
+    </div>
+  )
+}
+
+// ── Live match counter helper ─────────────────────────────────
+function countMatchingTx(transactions, conds) {
+  const active = conds.filter(c => c.value.trim())
+  if (!active.length) return null
+  return transactions.filter(tx => {
+    if (tx.excluded) return false
+    return active.every(cond => {
+      const val = (cond.value || '').toLowerCase()
+      switch (cond.field) {
+        case 'anywhere':
+        case 'description': {
+          const hay = (tx.description || tx.descAI || '').toLowerCase()
+          switch (cond.op) {
+            case 'contains':     return hay.includes(val)
+            case 'not_contains': return !hay.includes(val)
+            case 'starts_with':  return hay.startsWith(val)
+            case 'ends_with':    return hay.endsWith(val)
+            case 'equals':       return hay === val
+            default: return false
+          }
+        }
+        case 'merchant': {
+          const hay = (tx.merchant || '').toLowerCase()
+          switch (cond.op) {
+            case 'contains':    return hay.includes(val)
+            case 'equals':      return hay === val
+            case 'starts_with': return hay.startsWith(val)
+            default: return false
+          }
+        }
+        case 'counterpart': {
+          const hay = (tx.counterpart || tx.description || '').toLowerCase()
+          return hay.includes(val)
+        }
+        case 'importo':
+        case 'amount': {
+          const amt = Math.abs(tx.amount || 0)
+          const n = parseFloat(cond.value || 0)
+          switch (cond.op) {
+            case 'gt': case '>':  return amt > n
+            case 'gte': case '>=': return amt >= n
+            case 'lt': case '<':  return amt < n
+            case 'lte': case '<=': return amt <= n
+            case 'equals': return Math.abs(amt - n) < 0.01
+            default: return false
+          }
+        }
+        default: return false
+      }
+    })
+  }).length
+}
+
 // ── Multi-condition rules table ───────────────────────────────
 function ZustandRulesSection() {
   const { aiRules, addAiRule, updateAiRule, deleteAiRule, applySingleRule } = useStore()
+  const transactions = useStore(s => s.transactions)
 
   // Expanded edit row state
   const [editingId, setEditingId] = useState(null)
@@ -476,7 +560,8 @@ function ZustandRulesSection() {
     if (analyzing || !aiRules?.length) return
     setAnalyzing(true); setOverlapError(null); setOverlapAI({})
     try {
-      const key = localStorage.getItem('fm-gemini-key') || 'proxy'
+      const key = getApiKey()
+      if (!key) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
 
       // Build code↔id maps for response normalization
       const codeToId = {}
@@ -508,7 +593,7 @@ function ZustandRulesSection() {
         'Se nessun overlap: {"overlaps":[]}',
       ].join('\n')
 
-      const res = await fetch('http://localhost:3001/gemini', {
+      const res = await fetch(proxyUrl('/gemini'), {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ prompt, key })
       })
@@ -535,8 +620,11 @@ function ZustandRulesSection() {
     } finally { setAnalyzing(false) }
   }
 
-  // Grid columns: # | AI Desc | Conditions | Category | Actions | Overlap
-  const COL = '48px 120px 1fr 190px 72px 130px'
+  // King confirmation state
+  const [confirmKingId, setConfirmKingId] = useState(null)
+
+  // Grid columns: # | 👑 | AI Desc | Conditions | Category | Actions | Overlap
+  const COL = '48px 36px 120px 1fr 190px 72px 130px'
 
   const hasAiOverlaps = Object.keys(overlapAI).length > 0
 
@@ -586,6 +674,7 @@ function ZustandRulesSection() {
             background:'var(--surface2)',borderBottom:'1px solid var(--border)',
             fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.05em'}}>
             <div>#</div>
+            <div style={{textAlign:'center'}} title="Regola King — vince su tutte le altre">👑</div>
             <div>AI Desc</div>
             <div>Condizioni</div>
             <div>Categoria</div>
@@ -596,10 +685,12 @@ function ZustandRulesSection() {
           {aiRules.map((r,i) => {
             const ai = overlapAI[r.id]
             const hasOverlap = !!ai
-            const rowBg = r.enabled===false ? 'var(--surface2)'
+            const rowBg = r.isKing ? 'rgba(200,160,0,.06)'
+              : r.enabled===false ? 'var(--surface2)'
               : hasOverlap ? 'rgba(255,160,50,.07)'
               : 'var(--surface)'
-            const rowBorder = hasOverlap ? '1px solid rgba(255,160,50,.25)' : undefined
+            const rowBorder = r.isKing ? '1px solid rgba(200,160,0,.3)'
+              : hasOverlap ? '1px solid rgba(255,160,50,.25)' : undefined
 
             return (
               <div key={r.id}>
@@ -614,8 +705,20 @@ function ZustandRulesSection() {
                   transition:'background .3s',
                 }}>
                   {/* Code */}
-                  <div style={{fontSize:11,fontWeight:700,color: hasOverlap?'#b87000':'var(--text3)',fontFamily:'var(--font-mono)'}}>
+                  <div style={{fontSize:11,fontWeight:700,color:r.isKing?'#b8940a':hasOverlap?'#b87000':'var(--text3)',fontFamily:'var(--font-mono)'}}>
                     {ruleCode(i)}
+                  </div>
+
+                  {/* King toggle */}
+                  <div style={{textAlign:'center'}}>
+                    <button
+                      onClick={() => r.isKing ? updateAiRule(r.id,{isKing:false}) : setConfirmKingId(r.id)}
+                      title={r.isKing ? 'Regola King attiva — clicca per rimuovere' : 'Imposta come Regola King'}
+                      style={{background:'none',border:'none',cursor:'pointer',fontSize:15,padding:0,lineHeight:1,
+                        opacity:r.isKing?1:0.18,filter:r.isKing?'drop-shadow(0 0 3px gold)':'grayscale(1)',
+                        transition:'all .15s'}}>
+                      👑
+                    </button>
                   </div>
 
                   {/* AI Desc */}
@@ -729,7 +832,8 @@ function ZustandRulesSection() {
                       <CatDescEditor cat1={editCat1} cat2={editCat2} descAI={editDesc}
                         onChangeCat1={setEditCat1} onChangeCat2={setEditCat2} onChangeDescAI={setEditDesc}/>
                     </div>
-                    <div style={{display:'flex',gap:8}}>
+                    <LiveMatchCount conds={editConds} transactions={transactions}/>
+                    <div style={{display:'flex',gap:8,marginTop:10}}>
                       <button className="btn btn-primary" style={{fontSize:12}} onClick={()=>saveEdit(r.id)}>✓ Salva</button>
                       <button className="btn btn-ghost"   style={{fontSize:12}} onClick={()=>setEditingId(null)}>Annulla</button>
                     </div>
@@ -740,6 +844,45 @@ function ZustandRulesSection() {
           })}
         </div>
       )}
+      {/* ── King confirmation dialog ── */}
+      {confirmKingId && (() => {
+        const kr = aiRules.find(r => r.id === confirmKingId)
+        return (
+          <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.5)',
+            display:'flex',alignItems:'center',justifyContent:'center'}}
+            onClick={e=>{if(e.target===e.currentTarget)setConfirmKingId(null)}}>
+            <div style={{background:'var(--surface)',borderRadius:16,padding:'28px 32px',
+              maxWidth:420,width:'90%',boxShadow:'0 12px 48px rgba(0,0,0,.22)',textAlign:'center'}}>
+              <div style={{fontSize:36,marginBottom:10}}>👑</div>
+              <div style={{fontSize:16,fontWeight:800,marginBottom:6}}>Imposta Regola King</div>
+              <div style={{fontSize:13,color:'var(--text2)',marginBottom:6,lineHeight:1.55}}>
+                <strong style={{color:'var(--text)'}}>{kr?.name || kr?.descAI || confirmKingId}</strong>
+              </div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:20,lineHeight:1.6,
+                padding:'10px 14px',borderRadius:8,background:'rgba(200,160,0,.07)',
+                border:'1px solid rgba(200,160,0,.2)'}}>
+                Questa regola vincerà su tutte le altre in tutta l'app.<br/>
+                Le nuove regole non potranno sovrascrivere le transazioni già coperte da questa.<br/><br/>
+                <strong>Vuoi applicarla subito a tutte le transazioni?</strong>
+              </div>
+              <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+                <button className="btn btn-primary" style={{fontSize:13,background:'#b8940a',borderColor:'#b8940a'}}
+                  onClick={()=>{ updateAiRule(confirmKingId,{isKing:true}); runSingleRule(confirmKingId); setConfirmKingId(null) }}>
+                  👑 Sì, imposta e applica ora
+                </button>
+                <button className="btn btn-ghost" style={{fontSize:13}}
+                  onClick={()=>{ updateAiRule(confirmKingId,{isKing:true}); setConfirmKingId(null) }}>
+                  Solo imposta (no run)
+                </button>
+                <button className="btn btn-ghost" style={{fontSize:13,color:'var(--text3)'}}
+                  onClick={()=>setConfirmKingId(null)}>
+                  Annulla
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

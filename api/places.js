@@ -42,7 +42,7 @@ function getRawBody(req) {
 function callPlaces(query, key) {
   return new Promise((resolve, reject) => {
     const encoded = encodeURIComponent(query)
-    const path = `/maps/api/place/textsearch/json?query=${encoded}&key=${key}&language=it`
+    const path = `/maps/api/place/textsearch/json?query=${encoded}&key=${encodeURIComponent(key)}&language=it`
     const req = https.request({
       hostname: 'maps.googleapis.com',
       path,
@@ -61,7 +61,14 @@ function callPlaces(query, key) {
             comps.find(c => c.types.includes('administrative_area_level_3'))?.long_name ||
             null
           )
-          resolve({ city, address: place.formatted_address || null, placeId: place.place_id || null })
+          resolve({
+            name:    place.name || null,
+            city,
+            address: place.formatted_address || null,
+            placeId: place.place_id || null,
+            lat:     place.geometry?.location?.lat || null,
+            lng:     place.geometry?.location?.lng || null,
+          })
         } catch(e) { reject(e) }
       })
     })

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { useStore } from '../store/useStore'
 import { setHouseholdId } from '../services/firestore'
@@ -6,6 +6,8 @@ import MobileOverview  from './MobileOverview'
 import MobileContanti  from './MobileContanti'
 import MobileDiscovery from './MobileDiscovery'
 import MobileStaff     from './MobileStaff'
+import MobileQuality   from './MobileQuality'
+import MobileBlocNotes from './MobileBlocNotes'
 import './mobile.css'
 
 const TABS = [
@@ -14,6 +16,8 @@ const TABS = [
   { id: 'nanny',     icon: '👩', label: 'Nanny'     },
   { id: 'colf',      icon: '🧹', label: 'Colf'      },
   { id: 'discovery', icon: '🔍', label: 'Discovery' },
+  { id: 'quality',   icon: '📊', label: 'Accuracy'  },
+  { id: 'notes',     icon: '📝', label: 'Note'      },
 ]
 
 // Tabs that expose a "+" FAB
@@ -44,14 +48,21 @@ export default function MobileApp() {
     localStorage.setItem('fm-dark', darkMode)
   }, [darkMode])
 
+  const syncKeyRef = useRef(null)
   useEffect(() => {
     if (householdId && user && !isDemoMode) {
       setHouseholdId(householdId)
-      loadAllData(user.uid)
+      // Realtime sync: safe to (re)start — startRealtimeSync unsubscribes existing listeners first
       startRealtimeSync()
+      // Full data load: only once per household/user pair
+      const key = `${householdId}|${user.uid}`
+      if (syncKeyRef.current !== key) {
+        syncKeyRef.current = key
+        loadAllData(user.uid)
+      }
     }
     return () => stopRealtimeSync()
-  }, [householdId])
+  }, [householdId, user, isDemoMode])
 
   // Close add modal when switching tabs
   function switchTab(id) { setTab(id); setShowAdd(false) }
@@ -61,13 +72,15 @@ export default function MobileApp() {
   const colfName   = appPrefs?.colfName  || 'Colf'
 
   // Tab titles
-  const TITLES = { overview: 'Overview', contanti: 'Contanti', nanny: nannyName, colf: colfName, discovery: 'Discovery' }
+  const TITLES = { overview: 'Overview', contanti: 'Contanti', nanny: nannyName, colf: colfName, discovery: 'Discovery', quality: 'Accuracy', notes: 'Bloc Notes' }
   const SUBS   = {
     overview:  'Situazione finanziaria',
     contanti:  'Gestione contanti',
     nanny:     'Timesheet Nanny',
     colf:      'Timesheet Colf',
     discovery: 'Revisione transazioni',
+    quality:   'Accuratezza e KPIs',
+    notes:     'Post-it e appunti veloci',
   }
 
   return (
@@ -96,7 +109,7 @@ export default function MobileApp() {
       </div>
 
       {/* Page content */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+      <div className="m-content">
         {tab === 'overview'  && <MobileOverview />}
         {tab === 'contanti'  && <MobileContanti showAdd={showAdd} onCloseAdd={() => setShowAdd(false)} />}
         {tab === 'nanny'     && (
@@ -110,6 +123,8 @@ export default function MobileApp() {
             showAdd={showAdd} onCloseAdd={() => setShowAdd(false)} />
         )}
         {tab === 'discovery' && <MobileDiscovery />}
+        {tab === 'quality'   && <MobileQuality />}
+        {tab === 'notes'     && <MobileBlocNotes />}
       </div>
 
       {/* FAB — absolutely positioned within m-app so it stays inside the 430px container */}
@@ -119,7 +134,7 @@ export default function MobileApp() {
         </button>
       )}
 
-      {/* Bottom nav */}
+      {/* Bottom nav — floating pill */}
       <nav className="m-nav">
         {TABS.map(t => {
           const isActive = tab === t.id

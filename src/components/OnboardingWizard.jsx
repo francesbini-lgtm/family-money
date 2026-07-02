@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useAuth } from '../auth/AuthContext'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
 import { categorizeBatch } from '../data/aiService'
@@ -53,12 +54,14 @@ function StepAccount({ onNext, onBack, data, setData }) {
   const [name, setName]   = useState(data.accountName || 'Conto Corrente')
   const [bank, setBank]   = useState(data.accountBank || '')
   const [type, setType]   = useState(data.accountType || 'conto')
-  const { setUserAccounts } = useStore()
+  const { setUserAccounts, userAccounts } = useStore()
+  const { user } = useAuth()
 
   function confirm() {
-    const account = { id: 1, name, bank, type }
+    const account = { id: Date.now(), name, bank, type }
     setData(d => ({ ...d, accountName: name, accountBank: bank, accountType: type, account }))
-    setUserAccounts(null, [account])
+    // Append to existing accounts (replacing any with the same name, e.g. the default placeholder)
+    setUserAccounts(user?.uid, [...(userAccounts || []).filter(a => a.name !== name), account])
     onNext()
   }
 
@@ -105,29 +108,37 @@ function StepImport({ onNext, onBack, data }) {
   const [useAI,    setUseAI]    = useState(true)
   const [progress, setProgress] = useState(null)
   const [result,   setResult]   = useState(null)
+  const [error,    setError]    = useState(null)
 
   async function doImport() {
     if (!file) return
+    setError(null)
     setProgress('Lettura file…')
-    const text = await file.text()
-    const txs  = parseCSV(text, data.accountName || 'Conto Corrente')
-    if (!txs.length) { setProgress('Nessuna transazione trovata nel file.'); return }
+    try {
+      const text = await file.text()
+      const txs  = parseCSV(text, data.accountName || 'Conto Corrente')
+      if (!txs.length) { setError('Nessuna transazione trovata nel file.'); return }
 
-    let final = txs
-    if (useAI) {
-      setProgress(`Categorizzazione AI di ${txs.length} transazioni…`)
-      const batches = []
-      for (let i = 0; i < txs.length; i += 20) batches.push(txs.slice(i, i+20))
-      final = []
-      for (let b = 0; b < batches.length; b++) {
-        const done = await categorizeBatch(batches[b])
-        final.push(...done)
-        setProgress(`AI: ${Math.min((b+1)*20, txs.length)} / ${txs.length}…`)
+      let final = txs
+      if (useAI) {
+        setProgress(`Categorizzazione AI di ${txs.length} transazioni…`)
+        const batches = []
+        for (let i = 0; i < txs.length; i += 20) batches.push(txs.slice(i, i+20))
+        final = []
+        for (let b = 0; b < batches.length; b++) {
+          const done = await categorizeBatch(batches[b])
+          final.push(...done)
+          setProgress(`AI: ${Math.min((b+1)*20, txs.length)} / ${txs.length}…`)
+        }
       }
+      addTransactions(final)
+      setResult(final.length)
+    } catch (e) {
+      console.error('[onboarding import]', e)
+      setError('Errore durante l\'importazione: ' + e.message)
+    } finally {
+      setProgress(null)
     }
-    addTransactions(final)
-    setProgress(null)
-    setResult(final.length)
   }
 
   return (
@@ -160,6 +171,9 @@ function StepImport({ onNext, onBack, data }) {
 
           {progress && (
             <div className="ob-progress">{progress}</div>
+          )}
+          {error && (
+            <div className="ob-progress" style={{ color: 'var(--red)' }}>⚠️ {error}</div>
           )}
 
           <div className="ob-actions">

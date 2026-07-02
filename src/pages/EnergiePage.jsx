@@ -120,7 +120,7 @@ function UtilityCard({ type, bills }) {
       {showAdd && (
         <Modal title={`+ Bolletta ${type.label}`} onClose={()=>setShowAdd(false)}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-            <FormRow label="Mese"><Input type="month" value={form.date} onChange={e=>set('date',e.target.value+'-01')}/></FormRow>
+            <FormRow label="Mese"><Input type="month" value={(form.date||'').slice(0,7)} onChange={e=>set('date',e.target.value+'-01')}/></FormRow>
             <FormRow label="Importo (€)"><Input type="number" value={form.importo} onChange={e=>set('importo',e.target.value)} placeholder="0"/></FormRow>
           </div>
           {type.unit && (

@@ -20,8 +20,9 @@ const INV_CLASSES = {
 }
 
 // ── Position utils ────────────────────────────────────────
-const posVal  = p => p.qty * p.prezzoLive * (p.currency==='$'?0.92:1)
-const posCost = p => p.qty * p.pmCarico  * (p.currency==='$'?0.92:1)
+// Handles both field sets: qty/pmCarico/prezzoLive and quantity/avgPrice/currentPrice/currentValue (Cecilia)
+const posVal  = p => p.currentValue != null ? p.currentValue : (p.qty ?? p.quantity ?? 0) * (p.prezzoLive ?? p.currentPrice ?? 0) * (p.currency==='$'?0.92:1)
+const posCost = p => (p.qty ?? p.quantity ?? 0) * (p.pmCarico ?? p.avgPrice ?? 0) * (p.currency==='$'?0.92:1)
 const posGL   = p => posVal(p) - posCost(p)
 const posGLPct= p => posCost(p) > 0 ? (posGL(p)/posCost(p))*100 : 0
 

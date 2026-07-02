@@ -70,13 +70,45 @@ function proxyUrl(path) {
 }
 
 // ── Gemini call via proxy ─────────────────────────────────
+// For OpenAI keys (sk-*): calls OpenAI directly from the browser to bypass
+// Vercel's 10s hobby-plan timeout. For Gemini keys: uses the proxy (needed for CORS).
 export async function callGemini(prompt) {
   const key = getApiKey()
   if (!key) throw new Error('GEMINI_KEY_MISSING')
 
+  // ── OpenAI key: direct browser → OpenAI (no Vercel proxy, no 10s timeout) ──
+  if (key.startsWith('sk-')) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 8000,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      const text = data.choices?.[0]?.message?.content?.trim() || ''
+      if (!text) throw new Error('Empty response from AI')
+      return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    } catch(e) {
+      if (e.message.includes('fetch') || e.message.includes('Failed to fetch')) {
+        throw new Error('PROXY_NOT_RUNNING')
+      }
+      throw e
+    }
+  }
+
+  // ── Gemini key: go through proxy (CORS not allowed direct) ──
   try {
     const controller = new AbortController()
-    const timeoutId  = setTimeout(() => controller.abort(), 60_000) // 60s timeout
+    const timeoutId  = setTimeout(() => controller.abort(), 60_000)
 
     let response
     try {
@@ -92,18 +124,13 @@ export async function callGemini(prompt) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
-      const msg = err?.error?.message || `HTTP ${response.status}`
+      const msg = err?.error?.message || (typeof err?.error === 'string' ? err.error : null) || `HTTP ${response.status}`
       console.error('[callGemini] proxy error:', msg)
       throw new Error('PROXY_ERROR: ' + msg)
     }
 
     const data = await response.json()
-    // OpenAI format: choices[0].message.content
-    // Gemini format: candidates[0].content.parts[0].text
-    const text = data.choices?.[0]?.message?.content
-               || data.candidates?.[0]?.content?.parts?.[0]?.text
-               || ''
-    console.log('[callGemini] response keys:', Object.keys(data), '| text length:', text.length)
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
     if (!text) throw new Error('Empty response from AI')
     return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
 
@@ -114,6 +141,177 @@ export async function callGemini(prompt) {
       throw new Error('PROXY_NOT_RUNNING')
     }
     throw e
+  }
+}
+
+// ── Merchant lookup — direct OpenAI call (bypasses proxy to avoid Vercel timeout) ──
+export async function lookupMerchantInfo(merchant, description, amount) {
+  const key = getApiKey()
+  if (!key) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
+
+  const prompt = `Sei un assistente finanziario italiano. Fornisci informazioni BREVI (max 2 frasi) su questa attività commerciale o transazione bancaria. Rispondi SOLO con la descrizione, niente altro.
+
+Merchant/Descrizione: "${merchant || description}"
+Importo: €${Math.abs(amount || 0).toFixed(2)}
+
+Esempio risposta: "Supermercato della catena Esselunga. Vendita prodotti alimentari e per la casa."
+
+Risposta:`
+
+  // OpenAI key → chiama direttamente (evita timeout Vercel)
+  if (key.startsWith('sk-')) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 150,
+      })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content?.trim() || ''
+  }
+
+  // Gemini key → usa proxy come prima
+  return callGemini(prompt)
+}
+
+// ── Merchant + Places lookup (Discovery AI button) ────────
+// Returns: { merchantName, merchantType, category, notes, place: { name, city, address, lat, lng } | null }
+export async function lookupMerchantAndPlace(merchant, description, amount, city) {
+  const aiKey = getApiKey()
+  if (!aiKey) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
+
+  // Use full original description for best merchant extraction
+  const fullDesc = [merchant, description].filter(Boolean).join(' | ')
+  const prompt = `Sei un assistente finanziario italiano. Analizza questa transazione bancaria e rispondi SOLO con un JSON valido (nessun testo extra).
+
+IMPORTANTE: estrai il nome REALE del negozio o attività commerciale dalla descrizione originale della transazione. Non interpretare parole italiane generiche come nomi di categorie — "Bolli Blu" è un nome di negozio, non una tassa.
+
+{
+  "merchantName": "nome esatto del negozio/attività come appare nella transazione (es. 'Bolli Blu', 'Esselunga', 'Amazon')",
+  "merchantType": "tipo di attività reale (es. Abbigliamento bambini, Supermercato, E-commerce)",
+  "category": "categoria di spesa suggerita in italiano",
+  "notes": "una frase descrittiva sull'attività commerciale"
+}
+
+Descrizione transazione: "${fullDesc}"
+Importo: €${Math.abs(amount || 0).toFixed(2)}${city ? `\nCittà: ${city}` : ''}`
+
+  let aiResult = {}
+  if (aiKey.startsWith('sk-')) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 200,
+        response_format: { type: 'json_object' },
+      })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    try { aiResult = JSON.parse(data.choices?.[0]?.message?.content || '{}') } catch { aiResult = {} }
+  } else {
+    const text = await callGemini(prompt)
+    try {
+      const match = text.match(/\{[\s\S]*\}/)
+      aiResult = match ? JSON.parse(match[0]) : { notes: text }
+    } catch { aiResult = { notes: text } }
+  }
+
+  // Step 2: Google Places lookup via proxy (CORS blocked direct)
+  const placesKey = getPlacesKey()
+  let place = null
+  if (placesKey && aiResult.merchantName) {
+    try {
+      const res = await fetch(proxyUrl('/places'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Include city in query for better local match (e.g. "Bolli Blu Como")
+        body: JSON.stringify({ query: [aiResult.merchantName, city].filter(Boolean).join(' '), key: placesKey }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.error && (data.lat || data.address)) place = data
+      }
+    } catch(e) {
+      console.warn('[places lookup]', e.message)
+    }
+  }
+
+  return { ...aiResult, place }
+}
+
+// ── Standalone Places lookup (for post-enrichBatch map display) ─────────────
+// First tries Google Places (if key configured), then falls back to OpenAI direct.
+export async function lookupPlaceForMerchant(merchantName, city) {
+  if (!merchantName) return null
+  const query = [merchantName, city].filter(Boolean).join(' ')
+
+  // 1. Try Google Places (fast, accurate — needs placesKey)
+  const placesKey = getPlacesKey()
+  if (placesKey) {
+    try {
+      const res = await fetch(proxyUrl('/places'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, key: placesKey }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.error && (data.lat || data.address)) return data
+      }
+    } catch(e) {
+      console.warn('[lookupPlaceForMerchant] Places failed, falling back to AI:', e.message)
+    }
+  }
+
+  // 2. Fallback: ask OpenAI directly for location (no proxy, no timeout issue)
+  const aiKey = getApiKey()
+  if (!aiKey?.startsWith('sk-')) return null
+  try {
+    const prompt = `Given this Italian merchant/business transaction:
+Merchant: "${merchantName}"${city ? `\nCity: "${city}"` : ''}
+
+Find the most likely physical address and GPS coordinates for this business in Italy.
+Return ONLY valid JSON (no other text):
+{"name":"exact business name","address":"full street address, city","lat":45.123,"lng":9.456}
+
+If you cannot determine the exact location with confidence, return:
+{"name":null,"address":null,"lat":null,"lng":null}`
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${aiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        max_tokens: 150,
+        response_format: { type: 'json_object' },
+      }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const text = data.choices?.[0]?.message?.content || '{}'
+    const parsed = JSON.parse(text)
+    if (parsed.lat && parsed.lng) return parsed
+    return null
+  } catch(e) {
+    console.warn('[lookupPlaceForMerchant] AI fallback failed:', e.message)
+    return null
   }
 }
 
@@ -134,7 +332,7 @@ const CAT_LIST = CAT_NAMES
   .join('\n')
 
 // ── Batch enrichment — MAIN FUNCTION ─────────────────────
-export async function enrichBatch(transactions, { force = false } = {}) {
+export async function enrichBatch(transactions, { force = false, throwOnError = false } = {}) {
   if (!transactions.length) return []
 
   // Step 1 — Regex pre-enrichment (instant, no API)
@@ -149,9 +347,9 @@ export async function enrichBatch(transactions, { force = false } = {}) {
       card:        r.card        || t.card        || null,
       time:        r.time        || t.time        || null,
       // City is always determined by AI — regex city is unreliable
-      // force=true: clear existing city so AI re-evaluates
+      // force=true: clear existing city so AI re-evaluates (unless user-edited)
       // force=false: keep existing AI-set city (don't re-evaluate unless missing)
-      city:        force ? null : (t.city || null),
+      city:        (force && !t.cityUserEdited) ? null : (t.city || null),
       counterpart: r.counterpart || t.counterpart || null,
       // force=true: always use regex merchant (ignores stale old value)
       merchant:    force ? (regexMerchant || null) : (regexMerchant || t.merchant || null),
@@ -246,10 +444,16 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
         return out
       }
       const aiMap = new Map()
-      // Always key by ACTUAL txId (positional), ignore AI-returned txId which may be wrong
+      // Match by AI-returned txId when every item carries one; otherwise fall back
+      // to positional matching, which is only safe when counts line up exactly
+      const byTxId  = parsed.length > 0 && parsed.every(p => p && p.txId)
+      const idIndex = new Map(needsAI.map(t => [String(t.txId), t]))
+      if (!byTxId && parsed.length !== needsAI.length) {
+        throw new Error(`AI returned ${parsed.length} items for ${needsAI.length} transactions`)
+      }
       parsed.forEach((aiRaw, i) => {
         const ai   = cleanAI(aiRaw)
-        const t    = needsAI[i]  // positional match — always correct
+        const t    = byTxId ? idIndex.get(String(aiRaw.txId)) : needsAI[i]
         if (!t) return
         const txId = t.txId      // use real txId as key, not ai.txId
         const cat1 = validCat1(ai.cat1)
@@ -288,9 +492,9 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
           merchant:      pick(ai.merchant,    t.merchant),
           counterpart:   pick(ai.counterpart, t.counterpart),
           descAI:        t.userEditedDesc ? t.descAI : pick(ai.descAI, t.descAI),
-          city:          pick(ai.city,        t.city),
-          cat1:          ai.cat1        || t.cat1  || null,
-          cat2:          ai.cat2        !== undefined ? ai.cat2 : (t.cat2||''),
+          city:          t.cityUserEdited ? t.city : pick(ai.city, t.city),
+          cat1:          t.userEditedCat ? (t.cat1 || null) : (ai.cat1 || t.cat1 || null),
+          cat2:          t.userEditedCat ? (t.cat2 || '') : (ai.cat2 !== undefined ? ai.cat2 : (t.cat2||'')),
           conf:          ai.conf        || t.conf  || 70,
           aiEnriched:    true,
           aiEnrichedAt:  new Date().toISOString(),
@@ -303,7 +507,9 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
       if (e.message === 'PROXY_NOT_RUNNING')  throw e
       if (e.message === 'PROXY_TIMEOUT')      throw e
       console.warn('[enrichBatch] AI failed, falling back to regex:', e.message)
-      // Fall through: return regex results only (no aiEnriched flag — so user can retry)
+      if (throwOnError) throw e
+      // Failure: return regex results only (no aiEnriched flag — so user can retry)
+      return preEnriched
     }
   }
 
@@ -528,3 +734,147 @@ export async function enrichCitiesBatch(transactions, { onProgress, skipCache = 
 
 // ── AI Enrichment ─────────────────────────────────────────
 // Step 1: regex (instant) → Step 2: Gemini batch
+
+// ── Shared PayPal AI prompt ───────────────────────────────
+const paypalPromptSuffix = (year, merchantHistory) => {
+  const yr = year || new Date().getFullYear()
+  const histSection = merchantHistory && Object.keys(merchantHistory).length > 0
+    ? `\nStorico categorie merchant già noti (usa queste per merchant identici o molto simili, hanno la precedenza sul tuo giudizio):\n${
+        Object.entries(merchantHistory)
+          .slice(0, 60)
+          .map(([m, { cat1, cat2 }]) => `- ${m} → ${cat1}${cat2 ? ' / ' + cat2 : ''}`)
+          .join('\n')
+      }\n`
+    : ''
+  return `Per ogni transazione restituisci:
+- merchant: nome esatto del merchant/negozio/servizio (stringa)
+- date: data nel formato YYYY-MM-DD. Se l'anno non è indicato usa ${yr}. Mesi italiani: gen=01 feb=02 mar=03 apr=04 mag=05 giu=06 lug=07 ago=08 set=09 ott=10 nov=11 dic=12
+- amount: importo come numero (negativo per uscite, positivo per entrate/rimborsi)
+- type: tipo operazione originale (es. "Pagamento", "Pagamento automatico", "Rimborso", "Trasferimento")
+- cat1_suggestion: categoria L1 suggerita tra: Casa, Veicoli, Spesa e Alimentari, Tempo Libero, Weekend e Vacanze, Shopping, Salute e Cura, Figli, Altro
+- cat2_suggestion: sottocategoria L2 appropriata
+${histSection}
+Rispondi SOLO con un array JSON valido, nessun testo aggiuntivo. Esempio:
+[{"merchant":"Netflix","date":"${yr}-06-15","amount":-15.99,"type":"Pagamento automatico","cat1_suggestion":"Tempo Libero","cat2_suggestion":"Altro"}]`
+}
+
+async function parsePaypalResponse(res) {
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`API error ${res.status}: ${errBody.slice(0,200)}`)
+  }
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+  const text = data.choices?.[0]?.message?.content || data.text || ''
+  const match = text.match(/\[[\s\S]*\]/)
+  if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+  return JSON.parse(match[0])
+}
+
+// ── PayPal Vision — screenshots (images, direct OpenAI call) ─────────
+export async function callPaypalVision(imagesBase64, key, year, merchantHistory) {
+  const prompt = `Sei un assistente finanziario. Analizza questi screenshot dell'app PayPal italiana e estrai TUTTE le transazioni visibili.\n\n${paypalPromptSuffix(year, merchantHistory)}`
+  const content = [
+    { type: 'text', text: prompt },
+    ...imagesBase64.map(b64 => ({
+      type: 'image_url',
+      image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' }
+    }))
+  ]
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content }], temperature: 0.1, max_tokens: 4096 })
+  })
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`OpenAI error ${res.status}: ${errBody.slice(0, 300)}`)
+  }
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+  const text = data.choices?.[0]?.message?.content || ''
+  const match = text.match(/\[[\s\S]*\]/)
+  if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+  return JSON.parse(match[0])
+}
+
+// ── PayPal Text — PDF text extraction (direct OpenAI call, no proxy) ───
+// Calls OpenAI directly from the browser — avoids Vercel proxy timeout/crash
+export async function callPaypalText(pdfText, key, year, merchantHistory) {
+  const CHUNK = 10000
+  const chunks = []
+  for (let i = 0; i < pdfText.length; i += CHUNK) chunks.push(pdfText.slice(i, i + CHUNK))
+  const allResults = []
+  for (const chunk of chunks) {
+    const prompt = `Sei un assistente finanziario. Analizza questo testo estratto da un PDF di cronologia PayPal italiana ed estrai TUTTE le transazioni presenti in questo estratto.\n\nTESTO:\n${chunk}\n\n${paypalPromptSuffix(year, merchantHistory)}`
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 8192 })
+    })
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '')
+      throw new Error(`OpenAI error ${res.status}: ${errBody.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+    const text = data.choices?.[0]?.message?.content || ''
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+    allResults.push(...JSON.parse(match[0]))
+  }
+  // Deduplicate at chunk boundaries
+  const seen = new Set()
+  return allResults.filter(t => {
+    const k = `${t.date}|${t.amount}|${t.merchant}`
+    if (seen.has(k)) return false
+    seen.add(k); return true
+  })
+}
+
+// ── PayPal Reclassify — batch re-categorisation of existing imports ─────
+// Takes a list of {id, merchant, amount} and returns [{id, cat1, cat2}]
+export async function callPaypalReclassify(items, key, merchantHistory) {
+  const CHUNK = 40
+  const allResults = []
+  for (let offset = 0; offset < items.length; offset += CHUNK) {
+    const chunk = items.slice(offset, offset + CHUNK)
+    const histSection = merchantHistory && Object.keys(merchantHistory).length > 0
+      ? `Storico categorie merchant già noti (usa queste ESATTAMENTE per merchant identici o molto simili):\n${
+          Object.entries(merchantHistory).slice(0, 60)
+            .map(([m, { cat1, cat2 }]) => `- ${m} → ${cat1}${cat2 ? ' / ' + cat2 : ''}`)
+            .join('\n')
+        }\n\n`
+      : ''
+    const prompt = `${histSection}Assegna categoria L1 e L2 a ciascun merchant PayPal italiano. Usa lo storico sopra se disponibile. Se non presente, usa il tuo giudizio.
+
+Merchant da categorizzare:
+${chunk.map((it, i) => `${i}. ${it.merchant} (€${Math.abs(Number(it.amount)||0).toFixed(2)})`).join('\n')}
+
+Categorie L1 disponibili: Casa, Veicoli, Spesa e Alimentari, Tempo Libero, Weekend e Vacanze, Shopping, Salute e Cura, Figli, Altro
+
+Rispondi SOLO con un array JSON, un oggetto per ogni merchant nell'ordine ricevuto. Usa "index" come indice nell'array sopra (0-based).
+Esempio: [{"index":0,"cat1":"Weekend e Vacanze","cat2":"Vacanze"},{"index":1,"cat1":"Veicoli","cat2":"Parcheggio"}]`
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2048 })
+    })
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '')
+      throw new Error(`OpenAI error ${res.status}: ${errBody.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+    const text = data.choices?.[0]?.message?.content || ''
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+    const parsed = JSON.parse(match[0])
+    // Map chunk-relative index back to item id
+    parsed.forEach(r => {
+      const item = chunk[r.index]
+      if (item) allResults.push({ id: item.id, cat1: r.cat1 || '', cat2: r.cat2 || '' })
+    })
+  }
+  return allResults
+}

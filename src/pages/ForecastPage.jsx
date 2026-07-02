@@ -11,6 +11,41 @@ import { fmtIT } from '../utils/format'
 // ── Helpers ───────────────────────────────────────────────
 const MON = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
+// Calcola totale spese per un mese, sostituendo _satiLinked con splits
+function expTotal(transactions, ym) {
+  let total = 0
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0 || t.cat1 === 'Entrate') return
+    if (!(t._effDate || t.date || '').startsWith(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
+    } else {
+      total += Math.abs(t.amount)
+    }
+  })
+  return total
+}
+
+// Lista transazioni di spesa effettive per un set di mesi (satiLinked → splits virtuali)
+function expList(transactions, yms) {
+  const ymSet = new Set(yms)
+  const result = []
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0) return
+    const ym = (t._effDate || t.date || '').slice(0, 7)
+    if (!ymSet.has(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => {
+        if (sp.amount > 0) result.push({ ...t, _virtual: true, amount: -sp.amount,
+          cat1: sp.cat1 || 'Non Categorizzato', cat2: sp.cat2 || 'Altro' })
+      })
+    } else {
+      result.push(t)
+    }
+  })
+  return result
+}
+
 function fmtK(n) {
   const a = Math.abs(n)
   if (a >= 1_000_000) return `€ ${(n/1_000_000).toFixed(2)}M`
@@ -91,7 +126,10 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
   return (
     <div className="fc-whatif-panel">
       <div style={{fontSize:11,color:'var(--text3)',marginBottom:12,lineHeight:1.5}}>
-        Seleziona le categorie da escludere: il risparmio mensile aumenta dell'importo medio mensile di quelle spese.
+        Seleziona le categorie da escludere: il risparmio mensile aumenta dell'importo indicato.
+        <span style={{display:'block',marginTop:3,fontStyle:'italic',opacity:.8}}>
+          Importi calcolati come: totale spese categoria (ultimi 12 mesi) ÷ 12
+        </span>
       </div>
       {cats.map(([c1, info]) => {
         const c1Excluded  = excludedCats.has(c1)
@@ -154,7 +192,10 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function ForecastPage() {
-  const { transactions, customCats } = useStore()
+  const { transactions, customCats, appPrefs, setAppPref } = useStore()
+  const excludedMonths = appPrefs?.forecastExcludedMonths || []
+
+  const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
 
   // Adjustable parameters
   const [growth,    setGrowth]    = useState(2)
@@ -171,9 +212,7 @@ export default function ForecastPage() {
     const d = new Date(); d.setFullYear(d.getFullYear() + 1)
     return `${d.getFullYear()}-01`
   })
-
-  // Diagnostics
-  const [showIncomeDetail, setShowIncomeDetail] = useState(false)
+  const [mortgageAnticipo, setMortgageAnticipo] = useState(0)
 
   // What if
   const [whatIfOpen,   setWhatIfOpen]   = useState(false)
@@ -199,7 +238,7 @@ export default function ForecastPage() {
   }
 
   // ── Real data: last 6 FULL months (excluding current month) ──
-  const { avgIncome, avgExpense, currentSaldo, historicalPoints, catStats, last6, incomeByMonth } = useMemo(() => {
+  const { avgIncome, avgExpense, currentSaldo, historicalPoints, historicalYearPoints, catStats, last6, incomeByMonth, expenseByMonth } = useMemo(() => {
     const now = new Date()
     const active = transactions.filter(t => !t.excluded || t._forcedBalance)
 
@@ -221,9 +260,9 @@ export default function ForecastPage() {
       return { ym, label: ymToLabel(ym), saldo: Math.round(saldoUpTo) }
     })
 
-    // Last 6 FULL months — EXCLUDING current month
+    // Last 12 FULL months — EXCLUDING current month
     const last6 = []
-    for (let i = 6; i >= 1; i--) {
+    for (let i = 12; i >= 1; i--) {
       const d  = new Date(now.getFullYear(), now.getMonth() - i, 1)
       const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
       last6.push(ym)
@@ -243,12 +282,7 @@ export default function ForecastPage() {
         )
 
     const totalIncome  = incomeTxs.reduce((s, t) => s + t.amount, 0)
-    const totalExpense = Math.abs(
-      transactions.filter(t =>
-        !t.excluded && t.amount < 0 &&
-        last6.some(ym => (t._effDate||(t._effDate||t.date||'')).startsWith(ym))
-      ).reduce((s, t) => s + t.amount, 0)
-    )
+    const totalExpense = last6.reduce((s, ym) => s + expTotal(transactions, ym), 0)
 
     // Monthly breakdown for diagnostics
     const incomeByMonth = last6.map(ym => ({
@@ -259,14 +293,33 @@ export default function ForecastPage() {
       other: incomeTxs.filter(t => t.cat2 !== 'Fra' && t.cat2 !== 'Sofi' && (t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0),
     }))
 
-    // Always divide by 6 — fixed window of 6 closed months
+    // Monthly expense breakdown (last 12 months)
+    const expenseByMonth = last6.map(ym => ({
+      ym,
+      label: ymToLabel(ym),
+      total: expTotal(transactions, ym),
+    }))
+
+    // Historical saldo by year (for chart coherence when showing multi-year forecast)
+    const historicalYearPoints = []
+    for (let y = 3; y >= 1; y--) {
+      const year = now.getFullYear() - y
+      if (year < 2020) continue
+      const endYm = `${year}-12`
+      const saldo = active.filter(t => (t._effDate||(t._effDate||t.date||'')) <= endYm + '-31')
+        .reduce((s, t) => s + t.amount, 0)
+      historicalYearPoints.push({ ym: endYm, label: String(year), saldo: Math.round(saldo) })
+    }
+    // Also add current year so far
+    const curYmLabel = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+    const saldoNow = active.reduce((s,t) => s + t.amount, 0)
+    historicalYearPoints.push({ ym: curYmLabel, label: String(now.getFullYear()), saldo: Math.round(saldoNow) })
+
+    // Always divide by 12 — fixed window of 12 closed months
 
     // Cat stats for What If panel — avg monthly per cat1 and cat2
     const catRaw = {}
-    transactions.filter(t =>
-      !t.excluded && t.amount < 0 &&
-      last6.some(ym => (t._effDate||(t._effDate||t.date||'')).startsWith(ym))
-    ).forEach(t => {
+    expList(transactions, last6).forEach(t => {
       const c1 = t.cat1 || 'Non Categorizzato'
       if (c1 === 'Entrate') return
       if (!catRaw[c1]) catRaw[c1] = { total: 0, subs: {}, color: (getMergedCats(customCats)[c1]?.color) || '#888' }
@@ -277,22 +330,51 @@ export default function ForecastPage() {
     const catStats = {}
     Object.entries(catRaw).forEach(([c1, data]) => {
       catStats[c1] = {
-        avg:   Math.round(data.total / 6),
+        avg:   Math.round(data.total / 12),
         color: data.color,
-        subs:  Object.fromEntries(Object.entries(data.subs).map(([c2, tot]) => [c2, Math.round(tot / 6)])),
+        subs:  Object.fromEntries(Object.entries(data.subs).map(([c2, tot]) => [c2, Math.round(tot / 12)])),
       }
     })
 
     return {
-      avgIncome:  Math.round(totalIncome  / 6),
-      avgExpense: Math.round(totalExpense / 6),
+      avgIncome:  Math.round(totalIncome  / 12),
+      avgExpense: Math.round(totalExpense / 12),
       currentSaldo,
       historicalPoints,
+      historicalYearPoints,
       catStats,
       last6,
       incomeByMonth,
+      expenseByMonth,
     }
   }, [transactions, customCats])
+
+  // Effective income avg excluding deselected months
+  const effectiveIncomeMths = incomeByMonth.filter(m => !excludedMonths.includes(m.ym))
+  const avgIncomeEffective = effectiveIncomeMths.length > 0
+    ? Math.round(effectiveIncomeMths.reduce((s, m) => s + m.fra + m.sofi + m.other, 0) / effectiveIncomeMths.length)
+    : avgIncome
+
+  // ── Historical yearly data for proiezione table ──────────
+  const historicalTableData = useMemo(() => {
+    const now = new Date()
+    const activeTxs = transactions.filter(t => !t.excluded)
+    const rows = []
+    for (let y = 3; y >= 1; y--) {
+      const year = now.getFullYear() - y
+      if (year < 2020) continue
+      const yStr = String(year)
+      const inc = activeTxs.filter(t => t.amount > 0 && (t._effDate||(t.date||'')).startsWith(yStr))
+        .reduce((s,t) => s+t.amount, 0)
+      const exp = Math.abs(activeTxs.filter(t => t.amount < 0 && (t._effDate||(t.date||'')).startsWith(yStr))
+        .reduce((s,t) => s+t.amount, 0))
+      const saldo = activeTxs.filter(t => (t._effDate||(t.date||'')) <= `${yStr}-12-31`)
+        .reduce((s,t) => s+t.amount, 0)
+      if (inc === 0 && exp === 0) continue
+      rows.push({ label: yStr, inc: Math.round(inc), exp: Math.round(exp), saldo: Math.round(saldo) })
+    }
+    return rows
+  }, [transactions])
 
   // ── What If: saved per month from excluded cats ───────────
   const savedPerMonth = useMemo(() => {
@@ -323,8 +405,8 @@ export default function ForecastPage() {
   }, [mortgageOn, mortgageAmt, mortgageYears, mortgageTaeg, years])
 
   // ── Forecast data (uses effectiveExpense) ─────────────────
-  const monthlySavings = avgIncome - effectiveExpense - (mortgage ? mortgage.rata : 0)
-  const savingsRate    = avgIncome > 0 ? Math.round(monthlySavings / avgIncome * 100) : 0
+  const monthlySavings = avgIncomeEffective - effectiveExpense - (mortgage ? mortgage.rata : 0)
+  const savingsRate    = avgIncomeEffective > 0 ? Math.round(monthlySavings / avgIncomeEffective * 100) : 0
 
   const mortgageStartYear = useMemo(() => {
     if (!mortgageStart) return new Date().getFullYear()
@@ -334,15 +416,26 @@ export default function ForecastPage() {
   const forecastData = useMemo(() => {
     const now = new Date()
     const pts = []
+    const monthsRemaining = 12 - now.getMonth() // getMonth() is 0-based, so July = 6, remaining = 6
+    const currentYearFraction = monthsRemaining / 12
     let saldo = currentSaldo
-    let inc   = avgIncome
+    let inc   = avgIncomeEffective
     let exp   = effectiveExpense
+    let anticipoApplied = false
 
     for (let y = 0; y <= years; y++) {
       const year = now.getFullYear() + y
       const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear
       const mortgageMonthly = mortgageActive ? mortgage.rata : 0
-      saldo += (inc - exp - mortgageMonthly) * 12
+      // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
+      // not unconditionally in year 0
+      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && year >= mortgageStartYear) {
+        saldo -= mortgageAnticipo
+        anticipoApplied = true
+      }
+      // Year 0: only count the fraction of the year that remains
+      const yearFraction = y === 0 ? currentYearFraction : 1
+      saldo += (inc - exp - mortgageMonthly) * 12 * yearFraction
 
       const yearsIntoMortgage = year - mortgageStartYear
       const residual = (mortgageActive && yearsIntoMortgage >= 0 && yearsIntoMortgage < mortgage.residuals.length)
@@ -359,11 +452,13 @@ export default function ForecastPage() {
       exp *= (1 + inflation / 100)
     }
     return pts
-  }, [avgIncome, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAnticipo])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
-    const histPts = historicalPoints.map(p => ({
+    // Use yearly historical when forecast horizon > 1 year (for label coherence)
+    const srcHist = years > 1 ? historicalYearPoints : historicalPoints
+    const histPts = srcHist.map(p => ({
       label:      p.label,
       historical: p.saldo,
       forecast:   null,
@@ -380,7 +475,7 @@ export default function ForecastPage() {
       residual:   d.residual ?? null,
     }))
     return [...histPts, ...fcPts]
-  }, [historicalPoints, forecastData])
+  }, [historicalPoints, historicalYearPoints, forecastData, years])
 
   const finalPoint    = forecastData[forecastData.length - 1]
   const finalSaldo    = finalPoint?.forecast || 0
@@ -404,9 +499,9 @@ export default function ForecastPage() {
           <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600}}>📊 Forecast Finanziario</h1>
           <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>
             Proiezione basata su dati reali · {sourceLabel} ·{' '}
-            {last6.length === 6 && (
+            {last6.length >= 6 && (
               <span style={{fontFamily:'var(--font-mono)',fontSize:12}}>
-                {ymToLabel(last6[0])} → {ymToLabel(last6[5])}
+                {ymToLabel(last6[0])} → {ymToLabel(last6[last6.length - 1])}
               </span>
             )}
           </div>
@@ -432,22 +527,33 @@ export default function ForecastPage() {
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
 
           {/* Real data summary */}
-          <div className="card fc-controls">
-            <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>📈 Dati Reali (Media 6 mesi)</div>
+          <div className="card fc-controls" style={{position:'relative'}}>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:700}}>📈 Dati Reali (Ultimi 12 mesi)</div>
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>somma ultimi 12 mesi ÷ 12</div>
+            </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
-              {/* Entrate — cliccabile per dettaglio */}
-              <div onClick={() => setShowIncomeDetail(v=>!v)}
-                style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,
-                  border:`1px solid ${showIncomeDetail ? 'var(--green)' : 'var(--border)'}`,
-                  cursor:'pointer',transition:'border-color .15s'}}>
+              {/* Entrate — clickable */}
+              <div onClick={()=>setDetailPopup(detailPopup==='income'?null:'income')}
+                style={{padding:'10px 12px',background: detailPopup==='income'?'rgba(50,180,100,.08)':'var(--surface2)',
+                  borderRadius:8,border:`1px solid ${detailPopup==='income'?'var(--green)':'var(--border)'}`,
+                  cursor:'pointer',userSelect:'none'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
-                  <span>Entrate / mese</span>
-                  <span style={{color:'var(--accent)',opacity:.7}}>🔍</span>
+                  <span>Entrate (totale / 12)</span><span style={{opacity:.5}}>▼</span>
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncome)}</div>
               </div>
+              {/* Spese — clickable */}
+              <div onClick={()=>setDetailPopup(detailPopup==='expense'?null:'expense')}
+                style={{padding:'10px 12px',background: detailPopup==='expense'?'rgba(220,50,50,.08)':'var(--surface2)',
+                  borderRadius:8,border:`1px solid ${detailPopup==='expense'?'var(--red)':'var(--border)'}`,
+                  cursor:'pointer',userSelect:'none'}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
+                  <span>Spese (totale / 12)</span><span style={{opacity:.5}}>▼</span>
+                </div>
+                <div style={{fontSize:16,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgExpense)}</div>
+              </div>
               {[
-                ['Spese / mese',     fmtFull(avgExpense),                                       'var(--red)'],
                 ['Saldo attuale',    fmtFull(currentSaldo),  currentSaldo >= 0 ? 'var(--blue)' : 'var(--red)'],
                 ['Risparmio netto',  fmtFull(avgIncome - avgExpense), (avgIncome - avgExpense) >= 0 ? 'var(--green)' : 'var(--red)'],
               ].map(([l, v, c]) => (
@@ -458,55 +564,52 @@ export default function ForecastPage() {
               ))}
             </div>
 
-            {/* Income detail breakdown */}
-            {showIncomeDetail && (
-              <div style={{marginBottom:14,border:'1px solid var(--border)',borderRadius:8,overflow:'hidden'}}>
-                <div style={{padding:'8px 12px',background:'var(--surface2)',fontSize:11,fontWeight:700,color:'var(--text3)',borderBottom:'1px solid var(--border)'}}>
-                  Dettaglio entrate per mese
-                </div>
-                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-                  <thead>
-                    <tr style={{background:'var(--surface2)'}}>
-                      {['Mese','Fra','Sofi', incomeByMonth.some(m=>m.other>0)?'Altro':null,'Totale'].filter(Boolean).map(h=>(
-                        <th key={h} style={{padding:'5px 10px',textAlign:h==='Mese'?'left':'right',fontSize:10,fontWeight:700,color:'var(--text3)',borderBottom:'1px solid var(--border)'}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {incomeByMonth.map(m => {
-                      const tot = m.fra + m.sofi + m.other
-                      const missing = tot === 0
-                      return (
-                        <tr key={m.ym} style={{borderBottom:'1px solid var(--border)',background: missing ? 'rgba(220,50,50,.04)' : 'none'}}>
-                          <td style={{padding:'6px 10px',fontWeight:600,color: missing ? 'var(--red)' : 'var(--text)'}}>{m.label}</td>
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color: m.fra>0?'var(--green)':'var(--text3)'}}>
-                            {m.fra > 0 ? fmtFull(m.fra) : '—'}
-                          </td>
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color: m.sofi>0?'var(--green)':'var(--text3)'}}>
-                            {m.sofi > 0 ? fmtFull(m.sofi) : '—'}
-                          </td>
-                          {incomeByMonth.some(m=>m.other>0) && (
-                            <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text3)'}}>
-                              {m.other > 0 ? fmtFull(m.other) : '—'}
-                            </td>
-                          )}
-                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color: missing ? 'var(--red)' : 'var(--text)'}}>
-                            {missing ? '⚠️ 0' : fmtFull(tot)}
+            {/* Monthly detail popup */}
+            {detailPopup && (()=>{
+              const isInc = detailPopup === 'income'
+              const rows = isInc
+                ? incomeByMonth.map(m=>({ label: m.label, val: m.fra+m.sofi+m.other }))
+                : expenseByMonth.map(m=>({ label: m.label, val: m.total }))
+              const total = rows.reduce((s,r)=>s+r.val,0)
+              const avg   = Math.round(total/12)
+              const color = isInc ? 'var(--green)' : 'var(--red)'
+              return (
+                <div style={{position:'absolute',top:0,left:0,right:0,zIndex:50,
+                  background:'var(--surface)',border:'1px solid var(--border)',
+                  borderRadius:12,padding:'14px 16px',
+                  boxShadow:'0 8px 32px rgba(0,0,0,.18)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                    <div style={{fontSize:13,fontWeight:700,color}}>
+                      {isInc ? '📥 Entrate' : '📤 Spese'} — ultimi 12 mesi
+                    </div>
+                    <button onClick={()=>setDetailPopup(null)}
+                      style={{border:'none',background:'none',cursor:'pointer',fontSize:16,color:'var(--text3)',lineHeight:1}}>✕</button>
+                  </div>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <tbody>
+                      {rows.map(r=>(
+                        <tr key={r.label} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'4px 0',color:'var(--text2)'}}>{r.label}</td>
+                          <td style={{padding:'4px 0',textAlign:'right',fontFamily:'var(--font-mono)',color,fontWeight:600}}>
+                            {fmtFull(Math.round(r.val))}
                           </td>
                         </tr>
-                      )
-                    })}
-                    <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
-                      <td style={{padding:'6px 10px',fontWeight:700,fontSize:11}}>Media /6</td>
-                      <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--green)',fontSize:11}} colSpan={incomeByMonth.some(m=>m.other>0)?3:2}/>
-                      <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color:'var(--green)'}}>
-                        {fmtFull(avgIncome)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{borderTop:'2px solid var(--border)'}}>
+                        <td style={{padding:'6px 0',fontWeight:700,fontSize:11,color:'var(--text3)'}}>Totale</td>
+                        <td style={{padding:'6px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color}}>{fmtFull(Math.round(total))}</td>
+                      </tr>
+                      <tr>
+                        <td style={{padding:'2px 0',fontWeight:700,fontSize:11,color:'var(--text3)'}}>Totale / 12</td>
+                        <td style={{padding:'2px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color}}>{fmtFull(avg)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )
+            })()}
 
             {/* What If toggle button */}
             <button className={`fc-whatif-btn ${whatIfOpen ? 'open' : ''}`}
@@ -604,15 +707,21 @@ export default function ForecastPage() {
                       onChange={e=>setMortgageTaeg(Number(e.target.value))} step="0.1" placeholder="3.5"/>
                   </div>
                   <div className="fc-mortgage-field">
+                    <label className="form-lbl-sm">Anticipo (€)</label>
+                    <input className="fc-input" type="number" value={mortgageAnticipo}
+                      onChange={e=>setMortgageAnticipo(Number(e.target.value))} placeholder="0"/>
+                    <div className="fc-input-hint">Dedotto dal saldo</div>
+                  </div>
+                  <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">Durata (anni)</label>
                     <input className="fc-input" type="number" value={mortgageYears}
                       onChange={e=>setMortgageYears(Number(e.target.value))} min="1" max="35" placeholder="20"/>
                   </div>
                   <div className="fc-mortgage-field">
-                    <label className="form-lbl-sm">Data inizio</label>
+                    <label className="form-lbl-sm">Inizio</label>
                     <input className="fc-input" type="month" value={mortgageStart}
                       onChange={e=>setMortgageStart(e.target.value)}/>
-                    <div className="fc-input-hint">Mese in cui parte il mutuo</div>
+                    <div className="fc-input-hint">{mortgageStart ? ymToLabel(mortgageStart) : 'Mese di inizio'}</div>
                   </div>
                 </div>
 
@@ -636,6 +745,12 @@ export default function ForecastPage() {
                       <span>Impatto mensile</span>
                       <strong style={{color:'var(--red)'}}>−{fmtFull(mortgage.rata)}</strong>
                     </div>
+                    {mortgageAnticipo > 0 && (
+                      <div className="fc-preview-item">
+                        <span>Anticipo</span>
+                        <strong style={{color:'var(--red)'}}>−{fmtFull(mortgageAnticipo)}</strong>
+                      </div>
+                    )}
                     {breakeven >= 0 && (
                       <div className="fc-preview-item">
                         <span>Saldo {'>'} Debito dal</span>
@@ -791,12 +906,40 @@ export default function ForecastPage() {
                 </tr>
               </thead>
               <tbody>
+                {/* Historical years (real data) */}
+                {historicalTableData.map(d => {
+                  const cf = d.inc - d.exp
+                  return (
+                    <tr key={d.label} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
+                      <td style={{padding:'8px 12px',fontWeight:700,color:'var(--text3)'}}>
+                        {d.label} <span style={{fontSize:9,fontWeight:500,background:'var(--border)',padding:'1px 5px',borderRadius:4,marginLeft:4}}>storico</span>
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
+                        € {fmtIT(d.inc, 0)}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                        € {fmtIT(d.exp, 0)}
+                      </td>
+                      {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
+                        {cf>=0?'+':''}€ {fmtIT(Math.abs(cf), 0)}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        fontWeight:700,color:'var(--text2)',fontSize:12}}>
+                        € {fmtIT(d.saldo, 0)}
+                      </td>
+                      {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                    </tr>
+                  )
+                })}
+                {/* Forecast rows */}
                 {forecastData
                   .filter((_,i) => i % Math.max(1, Math.floor(years / 8)) === 0 || i === forecastData.length - 1)
                   .map((d) => {
                     const year = parseInt(d.label)
                     const yOffset = year - now.getFullYear()
-                    const inc = avgIncome  * Math.pow(1 + growth / 100, yOffset)
+                    const inc = avgIncomeEffective * Math.pow(1 + growth / 100, yOffset)
                     const exp = effectiveExpense * Math.pow(1 + inflation / 100, yOffset)
                     const mortgageActive = mortgageOn && mortgage && year >= mortgageStartYear
                     const rataAnnua = mortgageActive ? mortgage.rata * 12 : 0

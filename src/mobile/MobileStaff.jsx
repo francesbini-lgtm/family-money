@@ -113,7 +113,9 @@ export default function MobileStaff({ role, name, entries, addMonth, deleteMonth
   // KPIs
   const last3months = useMemo(() => {
     const now = new Date()
-    const cutoff = `${now.getFullYear()}-${String(now.getMonth() - 2).padStart(2, '0')}`
+    // Current month + 2 previous — Date handles year rollover (e.g. Jan → Nov of prev year)
+    const d = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+    const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     return sorted.filter(e => (e.mese || '') >= cutoff)
   }, [sorted])
 

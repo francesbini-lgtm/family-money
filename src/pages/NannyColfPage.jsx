@@ -82,7 +82,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
 
   function confirm() {
     if (!selected) return
-    const recon = getRecon(reconKey)
+    const recon = { ...getRecon(reconKey) }
     recon[entry.id] = {
       txId:      selected.txId,
       txAmt:     Math.abs(selected.amount),
@@ -96,7 +96,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
   }
 
   function removeRecon() {
-    const recon = getRecon(reconKey)
+    const recon = { ...getRecon(reconKey) }
     delete recon[entry.id]
     saveRecon(reconKey, recon)
     setSaved(false)
@@ -111,7 +111,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
   const tdStyle = { padding:'8px 12px', fontSize:12, borderBottom:'1px solid var(--border)' }
 
   if (saved) {
-    const r = getNannyRecon()[entry.id]
+    const r = getRecon(reconKey)[entry.id]
     const tx = transactions.find(t=>t.txId===r?.txId)
     return (
       <Modal title={`Riconciliazione salvata — ${entry.mese}`} onClose={onClose} width={520}>
@@ -289,7 +289,8 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
     setForm({ mese:new Date().toISOString().slice(0,7), ore:'', rate:defaultRate, note:'' })
   }
 
-  const totalYear = entries.filter(e=>e.mese.startsWith(new Date().getFullYear().toString())).reduce((s,e)=>s+e.totale,0)
+  const yearEntries = entries.filter(e=>e.mese.startsWith(new Date().getFullYear().toString()))
+  const totalYear = yearEntries.reduce((s,e)=>s+e.totale,0)
 
   const StatusIcon=({status})=>status==='ok'?<CheckCircle size={14} color="var(--green)"/>:status==='partial'?<AlertCircle size={14} color="var(--gold)"/>:<XCircle size={14} color="var(--red)"/>
 
@@ -327,7 +328,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
       )}
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:20}}>
-        {[['Mesi registrati',entries.length],['Totale anno',`€ ${fmtIT(totalYear, 0)}`],['Media mensile',entries.length?`€ ${fmtIT(totalYear/entries.length, 0)}`:'—']].map(([l,v])=>(
+        {[['Mesi registrati',entries.length],['Totale anno',`€ ${fmtIT(totalYear, 0)}`],['Media mensile',yearEntries.length?`€ ${fmtIT(totalYear/yearEntries.length, 0)}`:'—']].map(([l,v])=>(
           <div key={l} className="card" style={{padding:'14px 18px'}}>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:6}}>{l}</div>
             <div style={{fontSize:22,fontWeight:700,fontFamily:'var(--font-mono)'}}>{v}</div>

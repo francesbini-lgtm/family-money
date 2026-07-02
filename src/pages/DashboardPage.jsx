@@ -1,11 +1,12 @@
 import { useStore } from '../store/useStore'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import { useFinancials } from '../hooks/useFinancials'
 import { IncomeExpenseChart, SavingsChart, CategoryDonut } from '../components/Charts'
 import { TrendingUp, TrendingDown, PiggyBank, Percent, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import './DashboardPage.css'
 import { fmtIT } from '../utils/format'
 import { useMemo, useState } from 'react'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar,
@@ -13,6 +14,21 @@ import {
 } from 'recharts'
 
 const MONTHS_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+// ── Helper: calcola totale spese effettive per mese (satiLinked → splits) ──
+function expTotal(transactions, ym) {
+  let total = 0
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0) return
+    if (!(t._effDate || t.date || '').startsWith(ym)) return
+    if (t._satiLinked && t.splits?.length > 0) {
+      t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
+    } else {
+      total += Math.abs(t.amount)
+    }
+  })
+  return total
+}
 
 // ── Saldo Chart ───────────────────────────────────────────
 function SaldoChart({ transactions }) {
@@ -125,12 +141,17 @@ function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent, name })
 // ── Transaction Modal ────────────────────────────────────
 function TxModal({ tx, onClose }) {
   const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats = useStore(s => s.customCats)
   const [editCat1, setEditCat1] = useState(tx?.cat1 || '')
   const [editCat2, setEditCat2] = useState(tx?.cat2 || '')
+  const [editDescAI, setEditDescAI] = useState(tx?.descAI || '')
   const [saved, setSaved] = useState(false)
+  const [toReview, setToReview] = useState(tx?._flagged || false)
+  function toggleReview() { const n=!toReview; setToReview(n); updateTransaction(tx.txId,{_flagged:n}) }
 
   if (!tx) return null
 
+  const _allCats = getMergedCats(customCats)
   const effDate = tx._effDate || tx.date || ''
   const fmtDate = (d) => {
     if (!d) return '—'
@@ -138,12 +159,12 @@ function TxModal({ tx, onClose }) {
     return parts.length===3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d
   }
 
-  const cat1Subs = CATS[editCat1]?.sub || []
+  const cat1Subs = _allCats[editCat1]?.sub || []
 
   const handleSave = () => {
     updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
     setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
+    setTimeout(onClose, 1000)
   }
 
   return (
@@ -198,6 +219,35 @@ function TxModal({ tx, onClose }) {
           </div>
         </div>
 
+        {/* ── To Review flag ── */}
+        <div onClick={toggleReview}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
+            border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:toReview?'#92400e':'var(--text2)'}}>
+            🔍 Da rivedere
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:toReview?'#f59e0b':'var(--border)',
+            color:toReview?'#fff':'var(--text3)'}}>
+            {toReview ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+        {/* AI Descr */}
+        <div style={{padding:'12px 16px',background:'var(--surface2)',borderRadius:10,marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
+            color:'var(--text3)',marginBottom:6}}>✏️ Descrizione AI</div>
+          <input
+            value={editDescAI}
+            onChange={e=>setEditDescAI(e.target.value)}
+            onBlur={()=>{ if(editDescAI.trim()!==tx.descAI) updateTransaction(tx.txId,{descAI:editDescAI.trim()}) }}
+            placeholder="Descrizione AI personalizzata..."
+            style={{width:'100%',boxSizing:'border-box',padding:'7px 10px',borderRadius:7,
+              border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text)',
+              fontSize:13,fontFamily:'var(--font-sans)',outline:'none'}}
+          />
+        </div>
         {/* Category editor */}
         <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
           <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:10}}>
@@ -211,7 +261,7 @@ function TxModal({ tx, onClose }) {
                 background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
               }}>
                 <option value="">— Nessuna —</option>
-                {CAT_NAMES.filter(n=>n!=='Non Categorizzato').map(n=>(
+                {Object.keys(_allCats).filter(n=>n!=='Non Categorizzato').map(n=>(
                   <option key={n} value={n}>{n}</option>
                 ))}
               </select>
@@ -239,6 +289,7 @@ function TxModal({ tx, onClose }) {
               {saved ? '✓ Salvato' : 'Salva'}
             </button>
           </div>
+          <VehicleQuickPicker txId={tx.txId} cat1={editCat1} />
         </div>
       </div>
     </div>
@@ -247,10 +298,13 @@ function TxModal({ tx, onClose }) {
 
 // ── Spese per categoria — Pie Chart, L1+L2 toggle, no Entrate ──
 function SpeseCatChart({ transactions }) {
+  const customCats = useStore(s => s.customCats)
+  const mergedCats = useMemo(() => getMergedCats(customCats), [customCats])
   const [showL2, setShowL2]       = useState(false)
   const [period, setPeriod]       = useState('M')
   const [hoverIdx, setHoverIdx]   = useState(null)
   const [selectedCat, setSelectedCat] = useState(null)
+  const [selectedParent, setSelectedParent] = useState(null) // parent cat1 of an L2 selection
   const [selectedTx, setSelectedTx]   = useState(null)
   const now = new Date()
 
@@ -265,7 +319,7 @@ function SpeseCatChart({ transactions }) {
 
   const catData = useMemo(() => {
     const months = getMonths()
-    return Object.entries(CATS)
+    return Object.entries(mergedCats)
       .filter(([name]) => name!=='Entrate' && name!=='Non Categorizzato')
       .map(([name, info]) => {
         const txs = transactions.filter(t=>!t.excluded&&t.amount<0&&t.cat1===name)
@@ -282,7 +336,7 @@ function SpeseCatChart({ transactions }) {
       })
       .filter(d=>d.total>0)
       .sort((a,b)=>b.total-a.total)
-  }, [transactions, period])
+  }, [transactions, period, mergedCats])
 
   // When L2 is on, expand each L1 slice into its L2 children
   const pieData = useMemo(() => {
@@ -307,12 +361,12 @@ function SpeseCatChart({ transactions }) {
     if (hoverIdx !== null) return hoverIdx
     if (selectedCat !== null) {
       const idx = pieData.findIndex(p =>
-        showL2 ? p.parent === selectedCat : p.name === selectedCat
+        (p.name === selectedCat && (selectedParent == null || p.parent === selectedParent)) || p.parent === selectedCat
       )
       return idx >= 0 ? idx : null
     }
     return null
-  }, [hoverIdx, selectedCat, pieData, showL2])
+  }, [hoverIdx, selectedCat, selectedParent, pieData, showL2])
 
   const activeCat = activeIdx !== null ? pieData[activeIdx] : null
 
@@ -325,7 +379,8 @@ function SpeseCatChart({ transactions }) {
     const months = getMonths()
     let txs = transactions.filter(t => !t.excluded && t.amount < 0)
     if (showL2) {
-      txs = txs.filter(t => t.cat2 === selectedCat)
+      // Match L2 (missing cat2 = 'Altro') within the parent cat1 of the selection
+      txs = txs.filter(t => (t.cat2 || 'Altro') === selectedCat && (selectedParent == null || t.cat1 === selectedParent))
     } else {
       txs = txs.filter(t => t.cat1 === selectedCat)
     }
@@ -338,7 +393,7 @@ function SpeseCatChart({ transactions }) {
       txs = txs.filter(t => (t._effDate||t.date||'') >= months[0])
     }
     return [...txs].sort((a,b) => Math.abs(a.amount) - Math.abs(b.amount)).reverse()
-  }, [selectedCat, transactions, period, showL2])
+  }, [selectedCat, selectedParent, transactions, period, showL2])
 
   const btnStyle = (active) => ({
     padding:'3px 10px',borderRadius:14,
@@ -349,11 +404,16 @@ function SpeseCatChart({ transactions }) {
   })
 
   const handlePieClick = (_, idx) => {
-    const clickedName = showL2 ? pieData[idx]?.parent : pieData[idx]?.name
+    // In L2 mode use the L2 slice name itself, so catTxs (which filters on
+    // t.cat2 === selectedCat) shows the right transactions
+    const clickedName = pieData[idx]?.name
+    const clickedParent = pieData[idx]?.parent || null
+    setSelectedParent(prev => (selectedCat === clickedName && prev === clickedParent) ? null : clickedParent)
     setSelectedCat(prev => prev === clickedName ? null : clickedName)
   }
 
   const handleLegendClick = (catName) => {
+    setSelectedParent(null)
     setSelectedCat(prev => prev === catName ? null : catName)
   }
 
@@ -365,16 +425,16 @@ function SpeseCatChart({ transactions }) {
   }
 
   // Color for selected cat in legend
-  const selectedColor = selectedCat ? (CATS[selectedCat]?.color || 'var(--accent)') : null
+  const selectedColor = selectedCat ? (mergedCats[selectedCat]?.color || 'var(--accent)') : null
 
   return (
     <div>
       {/* Toolbar */}
       <div style={{display:'flex',gap:6,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
         {[['M','Mese'],['Q','Trimestre'],['A','6 Mesi']].map(([v,l])=>(
-          <button key={v} onClick={()=>{setPeriod(v);setSelectedCat(null)}} style={btnStyle(period===v)}>{l}</button>
+          <button key={v} onClick={()=>{setPeriod(v);setSelectedCat(null);setSelectedParent(null)}} style={btnStyle(period===v)}>{l}</button>
         ))}
-        <button onClick={()=>{setShowL2(s=>!s);setSelectedCat(null)}} style={{...btnStyle(showL2),marginLeft:'auto'}}>
+        <button onClick={()=>{setShowL2(s=>!s);setSelectedCat(null);setSelectedParent(null)}} style={{...btnStyle(showL2),marginLeft:'auto'}}>
           {showL2?'▾ L2':'▸ L2'}
         </button>
       </div>
@@ -567,6 +627,9 @@ function KPICard({ icon, label, value, sub, color, delta, deltaLabel }) {
           ) : (
             <span style={{ color: 'var(--text3)' }}>{sub}</span>
           )}
+          {sub && delta !== null && delta !== undefined && (
+            <span style={{ color: 'var(--text3)', fontSize: 11, display: 'block', marginTop: 2 }}>{sub}</span>
+          )}
         </div>
       </div>
     </div>
@@ -585,9 +648,9 @@ function AIInsights({ transactions, catList, monthly }) {
   const thisTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM))
   const prevTxs  = transactions.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM))
   const thisInc  = thisTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const thisExp  = Math.abs(thisTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  const thisExp  = expTotal(transactions, thisYM)
   const prevInc  = prevTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const prevExp  = Math.abs(prevTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  const prevExp  = expTotal(transactions, prevYM)
   const thisSav  = thisInc - thisExp
   const prevSav  = prevInc - prevExp
   const thisSavRate = thisInc > 0 ? Math.round(thisSav/thisInc*100) : null
@@ -600,7 +663,7 @@ function AIInsights({ transactions, catList, monthly }) {
       const d  = new Date(now.getFullYear(), now.getMonth()-i, 1)
       const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
       const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const exp = expTotal(transactions, ym)
       if (inc>0) { total += inc-exp; count++ }
     }
     return count>0 ? total/count : null
@@ -633,7 +696,7 @@ function AIInsights({ transactions, catList, monthly }) {
     for (let m=0; m<now.getMonth(); m++) {
       const ym = `${now.getFullYear()}-${String(m+1).padStart(2,'0')}`
       const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const exp = expTotal(transactions, ym)
       if (inc>0 && inc<exp) count++
     }
     return count
@@ -645,7 +708,7 @@ function AIInsights({ transactions, catList, monthly }) {
     for (let m=0; m<now.getMonth(); m++) {
       const ym = `${now.getFullYear()}-${String(m+1).padStart(2,'0')}`
       const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-      const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+      const exp = expTotal(transactions, ym)
       const sav = inc-exp
       if (inc>0 && sav>bestAmt) { bestAmt=sav; best=MONTHS_IT[m] }
     }
@@ -811,6 +874,14 @@ export default function DashboardPage() {
   const now = new Date()
   const monthName = now.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
 
+  const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+  const prevYM = (() => { const d=new Date(now.getFullYear(),now.getMonth()-1,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
+  const thisSalaryInc = transactions.filter(t=>!t.excluded&&t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')&&(t._effDate||t.date||'').startsWith(thisYM)).reduce((s,t)=>s+t.amount,0)
+  const thisOtherInc  = Math.round(thisIncome - thisSalaryInc)
+  const prevSalaryInc = transactions.filter(t=>!t.excluded&&t.amount>0&&t.cat1==='Entrate'&&(t.cat2==='Fra'||t.cat2==='Sofi')&&(t._effDate||t.date||'').startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
+  const prevIncTotal  = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||t.date||'').startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
+  const prevOtherInc  = Math.round(prevIncTotal - prevSalaryInc)
+
   return (
     <div className="dash-page">
 
@@ -850,9 +921,18 @@ export default function DashboardPage() {
         const prevYM = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}`
         const prevName = prevD.toLocaleDateString('it-IT',{month:'long',year:'numeric'})
         const prevInc  = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)).reduce((s,t)=>s+t.amount,0)
-        const prevExp  = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)).reduce((s,t)=>s+t.amount,0))
+        const prevExp  = expTotal(transactions, prevYM)
         const prevSav  = prevInc - prevExp
         const prevRate = prevInc>0?Math.round(prevSav/prevInc*100):0
+
+        // Is the previous month fully covered by transactions?
+        const lastDayOfPrevMonth = new Date(prevD.getFullYear(), prevD.getMonth()+1, 0).getDate() // e.g. 30 for June
+        const prevMonthTxDates = transactions
+          .filter(t => !t.excluded && (t._effDate||(t.date||'')).startsWith(prevYM))
+          .map(t => parseInt((t._effDate||t.date||'').slice(8,10),10))
+          .filter(d => !isNaN(d))
+        const lastTxDay = prevMonthTxDates.length > 0 ? Math.max(...prevMonthTxDates) : 0
+        const prevMonthClosed = lastTxDay >= lastDayOfPrevMonth - 2 // allow 2-day tolerance
 
         // Savings averages
         const savgMonths = (n) => {
@@ -861,7 +941,7 @@ export default function DashboardPage() {
             const d = new Date(now2.getFullYear(),now2.getMonth()-i,1)
             const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
             const inc = transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-            const exp = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+            const exp = expTotal(transactions, ym)
             if (inc>0) { total += (inc-exp); count++ }
           }
           return count>0?Math.round(total/count):null
@@ -871,7 +951,7 @@ export default function DashboardPage() {
           for(let m=0;m<12;m++){
             const ym=`${yr}-${String(m+1).padStart(2,'0')}`
             const inc=transactions.filter(t=>!t.excluded&&t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)
-            const exp=Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+            const exp=expTotal(transactions, ym)
             if(inc>0){total+=inc-exp;count++}
           }
           return count>0?Math.round(total/count):null
@@ -888,11 +968,17 @@ export default function DashboardPage() {
           <>
             {/* Row 1 — mese corrente */}
             <div style={{marginBottom:6}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
-                📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',marginBottom:8,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <span style={{color:'var(--text3)'}}>📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE</span>
+                {thisIncome === 0 && thisExpense === 0 && (
+                  <span style={{color:'var(--red)',fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:6,background:'rgba(220,50,50,.08)',border:'1px solid rgba(220,50,50,.25)'}}>
+                    ⚠️ Dati mancanti
+                  </span>
+                )}
               </div>
               <div className="kpi-grid">
-                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(thisIncome)} color="var(--green)" delta={deltaIncome}/>
+                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(thisIncome)} color="var(--green)" delta={deltaIncome}
+                  sub={thisOtherInc > 0 ? `di cui € ${fmtIT(thisOtherInc)} altre entrate` : undefined}/>
                 <KPICard icon={<TrendingDown size={18}/>} label="Uscite" value={fmt(thisExpense)} color="var(--red)" delta={deltaExpense} deltaLabel="vs mese scorso"/>
                 <KPICard icon={<PiggyBank size={18}/>} label="Risparmio"
                   value={(cashflow>=0?'+':'')+fmt(cashflow)}
@@ -907,11 +993,18 @@ export default function DashboardPage() {
 
             {/* Row 2 — mese precedente */}
             <div style={{marginBottom:20}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
-                📅 {prevName.toUpperCase()} — MESE CHIUSO
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',marginBottom:8,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <span style={{color:'var(--text3)'}}>📅 {prevName.toUpperCase()} — MESE PASSATO</span>
+                {prevMonthClosed
+                  ? <span style={{color:'var(--green)',fontSize:10}}>✓ Chiuso</span>
+                  : <span style={{color:'var(--red)',fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:6,background:'rgba(220,50,50,.08)',border:'1px solid rgba(220,50,50,.25)'}}>
+                      ⚠️ Non chiuso — transazioni fino al {lastTxDay}/{prevD.getMonth()+1}, mancanti fino al {lastDayOfPrevMonth}
+                    </span>
+                }
               </div>
               <div className="kpi-grid">
-                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(prevInc)} color="var(--green)"/>
+                <KPICard icon={<TrendingUp size={18}/>} label="Entrate" value={fmt(prevInc)} color="var(--green)"
+                  sub={prevOtherInc > 0 ? `di cui € ${fmtIT(prevOtherInc)} altre entrate` : undefined}/>
                 <KPICard icon={<TrendingDown size={18}/>} label="Uscite" value={fmt(prevExp)} color="var(--red)"/>
                 <KPICard icon={<PiggyBank size={18}/>} label="Risparmio"
                   value={(prevSav>=0?'+':'')+fmt(prevSav)}

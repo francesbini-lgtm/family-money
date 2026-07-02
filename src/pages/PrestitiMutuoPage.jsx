@@ -278,9 +278,9 @@ function LoanCard({ loan }) {
             <div style={{marginBottom:8}}>Stai registrando il pagamento della rata <strong>#{loan.monthsPaid + 1}</strong>.</div>
             {amort?.rows[0] && (
               <div className="loan-preview">
-                <div className="loan-preview-item"><span>Rata totale</span><strong>€ {amort.rows[0].fmtIT(rata, 2)}</strong></div>
-                <div className="loan-preview-item"><span>di cui capitale</span><strong style={{color:'var(--blue)'}}>€ {amort.rows[0].fmtIT(principal, 2)}</strong></div>
-                <div className="loan-preview-item"><span>di cui interessi</span><strong style={{color:'var(--accent)'}}>€ {amort.rows[0].fmtIT(interest, 2)}</strong></div>
+                <div className="loan-preview-item"><span>Rata totale</span><strong>€ {fmtIT(amort.rows[0].rata, 2)}</strong></div>
+                <div className="loan-preview-item"><span>di cui capitale</span><strong style={{color:'var(--blue)'}}>€ {fmtIT(amort.rows[0].principal, 2)}</strong></div>
+                <div className="loan-preview-item"><span>di cui interessi</span><strong style={{color:'var(--accent)'}}>€ {fmtIT(amort.rows[0].interest, 2)}</strong></div>
                 <div className="loan-preview-item"><span>Residuo dopo</span><strong style={{color:'var(--red)'}}>€ {fmtIT(Math.max(0,loan.residual-amort.rows[0].principal), 2)}</strong></div>
               </div>
             )}

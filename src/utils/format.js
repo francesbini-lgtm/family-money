@@ -18,3 +18,14 @@ export function fmtEur(n, decimals = 2) {
 export function fmtEurInt(n) {
   return '\u20ac\u00a0' + fmtIT(Math.round(n), 0)
 }
+
+// \u2500\u2500 Signed variants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// The formatters above use Math.abs (many call sites rely on that).
+// Use these where the sign of the value must be shown.
+export function fmtITSigned(n, decimals = 0) {
+  return ((Number(n) || 0) < 0 ? '-' : '') + fmtIT(n, decimals)
+}
+
+export function fmtEurSigned(n, decimals = 2) {
+  return ((Number(n) || 0) < 0 ? '-' : '') + fmtEur(n, decimals)
+}

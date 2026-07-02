@@ -33,7 +33,7 @@ const PIN = '182218'
 const DEMO_PIN = '000000'
 
 function DeleteAllTransactionsButton() {
-  const { transactions } = useStore()
+  const { transactions, deleteAllTransactions } = useStore()
   const [step,    setStep]    = useState(0) // 0=idle, 1=first pin, 2=second pin, 3=done
   const [pin1,    setPin1]    = useState('')
   const [pin2,    setPin2]    = useState('')
@@ -49,12 +49,9 @@ function DeleteAllTransactionsButton() {
     if (pin2 !== PIN && pin2 !== DEMO_PIN) { setError('PIN errato'); setPin2(''); return }
     setError(null); setDeleting(true)
     try {
-      // Delete all from Firestore
-      const { db, getHouseholdId } = await import('../services/firestore')
-      const { collection, getDocs, deleteDoc, doc } = await import('firebase/firestore')
-      // We just clear the store — Firestore sync handles the rest
-      useStore.setState({ transactions: [] })
-      // Also delete from Firestore
+      // Delete from local store AND Firestore (same path as Danger Zone tab),
+      // otherwise the next sync restores everything
+      await deleteAllTransactions()
       setStep(3)
     } catch(e) {
       useStore.setState({ transactions: [] })
@@ -213,6 +210,9 @@ function FamilySection({ user }) {
   const appPrefs    = useStore(s => s.appPrefs)
   const setAppPref  = useStore(s => s.setAppPref)
   const [members, setMembers] = useState(() => appPrefs.family || [])
+  // Resync when appPrefs.family arrives/changes (Firestore load) — otherwise
+  // a save writes the stale initial snapshot and loses members
+  useEffect(() => { setMembers(appPrefs.family || []) }, [appPrefs.family])
   const [showAdd, setShowAdd]   = useState(false)
   const [newName,     setNewName]     = useState("")
   const [newEmail,    setNewEmail]    = useState("")
@@ -843,17 +843,36 @@ function SaldoInizialeBox() {
 
 function CategoriesTab() {
   const { customCats, setCustomCats } = useStore()
+  const transactions = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
   const [selCat, setSelCat] = useState(CAT_NAMES[0])
   const [showAddCat, setShowAddCat] = useState(false)
   const [showAddSub, setShowAddSub] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [newCatForm, setNewCatForm] = useState({name:'',color:'#c8622a',subs:''})
   const [newSub, setNewSub] = useState('')
+  const [newSubEmoji, setNewSubEmoji] = useState('')
+  const [editingEmojiFor, setEditingEmojiFor] = useState(null) // sub name being emoji-edited
+  const [emojiDraft, setEmojiDraft] = useState('')
 
   // Merge base CATS with customCats (preserves base subs + appends custom ones)
   const allCats = getMergedCats(customCats)
   const allCatNames = [...CAT_NAMES, ...Object.keys(customCats).filter(k=>!CAT_NAMES.includes(k))]
   const cat = allCats[selCat]
+
+  // Orphaned subcategories: transactions with cat2 not in allCats[cat1].sub
+  const orphanList = useMemo(() => {
+    const orphaned = {}
+    transactions.filter(t => !t.excluded && t.cat1 && t.cat2).forEach(t => {
+      const subs = allCats[t.cat1]?.sub || []
+      if (!subs.includes(t.cat2)) {
+        const key = `${t.cat1}›${t.cat2}`
+        if (!orphaned[key]) orphaned[key] = { cat1: t.cat1, cat2: t.cat2, count: 0 }
+        orphaned[key].count++
+      }
+    })
+    return Object.values(orphaned)
+  }, [transactions, allCats])
 
   function saveCustomCat() {
     if (!newCatForm.name.trim()) return
@@ -868,10 +887,27 @@ function CategoriesTab() {
   function addSubToCurrent() {
     if (!newSub.trim()) return
     const existing = allCats[selCat] || {color:'#888',sub:[]}
-    const updated = {...customCats, [selCat]: {...existing, sub:[...existing.sub, newSub.trim()], custom:true}}
+    const existingCustom = customCats[selCat] || {}
+    const subEmojis = { ...(existingCustom.subEmojis || existing.subEmojis || {}) }
+    if (newSubEmoji.trim()) subEmojis[newSub.trim()] = newSubEmoji.trim()
+    const updated = {
+      ...customCats,
+      [selCat]: { ...existing, ...existingCustom, sub:[...existing.sub, newSub.trim()], subEmojis, custom:true }
+    }
     setCustomCats(updated)
     setNewSub('')
+    setNewSubEmoji('')
     setShowAddSub(false)
+  }
+
+  function saveSubEmoji(sub, emoji) {
+    const existing = allCats[selCat] || {color:'#888',sub:[]}
+    const existingCustom = customCats[selCat] || {}
+    const subEmojis = { ...(existingCustom.subEmojis || existing.subEmojis || {}), [sub]: emoji.trim() }
+    if (!emoji.trim()) delete subEmojis[sub]
+    setCustomCats({ ...customCats, [selCat]: { ...existing, ...existingCustom, subEmojis, custom:true } })
+    setEditingEmojiFor(null)
+    setEmojiDraft('')
   }
 
   function removeSubFromCurrent(sub) {
@@ -936,31 +972,88 @@ function CategoriesTab() {
         </div>
 
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
-          {(cat?.sub||[]).map(s=>(
-            <span key={s} style={{
-              display:"inline-flex",alignItems:"center",gap:4,
-              padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:600,
-              background:`${cat.color}18`,color:"var(--text2)",border:`1px solid ${cat.color}33`
-            }}>
-              {s}
-              <button onClick={()=>removeSubFromCurrent(s)} style={{
-                background:"none",border:"none",cursor:"pointer",color:"var(--text3)",
-                fontSize:12,lineHeight:1,padding:0,display:"flex",alignItems:"center"
-              }}>×</button>
-            </span>
-          ))}
+          {(cat?.sub||[]).map(s=>{
+            const emoji = cat?.subEmojis?.[s] || ''
+            const isEditingEmoji = editingEmojiFor === s
+            return (
+              <span key={s} style={{
+                display:"inline-flex",alignItems:"center",gap:4,
+                padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:600,
+                background:`${cat.color}18`,color:"var(--text2)",border:`1px solid ${cat.color}33`
+              }}>
+                {isEditingEmoji ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={emojiDraft}
+                      onChange={e=>setEmojiDraft(e.target.value)}
+                      onKeyDown={e=>{
+                        if(e.key==='Enter') saveSubEmoji(s, emojiDraft)
+                        if(e.key==='Escape'){setEditingEmojiFor(null);setEmojiDraft('')}
+                      }}
+                      placeholder="emoji"
+                      style={{width:36,fontSize:16,border:'1px solid var(--accent)',borderRadius:6,
+                        padding:'1px 4px',textAlign:'center',background:'var(--bg)',outline:'none'}}
+                    />
+                    <button onClick={()=>saveSubEmoji(s, emojiDraft)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--green)',fontSize:12,padding:0}}>✓</button>
+                    <button onClick={()=>{setEditingEmojiFor(null);setEmojiDraft('')}}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,padding:0}}>✕</button>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      title="Clicca per modificare emoji"
+                      onClick={()=>{setEditingEmojiFor(s);setEmojiDraft(emoji)}}
+                      style={{cursor:'pointer',fontSize:14,minWidth:18,textAlign:'center',
+                        opacity:emoji?1:.35, userSelect:'none'}}
+                    >{emoji || '＋'}</span>
+                    <span>{s}</span>
+                    <button onClick={()=>removeSubFromCurrent(s)} style={{
+                      background:"none",border:"none",cursor:"pointer",color:"var(--text3)",
+                      fontSize:12,lineHeight:1,padding:0,display:"flex",alignItems:"center"
+                    }}>×</button>
+                  </>
+                )}
+              </span>
+            )
+          })}
           <button className="btn btn-ghost" style={{fontSize:11,padding:"3px 8px"}} onClick={()=>setShowAddSub(true)}>
             + Aggiungi
           </button>
         </div>
 
         {showAddSub && (
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <input className="form-inp" value={newSub} onChange={e=>setNewSub(e.target.value)}
-              placeholder="Nome sottocategoria" style={{flex:1}}
-              onKeyDown={e=>e.key==='Enter'&&addSubToCurrent()}/>
-            <button className="btn btn-primary" style={{fontSize:12}} onClick={addSubToCurrent}>Aggiungi</button>
-            <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setShowAddSub(false)}>✕</button>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,flexShrink:0}}>
+                <span style={{fontSize:10,color:"var(--text3)",fontWeight:600,letterSpacing:".04em"}}>EMOJI</span>
+                <input
+                  autoFocus
+                  value={newSubEmoji}
+                  onChange={e=>setNewSubEmoji(e.target.value)}
+                  placeholder="＋"
+                  title="Inserisci un'emoji. Su Mac: ⌘+Ctrl+Spazio. Su Windows: Win+."
+                  maxLength={2}
+                  style={{width:46,fontSize:20,textAlign:'center',padding:'5px 4px',borderRadius:8,
+                    border:'2px solid var(--accent)',background:'var(--bg)',cursor:'text',flexShrink:0}}
+                />
+              </div>
+              <div style={{display:"flex",flexDirection:"column",flex:1,gap:2}}>
+                <span style={{fontSize:10,color:"var(--text3)",fontWeight:600,letterSpacing:".04em"}}>NOME</span>
+                <input className="form-inp" value={newSub} onChange={e=>setNewSub(e.target.value)}
+                  placeholder="Nome sottocategoria"
+                  onKeyDown={e=>e.key==='Enter'&&addSubToCurrent()}/>
+              </div>
+              <div style={{display:"flex",gap:4,alignItems:"flex-end",paddingBottom:1}}>
+                <button className="btn btn-primary" style={{fontSize:12}} onClick={addSubToCurrent}>Aggiungi</button>
+                <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>{setShowAddSub(false);setNewSubEmoji('');setNewSub('')}}>✕</button>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:"var(--text3)"}}>
+              💡 Mac: <kbd style={{fontSize:10,padding:"1px 5px",borderRadius:4,border:"1px solid var(--border)",background:"var(--surface2)"}}>⌘ Ctrl Space</kbd>&nbsp;&nbsp;
+              Windows: <kbd style={{fontSize:10,padding:"1px 5px",borderRadius:4,border:"1px solid var(--border)",background:"var(--surface2)"}}>Win .</kbd>
+            </div>
           </div>
         )}
 
@@ -986,6 +1079,33 @@ function CategoriesTab() {
             <button className="btn btn-secondary" onClick={()=>setShowAddCat(false)}>Annulla</button>
           </ModalFooter>
         </Modal>
+      )}
+
+      {/* Orphaned subcategories */}
+      {orphanList.length > 0 && (
+        <div style={{marginTop:16,padding:'14px 16px',background:'#fff8f0',border:'1px solid #f59e0b',borderRadius:10,gridColumn:'1 / -1'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#92400e',marginBottom:8}}>
+            ⚠️ Sottocategorie rimosse con transazioni esistenti
+          </div>
+          {orphanList.map(({cat1,cat2,count})=>(
+            <div key={`${cat1}-${cat2}`} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+              <span style={{fontSize:12,color:'var(--text2)',fontWeight:600}}>{cat1} › {cat2}</span>
+              <span style={{fontSize:11,color:'var(--text3)'}}>({count} transazioni)</span>
+              <button
+                onClick={()=>{
+                  if(confirm(`Rimuovere la subcategoria "${cat2}" da tutte le ${count} transazioni ${cat1}?`)) {
+                    transactions
+                      .filter(t=>t.cat1===cat1&&t.cat2===cat2)
+                      .forEach(t=>updateTransaction(t.txId,{cat2:''}))
+                  }
+                }}
+                style={{fontSize:11,padding:'2px 10px',borderRadius:6,border:'1px solid var(--red)',
+                  background:'transparent',color:'var(--red)',cursor:'pointer',fontFamily:'var(--font-sans)'}}>
+                Rimuovi da tutte
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -1043,6 +1163,7 @@ function CashCatsTab() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [cashCats, setCashCats] = useState(() => appPrefs.cashCats || ['Figli','Casa'])
+  useEffect(() => { setCashCats(appPrefs.cashCats || ['Figli','Casa']) }, [appPrefs.cashCats])
 
   function toggle(cat) {
     const next = cashCats.includes(cat)
@@ -1059,8 +1180,8 @@ function CashCatsTab() {
         Queste categorie vengono usate nella riconciliazione ATM per Nanny, Colf e Veicoli.
       </div>
       <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-        {CAT_NAMES.filter(n=>n!=='Entrate').map(cat=>{
-          const color = CATS[cat]?.color||'#888'
+        {Object.keys(getMergedCats(customCats)).filter(n=>n!=='Entrate').map(cat=>{
+          const color = getMergedCats(customCats)[cat]?.color||'#888'
           const active = cashCats.includes(cat)
           return (
             <button key={cat} onClick={()=>toggle(cat)} style={{
@@ -1090,6 +1211,7 @@ function NotificationsTab() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [prefs, setPrefs] = useState(() => appPrefs.notifPrefs || {})
+  useEffect(() => { setPrefs(appPrefs.notifPrefs || {}) }, [appPrefs.notifPrefs])
 
   function toggle(key) {
     const next = {...prefs, [key]: prefs[key]===false ? true : false}
@@ -1693,6 +1815,7 @@ function NavSectionsTab() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [disabled, setDisabled] = useState(() => appPrefs.disabledNav || ['salute','shopping','tempo-libero'])
+  useEffect(() => { setDisabled(appPrefs.disabledNav || ['salute','shopping','tempo-libero']) }, [appPrefs.disabledNav])
   const [saved, setSaved] = useState(false)
 
   function toggle(id) {
@@ -1922,6 +2045,207 @@ function SecurityTab() {
   )
 }
 
+
+// ── AI Enrichment Settings Tab ────────────────────────────
+function AIEnrichmentTab() {
+  const { appPrefs, setAppPref } = useStore()
+  const enabled = appPrefs?.aiEnrichEnabled !== false
+  const savedCode = appPrefs?.aiEnrichCode || ''
+
+  const [codeInput, setCodeInput]   = useState('')
+  const [codeError, setCodeError]   = useState('')
+  const [codeSaved, setCodeSaved]   = useState(false)
+  const [newCode,   setNewCode]     = useState('')
+  const [newCode2,  setNewCode2]    = useState('')
+  const [toggleErr, setToggleErr]   = useState('')
+  const [toggleInput, setToggleInput] = useState('')
+  const [showChange, setShowChange] = useState(false)
+
+  function checkCode(input) {
+    return !savedCode || input.trim() === savedCode
+  }
+
+  function handleToggle() {
+    if (!checkCode(toggleInput)) { setToggleErr('Codice errato'); return }
+    setAppPref('aiEnrichEnabled', !enabled)
+    setToggleInput(''); setToggleErr('')
+  }
+
+  function handleSetCode() {
+    if (savedCode && !checkCode(codeInput)) { setCodeError('Codice attuale errato'); return }
+    if (!newCode.trim()) { setCodeError('Inserisci un nuovo codice'); return }
+    if (newCode !== newCode2) { setCodeError('I codici non coincidono'); return }
+    setAppPref('aiEnrichCode', newCode.trim())
+    setCodeInput(''); setNewCode(''); setNewCode2('')
+    setCodeError(''); setCodeSaved(true)
+    setShowChange(false)
+    setTimeout(() => setCodeSaved(false), 2000)
+  }
+
+  return (
+    <div style={{maxWidth:580}}>
+      {/* Enable/disable */}
+      <div className="card" style={{padding:'18px 20px',marginBottom:16}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>✨ AI Enrichment</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
+          Abilita o disabilita il pulsante AI Enrichment nella pagina Transazioni.<br/>
+          Quando abilitato, è protetto dal codice di conferma.
+        </div>
+
+        {/* Current status */}
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:16,
+          padding:'10px 14px',background:'var(--surface2)',borderRadius:8}}>
+          <div style={{width:10,height:10,borderRadius:'50%',
+            background:enabled?'var(--green)':'var(--text3)',flexShrink:0}}/>
+          <span style={{fontSize:13,fontWeight:600}}>
+            {enabled ? 'Abilitato' : 'Disabilitato'}
+          </span>
+        </div>
+
+        {/* Toggle with code */}
+        <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
+          {savedCode && (
+            <div style={{flex:1,minWidth:180}}>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Codice di conferma</div>
+              <input type="password" value={toggleInput}
+                onChange={e=>{setToggleInput(e.target.value);setToggleErr('')}}
+                onKeyDown={e=>e.key==='Enter'&&handleToggle()}
+                placeholder="Inserisci codice..."
+                style={{width:'100%',boxSizing:'border-box',padding:'8px 10px',
+                  border:`1px solid ${toggleErr?'var(--red)':'var(--border)'}`,borderRadius:7,
+                  fontSize:13,background:'var(--surface)',color:'var(--text)',
+                  fontFamily:'var(--font-mono)',outline:'none'}}/>
+              {toggleErr && <div style={{fontSize:11,color:'var(--red)',marginTop:3}}>{toggleErr}</div>}
+            </div>
+          )}
+          <button onClick={handleToggle}
+            className={enabled ? 'btn btn-secondary' : 'btn btn-primary'}
+            style={{fontSize:12}}>
+            {enabled ? '🚫 Disabilita' : '✅ Abilita'}
+          </button>
+        </div>
+      </div>
+
+      {/* Code management */}
+      <div className="card" style={{padding:'18px 20px'}}>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🔑 Codice di conferma</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
+          Questo codice viene richiesto ogni volta che si avvia l'AI Enrichment in Transazioni.
+          {!savedCode && ' Nessun codice impostato — al momento nessun gate attivo.'}
+        </div>
+
+        {codeSaved && (
+          <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,
+            fontSize:12,color:'var(--green)',fontWeight:600,marginBottom:12}}>
+            ✓ Codice salvato!
+          </div>
+        )}
+
+        {!showChange ? (
+          <button className="btn btn-secondary" style={{fontSize:12}}
+            onClick={()=>setShowChange(true)}>
+            {savedCode ? '🔄 Cambia codice' : '+ Imposta codice'}
+          </button>
+        ) : (
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {savedCode && (
+              <div>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Codice attuale</div>
+                <input type="password" value={codeInput}
+                  onChange={e=>{setCodeInput(e.target.value);setCodeError('')}}
+                  placeholder="Codice attuale..."
+                  style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                    fontSize:13,background:'var(--surface)',color:'var(--text)',
+                    fontFamily:'var(--font-mono)',outline:'none',width:'100%',boxSizing:'border-box'}}/>
+              </div>
+            )}
+            <div>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Nuovo codice</div>
+              <input type="password" value={newCode}
+                onChange={e=>{setNewCode(e.target.value);setCodeError('')}}
+                placeholder="Nuovo codice..."
+                style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                  fontSize:13,background:'var(--surface)',color:'var(--text)',
+                  fontFamily:'var(--font-mono)',outline:'none',width:'100%',boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Ripeti nuovo codice</div>
+              <input type="password" value={newCode2}
+                onChange={e=>{setNewCode2(e.target.value);setCodeError('')}}
+                onKeyDown={e=>e.key==='Enter'&&handleSetCode()}
+                placeholder="Ripeti codice..."
+                style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                  fontSize:13,background:'var(--surface)',color:'var(--text)',
+                  fontFamily:'var(--font-mono)',outline:'none',width:'100%',boxSizing:'border-box'}}/>
+            </div>
+            {codeError && (
+              <div style={{fontSize:11,color:'var(--red)'}}>{codeError}</div>
+            )}
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-secondary" style={{fontSize:12}}
+                onClick={()=>{setShowChange(false);setCodeInput('');setNewCode('');setNewCode2('');setCodeError('')}}>
+                Annulla
+              </button>
+              <button className="btn btn-primary" style={{fontSize:12}} onClick={handleSetCode}>
+                Salva codice
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Discovery Skip Rules Tab ──────────────────────────────
+function DiscoverySkipTab() {
+  const discoverySkipRules     = useStore(s => s.discoverySkipRules) || []
+  const removeDiscoverySkipRule = useStore(s => s.removeDiscoverySkipRule)
+
+  return (
+    <div>
+      <h2 style={{fontFamily:'var(--font-serif)',fontSize:18,fontWeight:600,marginBottom:4}}>🚫 Discovery — Regole di esclusione</h2>
+      <p style={{fontSize:13,color:'var(--text3)',marginBottom:20,lineHeight:1.5}}>
+        Le transazioni con queste descrizioni AI vengono automaticamente saltate nella sezione Discovery.
+        Puoi aggiungere una regola dal bottone "Salta sempre" nella schermata Discovery mobile.
+      </p>
+      {discoverySkipRules.length === 0 ? (
+        <div style={{padding:'24px 20px',background:'var(--surface)',borderRadius:12,
+          border:'1px solid var(--border)',textAlign:'center',color:'var(--text3)',fontSize:13}}>
+          Nessuna regola di esclusione. Usa "Salta sempre" nella Discovery mobile per aggiungerne una.
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {discoverySkipRules.map(rule => (
+            <div key={rule.id} style={{display:'flex',alignItems:'center',gap:12,
+              padding:'10px 14px',background:'var(--surface)',borderRadius:10,
+              border:'1px solid var(--border)'}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,color:'var(--text1)',fontWeight:500}}>{rule.descAI || '—'}</div>
+                {rule.note && <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{rule.note}</div>}
+              </div>
+              {(rule.addedAt || rule.createdAt) && (
+                <span style={{fontSize:11,color:'var(--text3)',flexShrink:0}}>
+                  {new Date((rule.addedAt || rule.createdAt).toDate
+                    ? (rule.addedAt || rule.createdAt).toDate()
+                    : (rule.addedAt || rule.createdAt)
+                  ).toLocaleDateString('it-IT')}
+                </span>
+              )}
+              <button onClick={() => removeDiscoverySkipRule(rule.id)}
+                style={{padding:'5px 10px',borderRadius:8,border:'1px solid var(--red)',
+                  background:'rgba(220,50,50,.08)',color:'var(--red)',fontSize:12,
+                  fontWeight:700,cursor:'pointer',fontFamily:'var(--font-sans)',flexShrink:0}}>
+                🗑 Rimuovi
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState("profile")
   const TABS=[
@@ -1935,21 +2259,25 @@ export default function SettingsPage() {
     {id:"nav-sections",  icon:"📋", label:"Sezioni"},
     {id:"danger",        icon:"⚠️", label:"Danger Zone"},
     {id:"ai-prompt",     icon:"🤖", label:"AI Prompt"},
+    {id:"ai-enrichment", icon:"✨", label:"AI Enrichment"},
+    {id:"discovery-skip",icon:"🚫", label:"Discovery"},
   ]
   return (
     <div style={{padding:"28px 32px",maxWidth:900}}>
       <h1 style={{fontFamily:"var(--font-serif)",fontSize:26,fontWeight:600,marginBottom:24}}>⚙️ Impostazioni</h1>
       <Tabs tabs={TABS} active={tab} onChange={setTab}/>
-      {tab==="security"      && <SecurityTab/>}
-      {tab==="profile"       && <ProfileTab/>}
-      {tab==="categories"    && <CategoriesTab/>}
-      {tab==="ai-rules"      && <AiRulesTab/>}
-      {tab==="excluded"      && <ExcludedTab/>}
-      {tab==="cash-cats"     && <CashCatsTab/>}
-      {tab==="notifications" && <NotificationsTab/>}
-      {tab==="nav-sections"  && <NavSectionsTab/>}
-      {tab==="danger"        && <DangerZoneTab/>}
-      {tab==="ai-prompt"     && <AIPromptTab/>}
+      {tab==="security"       && <SecurityTab/>}
+      {tab==="profile"        && <ProfileTab/>}
+      {tab==="categories"     && <CategoriesTab/>}
+      {tab==="ai-rules"       && <AiRulesTab/>}
+      {tab==="excluded"       && <ExcludedTab/>}
+      {tab==="cash-cats"      && <CashCatsTab/>}
+      {tab==="notifications"  && <NotificationsTab/>}
+      {tab==="nav-sections"   && <NavSectionsTab/>}
+      {tab==="danger"         && <DangerZoneTab/>}
+      {tab==="ai-prompt"      && <AIPromptTab/>}
+      {tab==="ai-enrichment"  && <AIEnrichmentTab/>}
+      {tab==="discovery-skip" && <DiscoverySkipTab/>}
     </div>
   )
 }

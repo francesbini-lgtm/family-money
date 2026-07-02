@@ -104,8 +104,12 @@ function toTitle(s) {
 
 function splitLine(line, sep) {
   const cols = []; let cur = '', inQ = false
-  for (const ch of line) {
-    if (ch === '"') inQ = !inQ
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++ }  // escaped "" → literal quote
+      else inQ = !inQ
+    }
     else if (ch === sep && !inQ) { cols.push(cur.trim()); cur = '' }
     else cur += ch
   }
@@ -127,6 +131,12 @@ function parseDate(raw) {
 function parseAmount(raw) {
   raw = (raw || '').trim().replace(/['"]/g, '').replace(/\s/g, '')
   if (!raw || raw === '-') return null
+  // Italian thousands only: 1.234 / 1.234.567 → strip dots
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(raw))
+    return parseFloat(raw.replace(/\./g, ''))
+  // English format: 1,234.56 / 1,234 → strip commas
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(raw))
+    return parseFloat(raw.replace(/,/g, ''))
   // Italian format: 1.234,56
   if (/^-?[\d.]+,\d{1,2}$/.test(raw))
     return parseFloat(raw.replace(/\./g, '').replace(',', '.'))
@@ -353,7 +363,7 @@ function splitCSVIntoLines(text) {
     const ch   = text[i]
     const next = text[i + 1]
     if (ch === '"') {
-      if (inQ && next === '"') { line += '"'; i++ }   // escaped ""
+      if (inQ && next === '"') { line += '""'; i++ }  // escaped "" — keep both, splitLine handles it
       else { inQ = !inQ; line += ch }
     } else if (ch === '\r' || ch === '\n') {
       if (ch === '\r' && next === '\n') i++           // CRLF → consume both
@@ -374,8 +384,6 @@ function splitCSVIntoLines(text) {
 export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
   const lines = splitCSVIntoLines(text)
   if (!lines.length) return []
-  const sep = lines[0].includes(';') ? ';' : ','
-
   // Find header row
   let hi = lines.findIndex(l => {
     const lower = l.toLowerCase()
@@ -383,7 +391,10 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
   })
   if (hi < 0) hi = 0
 
-  const headers = lines[hi].split(sep).map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
+  // Detect separator from the actual header row (lines[0] may be a preamble line)
+  const sep = lines[hi].includes(';') ? ';' : ','
+
+  const headers = splitLine(lines[hi], sep).map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
 
   // Column detection — works across UniCredit, Fineco, BNL, Credem, generic
   // colDateReg = data registrazione (when transaction was posted to account)

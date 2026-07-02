@@ -100,14 +100,17 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
   const [selected, setSelected] = useState(null)
   const [saved, setSaved] = useState(false)
 
-  const existingLink = getCompLinks()[incomeEntry.txId] || null
+  // Stable link key: bank entries use txId, manual entries use id
+  const linkKey = incomeEntry.txId || incomeEntry.id
+
+  const existingLink = (linkKey != null && getCompLinks()[linkKey]) || null
 
   // All transactions (income and expense) with abs amount within range
   // Show those where abs(amount) >= incomeEntry.amount - 1 (1€ tolerance below)
   const eligible = useMemo(() => {
     const alreadyLinked = new Set(
       Object.entries(getCompLinks())
-        .filter(([id]) => id !== incomeEntry.txId)
+        .filter(([id]) => id !== String(linkKey))
         .map(([,l]) => l.expTxId)
     )
     return transactions
@@ -138,16 +141,16 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
   }
 
   function confirm() {
-    if (!selected) return
+    if (!selected || linkKey == null) return
     const absExp = Math.abs(selected.amount)
     const isFull = absExp <= incomeEntry.amount  // expense fully covered
-    const links = getCompLinks()
-    links[incomeEntry.txId] = { expTxId: selected.txId, mode: isFull ? 'full' : 'partial', compensatedAmt: incomeEntry.amount }
+    const links = { ...getCompLinks() }
+    links[linkKey] = { expTxId: selected.txId, mode: isFull ? 'full' : 'partial', compensatedAmt: incomeEntry.amount }
     saveCompLinks(links)
     if (isFull) {
-      updateTransaction(selected.txId, { excluded: true, _compensatedBy: incomeEntry.txId })
+      updateTransaction(selected.txId, { excluded: true, _compensatedBy: linkKey })
     } else {
-      updateTransaction(selected.txId, { _compensatedAmt: incomeEntry.amount, _compensatedBy: incomeEntry.txId })
+      updateTransaction(selected.txId, { _compensatedAmt: incomeEntry.amount, _compensatedBy: linkKey })
     }
     setSaved(true)
     setTimeout(onClose, 800)
@@ -225,7 +228,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                       </tr>
                     )
                   })}
-                  {filtered.length === 0 && <tr><td colSpan={4} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna transazione nell'intervallo</td></tr>}
+                  {filtered.length === 0 && <tr><td colSpan={5} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna transazione nell'intervallo</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -300,13 +303,16 @@ function EntryModal({ entry, onClose }) {
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
-  const { addAltreEntrata, updateAltreEntrata } = useStore()
+  const setAppPref = useStore(s => s.setAppPref)
 
   function save() {
     if (!form.desc || !form.amount) return
     const data = {...form, amount: parseFloat(form.amount)}
-    if (isEdit) updateAltreEntrata?.(entry.id, data)
-    else        useStore.getState().addAltreEntrata?.(data)
+    const list = useStore.getState()?.appPrefs?.altreEntrateManual || []
+    const next = isEdit
+      ? list.map(x => x.id === entry.id ? { ...x, ...data } : x)
+      : [...list, { ...data, id: Date.now(), manuale: true }]
+    setAppPref('altreEntrateManual', next)
     onClose()
   }
 
@@ -474,11 +480,12 @@ export default function AltreEntratePage() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [showAdd, setShowAdd] = useState(false)
-  const [entries, setEntries] = useState([]) // local entries (persisted via addAltreEntrata in store future)
-  const [compLinks, setCompLinks] = useState(() => appPrefs.compLinks || {})
+  // Manual entries + links/notes/cats read directly from appPrefs (reactive via Zustand)
+  const entries   = appPrefs?.altreEntrateManual || []
+  const compLinks = appPrefs?.compLinks || {}
   const [compensaEntry, setCompensaEntry] = useState(null)
-  const [aeNotes, setAeNotes] = useState(() => appPrefs.aeNotes || {})
-  const [aeCats, setAeCats] = useState(() => appPrefs.aeCats || {})
+  const aeNotes = appPrefs?.aeNotes || {}
+  const aeCats  = appPrefs?.aeCats || {}
   const nicknames = useMemo(() => getUserNicknames(), [])
 
   const now    = new Date()
@@ -490,7 +497,7 @@ export default function AltreEntratePage() {
   // Detect non-salary income from bank transactions, excluding Satispay
   const autoEntries = useMemo(() => {
     return transactions.filter(t => {
-      if (t.excluded || t.amount <= 0) return false
+      if (t.amount <= 0 || t.excluded) return false
       const cat2low = (t.cat2||'').toLowerCase()
       // Exclude salary / personal entries (Fra, Sofi, etc.) by nickname config AND explicit list
       if (t.cat1 === 'Entrate' && nicknames.some(n => t.cat2 === n)) return false
@@ -500,6 +507,7 @@ export default function AltreEntratePage() {
       const merch = (t.merchant||'').toUpperCase()
       if (t.cat1 === 'Satispay' || cat2low === 'satispay') return false
       if (desc.includes('SATISPAY') || merch.includes('SATISPAY')) return false
+      if (t._forcedBalance) return false
       return t.cat1 === 'Entrate' || t.cat2 === 'Prestiti' || t.cat2 === 'Altro'
     })
   }, [transactions, nicknames])
@@ -507,28 +515,34 @@ export default function AltreEntratePage() {
   const allEntries = [...autoEntries, ...entries].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
 
   // Entries abbinate non contano come entrate reali — escluse dai totali
-  const unlinkedEntries = allEntries.filter(e => !compLinks[e.txId])
+  const unlinkedEntries = allEntries.filter(e => !compLinks[e.txId || e.id])
   const thisMonthTotal = unlinkedEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
-  const rimborsiTotal  = autoEntries.filter(e=>e.cat2==='Prestiti' && !compLinks[e.txId]).reduce((s,e)=>s+e.amount,0)
+  const rimborsiTotal  = autoEntries.filter(e=>e.cat2==='Prestiti' && !compLinks[e.txId || e.id]).reduce((s,e)=>s+e.amount,0)
   const ytdTotal       = unlinkedEntries.filter(e=>(e.date||'').startsWith(now.getFullYear().toString())).reduce((s,e)=>s+(e.amount||0),0)
   const compCount      = Object.keys(compLinks).length
   const compTotal      = Object.values(compLinks).reduce((s,l)=>s+(l.compensatedAmt||0),0)
 
   function addManual(data) {
-    setEntries(e=>[...e,{...data,id:Date.now(),manuale:true}])
+    const next = [
+      ...(appPrefs?.altreEntrateManual || []),
+      { ...data, amount: parseFloat(data.amount) || 0, id: Date.now(), manuale: true },
+    ]
+    setAppPref('altreEntrateManual', next)
+  }
+
+  function deleteManual(id) {
+    setAppPref('altreEntrateManual', (appPrefs?.altreEntrateManual || []).filter(x => x.id !== id))
   }
 
   function saveNote(key, val) {
     const next = { ...aeNotes, [key]: val }
     if (!val) delete next[key]
-    setAeNotes(next)
     setAppPref('aeNotes', next)
   }
 
   function saveCat(key, val) {
     const next = { ...aeCats, [key]: val }
     if (!val) delete next[key]
-    setAeCats(next)
     setAppPref('aeCats', next)
   }
 
@@ -576,49 +590,57 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Descrizione','Categoria','Compensa costo','Importo','Note',''].map(h=>(
+              {['Data','Descrizione','Cat L2','Categoria','Compensa costo','Importo','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {allEntries.slice(0,50).map((e,i)=>{
                 const entryKey = e.txId || e.id || String(i)
-                const compLink = compLinks[e.txId]
+                const compLink = compLinks[e.txId || e.id]
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(e.date||'').slice(5).replace('-','/')}</td>
-                    <td style={{padding:'9px 14px'}}>
+                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(d=>(d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(0,4)}`:d))(e.date||'')}</td>
+                    <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
                       <div style={{fontSize:13,fontWeight:500}}>{e.descAI||e.desc||e.description?.slice(0,40)}</div>
-                      {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
+                      <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:2}}>
+                        {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
+                        {e.excluded&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4}}>Esclusa</span>}
+                      </div>
+                    </td>
+                    <td style={{padding:'9px 14px'}}>
+                      {e.cat2 ? (
+                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:600,
+                          background:'rgba(100,100,220,.07)',color:'var(--accent)',
+                          border:'1px solid rgba(100,100,220,.2)'}}>
+                          {e.cat2}
+                        </span>
+                      ) : (
+                        <span style={{color:'var(--text3)',fontSize:11}}>—</span>
+                      )}
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       <AeCatCell entryKey={entryKey} cats={aeCats} onSave={saveCat}/>
                     </td>
                     <td style={{padding:'9px 14px'}}>
-                      {e.txId && !compLink && (
+                      {!compLink && (
                         <button className="btn btn-ghost" style={{fontSize:11,color:'var(--blue)',border:'1px solid var(--blue)',borderRadius:6,padding:'2px 8px'}}
                           onClick={()=>setCompensaEntry(e)}>
                           🔗 Abbina
                         </button>
                       )}
-                      {e.txId && compLink && (
+                      {compLink && (
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
                           <span style={{fontSize:11,color:'var(--green)',fontWeight:600}}>✓ Abbinata</span>
                           <button onClick={()=>{
-                            const links = getCompLinks()
-                            const expTxId = links[e.txId]?.expTxId
-                            delete links[e.txId]
+                            const linkKey = e.txId || e.id
+                            const links = { ...getCompLinks() }
+                            const expTxId = links[linkKey]?.expTxId
+                            delete links[linkKey]
                             saveCompLinks(links)
-                            setCompLinks({...links})
                             if(expTxId) useStore.getState().updateTransaction(expTxId, { excluded: false, _compensatedAmt: null, _compensatedBy: null })
                           }} style={{border:'none',background:'transparent',cursor:'pointer',color:'var(--red)',fontSize:11,padding:0}}>✕</button>
                         </div>
-                      )}
-                      {!e.txId && (
-                        <button className="btn btn-ghost" style={{fontSize:11,color:'var(--blue)',border:'1px solid var(--blue)',borderRadius:6,padding:'2px 8px'}}
-                          onClick={()=>setCompensaEntry(e)}>
-                          🔗 Abbina
-                        </button>
                       )}
                     </td>
                     <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right',fontFamily:'var(--font-mono)'}}>
@@ -628,7 +650,7 @@ export default function AltreEntratePage() {
                       <NoteCell entryKey={entryKey} notes={aeNotes} onSave={saveNote}/>
                     </td>
                     <td style={{padding:'6px 10px'}}>
-                      {e.manuale&&<button className="btn btn-ghost" style={{color:'var(--red)'}} onClick={()=>setEntries(es=>es.filter(x=>x.id!==e.id))}><Trash2 size={11}/></button>}
+                      {e.manuale&&<button className="btn btn-ghost" style={{color:'var(--red)'}} onClick={()=>deleteManual(e.id)}><Trash2 size={11}/></button>}
                     </td>
                   </tr>
                 )
@@ -647,10 +669,7 @@ export default function AltreEntratePage() {
         <CompensaModal
           incomeEntry={compensaEntry}
           transactions={transactions}
-          onClose={()=>{
-            setCompensaEntry(null)
-            setCompLinks(useStore.getState()?.appPrefs?.compLinks || {})
-          }}
+          onClose={()=>setCompensaEntry(null)}
         />
       )}
     </div>

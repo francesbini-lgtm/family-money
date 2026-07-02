@@ -42,6 +42,9 @@ const fmtK = (n) => {
   const abs = Math.abs(n)
   return abs >= 1000 ? `€\u00a0${fmtIT(abs/1000, 1)}K` : `€\u00a0${fmtIT(Math.round(abs), 0)}`
 }
+// Signed variants — fmt/fmtK above drop the sign (call sites rely on abs)
+const fmtSigned  = (n) => ((Number(n) || 0) < 0 ? '-' : '') + fmt(n)
+const fmtKSigned = (n) => ((Number(n) || 0) < 0 ? '-' : '') + fmtK(n)
 
 // ── Main hook ─────────────────────────────────────────────
 export function useFinancials() {
@@ -128,7 +131,7 @@ export function useFinancials() {
       // YTD
       ytdIncome, ytdExpense,
       // Helpers
-      fmt, fmtK,
+      fmt, fmtK, fmtSigned, fmtKSigned,
       thisYM, lastYM,
       ytdCatList,
       isEmpty: transactions.length === 0,

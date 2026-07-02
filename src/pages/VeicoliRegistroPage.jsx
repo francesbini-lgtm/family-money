@@ -1,15 +1,17 @@
 import { useState, useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
+import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import { uploadExpenseFiles, deleteExpenseFile } from '../services/storage'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend,
+  Tooltip, ResponsiveContainer, Legend, LabelList,
   LineChart, Line, PieChart, Pie, Cell, Area, AreaChart
 } from 'recharts'
 import { Plus, Trash2, Link } from 'lucide-react'
 import './VeicoliRegistroPage.css'
 import { fmtIT } from '../utils/format'
+import { CATS, getMergedCats } from '../data/categories'
 
 const VEH_ICONS = ['🚗','🚙','🚕','🏎','🚐','🛻','🏍','🚤','⛵','🚁','🛵','🚌',
   'svg:motocross','svg:motoscafo','svg:bmw1','svg:jeep']
@@ -110,7 +112,7 @@ function renderIcon(icon, size = 36) {
   if (icon && icon.startsWith('svg:')) return SVG_ICONS[icon] || '🚗'
   return <span style={{fontSize: size}}>{icon || '🚗'}</span>
 }
-const VEH_CATS  = ['Carburante','Assicurazione','Tagliando','Revisione','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Extra','Altro']
+const VEH_CATS  = ['Carburante','Assicurazione','Tagliando','Revisione','Gomme','Bollo','Car Washing','Autostrade','Parcheggio','Multa','Ormeggio','Extra','Altro']
 const VEH_COLORS = ['#2a5c8a','#c8622a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#f39c12','#1abc9c','#8e44ad','#2980b9','#27ae60']
 const CAT_COLORS = {
   Carburante:'#2a5c8a',Assicurazione:'#c8622a',Tagliando:'#2a7a4a',Revisione:'#b8942a',
@@ -129,8 +131,8 @@ function getLast6Months() {
 }
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
 const fmtDate = d => {
-  const m = (d||'').match(/\d{4}-(\d{2})-(\d{2})/)
-  return m ? `${parseInt(m[2])} ${MONTHS_IT[parseInt(m[1])-1]}` : d||'—'
+  const m = (d||'').match(/(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${parseInt(m[3])} ${MONTHS_IT[parseInt(m[2])-1]} ${m[1]}` : d||'—'
 }
 
 // ── Add/Edit Vehicle Modal ────────────────────────────────
@@ -418,27 +420,35 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
   const [search, setSearch] = useState('')
   const isCash = (payMethod || expense.payMethod) === 'cash'
 
-  // IDs of cashEntries already linked to other veh expenses
-  const usedCashIds = new Set(
+  // IDs already linked to other veh expenses
+  const usedReconRefs = new Set(
     (allVehExpenses||[]).filter(e=>e.id!==expense.id && e.reconType==='cash' && e.reconRef)
-      .map(e=>e.reconRef)
+      .map(e=>e.reconRef.slice(0,80))
   )
 
   // Build candidate list based on payment method
   let candidates = []
   if (isCash) {
-    // Cash mode: show only ATM withdrawals (prelievi) before the expense date, not yet assigned
-    candidates = (cashEntries||[])
-      .filter(e => {
-        const notUsed = !usedCashIds.has(`💵 ${e.note||e.cat1||'Contanti'} · ${e.date} · €${fmtIT(e.amount||0,2)}`)
-        const beforeDate = !expense.date || (e.date||'') <= expense.date
-        return beforeDate && notUsed && (e.amount||0) > 0
+    // Cash mode: ATM prelievi (cat1=Contanti, amount<0) within 60 days before expense date
+    const expDate = expense.date || ''
+    const cutoff = expDate ? new Date(new Date(expDate).getTime() - 60*24*60*60*1000).toISOString().slice(0,10) : ''
+    candidates = (transactions||[])
+      .filter(t => {
+        if (t.excluded || t.amount >= 0 || t.cat1 !== 'Contanti') return false
+        const tDate = t._effDate || t.date || ''
+        const beforeDate = !expDate || tDate <= expDate
+        const withinWindow = !cutoff || tDate >= cutoff
+        const label = `💵 ${t.descAI||(t.description||'').slice(0,30)} · ${tDate} · €${fmtIT(Math.abs(t.amount),2)}`
+        return beforeDate && withinWindow && !usedReconRefs.has(label.slice(0,80))
       })
-      .map(e => ({
-        id:`cash-${e.id}`,
-        label:`💵 ${e.note||e.cat1||'Contanti'} · ${e.date} · €${fmtIT(e.amount||0,2)}`,
-        amount: e.amount||0, type:'cash', rawEntry: e
-      }))
+      .map(t => {
+        const tDate = t._effDate || t.date || ''
+        return {
+          id:`atm-${t.txId}`,
+          label:`💵 ${t.descAI||(t.description||'').slice(0,30)} · ${tDate} · €${fmtIT(Math.abs(t.amount),2)}`,
+          amount: Math.abs(t.amount), type:'cash'
+        }
+      })
   } else {
     // Bank/other: show transactions before expense date
     candidates = transactions
@@ -458,7 +468,7 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
 
   // For cash: detect partial match (withdrawal > expense)
   function handleSelect(c) {
-    if (isCash && c.rawEntry && c.rawEntry.amount > expense.amount * 1.05) {
+    if (isCash && c.amount > expense.amount * 1.05) {
       // Partial: note that only part of the withdrawal is used
       onSave({ ...c, partial: true, usedAmount: expense.amount })
     } else {
@@ -470,13 +480,13 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
     <Modal title={`🔗 Collega — ${expense.desc || 'Spesa'}`} onClose={onClose} width={540}>
       <div style={{marginBottom:10,padding:'8px 12px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--blue)'}}>
         <strong>{expense.desc||'—'}</strong> · € {fmtIT(expense.amount,2)} · {expense.date}
-        {isCash && <span style={{marginLeft:8,fontSize:11,background:'var(--gold-l)',color:'var(--gold)',padding:'1px 7px',borderRadius:8,fontWeight:700}}>💵 Cash — mostra prelievi prima di questa data</span>}
+        {isCash && <span style={{marginLeft:8,fontSize:11,background:'var(--gold-l)',color:'var(--gold)',padding:'1px 7px',borderRadius:8,fontWeight:700}}>💵 Cash — prelievi ATM ultimi 60gg</span>}
       </div>
       <FormRow label="Cerca"><Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cerca…" autoFocus/></FormRow>
       <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:300,overflowY:'auto',marginBottom:4}}>
         {filtered.length===0
           ? <div style={{textAlign:'center',fontSize:12,color:'var(--text3)',padding:16}}>
-              {isCash ? 'Nessun prelievo disponibile prima di questa data.' : 'Nessuna transazione trovata.'}
+              {isCash ? 'Nessun prelievo ATM trovato (cat. Contanti, ultimi 60gg).' : 'Nessuna transazione trovata.'}
             </div>
           : filtered.map(c=>{
               const isPartial = isCash && c.amount > expense.amount * 1.05
@@ -504,7 +514,91 @@ function VehReconModal({ expense, transactions, cashEntries, payMethod, allVehEx
 }
 
 // ── Vehicle Compact Card ──────────────────────────────────
+// ── Vehicle Trips Modal ───────────────────────────────────
+function TripsModal({ vehicle, onClose }) {
+  const { appPrefs, setAppPref } = useStore()
+  const [newDate, setNewDate] = useState(new Date().toISOString().slice(0,10))
+
+  const allTrips = useMemo(() => {
+    const raw = appPrefs?.vehicleTrips?.[vehicle.id] || []
+    return [...raw].sort((a,b) => b.date.localeCompare(a.date))
+  }, [appPrefs?.vehicleTrips, vehicle.id])
+
+  const thisYear = new Date().getFullYear().toString()
+
+  function addTrip() {
+    if (!newDate) return
+    const existing = appPrefs?.vehicleTrips?.[vehicle.id] || []
+    const trip = { id: uid(), date: newDate }
+    setAppPref('vehicleTrips', { ...(appPrefs?.vehicleTrips || {}), [vehicle.id]: [...existing, trip] })
+    setNewDate(new Date().toISOString().slice(0,10))
+  }
+
+  function deleteTrip(id) {
+    const existing = appPrefs?.vehicleTrips?.[vehicle.id] || []
+    setAppPref('vehicleTrips', { ...(appPrefs?.vehicleTrips || {}), [vehicle.id]: existing.filter(t => t.id !== id) })
+  }
+
+  const tripsThisYear = allTrips.filter(t => t.date.startsWith(thisYear))
+
+  return (
+    <Modal title={`🗓 Uscite ${vehicle.name}`} onClose={onClose} width={420}>
+      <div style={{marginBottom:16,padding:'10px 14px',background:'var(--surface2)',borderRadius:8,display:'flex',alignItems:'center',gap:12}}>
+        <span style={{fontSize:28}}>{renderIcon(vehicle.icon, 28)}</span>
+        <div>
+          <div style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{tripsThisYear.length}</div>
+          <div style={{fontSize:11,color:'var(--text3)'}}>uscite nel {thisYear}</div>
+        </div>
+        {allTrips.length > tripsThisYear.length && (
+          <div style={{marginLeft:'auto',textAlign:'right'}}>
+            <div style={{fontSize:16,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>{allTrips.length}</div>
+            <div style={{fontSize:11,color:'var(--text3)'}}>totale storico</div>
+          </div>
+        )}
+      </div>
+
+      {/* Add new trip */}
+      <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
+        <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)}
+          style={{flex:1,padding:'7px 10px',border:'1px solid var(--border)',borderRadius:7,
+            fontSize:13,background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-sans)'}}/>
+        <button className="btn btn-primary" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={addTrip}>
+          + Aggiungi uscita
+        </button>
+      </div>
+
+      {/* Trip list */}
+      {allTrips.length === 0
+        ? <div style={{textAlign:'center',padding:'20px 0',fontSize:13,color:'var(--text3)'}}>Nessuna uscita registrata.</div>
+        : <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:320,overflowY:'auto'}}>
+            {allTrips.map((t,i) => (
+              <div key={t.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                padding:'7px 12px',borderRadius:7,background:'var(--surface2)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',fontFamily:'var(--font-mono)',minWidth:18,textAlign:'right'}}>{allTrips.length - i}</span>
+                  <span style={{fontSize:13,fontFamily:'var(--font-mono)'}}>{fmtDate(t.date)}</span>
+                  {t.date.startsWith(thisYear) && (
+                    <span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:'var(--accent-l,var(--blue-l))',color:'var(--accent)',fontWeight:700}}>{thisYear}</span>
+                  )}
+                </div>
+                <button onClick={()=>deleteTrip(t.id)} style={{background:'none',border:'none',cursor:'pointer',
+                  color:'var(--text3)',opacity:0.5,padding:2,lineHeight:1}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=0.5}>
+                  <Trash2 size={12}/>
+                </button>
+              </div>
+            ))}
+          </div>
+      }
+    </Modal>
+  )
+}
+
 function VehicleChip({ vehicle, onEdit, onDelete }) {
+  const { appPrefs } = useStore()
+  const [showTrips, setShowTrips] = useState(false)
+
   const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
     .filter(([k]) => vehicle[k])
     .map(([k,icon]) => {
@@ -514,7 +608,11 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
       return { key:k, icon, color, bg, label: days < 0 ? '⚠ scaduta' : days < 90 ? `${days}gg` : '✓', date: vehicle[k] }
     })
 
+  const thisYear = new Date().getFullYear().toString()
+  const tripsThisYear = (appPrefs?.vehicleTrips?.[vehicle.id] || []).filter(t => t.date.startsWith(thisYear)).length
+
   return (
+    <>
     <div className="card" style={{padding:'14px 16px',display:'flex',alignItems:'flex-start',gap:14,position:'relative'}}>
       {/* Edit pencil — top right corner */}
       <button onClick={onEdit} title="Modifica" style={{
@@ -543,7 +641,7 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
           {[vehicle.targa, vehicle.marca, vehicle.anno].filter(Boolean).join(' · ')}
         </div>
         {scadenze.length > 0 && (
-          <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+          <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:6}}>
             {scadenze.map(s=>(
               <span key={s.key} style={{fontSize:10,padding:'2px 7px',borderRadius:5,background:s.bg,color:s.color,fontWeight:700}}>
                 {s.icon} {s.key.slice(0,4)}: {s.date?.slice(5).replace('-','/')} {s.label}
@@ -551,7 +649,39 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
             ))}
           </div>
         )}
+        {/* Uscite counter */}
+        <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
+          style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
+            border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
+            cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
+            transition:'background .12s'}}
+          onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
+          onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
+          🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
+        </button>
       </div>
+    </div>
+    {showTrips && <TripsModal vehicle={vehicle} onClose={()=>setShowTrips(false)}/>}
+    </>
+  )
+}
+
+// ── Per-vehicle spending strip ─────────────────────────────
+function VehSpendingStrip({ vehicles, spending12m }) {
+  return (
+    <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.min(vehicles.length,4)},1fr)`,gap:12,marginBottom:20}}>
+      {vehicles.map(v => (
+        <div key={v.id} className="card" style={{padding:'12px 16px',display:'flex',alignItems:'center',gap:12}}>
+          <span style={{flexShrink:0,fontSize:24,lineHeight:1}}>{renderIcon(v.icon, 24)}</span>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.name}</div>
+            <div style={{fontSize:16,fontWeight:800,color:'var(--accent)',fontFamily:'var(--font-mono)'}}>
+              {spending12m[v.id] ? `€ ${fmtIT(Math.round(spending12m[v.id]),0)}` : '—'}
+            </div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>ultimi 12 mesi</div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -559,39 +689,53 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
 // ── Charts Section ────────────────────────────────────────
 const CHART_TOOLTIP = { fontSize:11, border:'1px solid var(--border)', borderRadius:7, background:'var(--surface)' }
 
-function VehicleCharts({ vehicles, allExpenses }) {
+// allRows = merged manual + auto rows from the table (same data)
+function VehicleCharts({ vehicles, allRows = [] }) {
   const last6 = getLast6Months()
-  const noData = allExpenses.length === 0
+  const noData = allRows.length === 0
   const empty = <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>Nessuna spesa registrata.</div>
 
   // ── Chart 1: Andamento Carburante (bar, 6 mesi) ──────────
   const fuelData = last6.map(ym => ({
     label: MONTHS_IT[parseInt(ym.slice(5))-1],
-    Carburante: allExpenses.filter(e=>e.cat==='Carburante'&&(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0)
+    Carburante: allRows.filter(r => r.cat === 'Carburante' && (r.date||'').startsWith(ym)).reduce((s,r)=>s+r.amount,0)
   }))
   const fuelAvg = fuelData.reduce((s,d)=>s+(d.Carburante||0),0) / (fuelData.filter(d=>d.Carburante>0).length||1)
 
-  // ── Chart 2: Donut carburante per veicolo — N/A, invece facciamo distribuzione categorie (escluso carburante) ──
-  const nonFuelExp = allExpenses.filter(e=>e.cat!=='Carburante')
+  // ── Chart 2: Distribuzione categorie (escluso carburante) ──
+  const nonFuelRows = allRows.filter(r => r.cat !== 'Carburante')
   const catTotals = VEH_CATS.filter(c=>c!=='Carburante').map(c=>({
     name: c,
-    value: Math.round(nonFuelExp.filter(e=>e.cat===c).reduce((s,e)=>s+(e.amount||0),0))
+    value: Math.round(nonFuelRows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
   })).filter(x=>x.value>0)
 
   // ── Chart 3: Costo per veicolo donut (escluso carburante) ──
   const vehTotals = vehicles.map((v,i)=>({
     name: v.name,
-    value: Math.round(nonFuelExp.filter(e=>e.vehicleId===v.id).reduce((s,e)=>s+(e.amount||0),0)),
+    value: Math.round(nonFuelRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0)),
     color: VEH_COLORS[i%VEH_COLORS.length]
   })).filter(x=>x.value>0)
 
   // ── Chart 4: Trend costi totali — area chart ──────────────
   const trendData = last6.map(ym => ({
     label: MONTHS_IT[parseInt(ym.slice(5))-1],
-    Totale: Math.round(allExpenses.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0))
+    Totale: Math.round(allRows.filter(r=>(r.date||'').startsWith(ym)).reduce((s,r)=>s+r.amount,0))
   }))
 
   const DONUT_COLORS = ['#c8622a','#2a5c8a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#1abc9c']
+
+  const RADIAN = Math.PI / 180
+  const renderPieLabel = ({ cx, cy, midAngle, outerRadius, value, name }) => {
+    const radius = outerRadius + 22
+    const x = cx + radius * Math.cos(-midAngle * RADIAN)
+    const y = cy + radius * Math.sin(-midAngle * RADIAN)
+    return (
+      <text x={x} y={y} fill="var(--text2)" textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central" fontSize={9} fontFamily="var(--font-mono)">
+        €{fmtIT(Math.round(value),0)}
+      </text>
+    )
+  }
 
   const ChartCard = ({title, children}) => (
     <div className="card" style={{padding:'16px 18px'}}>
@@ -617,7 +761,7 @@ function VehicleCharts({ vehicles, allExpenses }) {
       {/* 1 — Andamento Carburante */}
       <ChartCard title="⛽ Andamento Spesa Carburante">
         <ResponsiveContainer width="100%" height={190}>
-          <BarChart data={fuelData} margin={{top:4,right:4,bottom:0,left:0}}>
+          <BarChart data={fuelData} margin={{top:20,right:4,bottom:0,left:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
             <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
             <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={44} tickFormatter={v=>`€${v}`}/>
@@ -627,6 +771,9 @@ function VehicleCharts({ vehicles, allExpenses }) {
               {fuelData.map((d,i)=>(
                 <Cell key={i} fill={d.Carburante > fuelAvg ? '#c8622a' : '#e8a888'}/>
               ))}
+              <LabelList dataKey="Carburante" position="top"
+                formatter={v=>v>0?`€${fmtIT(Math.round(v),0)}`:''}
+                style={{fontSize:9,fill:'var(--text2)',fontFamily:'var(--font-mono)'}}/>
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -635,45 +782,7 @@ function VehicleCharts({ vehicles, allExpenses }) {
         </div>
       </ChartCard>
 
-      {/* 2 — Distribuzione categorie (escluso carburante) */}
-      <ChartCard title="📊 Costi per Categoria (escluso carburante)">
-        {catTotals.length === 0
-          ? empty
-          : <>
-            <ResponsiveContainer width="100%" height={160}>
-              <PieChart>
-                <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
-                  dataKey="value" paddingAngle={2}>
-                  {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
-                </Pie>
-                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
-              </PieChart>
-            </ResponsiveContainer>
-            {renderLegend(catTotals, DONUT_COLORS)}
-          </>
-        }
-      </ChartCard>
-
-      {/* 3 — Costo per Veicolo donut (escluso carburante) */}
-      <ChartCard title="🚗 Costo per Veicolo (escluso carburante)">
-        {vehTotals.length === 0
-          ? empty
-          : <>
-            <ResponsiveContainer width="100%" height={160}>
-              <PieChart>
-                <Pie data={vehTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
-                  dataKey="value" paddingAngle={2}>
-                  {vehTotals.map((v,i)=><Cell key={i} fill={v.color}/>)}
-                </Pie>
-                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
-              </PieChart>
-            </ResponsiveContainer>
-            {renderLegend(vehTotals, vehTotals.map(v=>v.color))}
-          </>
-        }
-      </ChartCard>
-
-      {/* 4 — Trend costi totali (area) */}
+      {/* 2 — Trend costi totali (area) */}
       <ChartCard title="📈 Trend Costi Totali">
         <ResponsiveContainer width="100%" height={190}>
           <AreaChart data={trendData} margin={{top:4,right:4,bottom:0,left:0}}>
@@ -693,201 +802,451 @@ function VehicleCharts({ vehicles, allExpenses }) {
         </ResponsiveContainer>
       </ChartCard>
 
+      {/* 3 — Costo per Veicolo donut (escluso carburante) */}
+      <ChartCard title="🚗 Costo per Veicolo (escluso carburante)">
+        {vehTotals.length === 0
+          ? empty
+          : <>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={vehTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
+                  dataKey="value" paddingAngle={2}
+                  label={renderPieLabel} labelLine={false}>
+                  {vehTotals.map((v,i)=><Cell key={i} fill={v.color}/>)}
+                </Pie>
+                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
+              </PieChart>
+            </ResponsiveContainer>
+            {renderLegend(vehTotals, vehTotals.map(v=>v.color))}
+          </>
+        }
+      </ChartCard>
+
+      {/* 4 — Distribuzione categorie (escluso carburante) */}
+      <ChartCard title="📊 Costi per Categoria (escluso carburante)">
+        {catTotals.length === 0
+          ? empty
+          : <>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
+                  dataKey="value" paddingAngle={2}
+                  label={renderPieLabel} labelLine={false}>
+                  {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
+                </Pie>
+                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
+              </PieChart>
+            </ResponsiveContainer>
+            {renderLegend(catTotals, DONUT_COLORS)}
+          </>
+        }
+      </ChartCard>
+
     </div>
   )
 }
 
 // ── All Expenses Table ────────────────────────────────────
 function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, onAddExpense }) {
-  const { deleteVehExpense, updateVehExpense } = useStore()
-  const [sortKey, setSortKey] = useState('date')
-  const [sortDir, setSortDir] = useState('desc')
+  const { deleteVehExpense, updateVehExpense, appPrefs, setAppPref } = useStore()
+  const customCats = useStore(s => s.customCats)
+  const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
+
+  // ── Cat filters config (stored in appPrefs) ──────────────
+  const vehCatFilters = useMemo(() => {
+    const saved = appPrefs?.vehCatFilters
+    if (saved) return saved
+    // Default: all Veicoli sub-categories
+    const sub = CATS['Veicoli']?.sub || []
+    return sub.map(s => ({ cat1: 'Veicoli', cat2: s }))
+  }, [appPrefs?.vehCatFilters])
+
+  const vehTxVehicles = useMemo(() => appPrefs?.vehTxVehicles || {}, [appPrefs?.vehTxVehicles])
+
+  function saveCatFilters(f) { setAppPref('vehCatFilters', f) }
+  function removeCatFilter(cat1, cat2) {
+    saveCatFilters(vehCatFilters.filter(f => !(f.cat1 === cat1 && f.cat2 === cat2)))
+  }
+  function addCatFilter(cat1, cat2) {
+    if (!cat1 || !cat2) return
+    if (vehCatFilters.some(f => f.cat1 === cat1 && f.cat2 === cat2)) return
+    saveCatFilters([...vehCatFilters, { cat1, cat2 }])
+  }
+  function setTxVehicle(txId, vehicleId) {
+    setAppPref('vehTxVehicles', { ...vehTxVehicles, [txId]: vehicleId })
+  }
+
+  // ── Settings panel state ──────────────────────────────────
+  const [showSettings, setShowSettings] = useState(false)
+  const [draftL1, setDraftL1] = useState('Veicoli')
+  const [draftL2, setDraftL2] = useState('')
+  const _mergedCats = getMergedCats(customCats)
+  const cat1List = Object.keys(_mergedCats)
+  const cat2List = draftL1 && _mergedCats[draftL1]?.sub ? _mergedCats[draftL1].sub : []
+
+  // ── Table state ───────────────────────────────────────────
+  const [sortKey, setSortKey]   = useState('date')
+  const [sortDir, setSortDir]   = useState('desc')
   const [filterVeh, setFilterVeh] = useState('')
   const [filterCat, setFilterCat] = useState('')
   const [reconExp,  setReconExp]  = useState(null)
-  const [attExp,    setAttExp]    = useState(null)  // expense whose attachments we're viewing
-  const [editExp,   setEditExp]   = useState(null)  // expense being edited
+  const [attExp,    setAttExp]    = useState(null)
+  const [editExp,   setEditExp]   = useState(null)
+  const [detailTx,  setDetailTx]  = useState(null)
 
-  const vehMap = Object.fromEntries(vehicles.map(v=>[v.id, v]))
+  const vehMap = Object.fromEntries(vehicles.map(v => [v.id, v]))
+
+  // ── Merge manual + auto rows ──────────────────────────────
+  const rows = useMemo(() => {
+    // 1) Manual expenses
+    const manualRows = allExpenses.map(e => ({
+      _type: 'manual', _key: `m-${e.id}`,
+      date: e.date || '',
+      desc: e.desc || '—',
+      cat: e.cat || '—',
+      vehicleId: e.vehicleId || '',
+      amount: e.amount || 0,
+      id: e.id, payMethod: e.payMethod,
+      reconRef: e.reconRef, reconType: e.reconType,
+      reconPartial: e.reconPartial, reconUsedAmount: e.reconUsedAmount,
+      attachments: e.attachments,
+    }))
+
+    // 2) Auto-detected transactions matching configured L1/L2 filters
+    const autoRows = vehCatFilters.length > 0
+      ? transactions
+          .filter(t => {
+            if (t.excluded || t.amount >= 0) return false
+            return vehCatFilters.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
+          })
+          .map(t => ({
+            _type: 'auto', _key: `a-${t.txId}`,
+            date: t._effDate || t.date || '',
+            desc: t.descAI || (t.description || '').slice(0, 60) || '—',
+            cat: t.cat2 || t.cat1 || '—',
+            vehicleId: vehTxVehicles[t.txId] || '',
+            amount: Math.abs(t.amount),
+            txId: t.txId,
+            cat1: t.cat1, cat2: t.cat2,
+          }))
+      : []
+
+    // 3) Merge + filter + sort
+    return [...manualRows, ...autoRows]
+      .filter(r => !filterVeh || r.vehicleId === filterVeh)
+      .filter(r => !filterCat || r.cat === filterCat)
+      .sort((a, b) => {
+        if (sortKey === 'amount') return sortDir === 'asc' ? a.amount - b.amount : b.amount - a.amount
+        const va = a[sortKey] || '', vb = b[sortKey] || ''
+        return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va)
+      })
+  }, [allExpenses, transactions, vehCatFilters, vehTxVehicles, filterVeh, filterCat, sortKey, sortDir])
+
+  const total = rows.reduce((s, r) => s + r.amount, 0)
 
   function toggleSort(k) {
-    if (sortKey===k) setSortDir(d=>d==='asc'?'desc':'asc')
+    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(k); setSortDir('desc') }
   }
-  const sortIcon = (k) => sortKey===k ? (sortDir==='asc'?'▲':'▼') : ''
+  const sortIcon = k => sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : ''
 
-  const rows = useMemo(() => {
-    return [...allExpenses]
-      .filter(e => !filterVeh || e.vehicleId===filterVeh)
-      .filter(e => !filterCat || e.cat===filterCat)
-      .sort((a,b) => {
-        if (sortKey==='amount') return sortDir==='asc' ? (a.amount||0)-(b.amount||0) : (b.amount||0)-(a.amount||0)
-        return sortDir==='asc'
-          ? (a[sortKey]||'').localeCompare(b[sortKey]||'')
-          : (b[sortKey]||'').localeCompare(a[sortKey]||'')
-      })
-  }, [allExpenses, filterVeh, filterCat, sortKey, sortDir])
-
-  const total = rows.reduce((s,e)=>s+(e.amount||0),0)
-
-  const TH = ({k,label,right=false}) => (
-    <th onClick={()=>toggleSort(k)} style={{
-      padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-      textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',
-      textAlign:right?'right':'left',cursor:'pointer',whiteSpace:'nowrap',userSelect:'none'}}>
-      {label} <span style={{fontSize:9}}>{sortIcon(k)}</span>
+  const TH = ({ k, label, right = false }) => (
+    <th onClick={() => toggleSort(k)} style={{
+      padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+      textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)',
+      textAlign: right ? 'right' : 'left', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none'
+    }}>
+      {label} <span style={{ fontSize: 9 }}>{sortIcon(k)}</span>
     </th>
   )
 
+  // ── All cats for filter dropdown ──────────────────────────
+  const allCats = useMemo(() => {
+    const s = new Set(rows.map(r => r.cat).filter(Boolean))
+    return [...s].sort()
+  }, [rows])
+
   return (
-    <div style={{marginTop:8}}>
-      {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-        padding:'12px 16px',background:'var(--surface2)',
-        borderRadius:'var(--radius) var(--radius) 0 0',border:'1px solid var(--border)',borderBottom:'none'}}>
-        <div>
-          <div style={{fontSize:15,fontWeight:700}}>📋 Tutte le spese veicoli</div>
-          <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>{rows.length} spese · € {fmtIT(Math.round(total),0)} totale</div>
+    <div style={{ marginTop: 8 }}>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <div style={{ marginBottom: 12, padding: '16px 20px', background: 'var(--surface2)',
+          border: '1px solid var(--border)', borderRadius: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+            ⚙️ Categorie rilevate automaticamente
+          </div>
+
+          {/* Current filters */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+            {vehCatFilters.length === 0 && (
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>Nessuna categoria configurata</span>
+            )}
+            {vehCatFilters.map(f => (
+              <span key={`${f.cat1}-${f.cat2}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  background: 'var(--accent-l,rgba(200,98,42,.1))', color: 'var(--accent)',
+                  border: '1px solid var(--accent)44' }}>
+                {f.cat1} › {f.cat2}
+                <button onClick={() => removeCatFilter(f.cat1, f.cat2)}
+                  style={{ border: 'none', background: 'none', cursor: 'pointer',
+                    color: 'var(--accent)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </span>
+            ))}
+          </div>
+
+          {/* Add new filter */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select value={draftL1} onChange={e => { setDraftL1(e.target.value); setDraftL2('') }}
+              style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6,
+                fontSize: 12, background: 'var(--surface)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
+              <option value="">— L1 —</option>
+              {cat1List.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={draftL2} onChange={e => setDraftL2(e.target.value)}
+              disabled={!cat2List.length}
+              style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6,
+                fontSize: 12, background: 'var(--surface)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
+              <option value="">— L2 —</option>
+              {cat2List.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button onClick={() => { addCatFilter(draftL1, draftL2); setDraftL2('') }}
+              disabled={!draftL1 || !draftL2}
+              className="btn btn-primary" style={{ fontSize: 11, padding: '5px 14px' }}>
+              + Aggiungi
+            </button>
+          </div>
         </div>
-        <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <select value={filterVeh} onChange={e=>setFilterVeh(e.target.value)}
-            style={{padding:'5px 9px',border:'1px solid var(--border)',borderRadius:6,fontSize:11,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}}>
+      )}
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 16px', background: 'var(--surface2)',
+        borderRadius: 'var(--radius) var(--radius) 0 0', border: '1px solid var(--border)', borderBottom: 'none' }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>📋 Tutte le spese veicoli</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
+            {rows.length} spese · € {fmtIT(Math.round(total), 0)} totale
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Gear button */}
+          <button onClick={() => setShowSettings(v => !v)}
+            title="Configura categorie rilevate automaticamente"
+            style={{ border: `1px solid ${showSettings ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: 7, background: showSettings ? 'var(--accent-l,rgba(200,98,42,.1))' : 'transparent',
+              color: showSettings ? 'var(--accent)' : 'var(--text3)',
+              cursor: 'pointer', padding: '4px 8px', fontSize: 14, lineHeight: 1 }}>
+            ⚙️
+          </button>
+          <select value={filterVeh} onChange={e => setFilterVeh(e.target.value)}
+            style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11,
+              background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontFamily: 'var(--font-sans)' }}>
             <option value="">Tutti i veicoli</option>
-            {vehicles.map(v=><option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+            {vehicles.map(v => <option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
           </select>
-          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)}
-            style={{padding:'5px 9px',border:'1px solid var(--border)',borderRadius:6,fontSize:11,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}}>
+          <select value={filterCat} onChange={e => setFilterCat(e.target.value)}
+            style={{ padding: '5px 9px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11,
+              background: 'var(--surface)', color: 'var(--text)', outline: 'none', fontFamily: 'var(--font-sans)' }}>
             <option value="">Tutte le categorie</option>
-            {VEH_CATS.map(c=><option key={c}>{c}</option>)}
+            {allCats.map(c => <option key={c}>{c}</option>)}
           </select>
-          <button className="btn btn-primary" style={{fontSize:11}} onClick={onAddExpense}>
-            <Plus size={11}/> Aggiungi spesa
+          <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={onAddExpense}>
+            <Plus size={11} /> Aggiungi spesa
           </button>
         </div>
       </div>
 
       {rows.length === 0 ? (
-        <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13,
-          border:'1px solid var(--border)',borderTop:'none',borderRadius:'0 0 var(--radius) var(--radius)',
-          background:'var(--surface)'}}>
-          Nessuna spesa registrata. Usa "+ Aggiungi spesa" o il pulsante Spesa su ogni veicolo.
+        <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)', fontSize: 13,
+          border: '1px solid var(--border)', borderTop: 'none',
+          borderRadius: '0 0 var(--radius) var(--radius)', background: 'var(--surface)' }}>
+          Nessuna spesa. Usa "+ Aggiungi spesa" o configura le categorie automatiche con ⚙️.
         </div>
       ) : (
-        <div style={{overflow:'hidden',border:'1px solid var(--border)',borderTop:'none',
-          borderRadius:'0 0 var(--radius) var(--radius)',background:'var(--surface)'}}>
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
+        <div style={{ overflow: 'hidden', border: '1px solid var(--border)', borderTop: 'none',
+          borderRadius: '0 0 var(--radius) var(--radius)', background: 'var(--surface)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{background:'var(--surface2)'}}>
-                  <TH k="date" label="Data"/>
-                  <TH k="desc" label="Descrizione"/>
-                  <TH k="cat" label="Categoria"/>
-                  <TH k="vehicleId" label="Veicolo"/>
-                  <TH k="amount" label="Importo" right/>
-                  <TH k="payMethod" label="Metodo"/>
-                  <th style={{padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-                    textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',minWidth:110}}>
+                <tr style={{ background: 'var(--surface2)' }}>
+                  <TH k="date" label="Data" />
+                  <TH k="desc" label="Descrizione" />
+                  <TH k="cat" label="Categoria" />
+                  <TH k="vehicleId" label="Veicolo" />
+                  <TH k="amount" label="Importo" right />
+                  <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)',
+                    textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    Comp. Satisp
+                  </th>
+                  <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)' }}>
+                    Fonte
+                  </th>
+                  <th style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)', minWidth: 110 }}>
                     Riconciliazione
                   </th>
-                  <th style={{padding:'8px 12px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-                    textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',width:40}}>
-                    📎
-                  </th>
-                  <th style={{borderBottom:'1px solid var(--border)',width:36}}/>
-                  <th style={{borderBottom:'1px solid var(--border)',width:36}}/>
+                  <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
+                  <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map(e => {
-                  const veh = vehMap[e.vehicleId]
+                {rows.map(r => {
+                  const veh = vehMap[r.vehicleId]
+                  const catColor = CAT_COLORS[r.cat] || '#888'
+
+                  // For auto rows, find the transaction to open detail modal
+                  const handleRowClick = () => {
+                    if (r._type === 'auto' && r.txId) {
+                      const tx = transactions.find(t => t.txId === r.txId)
+                      if (tx) setDetailTx(tx)
+                    }
+                  }
+
                   return (
-                    <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-                      <td style={{padding:'7px 12px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                        {fmtDate(e.date)}
+                    <tr key={r._key} style={{ borderBottom: '1px solid var(--border)', cursor: r._type === 'auto' ? 'pointer' : 'default' }}
+                      onClick={handleRowClick}
+                      onMouseEnter={e => { if (r._type === 'auto') e.currentTarget.style.background = 'var(--surface2)' }}
+                      onMouseLeave={e => { if (r._type === 'auto') e.currentTarget.style.background = 'transparent' }}>
+                      {/* Data */}
+                      <td style={{ padding: '7px 12px', fontSize: 12, color: 'var(--text3)',
+                        fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+                        {fmtDate(r.date)}
                       </td>
-                      <td style={{padding:'7px 12px',fontSize:13,fontWeight:600,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                        {e.desc || '—'}
+
+                      {/* Descrizione (descAI) */}
+                      <td style={{ padding: '7px 12px', fontSize: 13, fontWeight: 600,
+                        maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={r.desc}>
+                        {r.desc}
                       </td>
-                      <td style={{padding:'7px 12px'}}>
-                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:700,
-                          background:(CAT_COLORS[e.cat]||'#888')+'18',color:CAT_COLORS[e.cat]||'#888',
-                          border:`1px solid ${CAT_COLORS[e.cat]||'#888'}44`}}>
-                          {e.cat||'—'}
+
+                      {/* Categoria (L2) */}
+                      <td style={{ padding: '7px 12px' }}>
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                          background: catColor + '18', color: catColor, border: `1px solid ${catColor}44` }}>
+                          {r.cat}
                         </span>
                       </td>
-                      <td style={{padding:'7px 12px',fontSize:12}}>
-                        {veh ? <span style={{display:'flex',alignItems:'center',gap:4}}>{renderIcon(veh.icon,16)} {veh.name}</span> : <span style={{color:'var(--text3)'}}>—</span>}
+
+                      {/* Veicolo — select for both auto and manual */}
+                      <td style={{ padding: '7px 12px', fontSize: 12 }}>
+                        <select value={r.vehicleId || ''}
+                          onChange={e => {
+                            e.stopPropagation()
+                            if (r._type === 'auto') setTxVehicle(r.txId, e.target.value)
+                            else updateVehExpense(r.id, { vehicleId: e.target.value })
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          style={{ padding: '3px 7px', border: '1px solid var(--border)', borderRadius: 6,
+                            fontSize: 11, background: 'var(--surface2)', color: r.vehicleId ? 'var(--text)' : 'var(--text3)',
+                            fontFamily: 'var(--font-sans)', cursor: 'pointer' }}>
+                          <option value="">— Assegna —</option>
+                          {vehicles.map(v => <option key={v.id} value={v.id}>{v.icon} {v.name}</option>)}
+                        </select>
                       </td>
-                      <td style={{padding:'7px 12px',textAlign:'right',fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--red)'}}>
-                        € {fmtIT(e.amount||0,2)}
+
+                      {/* Importo */}
+                      <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700,
+                        fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
+                        € {fmtIT(r.amount, 2)}
                       </td>
-                      <td style={{padding:'7px 12px'}}>
-                        {e.payMethod ? (
-                          <span style={{fontSize:10,padding:'2px 7px',borderRadius:8,fontWeight:700,
-                            background: e.payMethod==='cash'?'var(--gold-l)': e.payMethod==='carta'?'var(--blue-l)':'var(--surface2)',
-                            color: e.payMethod==='cash'?'var(--gold)': e.payMethod==='carta'?'var(--blue)':'var(--text3)'}}>
-                            {e.payMethod==='cash'?'💵 Cash': e.payMethod==='carta'?'💳 Carta': e.payMethod==='bonifico'?'🏦 Bonifico':'• Altro'}
+
+                      {/* Comp. Satisp */}
+                      {(() => {
+                        const matchKey = r._type === 'manual' ? `veh-${r.id}` : r.txId
+                        const match = matchKey ? satiMatches[matchKey] : null
+                        const isMatched = match?.status === 'matched'
+                        return (
+                          <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                            {isMatched ? (
+                              <span title={`Compensato €${fmtIT(match.compensatedAmt||0,2)} via Satispay`}
+                                style={{ fontSize: 16, lineHeight: 1 }}>🟢</span>
+                            ) : (
+                              <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
+                            )}
+                          </td>
+                        )
+                      })()}
+
+                      {/* Fonte */}
+                      <td style={{ padding: '7px 12px' }}>
+                        {r._type === 'auto' ? (
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 8, fontWeight: 700,
+                            background: 'var(--blue-l)', color: 'var(--blue)' }}>
+                            🏦 Auto
                           </span>
-                        ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>}
+                        ) : (
+                          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 8, fontWeight: 700,
+                            background: r.payMethod === 'cash' ? 'var(--gold-l)' : r.payMethod === 'carta' ? 'var(--blue-l)' : 'var(--surface2)',
+                            color: r.payMethod === 'cash' ? 'var(--gold)' : r.payMethod === 'carta' ? 'var(--blue)' : 'var(--text3)' }}>
+                            {r.payMethod === 'cash' ? '💵 Cash' : r.payMethod === 'carta' ? '💳 Carta' : r.payMethod === 'bonifico' ? '🏦 Bonifico' : '• Manuale'}
+                          </span>
+                        )}
                       </td>
-                      <td style={{padding:'7px 12px'}}>
-                        {e.reconRef ? (
-                          <div style={{display:'flex',alignItems:'center',gap:4}}>
-                            <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,fontWeight:700,
-                              background:e.reconType==='cash'?'var(--gold-l)':'var(--blue-l)',
-                              color:e.reconType==='cash'?'var(--gold)':'var(--blue)'}}>
-                              {e.reconType==='cash'?'💵':'🏦'}
+
+                      {/* Riconciliazione (manual only) */}
+                      <td style={{ padding: '7px 12px' }}>
+                        {r._type === 'auto' ? (
+                          <span style={{ fontSize: 10, color: 'var(--text3)' }}>—</span>
+                        ) : r.reconRef ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 700,
+                              background: r.reconType === 'cash' ? 'var(--gold-l)' : 'var(--blue-l)',
+                              color: r.reconType === 'cash' ? 'var(--gold)' : 'var(--blue)' }}>
+                              {r.reconType === 'cash' ? '💵' : '🏦'}
                             </span>
-                            <span style={{fontSize:10,color:'var(--text3)',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-                              title={e.reconRef}>{e.reconRef.slice(0,30)}</span>
-                            <button className="btn btn-ghost" style={{padding:'1px 4px',fontSize:10,color:'var(--text3)'}}
-                              onClick={()=>updateVehExpense(e.id,{reconRef:null,reconType:null})}>×</button>
+                            <span style={{ fontSize: 10, color: 'var(--text3)', maxWidth: 80,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              title={r.reconRef}>{r.reconRef.slice(0, 28)}</span>
+                            <button className="btn btn-ghost" style={{ padding: '1px 4px', fontSize: 10, color: 'var(--text3)' }}
+                              onClick={() => updateVehExpense(r.id, { reconRef: null, reconType: null })}>×</button>
                           </div>
                         ) : (
                           <button className="btn btn-ghost"
-                            style={{fontSize:10,padding:'2px 7px',border:'1px solid var(--gold)',color:'var(--gold)',borderRadius:4}}
-                            onClick={()=>setReconExp(e)}>
-                            <Link size={9}/> Collega
+                            style={{ fontSize: 10, padding: '2px 7px', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 4 }}
+                            onClick={() => setReconExp({ ...r, payMethod: r.payMethod })}>
+                            <Link size={9} /> Collega
                           </button>
                         )}
                       </td>
-                      <td style={{padding:'5px 8px',textAlign:'center'}}>
-                        <button className="btn btn-ghost"
-                          style={{fontSize:11,padding:'2px 6px',color:(e.attachments?.length>0)?'var(--accent)':'var(--text3)',
-                            position:'relative'}}
-                          onClick={()=>setAttExp(e)}
-                          title={e.attachments?.length>0 ? `${e.attachments.length} allegato/i` : 'Aggiungi allegati'}>
-                          📎{e.attachments?.length>0 && <span style={{
-                            position:'absolute',top:-4,right:-4,fontSize:9,background:'var(--accent)',
-                            color:'#fff',borderRadius:8,padding:'0 4px',fontWeight:700,minWidth:14,textAlign:'center'}}>
-                            {e.attachments.length}
-                          </span>}
-                        </button>
+
+                      {/* Edit (manual only) */}
+                      <td style={{ padding: '5px 6px' }}>
+                        {r._type === 'manual' && (
+                          <button className="btn btn-ghost" style={{ color: 'var(--text3)', padding: '2px 5px' }}
+                            title="Modifica" onClick={() => setEditExp(r)}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                          </button>
+                        )}
                       </td>
-                      <td style={{padding:'5px 6px'}}>
-                        <button className="btn btn-ghost" style={{color:'var(--text3)',padding:'2px 5px'}}
-                          title="Modifica" onClick={()=>setEditExp(e)}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                          </svg>
-                        </button>
-                      </td>
-                      <td style={{padding:'5px 6px'}}>
-                        <button className="btn btn-ghost" style={{color:'var(--red)',padding:'2px 5px'}}
-                          onClick={()=>{if(confirm('Eliminare spesa?'))deleteVehExpense(e.id)}}>
-                          <Trash2 size={11}/>
-                        </button>
+
+                      {/* Delete (manual only) */}
+                      <td style={{ padding: '5px 6px' }}>
+                        {r._type === 'manual' && (
+                          <button className="btn btn-ghost" style={{ color: 'var(--red)', padding: '2px 5px' }}
+                            onClick={() => { if (confirm('Eliminare spesa?')) deleteVehExpense(r.id) }}>
+                            <Trash2 size={11} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )
                 })}
-                <tr style={{background:'var(--surface2)',fontWeight:700}}>
-                  <td colSpan={4} style={{padding:'8px 12px',fontSize:12}}>Totale ({rows.length})</td>
-                  <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)'}}>
-                    € {fmtIT(total,2)}
+                <tr style={{ background: 'var(--surface2)', fontWeight: 700 }}>
+                  <td colSpan={4} style={{ padding: '8px 12px', fontSize: 12 }}>
+                    Totale ({rows.length})
                   </td>
-                  <td colSpan={4}/>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
+                    € {fmtIT(total, 2)}
+                  </td>
+                  <td colSpan={4} />
                 </tr>
               </tbody>
             </table>
@@ -902,21 +1261,21 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
           cashEntries={cashEntries}
           payMethod={reconExp.payMethod}
           allVehExpenses={allExpenses}
-          onSave={ref=>{updateVehExpense(reconExp.id,{reconRef:ref.label.slice(0,80),reconType:ref.type,reconPartial:ref.partial||false,reconUsedAmount:ref.usedAmount||null});setReconExp(null)}}
-          onClose={()=>setReconExp(null)}
+          onSave={ref => { updateVehExpense(reconExp.id, { reconRef: ref.label.slice(0, 80), reconType: ref.type, reconPartial: ref.partial || false, reconUsedAmount: ref.usedAmount || null }); setReconExp(null) }}
+          onClose={() => setReconExp(null)}
         />
       )}
 
       {attExp && (
         <AttachmentsModal
           expense={attExp}
-          onClose={()=>setAttExp(null)}
-          onDelete={async (att,i)=>{
-            if(!confirm(`Eliminare "${att.name}"?`)) return
-            if(att.path) await deleteExpenseFile(att.path)
-            const newAtts = (attExp.attachments||[]).filter((_,j)=>j!==i)
-            updateVehExpense(attExp.id, {attachments: newAtts})
-            setAttExp({...attExp, attachments: newAtts})
+          onClose={() => setAttExp(null)}
+          onDelete={async (att, i) => {
+            if (!confirm(`Eliminare "${att.name}"?`)) return
+            if (att.path) await deleteExpenseFile(att.path)
+            const newAtts = (attExp.attachments || []).filter((_, j) => j !== i)
+            updateVehExpense(attExp.id, { attachments: newAtts })
+            setAttExp({ ...attExp, attachments: newAtts })
           }}
         />
       )}
@@ -925,9 +1284,200 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
         <AddExpenseModal
           vehicles={vehicles}
           expense={editExp}
-          onClose={()=>setEditExp(null)}
+          onClose={() => setEditExp(null)}
         />
       )}
+
+      {detailTx && (
+        <TxDetailModal tx={detailTx} onClose={() => setDetailTx(null)}/>
+      )}
+    </div>
+  )
+}
+
+// ── Tx Detail Modal ───────────────────────────────────────
+function TxDetailModal({ tx, onClose }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats = useStore(s => s.customCats)
+  const [editCat1, setEditCat1] = useState(tx?.cat1 || '')
+  const [editCat2, setEditCat2] = useState(tx?.cat2 || '')
+  const [editDescAI, setEditDescAI] = useState(tx?.descAI || '')
+  const [saved, setSaved] = useState(false)
+  const [toReview, setToReview] = useState(tx?._flagged || false)
+  const [nonRecurring, setNonRecurring] = useState(tx?._nonRecurring || false)
+
+  if (!tx) return null
+
+  const _allCats = getMergedCats(customCats)
+  const effDate = tx._effDate || tx.date || ''
+  const fmtDateTx = (d) => {
+    if (!d) return '—'
+    const parts = (d||'').slice(0,10).split('-')
+    return parts.length===3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d
+  }
+
+  const cat1Subs = _allCats[editCat1]?.sub || []
+
+  function toggleReview() {
+    const n = !toReview
+    setToReview(n)
+    updateTransaction(tx.txId, { _flagged: n })
+  }
+
+  function toggleNonRecurring() {
+    const n = !nonRecurring
+    setNonRecurring(n)
+    updateTransaction(tx.txId, { _nonRecurring: n })
+  }
+
+  const handleSave = () => {
+    updateTransaction(tx.txId, { cat1: editCat1, cat2: editCat2, conf: 100 })
+    setSaved(true)
+    setTimeout(onClose, 1000)
+  }
+
+  return (
+    <div style={{
+      position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:9999,
+      display:'flex',alignItems:'center',justifyContent:'center',padding:16,
+    }} onClick={onClose}>
+      <div style={{
+        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,
+        padding:24,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto',
+        boxShadow:'0 8px 40px rgba(0,0,0,.35)',position:'relative',
+      }} onClick={e=>e.stopPropagation()}>
+        {/* Close */}
+        <button onClick={onClose} style={{
+          position:'absolute',top:12,right:14,background:'none',border:'none',
+          fontSize:20,cursor:'pointer',color:'var(--text3)',lineHeight:1,
+        }}>✕</button>
+
+        {/* Header */}
+        <div style={{marginBottom:16,paddingRight:28}}>
+          <div style={{fontSize:15,fontWeight:700,color:'var(--text)',lineHeight:1.3,marginBottom:4}}>
+            {tx.descAI || (tx.description||'').slice(0,60) || '—'}
+          </div>
+          <div style={{fontSize:22,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>
+            {tx.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(tx.amount),2)}
+          </div>
+        </div>
+
+        {/* Info grid */}
+        <div style={{
+          display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 16px',
+          marginBottom:20,padding:'14px 16px',
+          background:'var(--surface2)',borderRadius:8,
+          border:'1px solid var(--border)',
+        }}>
+          {[
+            ['Data contabile', fmtDateTx(tx.date)],
+            ['Data valuta', fmtDateTx(tx.effectiveDate || tx._effDate)],
+            ['Merchant', tx.merchant || '—'],
+            ['Controparte', tx.counterpart || tx.counterparty || '—'],
+            ['Categoria', tx.cat1 ? (tx.cat1 + (tx.cat2 ? ' › ' + tx.cat2 : '')) : '—'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>{label}</div>
+              <div style={{fontSize:12,color:'var(--text)',fontWeight:500}}>{value}</div>
+            </div>
+          ))}
+          <div style={{gridColumn:'1 / -1'}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>Descrizione originale</div>
+            <div style={{fontSize:12,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || '—'}</div>
+          </div>
+        </div>
+
+        {/* To Review flag */}
+        <div onClick={toggleReview}
+          style={{marginBottom:10,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:toReview?'rgba(245,158,11,.08)':'var(--surface2)',
+            border:`1px solid ${toReview?'#f59e0b':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:toReview?'#92400e':'var(--text2)'}}>
+            🔍 Da rivedere
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:toReview?'#f59e0b':'var(--border)',
+            color:toReview?'#fff':'var(--text3)'}}>
+            {toReview ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+
+        {/* Non ricorrente flag */}
+        <div onClick={toggleNonRecurring}
+          style={{marginBottom:14,display:'flex',alignItems:'center',justifyContent:'space-between',
+            padding:'10px 14px',borderRadius:8,cursor:'pointer',userSelect:'none',
+            background:nonRecurring?'rgba(59,130,246,.08)':'var(--surface2)',
+            border:`1px solid ${nonRecurring?'var(--blue)':'var(--border)'}`}}>
+          <span style={{fontSize:13,fontWeight:600,color:nonRecurring?'var(--blue)':'var(--text2)'}}>
+            🔁 Non ricorrente
+          </span>
+          <span style={{fontSize:11,padding:'2px 10px',borderRadius:10,fontWeight:700,
+            background:nonRecurring?'var(--blue)':'var(--border)',
+            color:nonRecurring?'#fff':'var(--text3)'}}>
+            {nonRecurring ? 'Attivo' : 'Off'}
+          </span>
+        </div>
+
+        {/* AI Descr */}
+        <div style={{padding:'12px 16px',background:'var(--surface2)',borderRadius:10,marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
+            color:'var(--text3)',marginBottom:6}}>✏️ Descrizione AI</div>
+          <input
+            value={editDescAI}
+            onChange={e=>setEditDescAI(e.target.value)}
+            onBlur={()=>{ if(editDescAI.trim()!==tx.descAI) updateTransaction(tx.txId,{descAI:editDescAI.trim()}) }}
+            placeholder="Descrizione AI personalizzata..."
+            style={{width:'100%',boxSizing:'border-box',padding:'7px 10px',borderRadius:7,
+              border:'1px solid var(--border)',background:'var(--bg)',color:'var(--text)',
+              fontSize:13,fontFamily:'var(--font-sans)',outline:'none'}}
+          />
+        </div>
+
+        {/* Category editor */}
+        <div style={{borderTop:'1px solid var(--border)',paddingTop:16}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',marginBottom:10}}>
+            Modifica Categoria
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:140}}>
+              <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Categoria</div>
+              <select value={editCat1} onChange={e=>{setEditCat1(e.target.value);setEditCat2('')}} style={{
+                width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',
+                background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
+              }}>
+                <option value="">— Nessuna —</option>
+                {Object.keys(_allCats).filter(n=>n!=='Non Categorizzato').map(n=>(
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            {cat1Subs.length > 0 && (
+              <div style={{flex:1,minWidth:140}}>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Sottocategoria</div>
+                <select value={editCat2} onChange={e=>setEditCat2(e.target.value)} style={{
+                  width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,cursor:'pointer',
+                }}>
+                  <option value="">— Nessuna —</option>
+                  {cat1Subs.map(s=>(
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button onClick={handleSave} style={{
+              padding:'7px 18px',borderRadius:8,border:'none',cursor:'pointer',
+              background: saved ? 'var(--green)' : 'var(--accent)',
+              color:'#fff',fontSize:13,fontWeight:700,fontFamily:'var(--font-sans)',
+              transition:'background .2s',whiteSpace:'nowrap',
+            }}>
+              {saved ? '✓ Salvato' : 'Salva'}
+            </button>
+          </div>
+          <VehicleQuickPicker txId={tx.txId} cat1={editCat1} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -965,11 +1515,54 @@ function KPIStrip({ vehicles, allExpenses }) {
 
 // ── Main Page ─────────────────────────────────────────────
 export default function VeicoliRegistroPage() {
-  const { vehicles, vehExpenses, transactions, cashEntries, deleteVehicle } = useStore()
+  const { vehicles, vehExpenses, transactions, cashEntries, deleteVehicle, appPrefs } = useStore()
   const [showAddVeh,  setShowAddVeh]  = useState(false)
   const [editVeh,     setEditVeh]     = useState(null)
   const [showAddExp,  setShowAddExp]  = useState(false)
   const [preVehId,    setPreVehId]    = useState('')
+
+  // ── Merged rows (same logic as AllExpensesTable, unfiltered) for charts ──
+  const vehCatFiltersPage = useMemo(() => {
+    const saved = appPrefs?.vehCatFilters
+    if (saved) return saved
+    return (CATS['Veicoli']?.sub || []).map(s => ({ cat1: 'Veicoli', cat2: s }))
+  }, [appPrefs?.vehCatFilters])
+  const vehTxVehiclesPage = useMemo(() => appPrefs?.vehTxVehicles || {}, [appPrefs?.vehTxVehicles])
+
+  const mergedVehRows = useMemo(() => {
+    const manualRows = vehExpenses.map(e => ({
+      _type: 'manual', date: e.date || '',
+      cat: e.cat || '—', vehicleId: e.vehicleId || '',
+      amount: e.amount || 0, id: e.id,
+    }))
+    // Always include Carburante bank txs + any other vehCatFilters matches
+    const autoRows = transactions
+      .filter(t => !t.excluded && t.amount < 0 && (
+        (t.cat1 === 'Veicoli' && t.cat2 === 'Carburante') ||
+        vehCatFiltersPage.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
+      ))
+      .map(t => ({
+        _type: 'auto', date: t._effDate || t.date || '',
+        cat: t.cat2 || t.cat1 || '—', vehicleId: vehTxVehiclesPage[t.txId] || '',
+        amount: Math.abs(t.amount), txId: t.txId,
+      }))
+    return [...manualRows, ...autoRows]
+  }, [vehExpenses, transactions, vehCatFiltersPage, vehTxVehiclesPage])
+
+  // Per-vehicle spending last 12 months
+  const vehSpending12m = useMemo(() => {
+    const now = new Date()
+    // Cutoff = 1st of same month last year (includes all 12 calendar months incl. current)
+    const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), 1)
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-01`
+    const result = {}
+    mergedVehRows.forEach(r => {
+      if ((r.date || '') >= cutoffStr && r.vehicleId) {
+        result[r.vehicleId] = (result[r.vehicleId] || 0) + r.amount
+      }
+    })
+    return result
+  }, [mergedVehRows])
 
   function openAddExpense(vehicleId = '') {
     setPreVehId(vehicleId)
@@ -987,7 +1580,7 @@ export default function VeicoliRegistroPage() {
   )
 
   return (
-    <div>
+    <div style={{padding:'24px 20px'}}>
       {/* Page header */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
         <div>
@@ -1004,11 +1597,8 @@ export default function VeicoliRegistroPage() {
         </div>
       </div>
 
-      {/* KPIs */}
-      {vehExpenses.length > 0 && <KPIStrip vehicles={vehicles} allExpenses={vehExpenses}/>}
-
-      {/* Vehicle chips */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:24}}>
+      {/* Vehicle chips — row 1 */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:16}}>
         {vehicles.map(v=>(
           <VehicleChip key={v.id} vehicle={v}
             onEdit={()=>setEditVeh(v)}
@@ -1017,10 +1607,11 @@ export default function VeicoliRegistroPage() {
         ))}
       </div>
 
-      {/* Charts */}
-      {vehExpenses.length > 0 && (
-        <VehicleCharts vehicles={vehicles} allExpenses={vehExpenses}/>
-      )}
+      {/* Per-vehicle spending KPIs — row 2 */}
+      {vehicles.length > 0 && <VehSpendingStrip vehicles={vehicles} spending12m={vehSpending12m}/>}
+
+      {/* Charts — use mergedVehRows to match what's in the table below */}
+      {mergedVehRows.length > 0 && <VehicleCharts vehicles={vehicles} allRows={mergedVehRows}/>}
 
       {/* All expenses table */}
       <AllExpensesTable

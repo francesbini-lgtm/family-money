@@ -251,6 +251,9 @@ export default function ImportModal({ onClose }) {
     if (abortRef.current) { handleCancel(); return }
 
     // ── Phase 3: Save ────────────────────────────────
+    // Point of no return: data is about to be persisted on Firestore.
+    // Null the snapshot NOW so a late cancel can't roll back saved data.
+    snapshotTxsRef.current = null
     setStatus({ phase:'save', pct:10, current:0,
       total:finalTxs.length, eta:null, message:'Preparazione salvataggio…' })
     await new Promise(r => setTimeout(r, 100)) // let UI render
@@ -271,7 +274,6 @@ export default function ImportModal({ onClose }) {
     const aiCount = 0 // AI enrichment is now a separate step
     const dupes   = Math.max(0, finalTxs.length - (typeof added==='number' ? added : finalTxs.length))
 
-    snapshotTxsRef.current = null  // import completed — no rollback needed
     setStatus(null)
 
     // ── Card reconciliation ──────────────────────────────────
@@ -449,13 +451,17 @@ export default function ImportModal({ onClose }) {
               </div>
             )}
 
-            {/* ── Cancel button ── */}
-            <button className="import-cancel-btn" onClick={handleCancel}>
-              <X size={13}/> Annulla importazione
-            </button>
-            <div className="import-cancel-hint">
-              Annullare riporterà le transazioni allo stato precedente — nessun dato verrà salvato.
-            </div>
+            {/* ── Cancel button — hidden during save: data is being persisted ── */}
+            {status.phase !== 'save' && (
+              <>
+                <button className="import-cancel-btn" onClick={handleCancel}>
+                  <X size={13}/> Annulla importazione
+                </button>
+                <div className="import-cancel-hint">
+                  Annullare riporterà le transazioni allo stato precedente — nessun dato verrà salvato.
+                </div>
+              </>
+            )}
           </div>
         )}
 

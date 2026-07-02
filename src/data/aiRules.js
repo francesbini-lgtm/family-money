@@ -10,7 +10,12 @@ export function getAIRules() {
 
 export function addAIRule({ merchant, description, matchField, matchValue, matchLabel }) {
   const rules = getAIRules()
-  const nextId = String(rules.length + 1).padStart(4, '0')
+  // Next id = max existing numeric suffix + 1 (rules.length collides after deletions)
+  const maxNum = rules.reduce((m, r) => {
+    const n = parseInt(String(r.id || '').replace(/^cod-/, ''), 10)
+    return Number.isFinite(n) && n > m ? n : m
+  }, 0)
+  const nextId = String(maxNum + 1).padStart(4, '0')
   const _matchField = matchField || 'merchant'
   const _matchValue = matchValue || merchant || ''
   const _matchLabel = matchLabel || `Merchant = "${_matchValue}"`

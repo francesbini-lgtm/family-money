@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useCallback } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS } from '../data/categories'
+import { CATS, getMergedCats } from '../data/categories'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -35,7 +35,7 @@ function SpendingHeatmap({ transactions }) {
   for (let w = 0; w < 53; w++) {
     const week = []
     for (let d = 0; d < 7; d++) {
-      const dateStr = day.toISOString().slice(0, 10)
+      const dateStr = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`
       const inYear  = day.getFullYear() === year
       week.push({ date: dateStr, val: inYear ? (byDay[dateStr] || 0) : null })
       day = new Date(day.getTime() + 86400000)
@@ -356,6 +356,7 @@ function SaldoChart({ transactions }) {
 }
 
 function CategoryReport({ transactions }) {
+  const customCats = useStore(s => s.customCats)
   const [selected, setSelected] = useState(null)
   const [period,   setPeriod]   = useState('M') // M=month, Q=quarter, A=year
   const [showL2,   setShowL2]   = useState(false)
@@ -372,7 +373,7 @@ function CategoryReport({ transactions }) {
 
   const catData = useMemo(() => {
     const months = getMonths()
-    return Object.entries(CATS)
+    return Object.entries(getMergedCats(customCats))
       .filter(([name]) => name !== 'Entrate' && name !== 'Non Categorizzato')
       .map(([name, info]) => {
         const txs = transactions.filter(t => !t.excluded && t.amount < 0 && t.cat1 === name)
@@ -383,14 +384,14 @@ function CategoryReport({ transactions }) {
         const mult = period==='M'?1:period==='Q'?3:6
         const periodTxs = period==='M'
           ? txs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(months[5]))
-          : txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=months[0])
+          : txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=(period==='Q'?months[months.length-3]:months[0]))
         const total = Math.abs(periodTxs.reduce((s,t)=>s+t.amount,0))
         const avg   = mult > 0 ? Math.round(total/mult) : 0
         return { name, color: info.color, sub: info.sub||[], total, avg, byMonth }
       })
       .filter(d => d.total > 0)
       .sort((a,b) => b.total - a.total)
-  }, [transactions, period])
+  }, [transactions, period, customCats])
 
   const selCat = selected ? catData.find(d=>d.name===selected) : null
 
@@ -603,7 +604,7 @@ function LocationTab({ transactions }) {
     return Object.values(map)
       .sort((a,b) => b.total - a.total)
       .map((d,i) => ({ ...d, rank: i+1 }))
-  }, [transactions, yearFilter, cityOverrides])
+  }, [transactions, yearFilter, cityOverrides, locationExclusions])
 
   // Merchants with NO city (and not excluded)
   const noLocationMerchants = useMemo(() => {
@@ -641,7 +642,7 @@ function LocationTab({ transactions }) {
       map[key].count++
     })
     return Object.values(map).sort((a,b) => b.total - a.total)
-  }, [transactions, selectedCity, yearFilter, cityOverrides])
+  }, [transactions, selectedCity, yearFilter, cityOverrides, locationExclusions])
 
   // Transactions for selected merchant in selected city
   const merchantTxs = useMemo(() => {
@@ -654,7 +655,7 @@ function LocationTab({ transactions }) {
         return (t.merchant || t.descAI || '—') === selectedMerchant
       })
       .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
-  }, [transactions, selectedCity, selectedMerchant, yearFilter, cityOverrides])
+  }, [transactions, selectedCity, selectedMerchant, yearFilter, cityOverrides, locationExclusions])
 
   const maxTotal = cityRanking[0]?.total || 1
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { getYM, getLast6Months, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
@@ -216,7 +216,10 @@ function UtilityChartCard({ type, transactions, merchants }) {
 // ── Utility Transactions Table ────────────────────────────
 function UtilityTxTable() {
   const transactions = useStore(s => s.transactions)
+  const utilMerchantsPref = useStore(s => s.appPrefs?.utilMerchants)
   const [merchants, setMerchants] = useState(getUtilMerch)
+  // Resync when async prefs arrive (avoids stale snapshot)
+  useEffect(() => { setMerchants(utilMerchantsPref || {}) }, [utilMerchantsPref])
   const [sortKey, setSortKey] = useState('date')
   const [sortDir, setSortDir] = useState('desc')
   const [popupTx, setPopupTx] = useState(null)
@@ -254,7 +257,7 @@ function UtilityTxTable() {
   const displayTxs = hideSatispay ? utilTxs.filter(t => !isSatispay(t)) : utilTxs
   const satispayCount = utilTxs.filter(isSatispay).length
 
-  const total = displayTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+  const total = Math.abs(displayTxs.reduce((s,t) => s + t.amount, 0))
 
   if (utilTxs.length === 0) return (
     <div style={{padding:'28px',textAlign:'center',color:'var(--text3)',fontSize:13,
@@ -403,7 +406,10 @@ function UtilityTxTable() {
 export default function UtenzePage() {
   const transactions  = useStore(s => s.transactions)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [merchants]   = useState(getUtilMerch)
+  const utilMerchantsPref = useStore(s => s.appPrefs?.utilMerchants)
+  const [merchants, setMerchants] = useState(getUtilMerch)
+  // Resync when async prefs arrive (avoids stale snapshot)
+  useEffect(() => { setMerchants(utilMerchantsPref || {}) }, [utilMerchantsPref])
 
   const now = new Date()
   const ym  = getYM(now)

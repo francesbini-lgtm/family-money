@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, CAT_NAMES } from '../data/categories'
-import { getYM, getLast6Months, ymLabel } from '../hooks/useFinancials'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
+import { getYM, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Plus, Trash2, Wallet, Link2, User } from 'lucide-react'
@@ -51,6 +51,7 @@ function getAutoLinks(txId) {
 
 // ── Links Modal ───────────────────────────────────────────
 function LinksModal({ tx, onClose }) {
+  const customCats = useStore(s => s.customCats)
   const txAmt = Math.abs(tx.amount)
   const meta  = getAtmMeta()[tx.txId] || {}
   const autoLinks   = getAutoLinks(tx.txId)
@@ -68,21 +69,21 @@ function LinksModal({ tx, onClose }) {
   function addLink() {
     const amt = parseFloat(newAmt)
     if (!amt || !newCat1) return
-    const meta2 = getAtmMeta()
-    if (!meta2[tx.txId]) meta2[tx.txId] = {}
-    if (!meta2[tx.txId].links) meta2[tx.txId].links = []
-    meta2[tx.txId].links.push({ id: Date.now().toString(), cat1:newCat1, cat2:newCat2, amount:amt, note:newNote })
-    saveAtmMeta(meta2)
+    // Copy before mutating: getAtmMeta() returns the live appPrefs object
+    const cur = getAtmMeta()
+    const entry = { ...(cur[tx.txId] || {}) }
+    entry.links = [...(entry.links || []), { id: Date.now().toString(), cat1:newCat1, cat2:newCat2, amount:amt, note:newNote }]
+    saveAtmMeta({ ...cur, [tx.txId]: entry })
     setNewAmt('')
     setNewNote('')
     forceUpdate(n=>n+1)
   }
 
   function removeLink(id) {
-    const meta2 = getAtmMeta()
-    if (meta2[tx.txId]?.links) {
-      meta2[tx.txId].links = meta2[tx.txId].links.filter(l=>l.id!==id)
-      saveAtmMeta(meta2)
+    const cur = getAtmMeta()
+    if (cur[tx.txId]?.links) {
+      const entry = { ...cur[tx.txId], links: cur[tx.txId].links.filter(l=>l.id!==id) }
+      saveAtmMeta({ ...cur, [tx.txId]: entry })
       forceUpdate(n=>n+1)
     }
   }
@@ -151,14 +152,14 @@ function LinksModal({ tx, onClose }) {
           <div>
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:3}}>Categoria L1</div>
             <select value={newCat1} onChange={e=>{setNewCat1(e.target.value);setNewCat2('')}} style={{width:'100%',padding:'7px 10px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
-              {CAT_NAMES.filter(n=>n!=='Entrate').map(n=><option key={n}>{n}</option>)}
+              {Object.keys(getMergedCats(customCats)).filter(n=>n!=='Entrate'&&n!=='Non Categorizzato').map(n=><option key={n}>{n}</option>)}
             </select>
           </div>
           <div>
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:3}}>Sottocategoria</div>
             <select value={newCat2} onChange={e=>setNewCat2(e.target.value)} style={{width:'100%',padding:'7px 10px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
               <option value="">— nessuna —</option>
-              {(CATS[newCat1]?.sub||[]).map(s=><option key={s}>{s}</option>)}
+              {(getMergedCats(customCats)[newCat1]?.sub||[]).map(s=><option key={s}>{s}</option>)}
             </select>
           </div>
         </div>
@@ -186,6 +187,34 @@ function LinksModal({ tx, onClose }) {
   )
 }
 
+// ── Resolve member from transaction (same logic as TransactionsPage) ──
+function resolveMemberFromTx(t) {
+  const appPrefs   = useStore.getState()?.appPrefs || {}
+  const userAccounts = appPrefs.userAccounts || []
+  const ownerNick  = appPrefs.ownerNickname || 'Admin'
+  const family     = appPrefs.family || []
+  // 1. Card match
+  if (t.card) {
+    const acc = userAccounts.find(a => a.card4 === t.card)
+    if (acc?.memberId) {
+      if (acc.memberId === 'owner') return ownerNick
+      const member = family.find(m => String(m.id) === String(acc.memberId))
+      if (member) return member.nickname || member.name?.split(' ')[0] || null
+    }
+  }
+  // 2. Account name / nickname match
+  const allMembers = [
+    { nick: ownerNick, name: ownerNick },
+    ...family.map(m => ({ nick: m.nickname || m.name?.split(' ')[0] || '', name: m.name || '' }))
+  ]
+  const acc2 = (t.account || '').toLowerCase()
+  for (const m of allMembers) {
+    if (m.name && acc2.includes(m.name.toLowerCase())) return m.nick
+    if (m.nick && acc2.includes(m.nick.toLowerCase())) return m.nick
+  }
+  return null
+}
+
 // ── Member picker inline ──────────────────────────────────
 function MemberCell({ txId }) {
   const meta = getAtmMeta()[txId] || {}
@@ -194,20 +223,38 @@ function MemberCell({ txId }) {
   const members = getAllMembers()
   const current = meta.member || null
 
+  // Auto-suggest based on account name matching family members
+  const appPrefs = useStore.getState()?.appPrefs || {}
+  const ownerNick = appPrefs.ownerNickname || 'Admin'
+  const family = appPrefs.family || []
+  const txAccount = useStore.getState()?.transactions?.find(t=>t.txId===txId)?.account || ''
+
+  let autoSuggest = null
+  if (!current) {
+    const allNicks = [{name: ownerNick, nick: ownerNick}, ...family.filter(m=>m.name).map(m=>({name:m.name,nick:m.nickname||m.name.split(' ')[0]}))]
+    for (const m of allNicks) {
+      if (txAccount.toLowerCase().includes(m.name.toLowerCase()) || txAccount.toLowerCase().includes(m.nick.toLowerCase())) {
+        autoSuggest = m.nick
+        break
+      }
+    }
+  }
+  const displayNick = current || autoSuggest
+
   function pick(nick) {
-    const m = getAtmMeta()
-    if (!m[txId]) m[txId] = {}
-    m[txId].member = nick
-    saveAtmMeta(m)
+    // Copy before mutating: getAtmMeta() returns the live appPrefs object
+    const cur = getAtmMeta()
+    saveAtmMeta({ ...cur, [txId]: { ...(cur[txId] || {}), member: nick } })
     setOpen(false)
     forceUpdate(n=>n+1)
   }
 
   return (
     <div style={{position:'relative'}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'3px 8px',borderRadius:12,fontSize:12,display:'flex',alignItems:'center',gap:4,color:current?'var(--accent)':'var(--text3)',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{background:'none',border:'none',cursor:'pointer',padding:'3px 8px',borderRadius:12,fontSize:12,display:'flex',alignItems:'center',gap:4,color:displayNick?(current?'var(--accent)':'var(--text2)'):'var(--text3)',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
         <User size={11}/>
-        {current||'—'}
+        {displayNick||'—'}
+        {!current && autoSuggest && <span style={{fontSize:9,opacity:.5,marginLeft:3}}>auto</span>}
       </button>
       {open && (
         <div style={{position:'absolute',top:'calc(100% + 2px)',left:0,zIndex:100,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',boxShadow:'0 4px 12px rgba(0,0,0,.1)',minWidth:120,overflow:'hidden'}}>
@@ -223,40 +270,58 @@ function MemberCell({ txId }) {
   )
 }
 
-// ── Date competenza cell ──────────────────────────────────
-function DateCell({ tx }) {
+// ── Date valuta cell (read-only, shows tx.date) ───────────
+function DateValutaCell({ tx }) {
+  const d = tx.date || ''
+  const display = d.length >= 10 ? `${d.slice(8,10)}/${d.slice(5,7)}` : d
+  return <span style={{fontFamily:'var(--font-mono)',fontSize:12,color:'var(--text3)'}}>{display}</span>
+}
+
+// ── Date rettificata cell (editable, stored in atmMeta.effDate) ───
+function DateRettCell({ tx }) {
+  const { updateTransaction } = useStore()
   const meta = getAtmMeta()[tx.txId] || {}
   const [editing, setEditing] = useState(false)
-  const [val, setVal] = useState(meta.competenza || (tx._effDate||(tx._effDate||tx.date||'')).slice(0,7))
+  const stored = meta.effDate || tx._effDate || tx.date || ''
+  const [val, setVal] = useState(stored.slice(0,10))
   const [, forceUpdate] = useState(0)
-  const displayDate = meta.competenza
-    ? <span style={{color:'var(--accent)',fontWeight:700}}>{meta.competenza}</span>
-    : <span>{(tx._effDate||(tx._effDate||tx.date||'')).slice(5).replace('-','/')}</span>
+  const isCustom = !!meta.effDate
 
   function save() {
-    const m = getAtmMeta()
-    if (!m[tx.txId]) m[tx.txId] = {}
-    if (val) m[tx.txId].competenza = val
-    else delete m[tx.txId].competenza
-    saveAtmMeta(m)
+    // Copy before mutating: getAtmMeta() returns the live appPrefs object
+    const cur = getAtmMeta()
+    const entry = { ...(cur[tx.txId] || {}) }
+    if (val) {
+      entry.effDate = val
+      saveAtmMeta({ ...cur, [tx.txId]: entry })
+      updateTransaction(tx.txId, { _effDate: val })
+    } else {
+      delete entry.effDate
+      saveAtmMeta({ ...cur, [tx.txId]: entry })
+      updateTransaction(tx.txId, { _effDate: tx.date })
+    }
     setEditing(false)
     forceUpdate(n=>n+1)
   }
 
   if (editing) return (
     <div style={{display:'flex',gap:4,alignItems:'center'}}>
-      <input type="month" value={val} onChange={e=>setVal(e.target.value)} autoFocus
-        style={{width:120,padding:'3px 6px',borderRadius:'var(--radius-sm)',border:'1px solid var(--accent)',fontSize:11,background:'var(--bg)',color:'var(--text)'}}/>
+      <input type="date" value={val} onChange={e=>setVal(e.target.value)} autoFocus
+        style={{width:130,padding:'3px 6px',borderRadius:6,border:'1px solid var(--accent)',
+          fontSize:11,background:'var(--bg)',color:'var(--text)'}}/>
       <button className="btn btn-ghost" style={{padding:'2px 6px',fontSize:11}} onClick={save}>✓</button>
       <button className="btn btn-ghost" style={{padding:'2px 6px',fontSize:11}} onClick={()=>setEditing(false)}>✕</button>
     </div>
   )
 
+  const displayDate = stored.length >= 10 ? `${stored.slice(8,10)}/${stored.slice(5,7)}/${stored.slice(2,4)}` : stored
   return (
-    <button onClick={()=>setEditing(true)} title="Clicca per impostare competenza"
-      style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',fontFamily:'var(--font-mono)',fontSize:12,color:'inherit',textAlign:'left'}}>
+    <button onClick={()=>setEditing(true)} title="Clicca per modificare data rettificata"
+      style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',
+        fontFamily:'var(--font-mono)',fontSize:12,textAlign:'left',
+        color:isCustom?'var(--accent)':'inherit'}}>
       {displayDate}
-      {!meta.competenza && <span style={{fontSize:9,color:'var(--text3)',marginLeft:4}}>✏</span>}
+      {!isCustom && <span style={{fontSize:9,color:'var(--text3)',marginLeft:4}}>✏</span>}
     </button>
   )
 }
@@ -286,6 +351,8 @@ function LinkBadge({ tx, onOpen }) {
 
 // ── Category picker with L1/L2 + quick picks ─────────────
 function CatPicker({ cat1, cat2, onChange, quickPicks }) {
+  const customCats = useStore(s => s.customCats)
+  const _ccats = getMergedCats(customCats)
   const [open, setOpen] = useState(false)
   const [selL1, setSelL1] = useState(cat1 || CAT_NAMES.filter(c=>c!=='Entrate')[0])
   const color = CATS[cat1]?.color || '#888'
@@ -349,8 +416,8 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
         }} onClick={e=>e.stopPropagation()}>
           {/* L1 list */}
           <div style={{borderRight:'1px solid var(--border)',overflowY:'auto',maxHeight:320}}>
-            {CAT_NAMES.filter(n=>n!=='Entrate').map(name=>{
-              const c = CATS[name]?.color||'#888'
+            {Object.keys(_ccats).filter(n=>n!=='Entrate'&&n!=='Non Categorizzato').map(name=>{
+              const c = _ccats[name]?.color||'#888'
               return (
                 <button key={name} onClick={()=>setSelL1(name)} style={{
                   display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',
@@ -377,7 +444,7 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
             }}>
               — nessuna —
             </button>
-            {(CATS[selL1]?.sub||[]).map(sub=>(
+            {(_ccats[selL1]?.sub||[]).map(sub=>(
               <button key={sub} onClick={()=>select(selL1,sub)} style={{
                 display:'block',width:'100%',padding:'8px 10px',
                 border:'none',borderRadius:'var(--radius-sm)',
@@ -396,43 +463,149 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
   )
 }
 
+// ── Helper: linked amount for one ATM tx ─────────────────
+function linkedAmt(tx) {
+  const autoLinks   = getAutoLinks(tx.txId)
+  const manualLinks = (getAtmMeta()[tx.txId]?.links) || []
+  return [...autoLinks, ...manualLinks].reduce((s,l)=>s+l.amount,0)
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function ContantiPage() {
-  const { cashEntries, addCashEntry, deleteCashEntry, transactions } = useStore()
+  const { cashEntries, addCashEntry, deleteCashEntry, updateCashEntry, transactions, nannyTS, colfTS, vehExpenses, vehicles, appPrefs, setAppPref } = useStore()
   const [showAdd, setShowAdd] = useState(false)
-  const [linksTx, setLinksTx] = useState(null) // tx for LinksModal
+  const [linksTx, setLinksTx] = useState(null)
+  const [atmOffset, setAtmOffset] = useState(0)
+  const [abbinaTx, setAbbinaTx] = useState(null) // { rowId, tipo } — row waiting for ATM link
   const [form, setForm] = useState({
-    date:   new Date().toISOString().slice(0,10),
-    cat1:   'Spesa e Alimentari',
-    cat2:   '',
-    amount: '',
-    note:   '',
+    date: new Date().toISOString().slice(0,10),
+    cat1: 'Spesa e Alimentari', cat2: '',
+    amount: '', note: '', atmTxId: '',
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   const now   = new Date()
   const thisYM = getYM(now)
-  const last6  = getLast6Months()
+  const last12 = useMemo(() => {
+    const n = new Date()
+    return Array.from({length:12}, (_,i) => {
+      const d = new Date(n.getFullYear(), n.getMonth() - (11-i), 1)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    })
+  }, [])
+
+  // 6-month window for ATM table
+  const atmWindow = useMemo(() => {
+    const n = new Date()
+    return Array.from({length:6}, (_,i) => {
+      const d = new Date(n.getFullYear(), n.getMonth() - (5-i) - atmOffset*6, 1)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    })
+  }, [atmOffset])
+  const atmWindowStart = atmWindow[0]
+  const atmWindowEnd   = atmWindow[5]
 
   // ATM withdrawals from imported transactions
-  const atmTxs = useMemo(() =>
+  const atmTxsAll = useMemo(() =>
     transactions.filter(t => !t.excluded && t.cat1 === 'Contanti' && t.amount < 0)
   , [transactions])
 
-  const totalWithdrawn = Math.abs(atmTxs.reduce((s,t)=>s+t.amount,0))
+  const atmTxs = useMemo(() =>
+    atmTxsAll.filter(t => {
+      const d = (t._effDate || t.date || '').slice(0,7)
+      return d >= atmWindowStart && d <= atmWindowEnd
+    }).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+  , [atmTxsAll, atmWindowStart, atmWindowEnd])
+
+  // ── Utilizzo Contanti — unified rows ─────────────────────
+  const nannyName   = appPrefs?.nannyName  || 'Nanny'
+  const colfName    = appPrefs?.colfName   || 'Colf'
+  const nannyRecon  = appPrefs?.nannyRecon || {}
+  const colfRecon   = appPrefs?.colfRecon  || {}
+  const satiMatches = appPrefs?.satiMatches || {}
+
+  const utilizzoRows = useMemo(() => {
+    const rows = []
+    const fmtAtmDate = tx => tx ? (tx._effDate || tx.date || '').slice(0,10) : null
+
+    // Nanny — ALL timesheet entries
+    ;(nannyTS || []).forEach(entry => {
+      const recon  = nannyRecon[entry.id]
+      const atmTx  = recon?.txId ? atmTxsAll.find(t => t.txId === recon.txId) : null
+      const satiM  = recon?.txId ? satiMatches[recon.txId] : null
+      rows.push({
+        _id: 'nanny-' + entry.id, tipo: 'nanny', label: nannyName,
+        date: (entry.mese || '') + '-01', amount: recon ? recon.nannyAmt : entry.totale,
+        atmTxId: recon?.txId || null, atmDate: fmtAtmDate(atmTx),
+        satiMatched: satiM?.status === 'matched', readonly: true,
+      })
+    })
+
+    // Colf — ALL timesheet entries
+    ;(colfTS || []).forEach(entry => {
+      const recon  = colfRecon[entry.id]
+      const atmTx  = recon?.txId ? atmTxsAll.find(t => t.txId === recon.txId) : null
+      const satiM  = recon?.txId ? satiMatches[recon.txId] : null
+      rows.push({
+        _id: 'colf-' + entry.id, tipo: 'colf', label: colfName,
+        date: (entry.mese || '') + '-01', amount: recon ? recon.nannyAmt : entry.totale,
+        atmTxId: recon?.txId || null, atmDate: fmtAtmDate(atmTx),
+        satiMatched: satiM?.status === 'matched', readonly: true,
+      })
+    })
+
+    // Veicoli cash expenses
+    ;(vehExpenses || []).filter(e => e.payMethod === 'cash').forEach(e => {
+      const veh = (vehicles || []).find(v => v.id === e.vehicleId)
+      const vehName = veh ? (veh.nickname || veh.model || veh.targa || 'Veicolo') : 'Veicolo'
+      // reconRef for cash is a label string "💵 … · date · €…", not a txId — extract what we can
+      const hasAtm = e.reconType === 'cash' && e.reconRef
+      // Satispay match is keyed by "veh-<id>" in satiMatches (same synthetic id used in SatispayPage)
+      const satiM = satiMatches[`veh-${e.id}`]
+      rows.push({
+        _id: 'veh-' + e.id, tipo: 'veicoli',
+        label: e.desc || e.note || '—',
+        sublabel: vehName,
+        date: e.date, amount: e.amount,
+        atmTxId: null,
+        atmDate: hasAtm ? (e.reconRef.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null : null,
+        atmLabel: hasAtm ? e.reconRef : null,
+        satiMatched: satiM?.status === 'matched', readonly: true,
+      })
+    })
+
+    // Manual cashEntries (Spese in Contanti → merged here)
+    ;(cashEntries || []).forEach(e => {
+      const atmTx = e.atmTxId ? atmTxsAll.find(t => t.txId === e.atmTxId) : null
+      const satiM = e.atmTxId ? satiMatches[e.atmTxId] : null
+      const l1 = e.cat1 || e.cat || '—'; const l2 = e.cat2 || ''
+      rows.push({
+        _id: e.id, tipo: 'manual',
+        label: e.note || (l1 + (l2 ? ` › ${l2}` : '')),
+        cat1: l1, cat2: l2,
+        date: e.date, amount: e.amount,
+        atmTxId: e.atmTxId || null, atmDate: fmtAtmDate(atmTx),
+        satiMatched: satiM?.status === 'matched', readonly: false,
+      })
+    })
+
+    return rows.sort((a,b) => (b.date||'').localeCompare(a.date||''))
+  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashEntries, vehExpenses, vehicles, atmTxsAll, satiMatches, nannyName, colfName])
+
+  const totalWithdrawn = Math.abs(atmTxsAll.reduce((s,t)=>s+t.amount,0))
   const totalSpent     = cashEntries.reduce((s,e)=>s+(e.amount||0),0)
   const cashOnHand     = totalWithdrawn - totalSpent
 
-  const chartData = last6.map(ym=>({
+  const chartData = last12.map(ym=>({
     label:    ymLabel(ym),
-    prelievi: Math.abs(atmTxs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)),
+    prelievi: Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)),
     speso:    cashEntries.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0),
   }))
 
   // Category breakdown
   const byCat = {}
   cashEntries.forEach(e=>{
-    const key = e.cat1+(e.cat2?` › ${e.cat2}`:'') || e.cat || '—'
+    const key = e.cat1 ? e.cat1+(e.cat2?` › ${e.cat2}`:'') : (e.cat || '—')
     byCat[key] = (byCat[key]||0)+(e.amount||0)
   })
   const catList = Object.entries(byCat).sort((a,b)=>b[1]-a[1])
@@ -450,14 +623,14 @@ export default function ContantiPage() {
     return Object.values(counts).sort((a,b)=>b.count-a.count).slice(0,5)
   }, [cashEntries])
 
-  const thisAtm   = Math.abs(atmTxs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
+  const thisAtm   = Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
   const thisSpent = cashEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
 
   function saveEntry() {
     if (!form.amount||!form.cat1) return
     addCashEntry({...form, amount:parseFloat(form.amount)})
     setShowAdd(false)
-    setForm({date:new Date().toISOString().slice(0,10),cat1:'Spesa e Alimentari',cat2:'',amount:'',note:''})
+    setForm({date:new Date().toISOString().slice(0,10),cat1:'Spesa e Alimentari',cat2:'',amount:'',note:'',atmTxId:''})
   }
 
   return (
@@ -467,9 +640,17 @@ export default function ContantiPage() {
           <h1 className="cash-title">💵 Contanti</h1>
           <div className="cash-sub">Prelievi ATM e tracking spese in contanti</div>
         </div>
-        <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
-          <Plus size={14}/> Aggiungi Spesa
-        </button>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-ghost" onClick={async()=>{
+            const r = await useStore.getState().syncCashTransactions()
+            alert(`Sync completata: +${r.added} aggiunte, -${r.removed} rimosse`)
+          }} title="Sincronizza le transazioni cash verso il DB principale">
+            🔄 Sync Cash
+          </button>
+          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>
+            <Plus size={14}/> Aggiungi Spesa
+          </button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -584,73 +765,189 @@ export default function ContantiPage() {
         </div>
       </div>
 
-      {/* ATM withdrawals */}
-      {atmTxs.length > 0 && (
-        <>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>🏧 Prelievi ATM</div>
-          <div className="card" style={{padding:0,overflow:'hidden',marginBottom:20}}>
-            <table style={{width:'100%',borderCollapse:'collapse'}}>
+      {/* ── Utilizzo Contanti ── */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+        <div style={{fontSize:15,fontWeight:700}}>📋 Utilizzo Contanti</div>
+        <button className="btn btn-primary" onClick={()=>setShowAdd(true)} style={{fontSize:12,padding:'5px 14px'}}>
+          <Plus size={13}/> Aggiungi
+        </button>
+      </div>
+      <div className="card" style={{padding:0,overflow:'hidden',marginBottom:24}}>
+        {utilizzoRows.length === 0
+          ? <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
+              Nessun utilizzo registrato. Abbina Nanny/Colf ai prelievi nella pagina dedicata, o aggiungi manualmente.
+            </div>
+          : <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr>
-                {['Data / Competenza','Descrizione','Chi ha prelevato','Collegato a','Importo'].map(h=>(
+                {['Data','Descrizione','Importo','Abbinato Prelievo','Abbinato Satispay',''].map(h=>(
                   <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
-                {atmTxs.map(t=>(
-                  <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateCell tx={t}/></td>
-                    <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,38)}</td>
-                    <td style={{padding:'6px 14px'}}><MemberCell txId={t.txId}/></td>
-                    <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
-                    <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(Math.abs(t.amount), 2)}</td>
-                  </tr>
-                ))}
+                {utilizzoRows.map(row => {
+                  const fmtD = d => d && d.length>=10 ? `${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}` : '—'
+                  const tipoBadge = {
+                    nanny:   {color:'#2a7a4a', bg:'#2a7a4a18', label: nannyName},
+                    colf:    {color:'#b8942a', bg:'#b8942a18', label: colfName},
+                    veicoli: {color:'#6a3da8', bg:'#6a3da818', label: '🚗 Veicoli'},
+                    manual:  {color:'#2a5c8a', bg:'#2a5c8a18', label: row.cat1 || 'Altro'},
+                  }[row.tipo] || {}
+                  const hasAtmLink = row.atmDate || row.atmTxId || row.atmLabel
+                  const canAbbina  = row.tipo === 'manual' && !hasAtmLink
+                  return (
+                    <tr key={row._id} style={{borderBottom:'1px solid var(--border)',background:row.readonly?'var(--surface2)':undefined}}>
+                      <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)',color:'var(--text3)'}}>
+                        {row.tipo === 'nanny' || row.tipo === 'colf'
+                          ? row.date.slice(0,7).split('-').reverse().join('/')
+                          : fmtD(row.date)}
+                      </td>
+                      <td style={{padding:'9px 14px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}>
+                          <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:12,background:tipoBadge.bg,color:tipoBadge.color,border:`1px solid ${tipoBadge.color}33`,whiteSpace:'nowrap'}}>
+                            {tipoBadge.label}
+                          </span>
+                          <span style={{fontSize:12,color:'var(--text2)'}}>{row.label}</span>
+                          {row.sublabel && <span style={{fontSize:11,color:'var(--text3)'}}>· {row.sublabel}</span>}
+                          {row.readonly && row.tipo !== 'veicoli' && <span style={{fontSize:9,color:'var(--text3)',marginLeft:2}}>auto</span>}
+                        </div>
+                      </td>
+                      <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>
+                        € {fmtIT(row.amount||0,2)}
+                      </td>
+                      <td style={{padding:'9px 14px'}}>
+                        {row.atmLabel
+                          ? <span style={{fontSize:11,color:'var(--green)',fontWeight:600}} title={row.atmLabel}>✅ {fmtD(row.atmDate)||'(abbinato)'}</span>
+                          : row.atmDate
+                            ? <span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,fontWeight:600,color:'var(--green)'}}>✅ {fmtD(row.atmDate)}</span>
+                            : row.atmTxId
+                              ? <span style={{fontSize:11,color:'var(--text3)'}}>ID: {row.atmTxId.slice(-6)}</span>
+                              : canAbbina
+                                ? <button onClick={()=>setAbbinaTx({rowId:row._id,tipo:'manual'})}
+                                    style={{display:'inline-flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700,border:'1px dashed var(--border)',background:'none',cursor:'pointer',color:'var(--accent)',fontFamily:'var(--font-sans)'}}>
+                                    🔗 Abbina
+                                  </button>
+                                : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
+                        }
+                      </td>
+                      <td style={{padding:'9px 14px'}}>
+                        {row.satiMatched
+                          ? <span style={{fontSize:12,fontWeight:600,color:'var(--green)'}}>✅ Sì</span>
+                          : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
+                        }
+                      </td>
+                      <td style={{padding:'6px 10px',textAlign:'center'}}>
+                        {!row.readonly && (
+                          <button className="btn btn-ghost" onClick={()=>deleteCashEntry(row._id)}>
+                            <Trash2 size={12}/>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
+        }
+      </div>
+
+      {/* ATM withdrawals */}
+      {atmTxsAll.length > 0 && (
+        <>
+          {/* Header + period filter */}
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+            <div style={{fontSize:15,fontWeight:700}}>🏧 Prelievi ATM</div>
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <button onClick={()=>setAtmOffset(o=>o+1)}
+                style={{width:28,height:28,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text2)'}}>‹</button>
+              <span style={{fontSize:12,fontWeight:600,color:'var(--text2)',minWidth:120,textAlign:'center'}}>
+                {ymLabel(atmWindowStart)} – {ymLabel(atmWindowEnd)}
+              </span>
+              <button onClick={()=>setAtmOffset(o=>Math.max(0,o-1))} disabled={atmOffset===0}
+                style={{width:28,height:28,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',cursor:atmOffset===0?'default':'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',color:atmOffset===0?'var(--text3)':'var(--text2)',opacity:atmOffset===0?.4:1}}>›</button>
+            </div>
+          </div>
+
+          <div className="card" style={{padding:0,overflow:'hidden',marginBottom:20}}>
+            {atmTxs.length === 0
+              ? <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>Nessun prelievo in questo periodo</div>
+              : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead><tr>
+                    {['Data valuta','Data rettificata','Carta','Utente','Collegato a','Di cui abbinato','Importo'].map(h=>(
+                      <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Di cui abbinato','Importo'].includes(h)?'right':'left'}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {atmTxs.map(t=>{
+                      const txAmt   = Math.abs(t.amount)
+                      const linked  = Math.round(linkedAmt(t)*100)/100
+                      const pct     = txAmt > 0 ? Math.round(linked/txAmt*100) : 0
+                      const color   = pct >= 100 ? 'var(--green)' : pct > 0 ? 'var(--gold)' : 'var(--text3)'
+                      return (
+                        <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'9px 14px',fontSize:12,fontFamily:'var(--font-mono)'}}><DateValutaCell tx={t}/></td>
+                          <td style={{padding:'9px 14px',fontSize:12}}><DateRettCell tx={t}/></td>
+                          <td style={{padding:'9px 14px'}}>
+                            {(t.card && t.card!=='null')
+                              ? <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',fontWeight:700}}>*{t.card}</span>
+                              : <span style={{color:'var(--text3)',opacity:.3}}>—</span>}
+                          </td>
+                          <td style={{padding:'6px 14px'}}>
+                            {t.user
+                              ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{t.user}</span>
+                              : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>}
+                          </td>
+                          <td style={{padding:'6px 14px'}}><LinkBadge tx={t} onOpen={()=>setLinksTx(t)}/></td>
+                          <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color}}>
+                            {linked > 0
+                              ? <>€ {fmtIT(linked,2)} <span style={{fontSize:10,opacity:.7}}>({pct}%)</span></>
+                              : <span style={{opacity:.3}}>—</span>}
+                          </td>
+                          <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--blue)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(txAmt, 2)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+            }
           </div>
         </>
       )}
 
-      {/* Manual entries */}
-      <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>📝 Spese in Contanti</div>
-      {cashEntries.length === 0 ? (
-        <div className="cash-empty">
-          <Wallet size={32} color="var(--text3)" style={{marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Nessuna spesa registrata</div>
-          <div style={{fontSize:13,color:'var(--text3)',marginBottom:16}}>Registra le spese in contanti per sapere dove vanno i prelievi ATM.</div>
-          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={14}/> Aggiungi Spesa</button>
-        </div>
-      ) : (
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <table style={{width:'100%',borderCollapse:'collapse'}}>
-            <thead><tr>
-              {['Data','Categoria','Nota','Importo',''].map(h=>(
-                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {[...cashEntries].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')).map(e=>{
-                const l1 = e.cat1||e.cat||'—'
-                const l2 = e.cat2||''
-                const color = CATS[l1]?.color||'#888'
-                return (
-                  <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(e.date||'').slice(5).replace('-','/')}</td>
-                    <td style={{padding:'9px 14px'}}>
-                      <span style={{display:'inline-flex',alignItems:'center',gap:5,padding:'2px 9px',borderRadius:12,fontSize:11,fontWeight:700,background:color+'18',color,border:`1px solid ${color}33`}}>
-                        <span style={{width:6,height:6,borderRadius:'50%',background:color}}/>
-                        {l1}{l2?` › ${l2}`:''}
+      {/* Abbina Prelievo modal */}
+      {abbinaTx && (
+        <Modal title="🔗 Abbina a Prelievo ATM" onClose={()=>setAbbinaTx(null)} width={500}>
+          <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>Seleziona il prelievo ATM corrispondente a questa spesa in contanti.</div>
+          <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:340,overflowY:'auto',marginBottom:4}}>
+            {atmTxsAll.length === 0
+              ? <div style={{textAlign:'center',padding:24,color:'var(--text3)',fontSize:13}}>Nessun prelievo ATM trovato</div>
+              : atmTxsAll.slice(0,40).map(t => {
+                  const d = (t._effDate||t.date||'').slice(0,10)
+                  const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
+                  const lkd  = Math.round(linkedAmt(t)*100)/100
+                  const txAmt= Math.abs(t.amount)
+                  const pct  = txAmt>0?Math.round(lkd/txAmt*100):0
+                  return (
+                    <button key={t.txId}
+                      onClick={()=>{ updateCashEntry(abbinaTx.rowId,{atmTxId:t.txId}); setAbbinaTx(null) }}
+                      style={{padding:'10px 14px',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',background:'var(--surface)',cursor:'pointer',textAlign:'left',fontFamily:'var(--font-sans)',display:'flex',alignItems:'center',gap:12}}>
+                      <span style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:14,color:'var(--blue)',flexShrink:0}}>
+                        € {fmtIT(txAmt,2)}
                       </span>
-                    </td>
-                    <td style={{padding:'9px 14px',fontSize:13,color:'var(--text2)'}}>{e.note||'—'}</td>
-                    <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--red)',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtIT(e.amount||0, 2)}</td>
-                    <td style={{padding:'6px 10px'}}><button className="btn btn-ghost" onClick={()=>deleteCashEntry(e.id)}><Trash2 size={12}/></button></td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                      <span style={{flex:1,fontSize:12,color:'var(--text2)'}}>
+                        {disp} · {t.descAI||(t.description||'').slice(0,30)||'Prelievo ATM'}
+                      </span>
+                      {pct>0 && <span style={{fontSize:11,fontWeight:600,color:pct>=100?'var(--red)':'var(--gold)',flexShrink:0}}>
+                        {pct}% usato
+                      </span>}
+                    </button>
+                  )
+                })
+            }
+          </div>
+          <ModalFooter>
+            <button className="btn btn-secondary" onClick={()=>setAbbinaTx(null)}>Annulla</button>
+          </ModalFooter>
+        </Modal>
       )}
 
       {/* Links modal */}
@@ -658,7 +955,7 @@ export default function ContantiPage() {
 
       {/* Add modal */}
       {showAdd && (
-        <Modal title="+ Spesa in Contanti" onClose={()=>setShowAdd(false)}>
+        <Modal title="+ Aggiungi Utilizzo Contanti" onClose={()=>setShowAdd(false)}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
             <FormRow label="Data">
               <Input type="date" value={form.date} onChange={e=>set('date',e.target.value)}/>
@@ -678,6 +975,18 @@ export default function ContantiPage() {
 
           <FormRow label="Note" style={{marginTop:14}}>
             <Input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="Descrizione opzionale"/>
+          </FormRow>
+
+          <FormRow label="Abbina a Prelievo ATM (opzionale)" style={{marginTop:14}}>
+            <select value={form.atmTxId} onChange={e=>set('atmTxId',e.target.value)}
+              style={{width:'100%',padding:'9px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
+              <option value="">— Nessuno —</option>
+              {atmTxsAll.slice(0,30).map(t=>{
+                const d = (t._effDate||t.date||'').slice(0,10)
+                const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
+                return <option key={t.txId} value={t.txId}>{disp} — € {fmtIT(Math.abs(t.amount),2)}</option>
+              })}
+            </select>
           </FormRow>
 
           <ModalFooter>

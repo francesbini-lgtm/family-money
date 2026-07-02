@@ -9,13 +9,13 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(404).json({})
 
-  let prompt, key
+  let prompt, key, images
   try {
-    ;({ prompt, key } = req.body)
+    ;({ prompt, key, images } = req.body)
     if (!prompt && !key) {
       // fallback: parse raw body string
       const raw = await getRawBody(req)
-      ;({ prompt, key } = JSON.parse(raw))
+      ;({ prompt, key, images } = JSON.parse(raw))
     }
   } catch(e) {
     return res.status(400).json({ error: 'Invalid JSON' })
@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
   if (!key) return res.status(400).json({ error: 'No key' })
 
   try {
-    const result = key.startsWith('sk-') ? await callOpenAI(prompt, key) : await callGemini(prompt, key)
+    const result = key.startsWith('sk-') ? await callOpenAI(prompt, key, images) : await callGemini(prompt, key)
     return res.status(200).json(result)
   } catch(e) {
     return res.status(500).json({ error: e.message })
@@ -40,13 +40,24 @@ function getRawBody(req) {
   })
 }
 
-function callOpenAI(prompt, key) {
+function callOpenAI(prompt, key, images) {
   return new Promise((resolve, reject) => {
+    const hasImages = Array.isArray(images) && images.length > 0
+    const model = hasImages ? 'gpt-4o' : 'gpt-4o-mini'
+    const messageContent = hasImages
+      ? [
+          { type: 'text', text: prompt },
+          ...images.map(b64 => ({
+            type: 'image_url',
+            image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' }
+          }))
+        ]
+      : prompt
     const postData = JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
+      model,
+      messages: [{ role: 'user', content: messageContent }],
       temperature: 0.1,
-      max_tokens: 2048,
+      max_tokens: hasImages ? 4096 : 1500,  // 1500 is plenty for any enrichBatch response
     })
     const req = https.request({
       hostname: 'api.openai.com',
@@ -63,10 +74,18 @@ function callOpenAI(prompt, key) {
       r.on('end', () => {
         try {
           const json = JSON.parse(data)
-          const text = json.choices?.[0]?.message?.content || ''
-          resolve({ candidates: [{ content: { parts: [{ text }] } }] })
-        } catch(e) { reject(e) }
+          if (r.statusCode >= 400) {
+            // OpenAI returned an error — propagate the real message
+            const msg = json?.error?.message || `OpenAI HTTP ${r.statusCode}`
+            console.error('[gemini proxy] OpenAI error:', r.statusCode, msg)
+            return reject(new Error(msg))
+          }
+          resolve(json)
+        } catch(e) { reject(new Error(`OpenAI parse error (status ${r.statusCode}): ${data.slice(0,200)}`)) }
       })
+    })
+    req.setTimeout(9000, () => {
+      req.destroy(new Error('OpenAI request timed out (9s)'))
     })
     req.on('error', reject)
     req.write(postData)
@@ -81,9 +100,10 @@ function callGemini(prompt, key) {
       generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
     })
     const isOAuth = key.startsWith('AQ.') || key.startsWith('ya29.')
+    const model = 'gemini-2.0-flash'
     const path = isOAuth
-      ? '/v1beta/models/gemini-1.5-flash:generateContent'
-      : `/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`
+      ? `/v1beta/models/${model}:generateContent`
+      : `/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`
     const req = https.request({
       hostname: 'generativelanguage.googleapis.com',
       path,
@@ -97,8 +117,21 @@ function callGemini(prompt, key) {
       let data = ''
       r.on('data', c => data += c)
       r.on('end', () => {
-        try { resolve(JSON.parse(data)) } catch(e) { reject(e) }
+        try {
+          const json = JSON.parse(data)
+          if (r.statusCode >= 400) {
+            // Gemini returned an error — propagate it clearly
+            const msg = json?.error?.message || `Gemini HTTP ${r.statusCode}`
+            return reject(new Error(msg))
+          }
+          resolve(json)
+        } catch(e) {
+          reject(new Error(`Gemini parse error (status ${r.statusCode}): ${data.slice(0,200)}`))
+        }
       })
+    })
+    req.setTimeout(9000, () => {
+      req.destroy(new Error('Gemini request timed out (9s)'))
     })
     req.on('error', reject)
     req.write(postData)

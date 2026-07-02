@@ -19,7 +19,7 @@ const ALLOWED_EMAILS = [
   'sofi.vergallo@gmail.com',
 ]
 
-const VALID_PINS = ['182218', '000000']
+const VALID_PINS = ['182218']
 
 export function AuthProvider({ children }) {
   const [user,        setUser]        = useState(null)
