@@ -7,6 +7,7 @@ import MobileContanti  from './MobileContanti'
 import MobileDiscovery from './MobileDiscovery'
 import MobileStaff     from './MobileStaff'
 import MobileQuality   from './MobileQuality'
+import MobileBlocNotes from './MobileBlocNotes'
 import './mobile.css'
 
 const TABS = [
@@ -15,7 +16,8 @@ const TABS = [
   { id: 'nanny',     icon: '👩', label: 'Nanny'     },
   { id: 'colf',      icon: '🧹', label: 'Colf'      },
   { id: 'discovery', icon: '🔍', label: 'Discovery' },
-  { id: 'quality',   icon: '📊', label: 'Qualità'   },
+  { id: 'quality',   icon: '📊', label: 'Accuracy'  },
+  { id: 'notes',     icon: '📝', label: 'Note'      },
 ]
 
 // Tabs that expose a "+" FAB
@@ -63,7 +65,7 @@ export default function MobileApp() {
   const colfName   = appPrefs?.colfName  || 'Colf'
 
   // Tab titles
-  const TITLES = { overview: 'Overview', contanti: 'Contanti', nanny: nannyName, colf: colfName, discovery: 'Discovery', quality: 'Qualità Dati' }
+  const TITLES = { overview: 'Overview', contanti: 'Contanti', nanny: nannyName, colf: colfName, discovery: 'Discovery', quality: 'Accuracy', notes: 'Bloc Notes' }
   const SUBS   = {
     overview:  'Situazione finanziaria',
     contanti:  'Gestione contanti',
@@ -71,6 +73,7 @@ export default function MobileApp() {
     colf:      'Timesheet Colf',
     discovery: 'Revisione transazioni',
     quality:   'Accuratezza e KPIs',
+    notes:     'Post-it e appunti veloci',
   }
 
   return (
@@ -114,6 +117,7 @@ export default function MobileApp() {
         )}
         {tab === 'discovery' && <MobileDiscovery />}
         {tab === 'quality'   && <MobileQuality />}
+        {tab === 'notes'     && <MobileBlocNotes />}
       </div>
 
       {/* FAB — absolutely positioned within m-app so it stays inside the 430px container */}

@@ -50,6 +50,7 @@ import CarteCreditoPage     from './pages/CarteCreditoPage'
 import UscitePage           from './pages/UscitePage'
 import DevlogPage           from './pages/DevlogPage'
 import QualityDashboard     from './pages/QualityDashboard'
+import BlocNotesPage        from './pages/BlocNotesPage'
 import OnboardingWizard     from './components/OnboardingWizard'
 
 import { requestNotificationPermission, scheduleScadenzeNotifications } from './services/notifications'
@@ -60,7 +61,7 @@ import './App.css'
 
 
 const NAV = [
-  { id:'quality',          icon:'📊', label:'Dashboard',          group:null },
+  { id:'quality',          icon:'📊', label:'Accuracy',           group:null },
   { id:'ai',              icon:'✨', label:'AI Assistant',       group:'AI' },
   { id:'dashboard',       icon:'🏠', label:'Summary',           group:'Overview' },
   { id:'transactions',    icon:'💳', label:'Transazioni',        group:null },
@@ -88,6 +89,7 @@ const NAV = [
   { id:'stipendio',      icon:'💼', label:'Stipendi',            group:null },
   { id:'settings',        icon:'⚙️', label:'Impostazioni',       group:null },
   { id:'devlog',          icon:'🛠', label:'Sviluppo',            group:null },
+  { id:'blocnotes',       icon:'📝', label:'Bloc Notes',          group:null },
 ]
 
 const PAGE_MAP = {
@@ -129,6 +131,7 @@ const PAGE_MAP = {
   risparmio:         RisparmioPage,
   carte:             CarteCreditoPage,
   quality:           QualityDashboard,
+  blocnotes:         BlocNotesPage,
   settings:          SettingsPage,
   devlog:            DevlogPage,
   notifiche:         NotifichePage,
