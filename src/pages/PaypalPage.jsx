@@ -1440,6 +1440,7 @@ export default function PaypalPage() {
                     key={t.txId}
                     className="pp-tr pp-tr-clickable"
                     onClick={() => setSelectedTx(t)}
+                    style={t._flagged ? { background: '#fff7ed' } : undefined}
                   >
                     <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
                     <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
