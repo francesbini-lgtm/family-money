@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { CAT_NAMES, CATS, getMergedCats } from '../data/categories'
 import { useStore } from '../store/useStore'
 
@@ -415,9 +415,78 @@ function AddRuleForm({ onAdd }) {
   )
 }
 
+// ── Live match count badge ────────────────────────────────────
+function LiveMatchCount({ conds, transactions }) {
+  const count = useMemo(() => countMatchingTx(transactions, conds), [transactions, conds])
+  if (count === null) return null
+  const color = count === 0 ? 'var(--red)' : count > 50 ? '#b87000' : 'var(--accent)'
+  const bg    = count === 0 ? 'rgba(220,50,50,.08)' : count > 50 ? 'rgba(255,160,50,.12)' : 'rgba(var(--accent-rgb,99,102,241),.08)'
+  return (
+    <div style={{display:'inline-flex',alignItems:'center',gap:6,padding:'5px 10px',
+      background:bg,border:`1px solid ${color}`,borderRadius:6,fontSize:12,color}}>
+      <span style={{fontSize:14}}>📊</span>
+      <strong>{count}</strong> transazioni corrispondenti
+    </div>
+  )
+}
+
+// ── Live match counter helper ─────────────────────────────────
+function countMatchingTx(transactions, conds) {
+  const active = conds.filter(c => c.value.trim())
+  if (!active.length) return null
+  return transactions.filter(tx => {
+    if (tx.excluded) return false
+    return active.every(cond => {
+      const val = (cond.value || '').toLowerCase()
+      switch (cond.field) {
+        case 'anywhere':
+        case 'description': {
+          const hay = (tx.description || tx.descAI || '').toLowerCase()
+          switch (cond.op) {
+            case 'contains':     return hay.includes(val)
+            case 'not_contains': return !hay.includes(val)
+            case 'starts_with':  return hay.startsWith(val)
+            case 'ends_with':    return hay.endsWith(val)
+            case 'equals':       return hay === val
+            default: return false
+          }
+        }
+        case 'merchant': {
+          const hay = (tx.merchant || '').toLowerCase()
+          switch (cond.op) {
+            case 'contains':    return hay.includes(val)
+            case 'equals':      return hay === val
+            case 'starts_with': return hay.startsWith(val)
+            default: return false
+          }
+        }
+        case 'counterpart': {
+          const hay = (tx.counterpart || tx.description || '').toLowerCase()
+          return hay.includes(val)
+        }
+        case 'importo':
+        case 'amount': {
+          const amt = Math.abs(tx.amount || 0)
+          const n = parseFloat(cond.value || 0)
+          switch (cond.op) {
+            case 'gt': case '>':  return amt > n
+            case 'gte': case '>=': return amt >= n
+            case 'lt': case '<':  return amt < n
+            case 'lte': case '<=': return amt <= n
+            case 'equals': return Math.abs(amt - n) < 0.01
+            default: return false
+          }
+        }
+        default: return false
+      }
+    })
+  }).length
+}
+
 // ── Multi-condition rules table ───────────────────────────────
 function ZustandRulesSection() {
   const { aiRules, addAiRule, updateAiRule, deleteAiRule, applySingleRule } = useStore()
+  const transactions = useStore(s => s.transactions)
 
   // Expanded edit row state
   const [editingId, setEditingId] = useState(null)
@@ -749,7 +818,8 @@ function ZustandRulesSection() {
                       <CatDescEditor cat1={editCat1} cat2={editCat2} descAI={editDesc}
                         onChangeCat1={setEditCat1} onChangeCat2={setEditCat2} onChangeDescAI={setEditDesc}/>
                     </div>
-                    <div style={{display:'flex',gap:8}}>
+                    <LiveMatchCount conds={editConds} transactions={transactions}/>
+                    <div style={{display:'flex',gap:8,marginTop:10}}>
                       <button className="btn btn-primary" style={{fontSize:12}} onClick={()=>saveEdit(r.id)}>✓ Salva</button>
                       <button className="btn btn-ghost"   style={{fontSize:12}} onClick={()=>setEditingId(null)}>Annulla</button>
                     </div>

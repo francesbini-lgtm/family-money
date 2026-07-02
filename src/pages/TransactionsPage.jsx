@@ -1319,7 +1319,11 @@ export function autoDetectMatch(tx) {
 export function txMatchesRule(tx, match) {
   const val = (match.value||'').toLowerCase()
   if (!val) return false
-  const hay = (tx[match.field]||'').toLowerCase()
+  // For description field, also check descAI (AI-generated description)
+  const raw = match.field === 'description'
+    ? (tx.description || tx.descAI || '')
+    : (tx[match.field] || '')
+  const hay = raw.toLowerCase()
   return hay.includes(val)
 }
 

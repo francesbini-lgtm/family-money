@@ -1127,7 +1127,7 @@ export const useStore = create((set, get) => ({
       if (s.isKingProtected(tx.description, tx.amount)) continue
       const patch = {}
 
-      const desc = (tx.description || '').toLowerCase()
+      const desc = (tx.description || tx.descAI || '').toLowerCase()
       const amt  = Math.abs(tx.amount || 0)
 
       const matches = (rule.conditions || []).every(cond => {
