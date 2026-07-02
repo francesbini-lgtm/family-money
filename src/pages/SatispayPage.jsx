@@ -2600,10 +2600,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
                 <Tooltip
-                  formatter={(v, name) => [`€ ${fmtIT(v,0)}`, name === 'total' ? 'Non compensato' : 'Accrediti']}
+                  formatter={(v, name) => [`€ ${fmtIT(v,0)}`, name]}
                   contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
                   cursor={{fill:'var(--surface2)'}}/>
-                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Spese non compensate"/>
+                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti non compensati"/>
                 <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati"/>
                 <Legend iconType="circle" iconSize={8}
                   formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
