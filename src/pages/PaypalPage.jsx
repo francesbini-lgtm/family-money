@@ -734,17 +734,16 @@ function UnmatchedRow({ imp, paypalTxs, onManualMatch }) {
 }
 
 // ── Auto Abbina results modal ─────────────────────────────
-function AutoAbbinaModal({ pairs, updatedImports, customCats, onConfirm, onClose }) {
+function AutoAbbinaModal({ pairs, updatedImports, customCats, transactions, onConfirm, onClose }) {
   const allCats  = getMergedCats(customCats)
   const catNames = Object.keys(allCats).filter(n => n !== 'Non Categorizzato')
   const [rows, setRows] = useState(() =>
-    pairs.map(({ imp, tx }) => ({
-      imp, tx,
-      cat1:     imp.cat1_suggestion || tx.cat1 || '',
-      cat2:     imp.cat2_suggestion || tx.cat2 || '',
-      flagged:  false,
-      selected: true,
-    }))
+    pairs.map(({ imp, tx }) => {
+      const hist = getMerchantCatSuggestion(imp.merchant, transactions)
+      const cat1 = hist.cat1 || imp.cat1_suggestion || tx.cat1 || ''
+      const cat2 = hist.cat2 || imp.cat2_suggestion || tx.cat2 || ''
+      return { imp, tx, cat1, cat2, flagged: false, selected: true }
+    })
   )
   const selCount = rows.filter(r => r.selected).length
   const allSel   = selCount === rows.length
@@ -1495,6 +1494,7 @@ export default function PaypalPage() {
           pairs={autoAbbinaResults.pairs}
           updatedImports={autoAbbinaResults.updatedImports}
           customCats={customCats}
+          transactions={transactions}
           onConfirm={handleAutoAbbinaConfirm}
           onClose={() => setAutoAbbinaResults(null)}
         />
