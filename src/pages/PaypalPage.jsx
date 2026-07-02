@@ -348,10 +348,9 @@ function isAlreadyImported(item, existingImports) {
 
 // ── Build merchant→category history map for AI prompt ─────
 function buildMerchantHistory(transactions) {
-  const paypalTxs = transactions.filter(t => {
-    const h = `${t.merchant||''} ${t.description||''} ${t.descAI||''}`.toLowerCase()
-    return (h.includes('paypal') || h.includes('pay pal')) && t.cat1 && t.cat1 !== 'Non Categorizzato' && t.cat1 !== 'Altro'
-  })
+  const paypalTxs = transactions.filter(t =>
+    t._paypalOverride && t.cat1 && t.cat1 !== 'Non Categorizzato' && t.cat1 !== 'Altro'
+  )
   const merchantMap = {}
   paypalTxs.forEach(t => {
     const m = (t.descAI || t.merchant || '').trim()
@@ -373,10 +372,9 @@ function buildMerchantHistory(transactions) {
 function getMerchantCatSuggestion(merchant, transactions) {
   if (!merchant || !transactions?.length) return {}
   const norm = merchant.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const paypalTxs = transactions.filter(t => {
-    const haystack = `${t.merchant||''} ${t.description||''} ${t.descAI||''}`.toLowerCase()
-    return (haystack.includes('paypal') || haystack.includes('pay pal')) && t.cat1 && t.cat1 !== 'Non Categorizzato' && t.cat1 !== 'Altro'
-  })
+  const paypalTxs = transactions.filter(t =>
+    t._paypalOverride && t.cat1 && t.cat1 !== 'Non Categorizzato' && t.cat1 !== 'Altro'
+  )
   const matched = paypalTxs.filter(t => {
     const tNorm = (t.descAI || t.merchant || t.description || '').toLowerCase().replace(/[^a-z0-9]/g, '')
     if (!tNorm) return false
