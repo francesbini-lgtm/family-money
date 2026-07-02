@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import './MappaSpesePage.css'
 import { fmtIT } from '../utils/format'
 
@@ -112,6 +112,7 @@ const MAP_PATHS = `<g fill="#2d5a3d" stroke="#4a8a5a" stroke-width="1.2" opacity
 
 export default function MappaSpesePage() {
   const { transactions } = useStore()
+  const customCats = useStore(s => s.customCats)
   const svgRef = useRef(null)
   const containerRef = useRef(null)
 
@@ -186,7 +187,7 @@ export default function MappaSpesePage() {
         <div className="mappa-filters">
           <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="mappa-select">
             <option value="">Tutte le categorie</option>
-            {CAT_NAMES.map(n=><option key={n} value={n}>{n}</option>)}
+            {Object.keys(getMergedCats(customCats)).map(n=><option key={n} value={n}>{n}</option>)}
           </select>
           <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} className="mappa-select">
             <option value="">Tutto il periodo</option>

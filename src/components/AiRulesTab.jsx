@@ -360,7 +360,7 @@ function CatDescEditor({ cat1, cat2, descAI, onChangeCat1, onChangeCat2, onChang
     <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
       <span style={{fontSize:12,color:'var(--text3)',flexShrink:0}}>→ Categoria:</span>
       <select value={cat1} onChange={e=>{onChangeCat1(e.target.value);onChangeCat2('')}} style={SEL}>
-        {CAT_NAMES.map(n=><option key={n}>{n}</option>)}
+        {Object.keys(getMergedCats(customCats)).filter(n=>n!=='Non Categorizzato').map(n=><option key={n}>{n}</option>)}
       </select>
       {subCats.length>0 && (
         <select value={cat2} onChange={e=>onChangeCat2(e.target.value)} style={SEL}>
@@ -377,9 +377,10 @@ function CatDescEditor({ cat1, cat2, descAI, onChangeCat1, onChangeCat2, onChang
 
 // ── Add rule form ─────────────────────────────────────────────
 function AddRuleForm({ onAdd }) {
+  const customCats = useStore(s => s.customCats)
   const [open,   setOpen]   = useState(false)
   const [conds,  setConds]  = useState([{field:'description',op:'contains',value:''}])
-  const [cat1,   setCat1]   = useState(CAT_NAMES[0]||'')
+  const [cat1,   setCat1]   = useState(() => Object.keys(getMergedCats(useStore.getState().customCats||{}))[0]||'')
   const [cat2,   setCat2]   = useState('')
   const [descAI, setDescAI] = useState('')
 
@@ -389,7 +390,7 @@ function AddRuleForm({ onAdd }) {
     onAdd({ conditions:valid, action:'categorize', cats:[{cat1,cat2:cat2||'',pct:100}],
       descAI:descAI.trim()||null, name:`${cat1}${cat2?'/'+cat2:''} — ${valid.map(c=>condLabel(c)).join(' + ')}` })
     setConds([{field:'description',op:'contains',value:''}])
-    setCat1(CAT_NAMES[0]||''); setCat2(''); setDescAI(''); setOpen(false)
+    setCat1(Object.keys(getMergedCats(useStore.getState().customCats||{}))[0]||''); setCat2(''); setDescAI(''); setOpen(false)
   }
 
   if (!open) return (

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import './CalendarioPage.css'
@@ -155,6 +155,7 @@ function AddVacationModal({ onSave, onClose }) {
 // ── Main page ─────────────────────────────────────────────
 export default function CalendarioPage() {
   const { transactions } = useStore()
+  const customCats = useStore(s => s.customCats)
   const { vacations, add: addVac, remove: removeVac } = useVacations()
 
   const now     = new Date()
@@ -237,7 +238,7 @@ export default function CalendarioPage() {
         ))}
         <select className="cal-filter-select" value={filter.cat1} onChange={e=>setFilter(f=>({...f,cat1:e.target.value}))}>
           <option value="">Tutte le categorie</option>
-          {CAT_NAMES.map(n=><option key={n} value={n}>{n}</option>)}
+          {Object.keys(getMergedCats(customCats)).map(n=><option key={n} value={n}>{n}</option>)}
         </select>
       </div>
 

@@ -2246,6 +2246,7 @@ function AiFeedbackModal({ tx, onClose }) {
 // ── Add Manual Transaction Modal ──────────────────────────
 function AddManualTxModal({ onClose }) {
   const { addTransactions } = useStore()
+  const customCats = useStore(s => s.customCats)
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), description:'', amount:'', cat1:'Non Categorizzato', cat2:'' })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
   function save() {
@@ -2269,7 +2270,7 @@ function AddManualTxModal({ onClose }) {
       <FormRow label="Importo €"><input type="number" value={form.amount} onChange={e=>set('amount',e.target.value)} className="form-input" placeholder="−45.00 o +1200.00" step="0.01"/></FormRow>
       <FormRow label="Categoria">
         <Select value={form.cat1} onChange={e=>set('cat1',e.target.value)}>
-          {CAT_NAMES.map(n=><option key={n}>{n}</option>)}
+          {Object.keys(getMergedCats(customCats)).map(n=><option key={n}>{n}</option>)}
         </Select>
       </FormRow>
       <ModalFooter>

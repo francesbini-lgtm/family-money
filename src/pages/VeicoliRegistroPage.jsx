@@ -849,6 +849,7 @@ function VehicleCharts({ vehicles, allRows = [] }) {
 // ── All Expenses Table ────────────────────────────────────
 function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, onAddExpense }) {
   const { deleteVehExpense, updateVehExpense, appPrefs, setAppPref } = useStore()
+  const customCats = useStore(s => s.customCats)
   const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
 
   // ── Cat filters config (stored in appPrefs) ──────────────
@@ -879,8 +880,9 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
   const [showSettings, setShowSettings] = useState(false)
   const [draftL1, setDraftL1] = useState('Veicoli')
   const [draftL2, setDraftL2] = useState('')
-  const cat1List = Object.keys(CATS)
-  const cat2List = draftL1 && CATS[draftL1]?.sub ? CATS[draftL1].sub : []
+  const _mergedCats = getMergedCats(customCats)
+  const cat1List = Object.keys(_mergedCats)
+  const cat2List = draftL1 && _mergedCats[draftL1]?.sub ? _mergedCats[draftL1].sub : []
 
   // ── Table state ───────────────────────────────────────────
   const [sortKey, setSortKey]   = useState('date')

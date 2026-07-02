@@ -51,6 +51,7 @@ function getAutoLinks(txId) {
 
 // ── Links Modal ───────────────────────────────────────────
 function LinksModal({ tx, onClose }) {
+  const customCats = useStore(s => s.customCats)
   const txAmt = Math.abs(tx.amount)
   const meta  = getAtmMeta()[tx.txId] || {}
   const autoLinks   = getAutoLinks(tx.txId)
@@ -151,14 +152,14 @@ function LinksModal({ tx, onClose }) {
           <div>
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:3}}>Categoria L1</div>
             <select value={newCat1} onChange={e=>{setNewCat1(e.target.value);setNewCat2('')}} style={{width:'100%',padding:'7px 10px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
-              {CAT_NAMES.filter(n=>n!=='Entrate').map(n=><option key={n}>{n}</option>)}
+              {Object.keys(getMergedCats(customCats)).filter(n=>n!=='Entrate'&&n!=='Non Categorizzato').map(n=><option key={n}>{n}</option>)}
             </select>
           </div>
           <div>
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:3}}>Sottocategoria</div>
             <select value={newCat2} onChange={e=>setNewCat2(e.target.value)} style={{width:'100%',padding:'7px 10px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
               <option value="">— nessuna —</option>
-              {(CATS[newCat1]?.sub||[]).map(s=><option key={s}>{s}</option>)}
+              {(getMergedCats(customCats)[newCat1]?.sub||[]).map(s=><option key={s}>{s}</option>)}
             </select>
           </div>
         </div>
@@ -415,8 +416,8 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
         }} onClick={e=>e.stopPropagation()}>
           {/* L1 list */}
           <div style={{borderRight:'1px solid var(--border)',overflowY:'auto',maxHeight:320}}>
-            {CAT_NAMES.filter(n=>n!=='Entrate').map(name=>{
-              const c = CATS[name]?.color||'#888'
+            {Object.keys(_ccats).filter(n=>n!=='Entrate'&&n!=='Non Categorizzato').map(name=>{
+              const c = _ccats[name]?.color||'#888'
               return (
                 <button key={name} onClick={()=>setSelL1(name)} style={{
                   display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',

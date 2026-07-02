@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS, CAT_NAMES } from '../data/categories'
+import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
 
 const fmt = n => '€ ' + fmtIT(Math.abs(n), 2)
@@ -55,6 +55,7 @@ function SceltaModal({ onChoose, onClose }) {
 
 // ── Utilizzo Contanti modal ───────────────────────────────
 function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
+  const customCats = useStore(s => s.customCats)
   const now = new Date()
   const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
   const [amount,  setAmount]  = useState('')
@@ -64,8 +65,9 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
   const [date,    setDate]    = useState(localDate)
   const [atmLink, setAtmLink] = useState('')
 
-  const cats = CAT_NAMES.filter(c => c !== 'Entrate' && c !== 'Non Categorizzato')
-  const subs = CATS[cat1]?.sub || []
+  const _mcats = getMergedCats(customCats)
+  const cats = Object.keys(_mcats).filter(c => c !== 'Entrate' && c !== 'Non Categorizzato')
+  const subs = _mcats[cat1]?.sub || []
 
   function handleSave() {
     const amt = parseFloat(amount)

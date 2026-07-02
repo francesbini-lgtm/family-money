@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useCallback } from 'react'
 import { useStore } from '../store/useStore'
-import { CATS } from '../data/categories'
+import { CATS, getMergedCats } from '../data/categories'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -356,6 +356,7 @@ function SaldoChart({ transactions }) {
 }
 
 function CategoryReport({ transactions }) {
+  const customCats = useStore(s => s.customCats)
   const [selected, setSelected] = useState(null)
   const [period,   setPeriod]   = useState('M') // M=month, Q=quarter, A=year
   const [showL2,   setShowL2]   = useState(false)
@@ -372,7 +373,7 @@ function CategoryReport({ transactions }) {
 
   const catData = useMemo(() => {
     const months = getMonths()
-    return Object.entries(CATS)
+    return Object.entries(getMergedCats(customCats))
       .filter(([name]) => name !== 'Entrate' && name !== 'Non Categorizzato')
       .map(([name, info]) => {
         const txs = transactions.filter(t => !t.excluded && t.amount < 0 && t.cat1 === name)
@@ -390,7 +391,7 @@ function CategoryReport({ transactions }) {
       })
       .filter(d => d.total > 0)
       .sort((a,b) => b.total - a.total)
-  }, [transactions, period])
+  }, [transactions, period, customCats])
 
   const selCat = selected ? catData.find(d=>d.name===selected) : null
 

@@ -1179,8 +1179,8 @@ function CashCatsTab() {
         Queste categorie vengono usate nella riconciliazione ATM per Nanny, Colf e Veicoli.
       </div>
       <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-        {CAT_NAMES.filter(n=>n!=='Entrate').map(cat=>{
-          const color = CATS[cat]?.color||'#888'
+        {Object.keys(getMergedCats(customCats)).filter(n=>n!=='Entrate').map(cat=>{
+          const color = getMergedCats(customCats)[cat]?.color||'#888'
           const active = cashCats.includes(cat)
           return (
             <button key={cat} onClick={()=>toggle(cat)} style={{

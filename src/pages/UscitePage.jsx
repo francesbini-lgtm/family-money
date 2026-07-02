@@ -183,7 +183,7 @@ function TxDetailModal({ tx, onClose }) {
               <select value={editCat1} onChange={e=>{setEditCat1(e.target.value);setEditCat2('')}} className="uscite-modal-select">
 
                 <option value="">— Nessuna —</option>
-                {Object.keys(CATS).filter(n=>n!=='Non Categorizzato').map(n=>(
+                {Object.keys(_allCats).filter(n=>n!=='Non Categorizzato').map(n=>(
                   <option key={n} value={n}>{n}</option>
                 ))}
               </select>
