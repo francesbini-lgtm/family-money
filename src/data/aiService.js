@@ -825,3 +825,50 @@ export async function callPaypalText(pdfText, key, year, merchantHistory) {
     seen.add(k); return true
   })
 }
+
+// ── PayPal Reclassify — batch re-categorisation of existing imports ─────
+// Takes a list of {id, merchant, amount} and returns [{id, cat1, cat2}]
+export async function callPaypalReclassify(items, key, merchantHistory) {
+  const CHUNK = 40
+  const allResults = []
+  for (let offset = 0; offset < items.length; offset += CHUNK) {
+    const chunk = items.slice(offset, offset + CHUNK)
+    const histSection = merchantHistory && Object.keys(merchantHistory).length > 0
+      ? `Storico categorie merchant già noti (usa queste ESATTAMENTE per merchant identici o molto simili):\n${
+          Object.entries(merchantHistory).slice(0, 60)
+            .map(([m, { cat1, cat2 }]) => `- ${m} → ${cat1}${cat2 ? ' / ' + cat2 : ''}`)
+            .join('\n')
+        }\n\n`
+      : ''
+    const prompt = `${histSection}Assegna categoria L1 e L2 a ciascun merchant PayPal italiano. Usa lo storico sopra se disponibile. Se non presente, usa il tuo giudizio.
+
+Merchant da categorizzare:
+${chunk.map((it, i) => `${i}. ${it.merchant} (€${Math.abs(Number(it.amount)||0).toFixed(2)})`).join('\n')}
+
+Categorie L1 disponibili: Casa, Veicoli, Spesa e Alimentari, Tempo Libero, Weekend e Vacanze, Shopping, Salute e Cura, Figli, Altro
+
+Rispondi SOLO con un array JSON, un oggetto per ogni merchant nell'ordine ricevuto. Usa "index" come indice nell'array sopra (0-based).
+Esempio: [{"index":0,"cat1":"Weekend e Vacanze","cat2":"Vacanze"},{"index":1,"cat1":"Veicoli","cat2":"Parcheggio"}]`
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2048 })
+    })
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '')
+      throw new Error(`OpenAI error ${res.status}: ${errBody.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+    const text = data.choices?.[0]?.message?.content || ''
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) throw new Error('Nessun JSON trovato nella risposta AI')
+    const parsed = JSON.parse(match[0])
+    // Map chunk-relative index back to item id
+    parsed.forEach(r => {
+      const item = chunk[r.index]
+      if (item) allResults.push({ id: item.id, cat1: r.cat1 || '', cat2: r.cat2 || '' })
+    })
+  }
+  return allResults
+}

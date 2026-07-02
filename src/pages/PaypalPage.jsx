@@ -6,7 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
-import { callPaypalVision, callPaypalText } from '../data/aiService'
+import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
 import { showToast } from '../services/notifications'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -994,6 +994,7 @@ export default function PaypalPage() {
   const [pendingModal, setPendingModal]   = useState(null)  // import with pending_approval
   const [abbinaTx, setAbbinaTx]           = useState(null)  // bank tx to link to an import
   const [autoAbbinaResults, setAutoAbbinaResults] = useState(null)  // [{imp, tx}] after auto-abbina
+  const [reclassifying, setReclassifying]         = useState(false)
 
   const paypalImports = useMemo(
     () => appPrefs?.paypalImports || [],
@@ -1187,6 +1188,35 @@ export default function PaypalPage() {
     showToast(next ? 'Rifiutato — prossimo abbinamento' : 'Abbinamento rifiutato', 'info')
   }
 
+  async function handleReclassify() {
+    const toReclassify = paypalImports.filter(i => i.status !== 'matched')
+    if (!toReclassify.length) { showToast('Nessun import da reclassificare', 'info'); return }
+    if (!apiKey) { showToast('Chiave API non configurata — aggiungila in Impostazioni → AI', 'error'); return }
+    setReclassifying(true)
+    try {
+      const merchantHistory = buildMerchantHistory(transactions)
+      const items = toReclassify.map(imp => ({ id: imp.id, merchant: imp.merchant, amount: imp.amount }))
+      const suggestions = await callPaypalReclassify(items, apiKey, merchantHistory)
+      const suggMap = Object.fromEntries(suggestions.map(s => [s.id, s]))
+      const updated = paypalImports.map(imp => {
+        if (imp.status === 'matched') return imp
+        const s = suggMap[imp.id]
+        if (!s) return imp
+        return {
+          ...imp,
+          cat1_suggestion: s.cat1 || imp.cat1_suggestion || '',
+          cat2_suggestion: s.cat2 || imp.cat2_suggestion || '',
+        }
+      })
+      setAppPref('paypalImports', updated)
+      showToast(`Categorie aggiornate per ${toReclassify.length} import`, 'success')
+    } catch(e) {
+      showToast('Errore reclassificazione: ' + e.message, 'error')
+    } finally {
+      setReclassifying(false)
+    }
+  }
+
   function handleAutoAbbina() {
     const usedTxIds = new Set(
       paypalImports.filter(i => i.status === 'matched').map(i => i.matchedTxId).filter(Boolean)
@@ -1275,6 +1305,13 @@ export default function PaypalPage() {
               ⚠️ Non abbinate ({unmatchedCnt})
             </button>
           )}
+          <button className="pp-import-btn"
+            onClick={handleReclassify}
+            disabled={reclassifying || paypalImports.filter(i => i.status !== 'matched').length === 0}
+            title="Ri-analizza L1/L2 di tutti gli import non abbinati usando AI + storico merchant"
+          >
+            {reclassifying ? '⏳ Ricalcolo…' : '🔄 Aggiorna L1/L2'}
+          </button>
           <button className="pp-import-btn" style={{background:'var(--accent)',color:'#fff',border:'none'}}
             onClick={handleAutoAbbina}>
             ⚡ Auto Abbina
