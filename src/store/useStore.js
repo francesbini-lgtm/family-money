@@ -1198,7 +1198,7 @@ export const useStore = create((set, get) => ({
       if (matches) {
         if (rule.action === 'exclude') {
           if (!tx.excluded) patch.excluded = true
-        } else if (rule.action === 'categorize' && rule.cats?.length >= 1) {
+        } else if ((!rule.action || rule.action === 'categorize') && rule.cats?.length >= 1) {
           const { cat1, cat2 } = rule.cats[0]
           if (cat1) patch.cat1 = cat1
           patch.cat2 = cat2 || ''

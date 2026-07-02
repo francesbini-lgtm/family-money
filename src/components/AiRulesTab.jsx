@@ -544,6 +544,7 @@ function ZustandRulesSection() {
     const valid = editConds.filter(c=>c.value.trim())
     if (!valid.length) return
     updateAiRule(id, {
+      action: 'categorize',
       conditions: valid,
       cats: [{cat1: editCat1, cat2: editCat2||'', pct:100}],
       descAI: editDesc.trim()||null,
