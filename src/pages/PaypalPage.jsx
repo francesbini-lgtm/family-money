@@ -10,7 +10,7 @@ import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/
 import { showToast } from '../services/notifications'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
 } from 'recharts'
 import './PaypalPage.css'
 
@@ -1394,14 +1394,27 @@ export default function PaypalPage() {
             <div style={{ textAlign:'center', padding:'40px 0', color:'var(--text3)', fontSize:13 }}>Nessun dato</div>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={barData} margin={{ top:4, right:4, left:-10, bottom:0 }}>
+              <BarChart data={barData} margin={{ top:20, right:4, left:-10, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="month" tick={{ fontSize:11 }} axisLine />
                 <YAxis tick={{ fontSize:11 }} axisLine tickFormatter={v => `€${fmtIT(v)}`} />
-                <Tooltip formatter={(v,name) => [`€ ${fmtIT(v, 2)}`, name]} />
-                <Legend wrapperStyle={{ fontSize:11 }} />
-                {barCats.map(c => (
-                  <Bar key={c} dataKey={c} stackId="a" fill={CATS[c]?.color||'#aaa'} isAnimationActive={false} />
+                {barCats.map((c, idx) => (
+                  <Bar key={c} dataKey={c} stackId="a" fill={CATS[c]?.color||'#aaa'} isAnimationActive={false}>
+                    {idx === barCats.length - 1 && (
+                      <LabelList
+                        content={({ x, y, width, index }) => {
+                          const total = barCats.reduce((s, cat) => s + (barData[index]?.[cat] || 0), 0)
+                          if (!total) return null
+                          return (
+                            <text x={x + width / 2} y={y - 4} textAnchor="middle"
+                              fontSize={10} fontWeight={700} fill="var(--text2)">
+                              €{fmtIT(total)}
+                            </text>
+                          )
+                        }}
+                      />
+                    )}
+                  </Bar>
                 ))}
               </BarChart>
             </ResponsiveContainer>
