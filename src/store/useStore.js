@@ -1008,8 +1008,9 @@ export const useStore = create((set, get) => ({
   },
 
   // Returns true if a KING rule matches this transaction — used to block non-king overwrites
-  isKingProtected: (description, amount) => {
-    const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false)
+  // excludeRuleId: skip this rule from the check (used when running a king rule on itself)
+  isKingProtected: (description, amount, excludeRuleId = null) => {
+    const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false && r.id !== excludeRuleId)
     if (!kingRules.length) return false
     const desc = (description || '').toLowerCase()
     const amt  = Math.abs(amount || 0)
@@ -1152,7 +1153,8 @@ export const useStore = create((set, get) => ({
       const tx = transactions[i]
       if (onProgress) onProgress(i + 1, transactions.length)
       // King rules always win — never let a non-king single rule overwrite them
-      if (s.isKingProtected(tx.description, tx.amount)) continue
+      // Pass ruleId so a king rule running on itself is not blocked by its own protection
+      if (s.isKingProtected(tx.description, tx.amount, ruleId)) continue
       const patch = {}
 
       const desc = (tx.description || tx.descAI || '').toLowerCase()
