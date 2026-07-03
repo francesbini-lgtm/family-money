@@ -979,7 +979,8 @@ function FundCard({ pot, allPots }) {
       const linkedAmt = pot.data?.[ym]?.linkedAmt
       const mt = monthTotal(ym)
       const exact = linkedAmt!=null ? Math.abs(linkedAmt-mt)<0.01 : true
-      return { linked, exact }
+      const delta = pot.data?.[ym]?.linkedDelta || 0
+      return { linked, exact, delta }
     }
 
     const mt = monthTotal(ym)
@@ -1166,6 +1167,17 @@ function FundCard({ pot, allPots }) {
       })
     }
 
+    // Compute selectedTotal to detect delta (tx amounts may exceed the pot total)
+    const txIdArr = Array.isArray(txIds) ? txIds : (txIds ? [txIds] : [])
+    const totalAmt = amt || 0
+    const selectedTotal = txIdArr.reduce((s, id) => {
+      const tx = transactions.find(t => t.txId === id)
+      return s + Math.abs(tx?.amount || 0)
+    }, 0)
+    const linkedDelta = selectedTotal > totalAmt + 0.01
+      ? Math.round((selectedTotal - totalAmt) * 100) / 100
+      : 0
+
     // Save the link on the pot
     const prev = pot.data?.[ym] || {}
     updateSatiPot(pot.id, { data:{
@@ -1174,18 +1186,20 @@ function FundCard({ pot, allPots }) {
         ...prev,
         linked: txIds,
         linkedAmt: amt,
+        linkedDelta: linkedDelta || null,
         // Mark explicitly unlinked so auto-detection is suppressed
         explicitUnlinked: !txIds ? true : false
       }
     }})
 
-    // Auto-generate category splits on linked transactions
-    const txIdArr = Array.isArray(txIds) ? txIds : (txIds ? [txIds] : [])
-    const totalAmt = amt || 0
+    // Auto-generate category splits on linked transactions.
+    // Use selectedTotal as the denominator so splits sum to totalAmt (accantonamento),
+    // leaving the delta portion unattributed to any voce.
+    const splitDenom = selectedTotal > 0 ? selectedTotal : totalAmt
     txIdArr.forEach(txId => {
       const tx = transactions.find(t => t.txId === txId)
       if (!tx) return
-      const splits = computeSatiSplits(ym, tx.amount, totalAmt)
+      const splits = computeSatiSplits(ym, tx.amount, splitDenom)
       updateTransaction(txId, {
         splits,
         descAI: 'Accantonamento Satispay',
@@ -1610,10 +1624,15 @@ function FundCard({ pot, allPots }) {
                 )
                 if (status) return (
                   <td key={ym} style={cellStyle}>
-                    <button onClick={()=>setAbbina(ym)} title="Abbinamento trovato — clicca per modificare"
+                    <button onClick={()=>setAbbina(ym)}
+                      title={status.delta > 0.01 ? `Abbinato con delta +€${fmtIT(status.delta,2)} eccedente` : 'Abbinamento trovato — clicca per modificare'}
                       style={{border:'none',background:'transparent',cursor:'pointer',padding:0,
                         display:'flex',alignItems:'center',justifyContent:'flex-end',width:'100%'}}>
-                      <span style={{fontSize:14,lineHeight:1}}>{status.exact ? '✅' : '⚠️'}</span>
+                      {status.exact && status.delta <= 0.01
+                        ? <span style={{fontSize:14,lineHeight:1}}>✅</span>
+                        : status.exact && status.delta > 0.01
+                          ? <span style={{fontSize:15,lineHeight:1,fontWeight:900,color:'#ea580c'}}>✓</span>
+                          : <span style={{fontSize:14,lineHeight:1}}>⚠️</span>}
                     </button>
                   </td>
                 )
@@ -1654,6 +1673,27 @@ function FundCard({ pot, allPots }) {
                 )
               })}
             </tr>
+            {/* Delta TX row — visible only when at least one month has a delta */}
+            {visYMs.some(ym => (pot.data?.[ym]?.linkedDelta || 0) > 0.01) && (
+              <tr style={{background:'var(--surface)'}}>
+                <td/>
+                <td style={{padding:'3px 6px',whiteSpace:'nowrap'}}>
+                  <span style={{fontSize:9,fontWeight:700,color:'#ea580c',
+                    textTransform:'uppercase',letterSpacing:'.06em'}}>Delta TX</span>
+                </td>
+                <td/><td/>
+                {visYMs.map(ym => {
+                  const delta = pot.data?.[ym]?.linkedDelta || 0
+                  return (
+                    <td key={ym} style={{padding:'3px 6px',textAlign:'right',
+                      fontFamily:'var(--font-mono)',fontSize:11,
+                      color: delta > 0.01 ? '#ea580c' : 'var(--text3)'}}>
+                      {delta > 0.01 ? `+${fmtIT(delta,2)}` : '—'}
+                    </td>
+                  )
+                })}
+              </tr>
+            )}
           </tfoot>
         </table>
       </div>
