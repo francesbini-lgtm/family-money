@@ -2313,6 +2313,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   const [showUnmatchedIncome, setShowUnmatchedIncome] = useState(false)
   const [search, setSearch]             = useState('')
   const [showCatConfig, setShowCatConfig] = useState(false)
+  const [selectedRows, setSelectedRows]   = useState(new Set())
   const [catDraftL1, setCatDraftL1]     = useState('')
   const [catDraftL2, setCatDraftL2]     = useState('')
   const customCats = useStore(s => s.customCats)
@@ -2362,6 +2363,11 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       return db.localeCompare(da)
     })
   }, [filteredRows, unmatchedIncomeRows, showUnmatchedIncome])
+
+  // ── Multi-select abbinamento ──────────────────────────────
+  const selectedAccrediti = useMemo(() => [...selectedRows].filter(id => combinedRows.find(r => r.txId === id && r._rowType === 'accredito')), [selectedRows, combinedRows])
+  const selectedSpese     = useMemo(() => [...selectedRows].filter(id => combinedRows.find(r => r.txId === id && r._rowType === 'spesa')), [selectedRows, combinedRows])
+  const canAbbina = selectedAccrediti.length >= 1 && selectedSpese.length >= 1
 
   // ── KPIs ─────────────────────────────────────────────────
   const totSpese      = speseDaComp.reduce((s,t) => s + Math.abs(t.amount), 0)
@@ -2514,6 +2520,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
     saveMatches(newMatches)
     removeMatch(expTxId, prevMatch?.incomeTxId || null)
+  }
+
+  function handleQuickAbbina() {
+    if (selectedAccrediti.length !== 1) { showToast('Seleziona esattamente 1 accredito', 'warning'); return }
+    if (selectedSpese.length === 0) { showToast('Seleziona almeno 1 spesa', 'warning'); return }
+    selectedSpese.forEach(expId => handleLink(expId, selectedAccrediti[0]))
+    setSelectedRows(new Set())
   }
 
   function saveCatFilters(filters) {
@@ -2746,6 +2759,17 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               }}>
               💳 Accrediti
             </button>
+            {selectedRows.size > 0 && (
+              <button onClick={handleQuickAbbina} disabled={!canAbbina}
+                style={{display:'inline-flex',alignItems:'center',gap:5,padding:'5px 13px',
+                  border:`1px solid ${canAbbina?'var(--green)':'var(--border)'}`,borderRadius:20,
+                  background:canAbbina?'var(--green-l,#d1fae5)':'var(--surface2)',
+                  color:canAbbina?'var(--green)':'var(--text3)',
+                  fontSize:11,fontWeight:700,cursor:canAbbina?'pointer':'default',fontFamily:'var(--font-sans)',
+                  opacity:canAbbina?1:0.5}}>
+                🔗 Abbina ({selectedRows.size})
+              </button>
+            )}
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Cerca..."
               style={{padding:'5px 10px',border:'1px solid var(--border)',borderRadius:8,
@@ -2755,20 +2779,29 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
         </div>
 
         {/* Table */}
+        <div style={{overflowY:'auto',maxHeight:'calc(100vh - 420px)'}}>
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr>
+              <th style={{padding:'9px 14px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',
+                position:'sticky',top:0,zIndex:2,width:36}}>
+                <input type="checkbox"
+                  checked={combinedRows.length > 0 && combinedRows.every(r => selectedRows.has(r.txId))}
+                  onChange={e => setSelectedRows(e.target.checked ? new Set(combinedRows.map(r => r.txId)) : new Set())}
+                  style={{cursor:'pointer'}}/>
+              </th>
               {['Data','Descrizione','Categoria','Stato','Importo originale','Residuo','Note'].map(h => (
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                   textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                   borderBottom:'1px solid var(--border)',
+                  position:'sticky',top:0,zIndex:2,
                   textAlign:h.startsWith('Importo')?'right':'left'}}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {combinedRows.length === 0 && (
-              <tr><td colSpan={7} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
+              <tr><td colSpan={8} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
                 {search ? 'Nessun risultato' : 'Nessuna spesa da compensare — configura le categorie L1›L2 nel fondo'}
               </td></tr>
             )}
@@ -2776,6 +2809,11 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               if (t._rowType === 'accredito') {
                 return (
                   <tr key={t.txId} style={{borderBottom:'1px solid var(--border)', background:'var(--blue-l,#e8f4ff)'}}>
+                    <td style={{padding:'9px 14px'}} onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedRows.has(t.txId)}
+                        onChange={e => setSelectedRows(prev => { const n = new Set(prev); e.target.checked ? n.add(t.txId) : n.delete(t.txId); return n })}
+                        style={{cursor:'pointer'}}/>
+                    </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>
                       {fmtDate(t._effDate||t.date)}
                     </td>
@@ -2823,6 +2861,11 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   onClick={() => setDetailTx(t)}
                   onMouseEnter={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.13)' : 'var(--surface2)'}
                   onMouseLeave={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.06)' : 'transparent'}>
+                  <td style={{padding:'9px 14px'}} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedRows.has(t.txId)}
+                      onChange={e => setSelectedRows(prev => { const n = new Set(prev); e.target.checked ? n.add(t.txId) : n.delete(t.txId); return n })}
+                      style={{cursor:'pointer'}}/>
+                  </td>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                     {fmtDate(t._effDate||t.date)}
                   </td>
@@ -2902,6 +2945,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
             })}
           </tbody>
         </table>
+        </div>{/* end scroll wrapper */}
       </div>
 
       {/* Modals */}
