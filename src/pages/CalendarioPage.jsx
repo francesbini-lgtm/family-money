@@ -24,11 +24,11 @@ function useVacations() {
   return { vacations, add, remove }
 }
 
-// ── Vacation emoji helper ─────────────────────────────────
-function vacEmoji(name = '') {
-  const n = name.toLowerCase()
-  const beach = ['mare','sard','rimini','cost','bagn','lido','lignan','riccione','cattolica','riviera','tropea','sicil','calabr','puglia','salent','amalfitana','elba','capri','ischia','taormin','eolie','positano','amalfi','gallipoli','otranto','vieste']
-  const mtn   = ['mont','alp','dolomit','aosta','neve','ski','snowboard','courmayeur','livigno','madonna','sestriere','bormio','cervinia','cortina','trentino','val di fass','val garden','alta badia']
+// ── Vacation emoji from city name ─────────────────────────
+function cityToVacEmoji(city = '') {
+  const n = city.toLowerCase()
+  const beach = ['mare','sard','rimini','cost','bagn','lido','lignan','riccione','cattolica','riviera','tropea','sicil','calabr','puglia','salent','amalfi','elba','capri','ischia','taormin','eolie','positano','gallipoli','otranto','vieste','ibiza','mykonos','maiorca','tenerife','palermo','catania']
+  const mtn   = ['mont','alp','dolomit','aosta','neve','ski','snowboard','courmayeur','livigno','madonna','sestriere','bormio','cervinia','cortina','trentino','val di fass','val garden','alta badia','davos','zermatt','innsbruck','salzburg']
   if (beach.some(k => n.includes(k))) return '🌴'
   if (mtn.some(k => n.includes(k)))   return '⛰️'
   return '🏖️'
@@ -39,14 +39,19 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
   const isWeekend = IS_WEEKEND(year, month, day)
   const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
 
-  // Filter transactions for this day
+  // All transactions this day (unfiltered) — needed for vacation/boat detection
+  const allDayTxs = useMemo(() =>
+    txs.filter(t => (t._effDate||t.date) === dateStr && !t.excluded)
+  , [txs, dateStr])
+
+  // Filter transactions for display
   const dayTxs = useMemo(() => {
-    let t = txs.filter(t => (t._effDate||t.date) === dateStr && !t.excluded)
+    let t = allDayTxs
     if (filter.type === 'income')  t = t.filter(x => x.amount > 0)
     if (filter.type === 'expense') t = t.filter(x => x.amount < 0)
     if (filter.cat1) t = t.filter(x => x.cat1 === filter.cat1)
     return t
-  }, [txs, dateStr, filter])
+  }, [allDayTxs, filter])
 
   const total   = dayTxs.reduce((s, t) => s + t.amount, 0)
   const hasData = dayTxs.length > 0
@@ -63,17 +68,33 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
     return entries.sort((a, b) => b[1] - a[1])[0][0]
   }, [dayTxs])
 
-  // Vacation overlap
+  // Vacation overlap (manual periods — blue background)
   const vacs  = vacations.filter(v => dateStr >= v.from && dateStr <= v.to)
   const isVac = vacs.length > 0
-  const vacIcon = isVac ? vacEmoji(vacs[0]?.name) : null
+
+  // Vacation from transactions: days with "Weekend e Vacanze" spending
+  const vacTxs = useMemo(() =>
+    allDayTxs.filter(t => t.cat1 === 'Weekend e Vacanze')
+  , [allDayTxs])
+  const isVacTx = vacTxs.length > 0
+
+  // Vacation emoji: from city of vacation transactions, fallback to vacation name
+  const vacIcon = useMemo(() => {
+    if (isVacTx) {
+      const city = vacTxs.find(t => t.city && t.city !== 'null')?.city
+      return cityToVacEmoji(city || '')
+    }
+    if (isVac) return cityToVacEmoji(vacs[0]?.name || '')
+    return null
+  }, [isVacTx, isVac, vacTxs, vacs])
 
   // Boat trip
   const isBoat = boatDaySet.has(dateStr)
 
-  // Quick-filter dimming
+  // Quick-filter dimming: vacation = any vacation-related day (manual OR tx-based)
+  const isAnyVac = isVac || isVacTx
   const isDimmed = (quickFilter === 'boat' && !isBoat) ||
-                   (quickFilter === 'vacation' && !isVac)
+                   (quickFilter === 'vacation' && !isAnyVac)
 
   const today = new Date().toISOString().slice(0,10) === dateStr
 
@@ -81,11 +102,11 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
     <td
       className={[
         'cal-cell',
-        isWeekend ? 'weekend' : '',
-        isVac     ? 'vacation' : '',
-        today     ? 'today' : '',
-        hasData   ? 'has-data' : '',
-        isDimmed  ? 'dimmed' : '',
+        isWeekend  ? 'weekend' : '',
+        isAnyVac   ? 'vacation' : '',
+        today      ? 'today' : '',
+        hasData    ? 'has-data' : '',
+        isDimmed   ? 'dimmed' : '',
       ].filter(Boolean).join(' ')}
       onClick={() => onClick(dateStr, dayTxs, vacs)}
       title={[...vacs.map(v => v.name), isBoat ? '🚤 Uscita in barca' : ''].filter(Boolean).join(' · ')}
@@ -99,7 +120,6 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
       )}
       {hasData && (
         <div className={`cal-day-total ${total >= 0 ? 'positive' : 'negative'}`}>
-          {total >= 0 ? '+' : ''}{total < 0 ? '-' : ''}
           {Math.abs(Math.round(total)).toLocaleString('it-IT')}
         </div>
       )}

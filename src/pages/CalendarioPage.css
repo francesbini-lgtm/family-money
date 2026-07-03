@@ -126,8 +126,7 @@
 }
 
 .cal-cell.dimmed {
-  opacity: 0.18;
-  pointer-events: none;
+  opacity: 0.22;
 }
 
 /* Legend additions */
