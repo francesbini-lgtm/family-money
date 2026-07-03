@@ -10,15 +10,11 @@ import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
 // aiRules.js removed — AI naming rules now stored in Firestore via appPrefs
 import './TransactionsPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
-function fmtDate(dateStr) {
-  const m = (dateStr||'').match(/\d{4}-(\d{2})-(\d{2})/)
-  if (!m) return dateStr || '—'
-  return `${parseInt(m[2])} ${MONTHS[parseInt(m[1])-1]}`
-}
+// fmtDate imported from utils/format
 
 // ── KPI bar ───────────────────────────────────────────────
 const SALDO_PIN = '182218'
@@ -3213,7 +3209,7 @@ export default function TransactionsPage() {
                     checked={filtered.length>0 && filtered.every(t=>selected.has(t.txId))}
                     onChange={e=>setSelected(e.target.checked?new Set(filtered.map(t=>t.txId)):new Set())}/>
                 </th>
-                <th className="tx-th" style={{width:64,cursor:'pointer'}} onClick={()=>toggleSort('txId')}>Cod. {sortIcon('txId')}</th>
+                <th className="tx-th" style={{width:50,cursor:'pointer'}} onClick={()=>toggleSort('txId')}>Cod. {sortIcon('txId')}</th>
                 {(colOrder||DEFAULT_ORDER).filter(id=>visibleCols.has(id)||ALL_COLUMNS.find(c=>c.id===id)?.alwaysOn).map(id=>{
                   const filterBtn = (colId) => (
                     <button onClick={e=>openColFilter(colId,e)} style={{
@@ -3257,9 +3253,8 @@ export default function TransactionsPage() {
           </table>
         )}
         {filtered.some(t => t._compensatedAmt > 0) && (
-          <div style={{fontSize:11,color:'var(--gold)',padding:'8px 14px',background:'rgba(200,160,0,.05)',borderTop:'1px solid var(--border)',textAlign:'right',cursor:'pointer'}}
-            onClick={()=>window.location.hash='#/satispay'}>
-            * Importo rettificato — spesa compensata da entrata Satispay. Clicca per dettaglio →
+          <div style={{fontSize:11,color:'var(--gold)',padding:'8px 14px',background:'rgba(200,160,0,.05)',borderTop:'1px solid var(--border)',textAlign:'right'}}>
+            * Importo rettificato — transazione compensata (clicca sull'importo per dettaglio)
           </div>
         )}
       </div>

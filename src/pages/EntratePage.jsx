@@ -38,9 +38,11 @@ function RalEditModal({ person, data, onSave, onClose }) {
   const [rows, setRows] = useState(() =>
     [...(data[person] || [])].sort((a, b) => a.year - b.year)
   )
-  const [newYear, setNewYear] = useState('')
-  const [newRal, setNewRal]   = useState('')
-  const [newNetto, setNewNetto] = useState('')
+  const [newYear, setNewYear]             = useState('')
+  const [newRal, setNewRal]               = useState('')
+  const [newNetto, setNewNetto]           = useState('')
+  const [newBonusLordo, setNewBonusLordo] = useState('')
+  const [newBonusNetto, setNewBonusNetto] = useState('')
 
   function updateRow(i, field, val) {
     setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: parseFloat(val)||0 } : r))
@@ -52,8 +54,8 @@ function RalEditModal({ person, data, onSave, onClose }) {
     const yr = parseInt(newYear)
     if (!yr || yr < 2000 || yr > 2040) return
     if (rows.find(r => r.year === yr)) return
-    setRows(prev => [...prev, { year: yr, ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0 }].sort((a,b)=>a.year-b.year))
-    setNewYear(''); setNewRal(''); setNewNetto('')
+    setRows(prev => [...prev, { year: yr, ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0, bonusLordo: parseFloat(newBonusLordo)||0, bonusNetto: parseFloat(newBonusNetto)||0 }].sort((a,b)=>a.year-b.year))
+    setNewYear(''); setNewRal(''); setNewNetto(''); setNewBonusLordo(''); setNewBonusNetto('')
   }
   function handleSave() {
     onSave({ ...data, [person]: rows })
@@ -70,7 +72,9 @@ function RalEditModal({ person, data, onSave, onClose }) {
             <tr>
               <th>Anno</th>
               <th>RAL (€)</th>
+              <th style={{color:'var(--gold,#b8942a)'}}>+ Lordo Bonus (€)</th>
               <th>Netto annuo (€)</th>
+              <th style={{color:'var(--gold,#b8942a)'}}>+ Netto Bonus (€)</th>
               <th></th>
             </tr>
           </thead>
@@ -83,8 +87,18 @@ function RalEditModal({ person, data, onSave, onClose }) {
                     onChange={e => updateRow(i, 'ral', e.target.value)} />
                 </td>
                 <td>
+                  <input className="en-ral-input" type="number" value={r.bonusLordo||0}
+                    onChange={e => updateRow(i, 'bonusLordo', e.target.value)}
+                    style={{borderColor:'rgba(184,148,42,.4)'}} />
+                </td>
+                <td>
                   <input className="en-ral-input" type="number" value={r.netto}
                     onChange={e => updateRow(i, 'netto', e.target.value)} />
+                </td>
+                <td>
+                  <input className="en-ral-input" type="number" value={r.bonusNetto||0}
+                    onChange={e => updateRow(i, 'bonusNetto', e.target.value)}
+                    style={{borderColor:'rgba(184,148,42,.4)'}} />
                 </td>
                 <td>
                   <button className="en-ral-del" onClick={() => deleteRow(i)} title="Elimina">✕</button>
@@ -101,8 +115,18 @@ function RalEditModal({ person, data, onSave, onClose }) {
                   onChange={e => setNewRal(e.target.value)} />
               </td>
               <td>
+                <input className="en-ral-input" type="number" placeholder="Bonus lordo" value={newBonusLordo}
+                  onChange={e => setNewBonusLordo(e.target.value)}
+                  style={{borderColor:'rgba(184,148,42,.4)'}} />
+              </td>
+              <td>
                 <input className="en-ral-input" type="number" placeholder="Netto" value={newNetto}
                   onChange={e => setNewNetto(e.target.value)} />
+              </td>
+              <td>
+                <input className="en-ral-input" type="number" placeholder="Bonus netto" value={newBonusNetto}
+                  onChange={e => setNewBonusNetto(e.target.value)}
+                  style={{borderColor:'rgba(184,148,42,.4)'}} />
               </td>
               <td>
                 <button className="en-ral-add-btn" onClick={addRow} disabled={!newYear}>+</button>
@@ -291,7 +315,8 @@ export default function EntratePage() {
 
   // RAL / Netto chart state — read directly from appPrefs (reactive via Zustand)
   const ralData = appPrefs?.ralData || DEFAULT_RAL_DATA
-  const [ralView, setRalView]         = useState('netto') // 'ral' | 'netto'
+  const [ralView, setRalView]             = useState('netto') // 'ral' | 'netto'
+  const [ralWithBonus, setRalWithBonus]   = useState(false)
   const [ralEditPerson, setRalEditPerson] = useState(null) // 'Fra' | 'Sofi' | null
 
   function saveRalData(newData) { setAppPref('ralData', newData) }
@@ -477,16 +502,28 @@ export default function EntratePage() {
             const fraRows  = ralData.Fra  || []
             const sofiRows = ralData.Sofi || []
             const ralYears = [...new Set([...fraRows.map(d=>d.year), ...sofiRows.map(d=>d.year)])].sort((a,b)=>a-b)
-            const ralChartData = ralYears.map(yr => ({
-              year: String(yr),
-              'Fra RAL':   fraRows.find(d=>d.year===yr)?.ral,
-              'Fra Netto': fraRows.find(d=>d.year===yr)?.netto,
-              'Sofi RAL':  sofiRows.find(d=>d.year===yr)?.ral,
-              'Sofi Netto':sofiRows.find(d=>d.year===yr)?.netto,
-            }))
+            const ralChartData = ralYears.map(yr => {
+              const frR = fraRows.find(d=>d.year===yr)
+              const soR = sofiRows.find(d=>d.year===yr)
+              return {
+                year: String(yr),
+                'Fra RAL':            frR?.ral,
+                'Fra RAL+Bonus':      frR ? (frR.ral||0) + (frR.bonusLordo||0) : undefined,
+                'Fra Netto':          frR?.netto,
+                'Fra Netto+Bonus':    frR ? (frR.netto||0) + (frR.bonusNetto||0) : undefined,
+                'Sofi RAL':           soR?.ral,
+                'Sofi RAL+Bonus':     soR ? (soR.ral||0) + (soR.bonusLordo||0) : undefined,
+                'Sofi Netto':         soR?.netto,
+                'Sofi Netto+Bonus':   soR ? (soR.netto||0) + (soR.bonusNetto||0) : undefined,
+              }
+            })
             const ralLines = ralView === 'ral'
-              ? [{ key:'Fra RAL',   color:COLORS.Fra,  dash:'5 3' }, { key:'Sofi RAL',   color:COLORS.Sofi, dash:'5 3' }]
-              : [{ key:'Fra Netto', color:COLORS.Fra,  dash:'0'   }, { key:'Sofi Netto', color:COLORS.Sofi, dash:'0'   }]
+              ? (ralWithBonus
+                ? [{ key:'Fra RAL+Bonus',   color:COLORS.Fra,  dash:'5 3' }, { key:'Sofi RAL+Bonus',   color:COLORS.Sofi, dash:'5 3' }]
+                : [{ key:'Fra RAL',         color:COLORS.Fra,  dash:'5 3' }, { key:'Sofi RAL',         color:COLORS.Sofi, dash:'5 3' }])
+              : (ralWithBonus
+                ? [{ key:'Fra Netto+Bonus', color:COLORS.Fra,  dash:'0'   }, { key:'Sofi Netto+Bonus', color:COLORS.Sofi, dash:'0'   }]
+                : [{ key:'Fra Netto',       color:COLORS.Fra,  dash:'0'   }, { key:'Sofi Netto',       color:COLORS.Sofi, dash:'0'   }])
             return (
               <div className="en-charts">
                 {/* Chart 1 — Entrate per fonte */}
@@ -516,19 +553,30 @@ export default function EntratePage() {
 
                 {/* Chart 2 — Stipendio RAL vs Netto */}
                 <div className="card en-chart-card" style={{position:'relative'}}>
-                  {/* Top-right toggles — radio: RAL | Netto */}
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  {/* Top-right toggles — radio: RAL | Netto + con bonus */}
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
                     <span className="en-chart-title">Stipendio (RAL vs Netto)</span>
-                    <div style={{display:'flex',background:'var(--surface2,rgba(0,0,0,.04))',borderRadius:7,padding:2,border:'1px solid var(--border)',gap:0}}>
-                      {[['ral','RAL'],['netto','Netto']].map(([v,label]) => (
-                        <button key={v} onClick={() => setRalView(v)}
-                          style={{
-                            padding:'3px 12px',border:'none',borderRadius:5,cursor:'pointer',
-                            fontSize:11,fontWeight:700,transition:'all .15s',
-                            background: ralView===v ? 'var(--accent,#b8942a)' : 'transparent',
-                            color: ralView===v ? '#fff' : 'var(--text3)',
-                          }}>{label}</button>
-                      ))}
+                    <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      {/* con bonus toggle */}
+                      <button onClick={() => setRalWithBonus(b => !b)}
+                        style={{
+                          padding:'3px 10px',border:`1px solid ${ralWithBonus?'var(--gold,#b8942a)':'var(--border)'}`,
+                          borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,transition:'all .15s',
+                          background: ralWithBonus ? 'rgba(184,148,42,.15)' : 'transparent',
+                          color: ralWithBonus ? 'var(--gold,#b8942a)' : 'var(--text3)',
+                        }}>🎯 con bonus</button>
+                      {/* RAL | Netto segmented */}
+                      <div style={{display:'flex',background:'var(--surface2,rgba(0,0,0,.04))',borderRadius:7,padding:2,border:'1px solid var(--border)',gap:0}}>
+                        {[['ral','RAL'],['netto','Netto']].map(([v,label]) => (
+                          <button key={v} onClick={() => setRalView(v)}
+                            style={{
+                              padding:'3px 12px',border:'none',borderRadius:5,cursor:'pointer',
+                              fontSize:11,fontWeight:700,transition:'all .15s',
+                              background: ralView===v ? 'var(--accent,#b8942a)' : 'transparent',
+                              color: ralView===v ? '#fff' : 'var(--text3)',
+                            }}>{label}</button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <ResponsiveContainer width="100%" height={200}>

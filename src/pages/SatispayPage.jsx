@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { CATS, getMergedCats } from '../data/categories'
 import { Plus, Trash2, Edit2, Check, X, Link } from 'lucide-react'
@@ -217,7 +217,7 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
                     const isFull = absAmt <= availableForComp
                     return (
                       <tr key={t.txId} onClick={()=>setSelected(t)} style={{borderBottom:'1px solid var(--border)',cursor:'pointer',background:isSel?'var(--accent-l)':'transparent'}}>
-                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{(t._effDate||(t._effDate||t.date||'')).slice(5).replace('-','/')}</td>
+                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                         <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</td>
                         <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:t.amount>0?'var(--green)':'var(--red)'}}>
                           {t.amount>0?'+':'−'}€ {absAmt.toLocaleString('it-IT',{minimumFractionDigits:2})}
@@ -2034,7 +2034,7 @@ function SatiTxDetailModal({ tx, onClose }) {
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
           {[
-            ['Data', effDate ? effDate.slice(0,10).split('-').reverse().join('/') : '—'],
+            ['Data', effDate ? fmtDate(effDate) : '—'],
             ['Conto', tx.account || '—'],
             ['Categoria attuale', tx.cat1 ? `${tx.cat1}${tx.cat2 ? ' › '+tx.cat2 : ''}` : '—'],
             ['Importo originale', `−€ ${fmtIT(Math.abs(tx.amount),2)}`],
@@ -2847,8 +2847,8 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   )
 }
 
-// ── date formatter ────────────────────────────────────────
-function fmtDate(d) {
+// ── date formatter (legacy dd/MM/yyyy — kept for compatibility) ──
+function fmtDateLong(d) {
   const p = (d||'').split('-')
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : d || ''
 }
@@ -3673,7 +3673,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
                   background: i % 2 === 0 ? 'transparent' : 'var(--surface2)',
                   borderBottom:'1px solid var(--border2)'}}>
                   <td style={{padding:'6px 10px',fontSize:11,fontFamily:'var(--font-mono)',
-                    color:'var(--text3)',whiteSpace:'nowrap'}}>{t._effDate||t.date}</td>
+                    color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                   <td style={{padding:'6px 10px',maxWidth:240}}>
                     <div style={{fontSize:12,fontWeight:600,color:'var(--text)',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -3910,7 +3910,7 @@ function NonAbbinateModal({ onClose }) {
                   background: i % 2 === 0 ? 'transparent' : 'var(--surface2)',
                   borderBottom:'1px solid var(--border2)'}}>
                   <td style={{padding:'6px 10px',fontSize:11,fontFamily:'var(--font-mono)',
-                    color:'var(--text3)',whiteSpace:'nowrap'}}>{t._effDate||t.date}</td>
+                    color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                   <td style={{padding:'6px 10px',maxWidth:220}}>
                     <div style={{fontSize:12,fontWeight:600,color:'var(--text)',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>

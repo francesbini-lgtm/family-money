@@ -29,3 +29,14 @@ export function fmtITSigned(n, decimals = 0) {
 export function fmtEurSigned(n, decimals = 2) {
   return ((Number(n) || 0) < 0 ? '-' : '') + fmtEur(n, decimals)
 }
+
+// ── Date formatter ────────────────────────────────────────
+// DD MMM YY  e.g. "18 Jan 26"
+const _MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+export function fmtDate(dateStr) {
+  if (!dateStr) return ''
+  const s = String(dateStr).slice(0, 10)
+  const [yr, mo, dy] = s.split('-')
+  if (!yr || !mo || !dy) return s
+  return `${parseInt(dy, 10)} ${_MONTHS_SHORT[parseInt(mo, 10) - 1] || ''} ${yr.slice(2)}`
+}
