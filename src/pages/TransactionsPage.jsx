@@ -2467,7 +2467,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           checked={selected?.has(tx.txId)||false}
           onChange={e=>{const next=new Set(selected||[]);e.target.checked?next.add(tx.txId):next.delete(tx.txId);setSelected?.(next)}}/>
       </td>
-      <td style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
+      <td className="tx-cod-cell" style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
         <button
           onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_nonRecurring:!tx._nonRecurring})}}
           title={tx._nonRecurring?'Non ricorrente — clicca per rimuovere':'Segna come non ricorrente'}

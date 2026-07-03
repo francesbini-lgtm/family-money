@@ -166,6 +166,9 @@
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+/* Tight gap between COD and DATA columns */
+.tx-row .tx-cod-cell { padding: 2px 1px !important; }
+.tx-row .tx-date     { padding-left: 2px !important; }
 
 .tx-desc-cell { max-width: 320px; }
 
