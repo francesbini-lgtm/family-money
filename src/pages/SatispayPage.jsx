@@ -3945,7 +3945,9 @@ function NonAbbinateModal({ onClose }) {
 
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div>
-            <div style={{fontSize:16,fontWeight:800}}>⚠️ Accantonamenti non abbinati ({rows.length})</div>
+            <div style={{fontSize:16,fontWeight:800}}>
+              ⚠️ Accantonamenti non abbinati ({filtered.length}{filtered.length < rows.length ? ` di ${rows.length}` : ''})
+            </div>
             <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
               Uscite Satispay (−) non collegate a nessun fondo di accantonamento
             </div>
@@ -4129,6 +4131,7 @@ export default function SatispayPage() {
   })
   const accantonamentiNonAbbinati = satiUscite.filter(t => {
     if (isAltroSatiVarie(t)) return false
+    if (t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca') return false
     return !allLinkedToFund.has(t.txId)
   })
 
