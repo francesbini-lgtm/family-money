@@ -3654,7 +3654,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
           <table style={{borderCollapse:'collapse',width:'100%'}}>
             <thead>
               <tr style={{background:'var(--surface2)',position:'sticky',top:0,zIndex:1}}>
-                {['Data','Descrizione','Importo','Nota','Azioni'].map(h => (
+                {['Data','Descrizione','Importo','Azioni','Nota'].map(h => (
                   <th key={h} style={{padding:'6px 10px',fontSize:10,fontWeight:700,textAlign:h==='Importo'?'right':'left',
                     textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',
                     borderBottom:'1px solid var(--border)'}}>{h}</th>
@@ -3690,9 +3690,6 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
                     textAlign:'right',color:'var(--green)',whiteSpace:'nowrap'}}>
                     + € {fmtIT(t.amount,2)}
                   </td>
-                  <td style={{padding:'6px 10px',minWidth:140,maxWidth:200}}>
-                    <SatiNoteCell txId={t.txId} />
-                  </td>
                   <td style={{padding:'6px 10px'}}>
                     <button onClick={()=>setAbbinaTx(abbinaTx?.txId===t.txId?null:t)}
                       style={{fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:14,
@@ -3701,6 +3698,9 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
                         whiteSpace:'nowrap'}}>
                       🔗 Abbina
                     </button>
+                  </td>
+                  <td style={{padding:'6px 10px',minWidth:140,maxWidth:200}}>
+                    <SatiNoteCell txId={t.txId} />
                   </td>
                 </tr>
               ))}

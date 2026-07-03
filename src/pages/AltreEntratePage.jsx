@@ -37,6 +37,69 @@ function saveAeNotes(data) { useStore.getState()?.setAppPref?.('aeNotes', data) 
 function getAeCats() { return useStore.getState()?.appPrefs?.aeCats || {} }
 function saveAeCats(data) { useStore.getState()?.setAppPref?.('aeCats', data) }
 
+// ── Extract causale from raw bank description ──────────────
+function extractCausale(description) {
+  if (!description) return ''
+  // Common Italian bank description patterns
+  const patterns = [
+    /CAUSALE[:\s]+(.+?)(?:\s+(?:CRO|ABI|CAB|TRN|IBAN|BIC|SWIFT|DATA\s+VALUTA)[\s:/].+)?$/i,
+    /(?:TIT|TITOLO)[:\s]+(.+?)(?:\s+CRO.+)?$/i,
+    /MOTIVO[:\s]+(.+?)$/i,
+    /DESCRIZIONE[:\s]+(.+?)(?:\s+CRO.+)?$/i,
+  ]
+  for (const pat of patterns) {
+    const m = description.match(pat)
+    if (m) {
+      const val = m[1].trim().replace(/\s+/g, ' ')
+      if (val.length > 2) return val.slice(0, 80)
+    }
+  }
+  return ''
+}
+
+// ── OrigDescDot — pallino per vedere descrizione originale ─
+function OrigDescDot({ description }) {
+  const [open, setOpen] = useState(false)
+  if (!description) return null
+  return (
+    <span style={{ position: 'relative', display: 'inline-block', verticalAlign: 'middle', marginLeft: 5 }}>
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        title="Vedi descrizione originale"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
+          background: 'var(--text3)', flexShrink: 0,
+        }}/>
+      </button>
+      {open && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{ position: 'fixed', zIndex: 300, background: 'var(--surface)',
+            border: '1px solid var(--border)', borderRadius: 10,
+            boxShadow: '0 8px 32px rgba(0,0,0,.18)',
+            padding: '12px 14px', width: 320, maxWidth: '90vw' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)',
+            letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 6 }}>
+            Descrizione originale
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5,
+            wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+            {description}
+          </div>
+          <button onClick={() => setOpen(false)}
+            style={{ marginTop: 10, fontSize: 11, padding: '3px 10px', borderRadius: 6,
+              border: '1px solid var(--border)', background: 'var(--surface2)',
+              color: 'var(--text3)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
+            Chiudi
+          </button>
+        </div>
+      )}
+    </span>
+  )
+}
+
 const AE_CATS = ['Regalo', 'Prestito', 'Costo compensato', 'Altro']
 const AE_CAT_COLORS = {
   'Regalo':           '#9a4ab8',
@@ -590,7 +653,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Descrizione','Cat L2','Categoria','Compensa costo','Importo','Note',''].map(h=>(
+              {['Data','Descrizione','Causale','Cat L2','Categoria','Compensa costo','Importo','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
@@ -602,11 +665,26 @@ export default function AltreEntratePage() {
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(d=>(d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(0,4)}`:d))(e.date||'')}</td>
                     <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
-                      <div style={{fontSize:13,fontWeight:500}}>{e.descAI||e.desc||e.description?.slice(0,40)}</div>
+                      <div style={{fontSize:13,fontWeight:500,display:'flex',alignItems:'center'}}>
+                        {e.descAI||e.desc||e.description?.slice(0,40)}
+                        <OrigDescDot description={e.description}/>
+                      </div>
                       <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:2}}>
                         {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
                         {e.excluded&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4}}>Esclusa</span>}
                       </div>
+                    </td>
+                    <td style={{padding:'9px 14px',maxWidth:180}}>
+                      {(() => {
+                        const causale = extractCausale(e.description)
+                        return causale ? (
+                          <span style={{fontSize:11,color:'var(--text2)',overflow:'hidden',
+                            textOverflow:'ellipsis',display:'block',whiteSpace:'nowrap'}}
+                            title={causale}>
+                            {causale}
+                          </span>
+                        ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>
+                      })()}
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       {e.cat2 ? (

@@ -1041,7 +1041,7 @@ export default function PaypalPage() {
 
   const barData = useMemo(() => {
     return last6.map(ym => {
-      const row = { month: ym.slice(5) }
+      const row = { month: ym.slice(5), _zero: 0 }
       barCats.forEach(c => { row[c] = 0 })
       paypalExpenses
         .filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
@@ -1435,24 +1435,24 @@ export default function PaypalPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="month" tick={{ fontSize:11 }} axisLine />
                 <YAxis tick={{ fontSize:11 }} axisLine tickFormatter={v => `€${fmtIT(v)}`} />
-                {barCats.map((c, idx) => (
-                  <Bar key={c} dataKey={c} stackId="a" fill={CATS[c]?.color||'#aaa'} isAnimationActive={false}>
-                    {idx === barCats.length - 1 && (
-                      <LabelList
-                        content={({ x, y, width, index }) => {
-                          const total = barCats.reduce((s, cat) => s + (barData[index]?.[cat] || 0), 0)
-                          if (!total) return null
-                          return (
-                            <text x={x + width / 2} y={y - 4} textAnchor="middle"
-                              fontSize={10} fontWeight={700} fill="var(--text2)">
-                              €{fmtIT(total)}
-                            </text>
-                          )
-                        }}
-                      />
-                    )}
-                  </Bar>
+                {barCats.map((c) => (
+                  <Bar key={c} dataKey={c} stackId="a" fill={CATS[c]?.color||'#aaa'} isAnimationActive={false} />
                 ))}
+                {/* Transparent sentinel bar — sits at top of every stack, fires LabelList for all months */}
+                <Bar key="_zero" dataKey="_zero" stackId="a" fill="transparent" stroke="none" isAnimationActive={false}>
+                  <LabelList
+                    content={({ x, y, width, index }) => {
+                      const total = barCats.reduce((s, cat) => s + (barData[index]?.[cat] || 0), 0)
+                      if (!total) return null
+                      return (
+                        <text x={x + width / 2} y={y - 4} textAnchor="middle"
+                          fontSize={10} fontWeight={700} fill="var(--text2)">
+                          €{fmtIT(total)}
+                        </text>
+                      )
+                    }}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
