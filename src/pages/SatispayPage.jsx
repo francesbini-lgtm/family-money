@@ -548,9 +548,11 @@ function AbbinaModal({ pot, ym, currentLinked, onClose, onLink, allPots, onLinkO
             color: deltaOk ? 'var(--green)' : delta > 0 ? '#f59e0b' : 'var(--red)'}}>
             {deltaOk && Math.abs(delta) < 0.01
               ? '✅ Delta = 0'
-              : deltaOk && delta > 0
-                ? `✅ Delta coperto da ${selectedOtherPot?.name}`
-                : `Delta ${delta > 0 ? '+' : ''}€ ${fmtIT(delta,2)}`}
+              : deltaOk && delta > 0 && deltaMatchesOther
+                ? `✅ Delta coperto da ${selectedOtherPot.name}`
+                : deltaOk && delta > 0
+                  ? `+€ ${fmtIT(delta,2)} eccedente`
+                  : `Delta ${delta > 0 ? '+' : ''}€ ${fmtIT(delta,2)}`}
           </div>
         </div>
 
