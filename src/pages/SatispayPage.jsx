@@ -2179,8 +2179,8 @@ function SatiBarTooltip({ active, payload, label }) {
   if (!hasTx) return null
   return (
     <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,
-      padding:'10px 14px',fontSize:11,maxWidth:290,boxShadow:'0 4px 20px rgba(0,0,0,.15)',
-      lineHeight:1.5,pointerEvents:'none'}}>
+      padding:'10px 14px',fontSize:11,maxWidth:290,maxHeight:240,overflowY:'auto',
+      boxShadow:'0 4px 20px rgba(0,0,0,.15)',lineHeight:1.5,pointerEvents:'none'}}>
       <div style={{fontWeight:700,marginBottom:8,color:'var(--text)',fontSize:12}}>{label}</div>
       {d.totalTxs?.length > 0 && (
         <>
@@ -2696,11 +2696,12 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
+                <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
+                  wrapperStyle={{paddingBottom:6}}
+                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
                 <Tooltip content={<SatiBarTooltip />} cursor={{fill:'var(--surface2)'}}/>
                 <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti non compensati"/>
                 <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati"/>
-                <Legend iconType="circle" iconSize={8}
-                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
