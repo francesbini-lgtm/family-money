@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { Plus, Trash2, CheckCircle, AlertCircle, XCircle, Search } from 'lucide-react'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 
 const NANNY_RECON_KEY = 'nannyRecon'
 const COLF_RECON_KEY  = 'colfRecon'
@@ -184,7 +184,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
                   const isSelected = selected?.txId === t.txId
                   return (
                     <tr key={t.txId} style={{background:isSelected?'var(--accent-l,#f0f4ff)':'',cursor:'pointer'}} onClick={()=>setSelected(isSelected?null:t)}>
-                      <td style={{...tdStyle,fontFamily:'var(--font-mono)',color:'var(--text3)'}}>{(t._effDate||(t._effDate||t.date||'')).slice(5).replace('-','/')}</td>
+                      <td style={{...tdStyle,fontFamily:'var(--font-mono)',color:'var(--text3)'}}>{fmtDate(t._effDate||t.date)}</td>
                       <td style={tdStyle}>{t.descAI||(t.description||'').slice(0,38)}</td>
                       <td style={{...tdStyle,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>€ {fmtIT(Math.abs(t.amount),2)}</td>
                       <td style={{...tdStyle,textAlign:'center'}}>

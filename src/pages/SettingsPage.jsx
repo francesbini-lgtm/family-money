@@ -8,7 +8,7 @@ import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { createInvite } from '../services/invite'
 import { exportTransactionsCSV, exportSummaryCSV } from '../services/export'
 import { Plus, Trash2, LogOut, Download, Copy, UserPlus, Check, Pencil } from 'lucide-react'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
 import { saveTotpSecret, deleteTotpSecret } from '../services/firestore'
 
@@ -1139,7 +1139,7 @@ function ExcludedTab() {
             <tbody>
               {excluded.map(t=>(
                 <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',opacity:.7}}>
-                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{(t._effDate||(t._effDate||t.date||'')).slice(5).replace('-','/')}</td>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{fmtDate(t._effDate||t.date)}</td>
                   <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,45)}</td>
                   <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',color:'var(--text3)'}}>€ {fmtIT(Math.abs(t.amount), 2)}</td>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{t.cat1||'—'}</td>

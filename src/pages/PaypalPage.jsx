@@ -4,7 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 import { useStore } from '../store/useStore'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
 import { showToast } from '../services/notifications'
@@ -20,7 +20,7 @@ const isPayPal = t => {
   return haystack.includes('paypal') || haystack.includes('pay pal')
 }
 
-function fmtDate(d) {
+function fmtDateLong(d) {
   if (!d) return '—'
   const [y, m, day] = d.split('-')
   return `${day}/${m}/${y}`
@@ -853,7 +853,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, transactions, onCo
                     <td style={{padding:'6px 8px',fontWeight:600,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                       {imp.merchant || '—'}
                     </td>
-                    <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>{imp.date?.slice(0,10)}</td>
+                    <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(imp.date)}</td>
                     <td style={{padding:'6px 8px',textAlign:'right',color:'var(--red)',fontWeight:700,whiteSpace:'nowrap'}}>
                       −€{Math.abs(imp.amount).toFixed(2)}
                     </td>
@@ -861,7 +861,7 @@ function AutoAbbinaModal({ pairs, updatedImports, customCats, transactions, onCo
                       {tx.merchant || tx.descAI || tx.description?.slice(0,28) || '—'}
                     </td>
                     <td style={{padding:'6px 8px',color:'var(--text3)',whiteSpace:'nowrap'}}>
-                      {(tx._effDate||tx.date||'').slice(0,10)}
+                      {fmtDate(tx._effDate||tx.date)}
                     </td>
                     {/* L1 */}
                     <td style={{padding:'6px 4px'}}>

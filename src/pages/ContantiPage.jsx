@@ -6,7 +6,7 @@ import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Plus, Trash2, Wallet, Link2, User } from 'lucide-react'
 import './ContantiPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 
 // ── ATM Meta storage (Firestore via appPrefs) ─────────────
 function getAtmMeta() { return useStore.getState()?.appPrefs?.atmMeta || {} }
@@ -921,8 +921,7 @@ export default function ContantiPage() {
             {atmTxsAll.length === 0
               ? <div style={{textAlign:'center',padding:24,color:'var(--text3)',fontSize:13}}>Nessun prelievo ATM trovato</div>
               : atmTxsAll.slice(0,40).map(t => {
-                  const d = (t._effDate||t.date||'').slice(0,10)
-                  const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
+                  const disp = fmtDate(t._effDate||t.date)
                   const lkd  = Math.round(linkedAmt(t)*100)/100
                   const txAmt= Math.abs(t.amount)
                   const pct  = txAmt>0?Math.round(lkd/txAmt*100):0
@@ -982,8 +981,7 @@ export default function ContantiPage() {
               style={{width:'100%',padding:'9px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
               <option value="">— Nessuno —</option>
               {atmTxsAll.slice(0,30).map(t=>{
-                const d = (t._effDate||t.date||'').slice(0,10)
-                const disp = d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}`:d
+                const disp = fmtDate(t._effDate||t.date)
                 return <option key={t.txId} value={t.txId}>{disp} — € {fmtIT(Math.abs(t.amount),2)}</option>
               })}
             </select>

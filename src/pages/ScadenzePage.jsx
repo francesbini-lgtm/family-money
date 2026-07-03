@@ -4,7 +4,7 @@ import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { Plus, Trash2, CheckCircle, Circle, Bell } from 'lucide-react'
 import { requestNotificationPermission, scheduleScadenzeNotifications } from '../services/notifications'
 import './ScadenzePage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 
 const CATS_SCD = ['Mutuo/Prestito','Assicurazione','Abbonamento','Tasse','Auto','Utenze','Altro']
 
@@ -25,7 +25,7 @@ function ScadenzaRow({ s, onToggle, onDelete }) {
     daysLeft < 0   ? `Scaduta ${Math.abs(daysLeft)}gg fa` :
     daysLeft === 0  ? 'Scade oggi' :
     daysLeft <= 30  ? `Tra ${daysLeft} giorni` :
-    `${s.data.slice(5).replace('-','/')}`
+    `${fmtDate(s.data)}`
 
   // Vehicle-derived scadenza: read-only, distinct style
   if (s.isVehicle) {

@@ -6,7 +6,7 @@ import {
   Tooltip, ResponsiveContainer, LineChart, Line, Legend
 } from 'recharts'
 import './EntratePage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import AltreEntratePage from './AltreEntratePage'
 
 const INCOME_CATS = ['Fra', 'Sofi', 'Fra-Bonus', 'Sofi-Bonus']
@@ -38,11 +38,13 @@ function RalEditModal({ person, data, onSave, onClose }) {
   const [rows, setRows] = useState(() =>
     [...(data[person] || [])].sort((a, b) => a.year - b.year)
   )
-  const [newYear, setNewYear]             = useState('')
-  const [newRal, setNewRal]               = useState('')
-  const [newNetto, setNewNetto]           = useState('')
-  const [newBonusLordo, setNewBonusLordo] = useState('')
-  const [newBonusNetto, setNewBonusNetto] = useState('')
+  const [newYear, setNewYear]               = useState('')
+  const [newRal, setNewRal]                 = useState('')
+  const [newNetto, setNewNetto]             = useState('')
+  const [newBonusLordo, setNewBonusLordo]   = useState('')
+  const [newBonusNetto, setNewBonusNetto]   = useState('')
+  const [newCurrency, setNewCurrency]       = useState('EUR')
+  const [newExchangeRate, setNewExchangeRate] = useState('')
 
   function updateRow(i, field, val) {
     setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: parseFloat(val)||0 } : r))
@@ -54,8 +56,14 @@ function RalEditModal({ person, data, onSave, onClose }) {
     const yr = parseInt(newYear)
     if (!yr || yr < 2000 || yr > 2040) return
     if (rows.find(r => r.year === yr)) return
-    setRows(prev => [...prev, { year: yr, ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0, bonusLordo: parseFloat(newBonusLordo)||0, bonusNetto: parseFloat(newBonusNetto)||0 }].sort((a,b)=>a.year-b.year))
+    setRows(prev => [...prev, {
+      year: yr, ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0,
+      bonusLordo: parseFloat(newBonusLordo)||0, bonusNetto: parseFloat(newBonusNetto)||0,
+      currency: newCurrency || 'EUR',
+      exchangeRate: (newCurrency && newCurrency !== 'EUR') ? (parseFloat(newExchangeRate)||1) : 1,
+    }].sort((a,b)=>a.year-b.year))
     setNewYear(''); setNewRal(''); setNewNetto(''); setNewBonusLordo(''); setNewBonusNetto('')
+    setNewCurrency('EUR'); setNewExchangeRate('')
   }
   function handleSave() {
     onSave({ ...data, [person]: rows })
@@ -71,10 +79,12 @@ function RalEditModal({ person, data, onSave, onClose }) {
           <thead>
             <tr>
               <th>Anno</th>
-              <th>RAL (€)</th>
-              <th style={{color:'var(--gold,#b8942a)'}}>+ Lordo Bonus (€)</th>
-              <th>Netto annuo (€)</th>
-              <th style={{color:'var(--gold,#b8942a)'}}>+ Netto Bonus (€)</th>
+              <th>RAL</th>
+              <th style={{color:'var(--gold,#b8942a)'}}>+ Lordo Bonus</th>
+              <th>Netto annuo</th>
+              <th style={{color:'var(--gold,#b8942a)'}}>+ Netto Bonus</th>
+              <th>Valuta</th>
+              <th title="Tasso di cambio verso EUR (es. 1 CHF = 0,95 EUR)">→ EUR</th>
               <th></th>
             </tr>
           </thead>
@@ -99,6 +109,21 @@ function RalEditModal({ person, data, onSave, onClose }) {
                   <input className="en-ral-input" type="number" value={r.bonusNetto||0}
                     onChange={e => updateRow(i, 'bonusNetto', e.target.value)}
                     style={{borderColor:'rgba(184,148,42,.4)'}} />
+                </td>
+                <td>
+                  <select className="en-ral-input" value={r.currency||'EUR'}
+                    onChange={e => updateRow(i, 'currency', e.target.value)}
+                    style={{fontFamily:'var(--font-sans)',paddingRight:2}}>
+                    {['EUR','CHF','USD','GBP','SEK'].map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <input className="en-ral-input" type="number" step="0.0001"
+                    value={(r.currency||'EUR')==='EUR' ? '' : (r.exchangeRate??'')}
+                    placeholder={(r.currency||'EUR')==='EUR' ? '—' : '0.9500'}
+                    disabled={(r.currency||'EUR')==='EUR'}
+                    onChange={e => updateRow(i, 'exchangeRate', parseFloat(e.target.value)||1)}
+                    style={{opacity:(r.currency||'EUR')==='EUR'?0.35:1}} />
                 </td>
                 <td>
                   <button className="en-ral-del" onClick={() => deleteRow(i)} title="Elimina">✕</button>
@@ -127,6 +152,20 @@ function RalEditModal({ person, data, onSave, onClose }) {
                 <input className="en-ral-input" type="number" placeholder="Bonus netto" value={newBonusNetto}
                   onChange={e => setNewBonusNetto(e.target.value)}
                   style={{borderColor:'rgba(184,148,42,.4)'}} />
+              </td>
+              <td>
+                <select className="en-ral-input" value={newCurrency}
+                  onChange={e => setNewCurrency(e.target.value)}
+                  style={{fontFamily:'var(--font-sans)',paddingRight:2}}>
+                  {['EUR','CHF','USD','GBP','SEK'].map(c => <option key={c}>{c}</option>)}
+                </select>
+              </td>
+              <td>
+                <input className="en-ral-input" type="number" step="0.0001"
+                  value={newExchangeRate} placeholder={newCurrency==='EUR'?'—':'0.9500'}
+                  disabled={newCurrency==='EUR'}
+                  onChange={e => setNewExchangeRate(e.target.value)}
+                  style={{opacity:newCurrency==='EUR'?0.35:1}} />
               </td>
               <td>
                 <button className="en-ral-add-btn" onClick={addRow} disabled={!newYear}>+</button>
@@ -502,19 +541,22 @@ export default function EntratePage() {
             const fraRows  = ralData.Fra  || []
             const sofiRows = ralData.Sofi || []
             const ralYears = [...new Set([...fraRows.map(d=>d.year), ...sofiRows.map(d=>d.year)])].sort((a,b)=>a-b)
+            const hasNonEur = [...fraRows, ...sofiRows].some(r => r.currency && r.currency !== 'EUR')
             const ralChartData = ralYears.map(yr => {
               const frR = fraRows.find(d=>d.year===yr)
               const soR = sofiRows.find(d=>d.year===yr)
+              const frFx = (frR?.currency && frR.currency !== 'EUR') ? (frR.exchangeRate||1) : 1
+              const soFx = (soR?.currency && soR.currency !== 'EUR') ? (soR.exchangeRate||1) : 1
               return {
                 year: String(yr),
-                'Fra RAL':            frR?.ral,
-                'Fra RAL+Bonus':      frR ? (frR.ral||0) + (frR.bonusLordo||0) : undefined,
-                'Fra Netto':          frR?.netto,
-                'Fra Netto+Bonus':    frR ? (frR.netto||0) + (frR.bonusNetto||0) : undefined,
-                'Sofi RAL':           soR?.ral,
-                'Sofi RAL+Bonus':     soR ? (soR.ral||0) + (soR.bonusLordo||0) : undefined,
-                'Sofi Netto':         soR?.netto,
-                'Sofi Netto+Bonus':   soR ? (soR.netto||0) + (soR.bonusNetto||0) : undefined,
+                'Fra RAL':            frR ? frR.ral * frFx : undefined,
+                'Fra RAL+Bonus':      frR ? ((frR.ral||0) + (frR.bonusLordo||0)) * frFx : undefined,
+                'Fra Netto':          frR ? frR.netto * frFx : undefined,
+                'Fra Netto+Bonus':    frR ? ((frR.netto||0) + (frR.bonusNetto||0)) * frFx : undefined,
+                'Sofi RAL':           soR ? soR.ral * soFx : undefined,
+                'Sofi RAL+Bonus':     soR ? ((soR.ral||0) + (soR.bonusLordo||0)) * soFx : undefined,
+                'Sofi Netto':         soR ? soR.netto * soFx : undefined,
+                'Sofi Netto+Bonus':   soR ? ((soR.netto||0) + (soR.bonusNetto||0)) * soFx : undefined,
               }
             })
             const ralLines = ralView === 'ral'
@@ -594,6 +636,12 @@ export default function EntratePage() {
                       ))}
                     </LineChart>
                   </ResponsiveContainer>
+                  {/* FX note */}
+                  {hasNonEur && (
+                    <div style={{fontSize:10,color:'var(--text3)',textAlign:'right',marginTop:2,fontStyle:'italic'}}>
+                      * valori convertiti in EUR al tasso di cambio dell'anno
+                    </div>
+                  )}
                   {/* Bottom-right edit buttons */}
                   <div style={{display:'flex',gap:6,justifyContent:'flex-end',marginTop:6}}>
                     {['Fra','Sofi'].map(p => (
@@ -711,7 +759,7 @@ export default function EntratePage() {
                       {txs.map(t => (
                         <tr key={t.txId} className="en-row">
                           <td style={{fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                            {shortDate(t._effDate||t.date)}
+                            {fmtDate(t._effDate||t.date)}
                           </td>
                           <td>
                             <div style={{fontSize:13,fontWeight:500}}>{t.descAI || t.description}</div>
