@@ -4,7 +4,7 @@ import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { Plus, Trash2, Link, TrendingUp, RefreshCw } from 'lucide-react'
 import './AltreEntratePage.css'
 import { fmtIT } from '../utils/format'
-import { CATS } from '../data/categories'
+import { CATS, getMergedCats } from '../data/categories'
 
 const ENTRY_TYPES = ['Rimborso Costo','Prestito Ricevuto','Trasferimento','Entrata Generica']
 const TYPE_COLORS  = {
@@ -134,6 +134,51 @@ function NoteCell({ entryKey, notes, onSave }) {
       cursor:'text',fontStyle:val?'normal':'italic',display:'block',minWidth:80}}>
       {val || '+ nota'}
     </span>
+  )
+}
+
+// ── AeCat2Cell — editable Cat L2 for bank transactions ────
+function AeCat2Cell({ entry, updateTransaction, customCats }) {
+  const [editing, setEditing] = useState(false)
+  const allCats = useMemo(() => getMergedCats(customCats), [customCats])
+  const cat1 = entry.cat1 || ''
+  const cat2 = entry.cat2 || ''
+  const subs = cat1 ? (allCats[cat1]?.sub || []) : []
+
+  // Manual entries without txId: static badge only
+  if (!entry.txId) {
+    return cat2 ? (
+      <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:600,
+        background:'rgba(100,100,220,.07)',color:'var(--accent)',
+        border:'1px solid rgba(100,100,220,.2)'}}>
+        {cat2}
+      </span>
+    ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>
+  }
+
+  if (editing) return (
+    <select autoFocus value={cat2}
+      onChange={ev => { updateTransaction(entry.txId, { cat2: ev.target.value || null }); setEditing(false) }}
+      onBlur={() => setEditing(false)}
+      style={{padding:'3px 6px',borderRadius:6,border:'1px solid var(--accent)',
+        fontSize:12,background:'var(--surface)',color:'var(--text)',
+        fontFamily:'var(--font-sans)'}}>
+      <option value="">— nessuna —</option>
+      {subs.map(s => <option key={s} value={s}>{s}</option>)}
+    </select>
+  )
+
+  return (
+    <button onClick={() => setEditing(true)} title="Clicca per modificare"
+      style={{
+        padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:600,cursor:'pointer',
+        background: cat2 ? 'rgba(100,100,220,.07)' : 'var(--surface2)',
+        border: cat2 ? '1px solid rgba(100,100,220,.2)' : '1px dashed var(--border)',
+        color: cat2 ? 'var(--accent)' : 'var(--text3)',
+        fontFamily:'var(--font-sans)',
+      }}>
+      {cat2 || '+ L2'}
+    </button>
   )
 }
 
@@ -549,8 +594,10 @@ function SharedCostsSection() {
 // ── Main page ─────────────────────────────────────────────
 export default function AltreEntratePage() {
   const { transactions, rimborsiCosts } = useStore()
-  const appPrefs   = useStore(s => s.appPrefs)
-  const setAppPref = useStore(s => s.setAppPref)
+  const appPrefs          = useStore(s => s.appPrefs)
+  const setAppPref        = useStore(s => s.setAppPref)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats        = useStore(s => s.customCats)
   const [showAdd, setShowAdd] = useState(false)
   // Manual entries + links/notes/cats read directly from appPrefs (reactive via Zustand)
   const entries   = appPrefs?.altreEntrateManual || []
@@ -696,15 +743,7 @@ export default function AltreEntratePage() {
                       })()}
                     </td>
                     <td style={{padding:'9px 14px'}}>
-                      {e.cat2 ? (
-                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:10,fontWeight:600,
-                          background:'rgba(100,100,220,.07)',color:'var(--accent)',
-                          border:'1px solid rgba(100,100,220,.2)'}}>
-                          {e.cat2}
-                        </span>
-                      ) : (
-                        <span style={{color:'var(--text3)',fontSize:11}}>—</span>
-                      )}
+                      <AeCat2Cell entry={e} updateTransaction={updateTransaction} customCats={customCats}/>
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       <AeCatCell entryKey={entryKey} cats={aeCats} onSave={saveCat}/>
@@ -730,7 +769,7 @@ export default function AltreEntratePage() {
                         </div>
                       )}
                     </td>
-                    <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right',fontFamily:'var(--font-mono)'}}>
+                    <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                       +€ {fmtIT(e.amount||0, 2)}
                     </td>
                     <td style={{padding:'9px 14px'}}>
