@@ -34,41 +34,41 @@ const DEFAULT_RAL_DATA = {
 }
 
 // ── RAL edit modal ────────────────────────────────────────
+// Normalize: ensure effectiveDate exists (backward compat with year-only rows)
+function normalizeRalRow(r) {
+  return { ...r, effectiveDate: r.effectiveDate || (r.year ? `${r.year}-01` : '') }
+}
+
 function RalEditModal({ person, data, onSave, onClose }) {
   const [rows, setRows] = useState(() =>
-    [...(data[person] || [])].sort((a, b) => a.year - b.year)
+    [...(data[person] || [])].map(normalizeRalRow)
+      .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
   )
-  const [newYear, setNewYear]               = useState('')
+  const [newDate, setNewDate]               = useState('')
   const [newRal, setNewRal]                 = useState('')
   const [newNetto, setNewNetto]             = useState('')
   const [newBonusLordo, setNewBonusLordo]   = useState('')
   const [newBonusNetto, setNewBonusNetto]   = useState('')
-  const [newCurrency, setNewCurrency]       = useState('EUR')
-  const [newExchangeRate, setNewExchangeRate] = useState('')
 
   function updateRow(i, field, val) {
-    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [field]: parseFloat(val)||0 } : r))
+    setRows(prev => prev.map((r, idx) => idx === i
+      ? { ...r, [field]: field === 'effectiveDate' ? val : (parseFloat(val)||0) }
+      : r
+    ))
   }
-  function deleteRow(i) {
-    setRows(prev => prev.filter((_, idx) => idx !== i))
-  }
+  function deleteRow(i) { setRows(prev => prev.filter((_, idx) => idx !== i)) }
   function addRow() {
-    const yr = parseInt(newYear)
-    if (!yr || yr < 2000 || yr > 2040) return
-    if (rows.find(r => r.year === yr)) return
+    if (!newDate) return
+    if (rows.find(r => r.effectiveDate === newDate)) return
     setRows(prev => [...prev, {
-      year: yr, ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0,
+      effectiveDate: newDate,
+      year: parseInt(newDate.slice(0, 4)),  // keep for chart compat
+      ral: parseFloat(newRal)||0, netto: parseFloat(newNetto)||0,
       bonusLordo: parseFloat(newBonusLordo)||0, bonusNetto: parseFloat(newBonusNetto)||0,
-      currency: newCurrency || 'EUR',
-      exchangeRate: (newCurrency && newCurrency !== 'EUR') ? (parseFloat(newExchangeRate)||1) : 1,
-    }].sort((a,b)=>a.year-b.year))
-    setNewYear(''); setNewRal(''); setNewNetto(''); setNewBonusLordo(''); setNewBonusNetto('')
-    setNewCurrency('EUR'); setNewExchangeRate('')
+    }].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate)))
+    setNewDate(''); setNewRal(''); setNewNetto(''); setNewBonusLordo(''); setNewBonusNetto('')
   }
-  function handleSave() {
-    onSave({ ...data, [person]: rows })
-    onClose()
-  }
+  function handleSave() { onSave({ ...data, [person]: rows }); onClose() }
   const color = COLORS[person] || '#888'
   return (
     <div className="en-ral-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -78,20 +78,23 @@ function RalEditModal({ person, data, onSave, onClose }) {
         <table className="en-ral-table">
           <thead>
             <tr>
-              <th>Anno</th>
+              <th>Data inizio</th>
               <th>RAL</th>
               <th style={{color:'var(--gold,#b8942a)'}}>+ Lordo Bonus</th>
               <th>Netto annuo</th>
               <th style={{color:'var(--gold,#b8942a)'}}>+ Netto Bonus</th>
-              <th>Valuta</th>
-              <th title="Tasso di cambio verso EUR (es. 1 CHF = 0,95 EUR)">→ EUR</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={r.year}>
-                <td><strong>{r.year}</strong></td>
+              <tr key={r.effectiveDate}>
+                <td>
+                  <input className="en-ral-input" type="month"
+                    value={r.effectiveDate}
+                    onChange={e => updateRow(i, 'effectiveDate', e.target.value)}
+                    style={{fontFamily:'var(--font-sans)',minWidth:130}} />
+                </td>
                 <td>
                   <input className="en-ral-input" type="number" value={r.ral}
                     onChange={e => updateRow(i, 'ral', e.target.value)} />
@@ -111,29 +114,15 @@ function RalEditModal({ person, data, onSave, onClose }) {
                     style={{borderColor:'rgba(184,148,42,.4)'}} />
                 </td>
                 <td>
-                  <select className="en-ral-input" value={r.currency||'EUR'}
-                    onChange={e => updateRow(i, 'currency', e.target.value)}
-                    style={{fontFamily:'var(--font-sans)',paddingRight:2}}>
-                    {['EUR','CHF','USD','GBP','SEK'].map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </td>
-                <td>
-                  <input className="en-ral-input" type="number" step="0.0001"
-                    value={(r.currency||'EUR')==='EUR' ? '' : (r.exchangeRate??'')}
-                    placeholder={(r.currency||'EUR')==='EUR' ? '—' : '0.9500'}
-                    disabled={(r.currency||'EUR')==='EUR'}
-                    onChange={e => updateRow(i, 'exchangeRate', parseFloat(e.target.value)||1)}
-                    style={{opacity:(r.currency||'EUR')==='EUR'?0.35:1}} />
-                </td>
-                <td>
                   <button className="en-ral-del" onClick={() => deleteRow(i)} title="Elimina">✕</button>
                 </td>
               </tr>
             ))}
             <tr className="en-ral-add-row">
               <td>
-                <input className="en-ral-input" type="number" placeholder="Anno" value={newYear}
-                  onChange={e => setNewYear(e.target.value)} />
+                <input className="en-ral-input" type="month" value={newDate}
+                  onChange={e => setNewDate(e.target.value)}
+                  style={{fontFamily:'var(--font-sans)',minWidth:130}} />
               </td>
               <td>
                 <input className="en-ral-input" type="number" placeholder="RAL" value={newRal}
@@ -154,27 +143,65 @@ function RalEditModal({ person, data, onSave, onClose }) {
                   style={{borderColor:'rgba(184,148,42,.4)'}} />
               </td>
               <td>
-                <select className="en-ral-input" value={newCurrency}
-                  onChange={e => setNewCurrency(e.target.value)}
-                  style={{fontFamily:'var(--font-sans)',paddingRight:2}}>
-                  {['EUR','CHF','USD','GBP','SEK'].map(c => <option key={c}>{c}</option>)}
-                </select>
-              </td>
-              <td>
-                <input className="en-ral-input" type="number" step="0.0001"
-                  value={newExchangeRate} placeholder={newCurrency==='EUR'?'—':'0.9500'}
-                  disabled={newCurrency==='EUR'}
-                  onChange={e => setNewExchangeRate(e.target.value)}
-                  style={{opacity:newCurrency==='EUR'?0.35:1}} />
-              </td>
-              <td>
-                <button className="en-ral-add-btn" onClick={addRow} disabled={!newYear}>+</button>
+                <button className="en-ral-add-btn" onClick={addRow} disabled={!newDate}>+</button>
               </td>
             </tr>
           </tbody>
         </table>
         <button className="en-ral-save-btn" onClick={handleSave}>✓ Salva</button>
       </div>
+    </div>
+  )
+}
+
+// ── Get most recent RAL row active for a given year ───────
+function getActiveRalForYear(rows, year) {
+  const endDate = `${year}-12`
+  const candidates = rows
+    .map(r => ({ ...r, _d: r.effectiveDate || `${r.year || 1900}-01` }))
+    .filter(r => r._d <= endDate)
+    .sort((a, b) => a._d.localeCompare(b._d))
+  return candidates.length ? candidates[candidates.length - 1] : null
+}
+
+// ── RAL settings gear panel ───────────────────────────────
+function RalSettingsPanel({ settings, onChange, onClose }) {
+  const s = settings || { fraValuta: 'EUR', sofiValuta: 'EUR', fxRate: '' }
+  const currencies = ['EUR','CHF','USD','GBP','SEK']
+  const hasNonEur = (s.fraValuta||'EUR') !== 'EUR' || (s.sofiValuta||'EUR') !== 'EUR'
+  const inp = {
+    width:'100%', padding:'5px 7px', border:'1px solid var(--border)', borderRadius:6,
+    background:'var(--bg)', color:'var(--text)', fontSize:12, boxSizing:'border-box',
+  }
+  return (
+    <div style={{
+      position:'absolute', top:34, right:0, zIndex:200, width:190,
+      background:'var(--surface)', border:'1px solid var(--border)',
+      borderRadius:10, padding:'12px 14px',
+      boxShadow:'0 8px 24px rgba(0,0,0,.18)',
+    }} onClick={e => e.stopPropagation()}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+        <span style={{fontSize:12,fontWeight:700,color:'var(--text2)'}}>⚙️ Valuta & Cambio</span>
+        <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',fontSize:13,color:'var(--text3)',padding:0,lineHeight:1}}>✕</button>
+      </div>
+      {[['Fra','fraValuta'],['Sofi','sofiValuta']].map(([label, key]) => (
+        <div key={key} style={{marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:3}}>{label}</div>
+          <select value={s[key]||'EUR'} onChange={e=>onChange({...s,[key]:e.target.value})}
+            style={{...inp,fontFamily:'var(--font-sans)'}}>
+            {currencies.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+      ))}
+      <div style={{marginBottom:4}}>
+        <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:3}}>Cambio → EUR</div>
+        <input type="number" step="0.0001" placeholder={hasNonEur?'es. 0.9500':'—'}
+          value={hasNonEur ? (s.fxRate||'') : ''}
+          disabled={!hasNonEur}
+          onChange={e=>onChange({...s,fxRate:parseFloat(e.target.value)||1})}
+          style={{...inp,fontFamily:'var(--font-mono)',opacity:hasNonEur?1:0.4}}/>
+      </div>
+      <div style={{fontSize:9,color:'var(--text3)',marginTop:6,fontStyle:'italic'}}>1 unità valuta estera = x EUR</div>
     </div>
   )
 }
@@ -353,12 +380,15 @@ export default function EntratePage() {
   const [tab, setTab]       = useState('stipendi')
 
   // RAL / Netto chart state — read directly from appPrefs (reactive via Zustand)
-  const ralData = appPrefs?.ralData || DEFAULT_RAL_DATA
-  const [ralView, setRalView]             = useState('netto') // 'ral' | 'netto'
-  const [ralWithBonus, setRalWithBonus]   = useState(false)
-  const [ralEditPerson, setRalEditPerson] = useState(null) // 'Fra' | 'Sofi' | null
+  const ralData     = appPrefs?.ralData     || DEFAULT_RAL_DATA
+  const ralSettings = appPrefs?.ralSettings || { fraValuta: 'EUR', sofiValuta: 'EUR', fxRate: 1 }
+  const [ralView,         setRalView]         = useState('netto') // 'ral' | 'netto'
+  const [ralWithBonus,    setRalWithBonus]     = useState(false)
+  const [ralEditPerson,   setRalEditPerson]    = useState(null)   // 'Fra' | 'Sofi' | null
+  const [showRalSettings, setShowRalSettings]  = useState(false)
 
-  function saveRalData(newData) { setAppPref('ralData', newData) }
+  function saveRalData(newData)     { setAppPref('ralData', newData) }
+  function saveRalSettings(s)       { setAppPref('ralSettings', s) }
 
   const now    = new Date()
   const thisYM = getYM(now)
@@ -537,26 +567,31 @@ export default function EntratePage() {
 
           {/* Charts — respond to toggle */}
           {(() => {
-            // Build RAL chart data
-            const fraRows  = ralData.Fra  || []
-            const sofiRows = ralData.Sofi || []
-            const ralYears = [...new Set([...fraRows.map(d=>d.year), ...sofiRows.map(d=>d.year)])].sort((a,b)=>a-b)
-            const hasNonEur = [...fraRows, ...sofiRows].some(r => r.currency && r.currency !== 'EUR')
+            // Build RAL chart data using effectiveDate-based row lookup + global FX
+            const fraRows  = (ralData.Fra  || []).map(normalizeRalRow)
+            const sofiRows = (ralData.Sofi || []).map(normalizeRalRow)
+            const fraFx  = (ralSettings.fraValuta||'EUR')  !== 'EUR' ? (ralSettings.fxRate||1) : 1
+            const sofiFx = (ralSettings.sofiValuta||'EUR') !== 'EUR' ? (ralSettings.fxRate||1) : 1
+            const hasNonEur = fraFx !== 1 || sofiFx !== 1
+            // Derive years from all effectiveDates
+            const allDates = [
+              ...fraRows.map(r => r.effectiveDate || `${r.year}-01`),
+              ...sofiRows.map(r => r.effectiveDate || `${r.year}-01`),
+            ]
+            const ralYears = [...new Set(allDates.map(d => parseInt(d.slice(0,4))))].sort((a,b)=>a-b)
             const ralChartData = ralYears.map(yr => {
-              const frR = fraRows.find(d=>d.year===yr)
-              const soR = sofiRows.find(d=>d.year===yr)
-              const frFx = (frR?.currency && frR.currency !== 'EUR') ? (frR.exchangeRate||1) : 1
-              const soFx = (soR?.currency && soR.currency !== 'EUR') ? (soR.exchangeRate||1) : 1
+              const frR = getActiveRalForYear(fraRows, yr)
+              const soR = getActiveRalForYear(sofiRows, yr)
               return {
                 year: String(yr),
-                'Fra RAL':            frR ? frR.ral * frFx : undefined,
-                'Fra RAL+Bonus':      frR ? ((frR.ral||0) + (frR.bonusLordo||0)) * frFx : undefined,
-                'Fra Netto':          frR ? frR.netto * frFx : undefined,
-                'Fra Netto+Bonus':    frR ? ((frR.netto||0) + (frR.bonusNetto||0)) * frFx : undefined,
-                'Sofi RAL':           soR ? soR.ral * soFx : undefined,
-                'Sofi RAL+Bonus':     soR ? ((soR.ral||0) + (soR.bonusLordo||0)) * soFx : undefined,
-                'Sofi Netto':         soR ? soR.netto * soFx : undefined,
-                'Sofi Netto+Bonus':   soR ? ((soR.netto||0) + (soR.bonusNetto||0)) * soFx : undefined,
+                'Fra RAL':            frR ? frR.ral * fraFx : undefined,
+                'Fra RAL+Bonus':      frR ? ((frR.ral||0) + (frR.bonusLordo||0)) * fraFx : undefined,
+                'Fra Netto':          frR ? frR.netto * fraFx : undefined,
+                'Fra Netto+Bonus':    frR ? ((frR.netto||0) + (frR.bonusNetto||0)) * fraFx : undefined,
+                'Sofi RAL':           soR ? soR.ral * sofiFx : undefined,
+                'Sofi RAL+Bonus':     soR ? ((soR.ral||0) + (soR.bonusLordo||0)) * sofiFx : undefined,
+                'Sofi Netto':         soR ? soR.netto * sofiFx : undefined,
+                'Sofi Netto+Bonus':   soR ? ((soR.netto||0) + (soR.bonusNetto||0)) * sofiFx : undefined,
               }
             })
             const ralLines = ralView === 'ral'
@@ -595,10 +630,26 @@ export default function EntratePage() {
 
                 {/* Chart 2 — Stipendio RAL vs Netto */}
                 <div className="card en-chart-card" style={{position:'relative'}}>
-                  {/* Top-right toggles — radio: RAL | Netto + con bonus */}
+                  {/* Top-right toggles — RAL | Netto + con bonus + gear */}
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
                     <span className="en-chart-title">Stipendio (RAL vs Netto)</span>
-                    <div style={{display:'flex',alignItems:'center',gap:6}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,position:'relative'}}>
+                      {/* Gear settings */}
+                      <button onClick={e=>{e.stopPropagation();setShowRalSettings(v=>!v)}}
+                        title="Impostazioni valuta e cambio"
+                        style={{
+                          padding:'3px 7px',border:`1px solid ${showRalSettings?'var(--accent)':'var(--border)'}`,
+                          borderRadius:6,cursor:'pointer',fontSize:13,transition:'all .15s',
+                          background: showRalSettings ? 'var(--surface2)' : 'transparent',
+                          color: showRalSettings ? 'var(--accent)' : 'var(--text3)',
+                        }}>⚙️</button>
+                      {showRalSettings && (
+                        <RalSettingsPanel
+                          settings={ralSettings}
+                          onChange={s => saveRalSettings(s)}
+                          onClose={() => setShowRalSettings(false)}
+                        />
+                      )}
                       {/* con bonus toggle */}
                       <button onClick={() => setRalWithBonus(b => !b)}
                         style={{
