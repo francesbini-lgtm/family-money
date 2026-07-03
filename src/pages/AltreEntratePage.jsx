@@ -709,7 +709,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Descrizione','Causale','Cat L2','Categoria','Compensa costo','Importo','Note',''].map(h=>(
+              {['Data','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
@@ -746,9 +746,6 @@ export default function AltreEntratePage() {
                       <AeCat2Cell entry={e} updateTransaction={updateTransaction} customCats={customCats}/>
                     </td>
                     <td style={{padding:'9px 14px'}}>
-                      <AeCatCell entryKey={entryKey} cats={aeCats} onSave={saveCat}/>
-                    </td>
-                    <td style={{padding:'9px 14px'}}>
                       {!compLink && (
                         <button className="btn btn-ghost" style={{fontSize:11,color:'var(--blue)',border:'1px solid var(--blue)',borderRadius:6,padding:'2px 8px'}}
                           onClick={()=>setCompensaEntry(e)}>
@@ -771,6 +768,17 @@ export default function AltreEntratePage() {
                     </td>
                     <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                       +€ {fmtIT(e.amount||0, 2)}
+                    </td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                      {compLink ? (() => {
+                        const expTx = transactions.find(t => t.txId === compLink.expTxId)
+                        // residuo = income − expense covered (0 if income fully absorbed)
+                        const expAmt = expTx ? Math.abs(expTx.amount) : (e.amount||0)
+                        const residuo = Math.max(0, (e.amount||0) - expAmt)
+                        return residuo > 0
+                          ? <span style={{fontSize:13,fontWeight:700,color:'var(--green)'}}>+€ {fmtIT(residuo,2)}</span>
+                          : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
+                      })() : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>}
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       <NoteCell entryKey={entryKey} notes={aeNotes} onSave={saveNote}/>
