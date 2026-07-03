@@ -2758,7 +2758,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr>
-              {['Data','Descrizione','Categoria','Stato','Importo originale','Residuo'].map(h => (
+              {['Data','Descrizione','Categoria','Stato','Importo originale','Residuo','Note'].map(h => (
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                   textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                   borderBottom:'1px solid var(--border)',
@@ -2768,7 +2768,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
           </thead>
           <tbody>
             {combinedRows.length === 0 && (
-              <tr><td colSpan={6} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
+              <tr><td colSpan={7} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
                 {search ? 'Nessun risultato' : 'Nessuna spesa da compensare — configura le categorie L1›L2 nel fondo'}
               </td></tr>
             )}
@@ -2795,6 +2795,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       +€ {fmtIT(Math.abs(t.amount))}
                     </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',textAlign:'right'}}>—</td>
+                    <td style={{padding:'10px 14px'}} onClick={e => e.stopPropagation()}>
+                      <SatiNoteCell txId={t.txId}/>
+                    </td>
                   </tr>
                 )
               }
@@ -2890,6 +2893,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       : residual < origAmt
                         ? <span title={`Compensato: €${fmtIT(compensatedAmt,2)}`}>−€{fmtIT(residual,2)}</span>
                         : `−€ ${fmtIT(origAmt,2)}`}
+                  </td>
+                  <td style={{padding:'9px 14px'}} onClick={e => e.stopPropagation()}>
+                    <SatiNoteCell txId={t.txId}/>
                   </td>
                 </tr>
               )
