@@ -171,6 +171,14 @@ function getYearFxRate(year, ralSettings) {
   return ralSettings?.fxRate || 1  // legacy single-rate fallback
 }
 
+// ── Historical CHF→EUR annual average rates ───────────────
+const DEFAULT_CHFEUR_RATES = {
+  '2014': 0.8232, '2015': 0.9359, '2016': 0.9174, '2017': 0.8997,
+  '2018': 0.8657, '2019': 0.8991, '2020': 0.9341, '2021': 0.9247,
+  '2022': 0.9953, '2023': 1.0293, '2024': 1.0521, '2025': 1.0753,
+  '2026': 1.0811,
+}
+
 // ── RAL config modal (3 sections) ────────────────────────
 function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onClose }) {
   const [section, setSection] = useState('cambio')
@@ -178,11 +186,12 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
   const currencies = ['EUR','CHF','USD','GBP','SEK']
 
   // ── Tassi di cambio state ──────────────────────────────
-  const [fxRows, setFxRows] = useState(() =>
-    Object.entries(s.fxRates || {})
+  const [fxRows, setFxRows] = useState(() => {
+    const src = Object.keys(s.fxRates || {}).length > 0 ? s.fxRates : DEFAULT_CHFEUR_RATES
+    return Object.entries(src)
       .map(([y, r]) => ({ year: String(y), rate: String(r) }))
       .sort((a, b) => Number(a.year) - Number(b.year))
-  )
+  })
   const [newFxYear, setNewFxYear] = useState('')
   const [newFxRate, setNewFxRate] = useState('')
 
@@ -343,10 +352,10 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
         <div style={{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:20}}>
           <button style={secBtnStyle('cambio')} onClick={()=>setSection('cambio')}>💱 Tassi di cambio</button>
           <button style={secBtnStyle('fra')}    onClick={()=>setSection('fra')}>
-            <span style={{color:COLORS.Fra,marginRight:4}}>●</span>Salario Utente 1
+            <span style={{color:COLORS.Fra,marginRight:4}}>●</span>Salario Fra
           </button>
           <button style={secBtnStyle('sofi')}   onClick={()=>setSection('sofi')}>
-            <span style={{color:COLORS.Sofi,marginRight:4}}>●</span>Salario Utente 2
+            <span style={{color:COLORS.Sofi,marginRight:4}}>●</span>Salario Sofi
           </button>
         </div>
 
