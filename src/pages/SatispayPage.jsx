@@ -2171,6 +2171,56 @@ function SatiTxDetailModal({ tx, onClose }) {
   )
 }
 
+// ── Custom tooltip for "Spese non compensate" bar chart ──
+function SatiBarTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload || {}
+  const hasTx = (d.totalTxs?.length || 0) + (d.incomeTxs?.length || 0) > 0
+  if (!hasTx) return null
+  return (
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,
+      padding:'10px 14px',fontSize:11,maxWidth:290,boxShadow:'0 4px 20px rgba(0,0,0,.15)',
+      lineHeight:1.5,pointerEvents:'none'}}>
+      <div style={{fontWeight:700,marginBottom:8,color:'var(--text)',fontSize:12}}>{label}</div>
+      {d.totalTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--red)',fontWeight:700,marginBottom:4,fontSize:10,
+            textTransform:'uppercase',letterSpacing:'.05em'}}>Addebiti non compensati</div>
+          {d.totalTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--red)',fontWeight:700,flexShrink:0}}>
+                -{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+      {d.incomeTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--green)',fontWeight:700,
+            margin:`${(d.totalTxs?.length||0)>0?8:0}px 0 4px`,
+            fontSize:10,textTransform:'uppercase',letterSpacing:'.05em'}}>Accrediti non abbinati</div>
+          {d.incomeTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--green)',fontWeight:700,flexShrink:0}}>
+                +{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) {
   const appPrefs          = useStore(s => s.appPrefs)
@@ -2612,21 +2662,26 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
           const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
           const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
           // sum expenses in this month that are NOT compensated (or only partially)
-          const total = speseDaComp.filter(t => {
-            const tYm = (t._effDate||t.date||'').slice(0,7)
-            return tYm === ym
-          }).reduce((s,t) => {
+          const totalTxsForMonth = speseDaComp.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
+          const total = totalTxsForMonth.reduce((s,t) => {
             const m = satiMatches[t.txId]
             const orig = Math.abs(t.amount)
             const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
             return s + Math.max(0, orig - comp)
           }, 0)
-          const income = satiIncome.filter(t =>
+          const incomeTxsForMonth = satiIncome.filter(t =>
             !t.excluded &&
             (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched') &&
             (t._effDate||t.date||'').slice(0,7) === ym
-          ).reduce((s,t) => s + Math.abs(t.amount), 0)
-          return { label, total: Math.round(total * 100) / 100, income: Math.round(income * 100) / 100 }
+          )
+          const income = incomeTxsForMonth.reduce((s,t) => s + Math.abs(t.amount), 0)
+          return {
+            label,
+            total: Math.round(total * 100) / 100,
+            income: Math.round(income * 100) / 100,
+            totalTxs: totalTxsForMonth,
+            incomeTxs: incomeTxsForMonth,
+          }
         })
 
         if (bar24.every(b => b.total === 0 && b.income === 0)) return null
@@ -2641,10 +2696,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
-                <Tooltip
-                  formatter={(v, name) => [`€ ${fmtIT(v,0)}`, name]}
-                  contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
-                  cursor={{fill:'var(--surface2)'}}/>
+                <Tooltip content={<SatiBarTooltip />} cursor={{fill:'var(--surface2)'}}/>
                 <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti non compensati"/>
                 <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati"/>
                 <Legend iconType="circle" iconSize={8}
