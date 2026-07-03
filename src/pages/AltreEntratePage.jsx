@@ -62,7 +62,7 @@ function OrigDescDot({ description }) {
   const [open, setOpen] = useState(false)
   if (!description) return null
   return (
-    <span style={{ position: 'relative', display: 'inline-block', verticalAlign: 'middle', marginLeft: 5 }}>
+    <span style={{ display: 'inline-block', verticalAlign: 'middle', marginLeft: 5 }}>
       <button
         onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
         title="Vedi descrizione originale"
@@ -74,27 +74,36 @@ function OrigDescDot({ description }) {
         }}/>
       </button>
       {open && (
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{ position: 'fixed', zIndex: 300, background: 'var(--surface)',
-            border: '1px solid var(--border)', borderRadius: 10,
-            boxShadow: '0 8px 32px rgba(0,0,0,.18)',
-            padding: '12px 14px', width: 320, maxWidth: '90vw' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)',
-            letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 6 }}>
-            Descrizione originale
+        <>
+          {/* Backdrop — click outside to close */}
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 299 }}
+            onClick={e => { e.stopPropagation(); setOpen(false) }}
+          />
+          {/* Centred popup */}
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ position: 'fixed', zIndex: 300,
+              top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,.22)',
+              padding: '14px 16px', width: 380, maxWidth: '90vw' }}>
+            <div style={{ display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)',
+                letterSpacing: '.06em', textTransform: 'uppercase' }}>
+                Descrizione originale
+              </span>
+              <button onClick={() => setOpen(false)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer',
+                  fontSize: 16, color: 'var(--text3)', padding: 0, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6,
+              wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxHeight: 200, overflowY: 'auto' }}>
+              {description}
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5,
-            wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
-            {description}
-          </div>
-          <button onClick={() => setOpen(false)}
-            style={{ marginTop: 10, fontSize: 11, padding: '3px 10px', borderRadius: 6,
-              border: '1px solid var(--border)', background: 'var(--surface2)',
-              color: 'var(--text3)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
-            Chiudi
-          </button>
-        </div>
+        </>
       )}
     </span>
   )
