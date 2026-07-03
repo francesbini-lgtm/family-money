@@ -2830,7 +2830,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </span>
                     </td>
                     <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right'}}>
-                      +€ {fmtIT(Math.abs(t.amount))}
+                      +€ {fmtIT(Math.abs(t.amount),2)}
                     </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',textAlign:'right'}}>—</td>
                     <td style={{padding:'10px 14px'}} onClick={e => e.stopPropagation()}>
