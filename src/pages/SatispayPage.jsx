@@ -2851,7 +2851,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                               const sumAccAnno = speseDaComp
                                 .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && (t._effDate||t.date||'').startsWith(accAnno))
                                 .reduce((s,t) => s + Math.abs(t.amount), 0)
-                              const avg6m   = sumAccAnno / monthsElapsed
+                              const avg6m   = (sumAccAnno / monthsElapsed) * 12
                               const catColor = CATS[cat1]?.color || 'var(--accent)'
                               return (
                                 <tr key={`${cat1}|${cat2}`} style={{borderBottom:'1px solid var(--border)'}}>
@@ -2891,7 +2891,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                               const grandAcc   = speseDaComp
                                 .filter(t => (t._effDate||t.date||'').startsWith(accAnno))
                                 .reduce((s,t) => s + Math.abs(t.amount), 0)
-                              const grandAvg6m = grandAcc / monthsElapsed
+                              const grandAvg6m = (grandAcc / monthsElapsed) * 12
                               return (
                                 <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
                                   <td style={{padding:'9px 16px',fontSize:12,fontWeight:700}}>Media</td>
