@@ -2221,6 +2221,55 @@ function SatiBarTooltip({ active, payload, label }) {
   )
 }
 
+function SatiBarTotalTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload || {}
+  const hasTx = (d.totalTxs?.length || 0) + (d.incomeTxs?.length || 0) > 0
+  if (!hasTx) return null
+  return (
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,
+      padding:'10px 14px',fontSize:11,maxWidth:290,maxHeight:240,overflowY:'auto',
+      boxShadow:'0 4px 20px rgba(0,0,0,.15)',lineHeight:1.5,pointerEvents:'none'}}>
+      <div style={{fontWeight:700,marginBottom:8,color:'var(--text)',fontSize:12}}>{label}</div>
+      {d.totalTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--red)',fontWeight:700,marginBottom:4,fontSize:10,
+            textTransform:'uppercase',letterSpacing:'.05em'}}>Addebiti totali</div>
+          {d.totalTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--red)',fontWeight:700,flexShrink:0}}>
+                -{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+      {d.incomeTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--green)',fontWeight:700,
+            margin:`${(d.totalTxs?.length||0)>0?8:0}px 0 4px`,
+            fontSize:10,textTransform:'uppercase',letterSpacing:'.05em'}}>Accrediti totali</div>
+          {d.incomeTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--green)',fontWeight:700,flexShrink:0}}>
+                +{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) {
   const appPrefs          = useStore(s => s.appPrefs)
@@ -2677,6 +2726,48 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       )}
 
 
+
+      {/* ── Istogramma importi totali (compensati + non) ── */}
+      {(() => {
+        const now = new Date()
+        const barTot24 = Array.from({length:24}, (_,i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - 23 + i, 1)
+          const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+          const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
+          const totalTxs = speseDaComp.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
+          const total    = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const incomeTxs = satiIncome.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
+          const income   = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          return {
+            label,
+            total:  Math.round(total  * 100) / 100,
+            income: Math.round(income * 100) / 100,
+            totalTxs,
+            incomeTxs,
+          }
+        })
+        if (barTot24.every(b => b.total === 0 && b.income === 0)) return null
+        return (
+          <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>
+              📊 Spese e accrediti totali per mese
+            </div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={barTot24} margin={{top:8,right:8,bottom:0,left:0}} barSize={14} barCategoryGap="30%">
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                <YAxis hide/>
+                <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
+                  wrapperStyle={{paddingBottom:6}}
+                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
+                <Tooltip content={<SatiBarTotalTooltip />} cursor={{fill:'var(--surface2)'}}/>
+                <Bar dataKey="total"  fill="var(--red)"   opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali"/>
+                <Bar dataKey="income" fill="var(--green)" opacity={0.7}  radius={[4,4,0,0]} name="Accrediti totali"/>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )
+      })()}
 
       {/* ── Istogramma spese non compensate ultimi 24 mesi ── */}
       {(() => {
