@@ -2805,17 +2805,15 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   onClick={e => e.stopPropagation()}>
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
                     padding:'14px 20px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
-                    <div style={{fontWeight:700,fontSize:14}}>Spese per categoria e anno</div>
+                    <div style={{fontWeight:700,fontSize:14}}>Spese per categoria e anno (€)</div>
                     <button onClick={() => setShowTotalsTable(false)}
                       style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:'var(--text3)',lineHeight:1}}>✕</button>
                   </div>
                   <div style={{overflowY:'auto',flex:1}}>
                     {(() => {
                       const now3 = new Date()
-                      const last6yms = Array.from({length:6}, (_,i) => {
-                        const d3 = new Date(now3.getFullYear(), now3.getMonth() - 5 + i, 1)
-                        return `${d3.getFullYear()}-${String(d3.getMonth()+1).padStart(2,'0')}`
-                      })
+                      const accAnno = String(now3.getFullYear())
+                      const monthsElapsed = now3.getMonth() + 1
                       const thBase = {padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                         textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                         borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
@@ -2827,7 +2825,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                               <th style={{...thBase,textAlign:'left',minWidth:180}}>Categoria</th>
                               {years.map(y => <th key={y} style={thBase}>{y}</th>)}
                               <th style={{...thBase,borderLeft:'2px solid var(--border)'}}>Media/anno</th>
-                              <th style={{...thBase,color:'var(--accent)'}}>Media ult. 6m</th>
+                              <th style={{...thBase,color:'var(--accent)'}}>Media ACC Anno</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2840,10 +2838,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                               const rowTotal = rowAmts.reduce((s,v) => s + v, 0)
                               if (rowTotal < 0.01) return null
                               const rowAvg  = rowTotal / years.length
-                              const sum6m   = speseDaComp
-                                .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && last6yms.includes((t._effDate||t.date||'').slice(0,7)))
+                              const sumAccAnno = speseDaComp
+                                .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && (t._effDate||t.date||'').startsWith(accAnno))
                                 .reduce((s,t) => s + Math.abs(t.amount), 0)
-                              const avg6m   = sum6m / 6
+                              const avg6m   = sumAccAnno / monthsElapsed
                               const catColor = CATS[cat1]?.color || 'var(--accent)'
                               return (
                                 <tr key={`${cat1}|${cat2}`} style={{borderBottom:'1px solid var(--border)'}}>
@@ -2857,17 +2855,17 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                                   {rowAmts.map((amt,i) => (
                                     <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
                                       fontFamily:'var(--font-mono)',color:amt>0.01?'var(--text)':'var(--text3)'}}>
-                                      {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
+                                      {amt > 0.01 ? `${fmtIT(amt,2)}` : '—'}
                                     </td>
                                   ))}
                                   <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
                                     fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',
                                     borderLeft:'2px solid var(--border)'}}>
-                                    −€ {fmtIT(rowAvg,2)}
+                                    {fmtIT(rowAvg,2)}
                                   </td>
                                   <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
                                     fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>
-                                    {avg6m > 0.01 ? `−€ ${fmtIT(avg6m,2)}` : '—'}
+                                    {avg6m > 0.01 ? `${fmtIT(avg6m,2)}` : '—'}
                                   </td>
                                 </tr>
                               )
@@ -2880,27 +2878,27 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                               )
                               const grand     = colTotals.reduce((s,v) => s + v, 0)
                               const grandAvg  = grand / years.length
-                              const grand6m   = speseDaComp
-                                .filter(t => last6yms.includes((t._effDate||t.date||'').slice(0,7)))
+                              const grandAcc   = speseDaComp
+                                .filter(t => (t._effDate||t.date||'').startsWith(accAnno))
                                 .reduce((s,t) => s + Math.abs(t.amount), 0)
-                              const grandAvg6m = grand6m / 6
+                              const grandAvg6m = grandAcc / monthsElapsed
                               return (
                                 <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
                                   <td style={{padding:'9px 16px',fontSize:12,fontWeight:700}}>Media</td>
                                   {colTotals.map((amt,i) => (
                                     <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
                                       fontFamily:'var(--font-mono)',fontWeight:700,color:amt>0.01?'var(--red)':'var(--text3)'}}>
-                                      {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
+                                      {amt > 0.01 ? `${fmtIT(amt,2)}` : '—'}
                                     </td>
                                   ))}
                                   <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
                                     fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',
                                     borderLeft:'2px solid var(--border)'}}>
-                                    −€ {fmtIT(grandAvg,2)}
+                                    {fmtIT(grandAvg,2)}
                                   </td>
                                   <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
                                     fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>
-                                    {grandAvg6m > 0.01 ? `−€ ${fmtIT(grandAvg6m,2)}` : '—'}
+                                    {grandAvg6m > 0.01 ? `${fmtIT(grandAvg6m,2)}` : '—'}
                                   </td>
                                 </tr>
                               )
