@@ -2363,6 +2363,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   const [search, setSearch]             = useState('')
   const [showCatConfig, setShowCatConfig] = useState(false)
   const [selectedRows, setSelectedRows]   = useState(new Set())
+  const [showTotalsTable, setShowTotalsTable] = useState(false)
   const [catDraftL1, setCatDraftL1]     = useState('')
   const [catDraftL2, setCatDraftL2]     = useState('')
   const customCats = useStore(s => s.customCats)
@@ -2727,45 +2728,165 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
 
 
-      {/* ── Istogramma importi totali (compensati + non) ── */}
+      {/* ── Istogramma importi totali annuali ── */}
       {(() => {
-        const now = new Date()
-        const barTot24 = Array.from({length:24}, (_,i) => {
-          const d = new Date(now.getFullYear(), now.getMonth() - 23 + i, 1)
-          const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-          const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
-          const totalTxs = speseDaComp.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
-          const total    = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
-          const incomeTxs = satiIncome.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
-          const income   = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+        const currentYear = new Date().getFullYear()
+        const years = []
+        for (let y = 2022; y <= currentYear; y++) years.push(y)
+
+        const barAnnual = years.map(year => {
+          const yr = String(year)
+          const totalTxs  = speseDaComp.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const total     = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const incomeTxs = satiIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const income    = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
           return {
-            label,
+            label: yr,
             total:  Math.round(total  * 100) / 100,
             income: Math.round(income * 100) / 100,
             totalTxs,
             incomeTxs,
           }
         })
-        if (barTot24.every(b => b.total === 0 && b.income === 0)) return null
+
+        if (barAnnual.every(b => b.total === 0 && b.income === 0)) return null
+
+        // unique cat pairs for breakdown table
+        const catKeys = [...new Map(
+          speseDaComp
+            .filter(t => t.cat1)
+            .map(t => [`${t.cat1}|${t.cat2||''}`, { cat1: t.cat1, cat2: t.cat2||'' }])
+        ).values()].sort((a,b) => `${a.cat1}${a.cat2}`.localeCompare(`${b.cat1}${b.cat2}`))
+
         return (
-          <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:10}}>
-              📊 Spese e accrediti totali per mese
+          <>
+            <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--text2)'}}>
+                  📊 Spese e accrediti totali per anno
+                </div>
+                <button onClick={() => setShowTotalsTable(v => !v)}
+                  title="Breakdown per categoria"
+                  style={{border:`1px solid ${showTotalsTable?'var(--accent)':'var(--border)'}`,
+                    background:showTotalsTable?'var(--accent-l,#e8f0ff)':'var(--surface2)',
+                    borderRadius:6,padding:'4px 9px',cursor:'pointer',fontSize:13,
+                    color:showTotalsTable?'var(--accent)':'var(--text3)'}}>
+                  ▦
+                </button>
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={barAnnual} margin={{top:8,right:8,bottom:0,left:0}} barSize={40} barCategoryGap="35%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                  <XAxis dataKey="label" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                  <YAxis hide/>
+                  <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
+                    wrapperStyle={{paddingBottom:6}}
+                    formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
+                  <Tooltip content={<SatiBarTotalTooltip />} cursor={{fill:'var(--surface2)'}}/>
+                  <Bar dataKey="total"  fill="var(--red)"   opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali"/>
+                  <Bar dataKey="income" fill="var(--green)" opacity={0.7}  radius={[4,4,0,0]} name="Accrediti totali"/>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={barTot24} margin={{top:8,right:8,bottom:0,left:0}} barSize={14} barCategoryGap="30%">
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-                <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-                <YAxis hide/>
-                <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
-                  wrapperStyle={{paddingBottom:6}}
-                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
-                <Tooltip content={<SatiBarTotalTooltip />} cursor={{fill:'var(--surface2)'}}/>
-                <Bar dataKey="total"  fill="var(--red)"   opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali"/>
-                <Bar dataKey="income" fill="var(--green)" opacity={0.7}  radius={[4,4,0,0]} name="Accrediti totali"/>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+
+            {/* ── Tabella breakdown per categoria/anno ── */}
+            {showTotalsTable && (
+              <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:1000,
+                display:'flex',alignItems:'center',justifyContent:'center'}}
+                onClick={() => setShowTotalsTable(false)}>
+                <div style={{background:'var(--surface)',borderRadius:14,
+                  maxWidth:920,width:'92%',maxHeight:'82vh',overflow:'hidden',
+                  display:'flex',flexDirection:'column',boxShadow:'0 8px 40px rgba(0,0,0,.3)'}}
+                  onClick={e => e.stopPropagation()}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                    padding:'14px 20px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
+                    <div style={{fontWeight:700,fontSize:14}}>Spese per categoria e anno</div>
+                    <button onClick={() => setShowTotalsTable(false)}
+                      style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:'var(--text3)',lineHeight:1}}>✕</button>
+                  </div>
+                  <div style={{overflowY:'auto',flex:1}}>
+                    <table style={{width:'100%',borderCollapse:'collapse'}}>
+                      <thead>
+                        <tr>
+                          <th style={{padding:'9px 16px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                            textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                            borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,textAlign:'left',
+                            minWidth:180}}>Categoria</th>
+                          {years.map(y => (
+                            <th key={y} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                              textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                              borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
+                              textAlign:'right',whiteSpace:'nowrap'}}>{y}</th>
+                          ))}
+                          <th style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                            textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                            borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
+                            textAlign:'right',whiteSpace:'nowrap'}}>Totale</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {catKeys.map(({ cat1, cat2 }) => {
+                          const rowAmts = years.map(year =>
+                            speseDaComp
+                              .filter(t => t.cat1 === cat1 && (t.cat2||'') === cat2 && (t._effDate||t.date||'').startsWith(String(year)))
+                              .reduce((s,t) => s + Math.abs(t.amount), 0)
+                          )
+                          const rowTotal = rowAmts.reduce((s,v) => s + v, 0)
+                          if (rowTotal < 0.01) return null
+                          const catColor = CATS[cat1]?.color || 'var(--accent)'
+                          return (
+                            <tr key={`${cat1}|${cat2}`} style={{borderBottom:'1px solid var(--border)'}}>
+                              <td style={{padding:'9px 16px',fontSize:12}}>
+                                <span style={{fontSize:11,padding:'2px 9px',borderRadius:10,fontWeight:600,
+                                  background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
+                                  {cat2 || cat1}
+                                </span>
+                                {cat2 && <span style={{fontSize:10,color:'var(--text3)',marginLeft:5}}>{cat1}</span>}
+                              </td>
+                              {rowAmts.map((amt,i) => (
+                                <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                  fontFamily:'var(--font-mono)',color:amt>0.01?'var(--text)':'var(--text3)'}}>
+                                  {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
+                                </td>
+                              ))}
+                              <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>
+                                −€&nbsp;{fmtIT(rowTotal,2)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {/* Totals row */}
+                        {(() => {
+                          const colTotals = years.map(year =>
+                            speseDaComp
+                              .filter(t => (t._effDate||t.date||'').startsWith(String(year)))
+                              .reduce((s,t) => s + Math.abs(t.amount), 0)
+                          )
+                          const grand = colTotals.reduce((s,v) => s + v, 0)
+                          return (
+                            <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
+                              <td style={{padding:'9px 16px',fontSize:12,fontWeight:700}}>Totale</td>
+                              {colTotals.map((amt,i) => (
+                                <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                  fontFamily:'var(--font-mono)',fontWeight:700,color:amt>0.01?'var(--red)':'var(--text3)'}}>
+                                  {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
+                                </td>
+                              ))}
+                              <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>
+                                −€&nbsp;{fmtIT(grand,2)}
+                              </td>
+                            </tr>
+                          )
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )
       })()}
 
