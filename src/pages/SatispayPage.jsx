@@ -6,7 +6,7 @@ import { CATS, getMergedCats } from '../data/categories'
 import { Plus, Trash2, Edit2, Check, X, Link } from 'lucide-react'
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList
 } from 'recharts'
 
 // ── Sati entrate notes + comp links (Firestore via appPrefs) ─
@@ -2774,17 +2774,22 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   ▦
                 </button>
               </div>
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={barAnnual} margin={{top:8,right:8,bottom:0,left:0}} barSize={40} barCategoryGap="35%">
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={barAnnual} margin={{top:24,right:8,bottom:0,left:0}} barSize={40} barCategoryGap="35%">
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                   <XAxis dataKey="label" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                   <YAxis hide/>
                   <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
                     wrapperStyle={{paddingBottom:6}}
                     formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
-                  <Tooltip content={<SatiBarTotalTooltip />} cursor={{fill:'var(--surface2)'}}/>
-                  <Bar dataKey="total"  fill="var(--red)"   opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali"/>
-                  <Bar dataKey="income" fill="var(--green)" opacity={0.7}  radius={[4,4,0,0]} name="Accrediti totali"/>
+                  <Bar dataKey="total"  fill="var(--red)"   opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali">
+                    <LabelList dataKey="total" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:10,fill:'var(--red)',fontWeight:700}}/>
+                  </Bar>
+                  <Bar dataKey="income" fill="var(--green)" opacity={0.7}  radius={[4,4,0,0]} name="Accrediti totali">
+                    <LabelList dataKey="income" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:10,fill:'var(--green)',fontWeight:700}}/>
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -2805,83 +2810,105 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:'var(--text3)',lineHeight:1}}>✕</button>
                   </div>
                   <div style={{overflowY:'auto',flex:1}}>
-                    <table style={{width:'100%',borderCollapse:'collapse'}}>
-                      <thead>
-                        <tr>
-                          <th style={{padding:'9px 16px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
-                            textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
-                            borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,textAlign:'left',
-                            minWidth:180}}>Categoria</th>
-                          {years.map(y => (
-                            <th key={y} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
-                              textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
-                              borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
-                              textAlign:'right',whiteSpace:'nowrap'}}>{y}</th>
-                          ))}
-                          <th style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
-                            textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
-                            borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
-                            textAlign:'right',whiteSpace:'nowrap'}}>Totale</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {catKeys.map(({ cat1, cat2 }) => {
-                          const rowAmts = years.map(year =>
-                            speseDaComp
-                              .filter(t => t.cat1 === cat1 && (t.cat2||'') === cat2 && (t._effDate||t.date||'').startsWith(String(year)))
-                              .reduce((s,t) => s + Math.abs(t.amount), 0)
-                          )
-                          const rowTotal = rowAmts.reduce((s,v) => s + v, 0)
-                          if (rowTotal < 0.01) return null
-                          const catColor = CATS[cat1]?.color || 'var(--accent)'
-                          return (
-                            <tr key={`${cat1}|${cat2}`} style={{borderBottom:'1px solid var(--border)'}}>
-                              <td style={{padding:'9px 16px',fontSize:12}}>
-                                <span style={{fontSize:11,padding:'2px 9px',borderRadius:10,fontWeight:600,
-                                  background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
-                                  {cat2 || cat1}
-                                </span>
-                                {cat2 && <span style={{fontSize:10,color:'var(--text3)',marginLeft:5}}>{cat1}</span>}
-                              </td>
-                              {rowAmts.map((amt,i) => (
-                                <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
-                                  fontFamily:'var(--font-mono)',color:amt>0.01?'var(--text)':'var(--text3)'}}>
-                                  {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
-                                </td>
-                              ))}
-                              <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
-                                fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>
-                                −€&nbsp;{fmtIT(rowTotal,2)}
-                              </td>
+                    {(() => {
+                      const now3 = new Date()
+                      const last6yms = Array.from({length:6}, (_,i) => {
+                        const d3 = new Date(now3.getFullYear(), now3.getMonth() - 5 + i, 1)
+                        return `${d3.getFullYear()}-${String(d3.getMonth()+1).padStart(2,'0')}`
+                      })
+                      const thBase = {padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                        textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                        borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
+                        textAlign:'right',whiteSpace:'nowrap'}
+                      return (
+                        <table style={{width:'100%',borderCollapse:'collapse'}}>
+                          <thead>
+                            <tr>
+                              <th style={{...thBase,textAlign:'left',minWidth:180}}>Categoria</th>
+                              {years.map(y => <th key={y} style={thBase}>{y}</th>)}
+                              <th style={{...thBase,borderLeft:'2px solid var(--border)'}}>Media/anno</th>
+                              <th style={{...thBase,color:'var(--accent)'}}>Media ult. 6m</th>
                             </tr>
-                          )
-                        })}
-                        {/* Totals row */}
-                        {(() => {
-                          const colTotals = years.map(year =>
-                            speseDaComp
-                              .filter(t => (t._effDate||t.date||'').startsWith(String(year)))
-                              .reduce((s,t) => s + Math.abs(t.amount), 0)
-                          )
-                          const grand = colTotals.reduce((s,v) => s + v, 0)
-                          return (
-                            <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
-                              <td style={{padding:'9px 16px',fontSize:12,fontWeight:700}}>Totale</td>
-                              {colTotals.map((amt,i) => (
-                                <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
-                                  fontFamily:'var(--font-mono)',fontWeight:700,color:amt>0.01?'var(--red)':'var(--text3)'}}>
-                                  {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
-                                </td>
-                              ))}
-                              <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
-                                fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>
-                                −€&nbsp;{fmtIT(grand,2)}
-                              </td>
-                            </tr>
-                          )
-                        })()}
-                      </tbody>
-                    </table>
+                          </thead>
+                          <tbody>
+                            {catKeys.map(({ cat1, cat2 }) => {
+                              const rowAmts = years.map(year =>
+                                speseDaComp
+                                  .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && (t._effDate||t.date||'').startsWith(String(year)))
+                                  .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              )
+                              const rowTotal = rowAmts.reduce((s,v) => s + v, 0)
+                              if (rowTotal < 0.01) return null
+                              const rowAvg  = rowTotal / years.length
+                              const sum6m   = speseDaComp
+                                .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && last6yms.includes((t._effDate||t.date||'').slice(0,7)))
+                                .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              const avg6m   = sum6m / 6
+                              const catColor = CATS[cat1]?.color || 'var(--accent)'
+                              return (
+                                <tr key={`${cat1}|${cat2}`} style={{borderBottom:'1px solid var(--border)'}}>
+                                  <td style={{padding:'9px 16px',fontSize:12}}>
+                                    <span style={{fontSize:11,padding:'2px 9px',borderRadius:10,fontWeight:600,
+                                      background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
+                                      {cat2 || cat1}
+                                    </span>
+                                    {cat2 && <span style={{fontSize:10,color:'var(--text3)',marginLeft:5}}>{cat1}</span>}
+                                  </td>
+                                  {rowAmts.map((amt,i) => (
+                                    <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                      fontFamily:'var(--font-mono)',color:amt>0.01?'var(--text)':'var(--text3)'}}>
+                                      {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
+                                    </td>
+                                  ))}
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',
+                                    borderLeft:'2px solid var(--border)'}}>
+                                    −€ {fmtIT(rowAvg,2)}
+                                  </td>
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>
+                                    {avg6m > 0.01 ? `−€ ${fmtIT(avg6m,2)}` : '—'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                            {(() => {
+                              const colTotals = years.map(year =>
+                                speseDaComp
+                                  .filter(t => (t._effDate||t.date||'').startsWith(String(year)))
+                                  .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              )
+                              const grand     = colTotals.reduce((s,v) => s + v, 0)
+                              const grandAvg  = grand / years.length
+                              const grand6m   = speseDaComp
+                                .filter(t => last6yms.includes((t._effDate||t.date||'').slice(0,7)))
+                                .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              const grandAvg6m = grand6m / 6
+                              return (
+                                <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
+                                  <td style={{padding:'9px 16px',fontSize:12,fontWeight:700}}>Media</td>
+                                  {colTotals.map((amt,i) => (
+                                    <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                      fontFamily:'var(--font-mono)',fontWeight:700,color:amt>0.01?'var(--red)':'var(--text3)'}}>
+                                      {amt > 0.01 ? `−€ ${fmtIT(amt,2)}` : '—'}
+                                    </td>
+                                  ))}
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',
+                                    borderLeft:'2px solid var(--border)'}}>
+                                    −€ {fmtIT(grandAvg,2)}
+                                  </td>
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>
+                                    {grandAvg6m > 0.01 ? `−€ ${fmtIT(grandAvg6m,2)}` : '—'}
+                                  </td>
+                                </tr>
+                              )
+                            })()}
+                          </tbody>
+                        </table>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
