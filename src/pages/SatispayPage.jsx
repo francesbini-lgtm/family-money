@@ -2346,11 +2346,22 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   // ── Unmatched income rows ────────────────────────────────
   const unmatchedIncomeRows = useMemo(() => {
     if (!showUnmatchedIncome) return []
-    return satiIncome.filter(t =>
+    let list = satiIncome.filter(t =>
       !t.excluded &&
       (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched')
     )
-  }, [showUnmatchedIncome, satiIncome, satiMatches])
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(t =>
+        (t.descAI||'').toLowerCase().includes(q) ||
+        (t.description||'').toLowerCase().includes(q) ||
+        (t.cat1||'').toLowerCase().includes(q) ||
+        (t.cat2||'').toLowerCase().includes(q) ||
+        String(Math.abs(t.amount)).includes(q)
+      )
+    }
+    return list
+  }, [showUnmatchedIncome, satiIncome, satiMatches, search])
 
   // Combined rows: spese + accrediti non abbinati, sorted by date desc
   const combinedRows = useMemo(() => {
