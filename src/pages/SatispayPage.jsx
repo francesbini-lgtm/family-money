@@ -2447,6 +2447,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   // ── Available income for manual linking ─────────────────
   const matchedIncomeIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
   const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
+  // excluded (matched) accrediti — not in satiIncome prop (filtered out upstream)
+  const excludedIncome   = useMemo(() =>
+    transactions.filter(t => matchedIncomeIds.has(t.txId) && t.amount > 0)
+  , [transactions, satiMatches]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Migration: fix all matched income/expense txs to current rules ──
   const migrationDoneRef = useRef(false)
@@ -2736,16 +2740,21 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
         const barAnnual = years.map(year => {
           const yr = String(year)
-          const totalTxs  = speseDaComp.filter(t => (t._effDate||t.date||'').startsWith(yr))
-          const total     = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
-          const incomeTxs = satiIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
-          const income    = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const totalTxs      = speseDaComp.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const total         = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const incomeTxs     = satiIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const income        = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const incomeExclTxs = excludedIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const incomeExcl    = incomeExclTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
           return {
             label: yr,
-            total:  Math.round(total  * 100) / 100,
-            income: Math.round(income * 100) / 100,
+            total:       Math.round(total      * 100) / 100,
+            income:      Math.round(income     * 100) / 100,
+            incomeExcl:  Math.round(incomeExcl * 100) / 100,
+            incomeTotal: Math.round((income + incomeExcl) * 100) / 100,
             totalTxs,
             incomeTxs,
+            incomeExclTxs,
           }
         })
 
@@ -2782,13 +2791,14 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
                     wrapperStyle={{paddingBottom:6}}
                     formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
-                  <Bar dataKey="total"  fill="var(--red)"   opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali">
+                  <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali">
                     <LabelList dataKey="total" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
                       style={{fontSize:10,fill:'var(--red)',fontWeight:700}}/>
                   </Bar>
-                  <Bar dataKey="income" fill="var(--green)" opacity={0.7}  radius={[4,4,0,0]} name="Accrediti totali">
-                    <LabelList dataKey="income" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
-                      style={{fontSize:10,fill:'var(--green)',fontWeight:700}}/>
+                  <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati"/>
+                  <Bar dataKey="incomeExcl" stackId="acc" fill="#15803d" opacity={0.85} radius={[4,4,0,0]} name="Accrediti abbinati">
+                    <LabelList dataKey="incomeTotal" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:10,fill:'#15803d',fontWeight:700}}/>
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
