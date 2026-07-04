@@ -227,7 +227,7 @@ function ConditionRow({ cond, idx, total, onChange, onRemove }) {
         style={SEL_STYLE}>
         <option value="merchant">Merchant</option>
         <option value="descAI">Descrizione AI</option>
-        <option value="description">Descrizione originale</option>
+        <option value="description">Descrizione</option>
         <option value="counterpart">Controparte</option>
         <option value="importo">Importo</option>
       </select>
@@ -546,7 +546,7 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
     // try to extract first meaningful word from descAI
     if (d) {
       const word = d.split(/\s+/).slice(0,3).join(' ')
-      return { field: 'descAI', op: 'contiene', value: word }
+      return { field: 'description', op: 'contiene', value: word }
     }
     return { field: 'merchant', op: 'contiene', value: '' }
   })()
