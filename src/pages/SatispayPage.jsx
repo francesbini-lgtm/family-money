@@ -2193,7 +2193,7 @@ function SatiBarTooltip({ active, payload, label }) {
                 {t.descAI || t.description || '—'}
               </span>
               <span style={{fontFamily:'var(--font-mono)',color:'var(--red)',fontWeight:700,flexShrink:0}}>
-                -{fmtIT(Math.abs(t.amount),2)}
+                -{fmtIT(t._residual ?? Math.abs(t.amount),2)}
               </span>
             </div>
           ))}
@@ -2686,13 +2686,16 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
           const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
           const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
           // sum expenses in this month that are NOT compensated (or only partially)
-          const totalTxsForMonth = speseDaComp.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
-          const total = totalTxsForMonth.reduce((s,t) => {
-            const m = satiMatches[t.txId]
-            const orig = Math.abs(t.amount)
-            const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
-            return s + Math.max(0, orig - comp)
-          }, 0)
+          const totalTxsForMonth = speseDaComp
+            .filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
+            .map(t => {
+              const m = satiMatches[t.txId]
+              const orig = Math.abs(t.amount)
+              const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
+              return { ...t, _residual: Math.max(0, orig - comp) }
+            })
+            .filter(t => t._residual > 0.01)
+          const total = totalTxsForMonth.reduce((s,t) => s + t._residual, 0)
           const incomeTxsForMonth = satiIncome.filter(t =>
             !t.excluded &&
             (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched') &&
