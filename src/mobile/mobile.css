@@ -288,7 +288,9 @@
 }
 .m-fab-inner:active { transform: scale(.92); }
 
-/* Modal overlay */
+/* Modal overlay — rendered in a portal on <body> so it always
+   paints above the floating nav (.m-nav), even on iOS Safari
+   where .m-content's composited scrolling traps z-indexes. */
 .m-modal-overlay {
   position: fixed;
   inset: 0;
@@ -296,12 +298,14 @@
   z-index: 100;
   display: flex;
   align-items: flex-end;
+  justify-content: center;
 }
 .m-modal {
   background: var(--surface);
   border-radius: 20px 20px 0 0;
   padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
   width: 100%;
+  max-width: 430px; /* keep sheet aligned with the app column on wide screens */
   max-height: 85dvh;
   overflow-y: auto;
 }

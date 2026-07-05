@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import Portal from './Portal'
 import { useStore } from '../store/useStore'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
@@ -26,6 +27,7 @@ function dateLabel(dateStr) {
 // ── Scelta tipo aggiunta ──────────────────────────────────
 function SceltaModal({ onChoose, onClose }) {
   return (
+    <Portal>
     <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="m-modal">
         <div className="m-modal-handle"/>
@@ -50,6 +52,7 @@ function SceltaModal({ onChoose, onClose }) {
         </div>
       </div>
     </div>
+    </Portal>
   )
 }
 
@@ -81,6 +84,7 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
   }
 
   return (
+    <Portal>
     <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="m-modal">
         <div className="m-modal-handle"/>
@@ -141,6 +145,7 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
         </div>
       </div>
     </div>
+    </Portal>
   )
 }
 
@@ -163,6 +168,7 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
   }
 
   return (
+    <Portal>
     <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="m-modal">
         <div className="m-modal-handle"/>
@@ -195,6 +201,7 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
         </div>
       </div>
     </div>
+    </Portal>
   )
 }
 
