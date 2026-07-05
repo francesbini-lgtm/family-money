@@ -465,14 +465,12 @@ function CatPicker({ cat1, cat2, onChange, quickPicks }) {
 
 // ── Helper: linked amount for one ATM tx ─────────────────
 function linkedAmt(tx) {
-  const autoLinks   = getAutoLinks(tx.txId)
-  const manualLinks = (getAtmMeta()[tx.txId]?.links) || []
-  return [...autoLinks, ...manualLinks].reduce((s,l)=>s+l.amount,0)
+  return useStore.getState().computeAtmUsed(tx.txId)
 }
 
 // ── Main page ─────────────────────────────────────────────
 export default function ContantiPage() {
-  const { cashEntries, addCashEntry, deleteCashEntry, updateCashEntry, transactions, nannyTS, colfTS, vehExpenses, vehicles, appPrefs, setAppPref } = useStore()
+  const { cashEntries, addCashEntry, deleteCashEntry, updateCashEntry, transactions, nannyTS, colfTS, vehExpenses, vehicles, appPrefs, setAppPref, pendingWithdrawals, addPendingWithdrawal, autoAssignAtm, rebalanceAutoAssignments } = useStore()
   const [showAdd, setShowAdd] = useState(false)
   const [linksTx, setLinksTx] = useState(null)
   const [atmOffset, setAtmOffset] = useState(0)
@@ -483,6 +481,8 @@ export default function ContantiPage() {
     amount: '', note: '', atmTxId: '',
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
+  const [pendingDate, setPendingDate] = useState('')
+  const [pendingAmt,  setPendingAmt]  = useState('')
 
   const now   = new Date()
   const thisYM = getYM(now)
@@ -576,8 +576,9 @@ export default function ContantiPage() {
 
     // Manual cashEntries (Spese in Contanti → merged here)
     ;(cashEntries || []).forEach(e => {
-      const atmTx = e.atmTxId ? atmTxsAll.find(t => t.txId === e.atmTxId) : null
-      const satiM = e.atmTxId ? satiMatches[e.atmTxId] : null
+      const atmTx   = e.atmTxId ? atmTxsAll.find(t => t.txId === e.atmTxId) : null
+      const pendPW  = e.atmTxId && !atmTx ? (pendingWithdrawals||[]).find(pw => pw.id === e.atmTxId) : null
+      const satiM   = e.atmTxId && atmTx ? satiMatches[e.atmTxId] : null
       const l1 = e.cat1 || e.cat || '—'; const l2 = e.cat2 || ''
       rows.push({
         _id: e.id, tipo: 'manual',
@@ -585,12 +586,14 @@ export default function ContantiPage() {
         cat1: l1, cat2: l2,
         date: e.date, amount: e.amount,
         atmTxId: e.atmTxId || null, atmDate: fmtAtmDate(atmTx),
+        atmSource: e.atmSource || null,
+        atmPending: pendPW || null,
         satiMatched: satiM?.status === 'matched', readonly: false,
       })
     })
 
     return rows.sort((a,b) => (b.date||'').localeCompare(a.date||''))
-  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashEntries, vehExpenses, vehicles, atmTxsAll, satiMatches, nannyName, colfName])
+  }, [nannyTS, colfTS, nannyRecon, colfRecon, cashEntries, vehExpenses, vehicles, atmTxsAll, satiMatches, nannyName, colfName, pendingWithdrawals])
 
   const totalWithdrawn = Math.abs(atmTxsAll.reduce((s,t)=>s+t.amount,0))
   const totalSpent     = cashEntries.reduce((s,e)=>s+(e.amount||0),0)
@@ -628,8 +631,30 @@ export default function ContantiPage() {
 
   function saveEntry() {
     if (!form.amount||!form.cat1) return
-    addCashEntry({...form, amount:parseFloat(form.amount)})
+    const amount = parseFloat(form.amount)
+    let atmTxId   = form.atmTxId || null
+    let atmSource = null
+    if (atmTxId === '__nonloso__') {
+      atmTxId   = autoAssignAtm(amount)
+      atmSource = 'auto'
+      setTimeout(() => rebalanceAutoAssignments(), 0)
+    } else if (atmTxId === '__altro__') {
+      const pwId = addPendingWithdrawal({
+        date:      pendingDate || null,
+        amount:    pendingAmt ? parseFloat(pendingAmt) : null,
+        note:      form.note || `Prelievo per ${form.cat1}`,
+        status:    'pending',
+        createdAt: new Date().toISOString(),
+      })
+      atmTxId   = pwId
+      atmSource = 'pending'
+    } else if (atmTxId) {
+      atmSource = 'manual'
+    }
+    addCashEntry({...form, amount, atmTxId, atmSource})
     setShowAdd(false)
+    setPendingDate('')
+    setPendingAmt('')
     setForm({date:new Date().toISOString().slice(0,10),cat1:'Spesa e Alimentari',cat2:'',amount:'',note:'',atmTxId:''})
   }
 
@@ -815,18 +840,27 @@ export default function ContantiPage() {
                         € {fmtIT(row.amount||0,2)}
                       </td>
                       <td style={{padding:'9px 14px'}}>
-                        {row.atmLabel
-                          ? <span style={{fontSize:11,color:'var(--green)',fontWeight:600}} title={row.atmLabel}>✅ {fmtD(row.atmDate)||'(abbinato)'}</span>
-                          : row.atmDate
-                            ? <span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,fontWeight:600,color:'var(--green)'}}>✅ {fmtD(row.atmDate)}</span>
-                            : row.atmTxId
-                              ? <span style={{fontSize:11,color:'var(--text3)'}}>ID: {row.atmTxId.slice(-6)}</span>
-                              : canAbbina
-                                ? <button onClick={()=>setAbbinaTx({rowId:row._id,tipo:'manual'})}
-                                    style={{display:'inline-flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700,border:'1px dashed var(--border)',background:'none',cursor:'pointer',color:'var(--accent)',fontFamily:'var(--font-sans)'}}>
-                                    🔗 Abbina
-                                  </button>
-                                : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
+                        {row.atmPending
+                          ? <span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,fontWeight:600,color:'var(--gold)'}}>
+                              ⏳ {row.atmPending.date ? fmtD(row.atmPending.date) : 'data?'}
+                              {row.atmPending.amount ? ` · €${fmtIT(row.atmPending.amount,2)}` : ''}
+                              <span style={{fontSize:9,opacity:.6}}>da riconciliare</span>
+                            </span>
+                          : row.atmLabel
+                            ? <span style={{fontSize:11,color:'var(--green)',fontWeight:600}} title={row.atmLabel}>✅ {fmtD(row.atmDate)||'(abbinato)'}</span>
+                            : row.atmDate
+                              ? <span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,fontWeight:600,color:'var(--green)'}}>
+                                  ✅ {fmtD(row.atmDate)}
+                                  {row.atmSource==='auto' && <span style={{fontSize:9,opacity:.5,marginLeft:2}}>auto</span>}
+                                </span>
+                              : row.atmTxId
+                                ? <span style={{fontSize:11,color:'var(--text3)'}}>ID: {row.atmTxId.slice(-6)}</span>
+                                : canAbbina
+                                  ? <button onClick={()=>setAbbinaTx({rowId:row._id,tipo:'manual',prevAtmId:row.atmTxId,prevSource:row.atmSource})}
+                                      style={{display:'inline-flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:700,border:'1px dashed var(--border)',background:'none',cursor:'pointer',color:'var(--accent)',fontFamily:'var(--font-sans)'}}>
+                                      🔗 Abbina
+                                    </button>
+                                  : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
                         }
                       </td>
                       <td style={{padding:'9px 14px'}}>
@@ -927,7 +961,7 @@ export default function ContantiPage() {
                   const pct  = txAmt>0?Math.round(lkd/txAmt*100):0
                   return (
                     <button key={t.txId}
-                      onClick={()=>{ updateCashEntry(abbinaTx.rowId,{atmTxId:t.txId}); setAbbinaTx(null) }}
+                      onClick={()=>{ updateCashEntry(abbinaTx.rowId,{atmTxId:t.txId,atmSource:'manual'}); setTimeout(()=>rebalanceAutoAssignments(),0); setAbbinaTx(null) }}
                       style={{padding:'10px 14px',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',background:'var(--surface)',cursor:'pointer',textAlign:'left',fontFamily:'var(--font-sans)',display:'flex',alignItems:'center',gap:12}}>
                       <span style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:14,color:'var(--blue)',flexShrink:0}}>
                         € {fmtIT(txAmt,2)}
@@ -977,14 +1011,33 @@ export default function ContantiPage() {
           </FormRow>
 
           <FormRow label="Abbina a Prelievo ATM (opzionale)" style={{marginTop:14}}>
-            <select value={form.atmTxId} onChange={e=>set('atmTxId',e.target.value)}
+            <select value={form.atmTxId} onChange={e=>{set('atmTxId',e.target.value);if(e.target.value!=='__altro__'){setPendingDate('');setPendingAmt('')}}}
               style={{width:'100%',padding:'9px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}>
               <option value="">— Nessuno —</option>
+              <option value="__nonloso__">❓ Non lo so — assegna automaticamente</option>
+              <option value="__altro__">🕐 Altro prelievo (non ancora in banca)…</option>
+              {(pendingWithdrawals||[]).filter(pw=>pw.status==='pending').map(pw=>(
+                <option key={pw.id} value={pw.id}>⏳ {pw.date||'data?'} · {pw.amount?`€${fmtIT(pw.amount,2)}`:''} · {pw.note||'Prelievo temporaneo'}</option>
+              ))}
               {atmTxsAll.slice(0,30).map(t=>{
                 const disp = fmtDate(t._effDate||t.date)
                 return <option key={t.txId} value={t.txId}>{disp} — € {fmtIT(Math.abs(t.amount),2)}</option>
               })}
             </select>
+            {form.atmTxId==='__altro__' && (
+              <div style={{marginTop:8,padding:'10px 12px',background:'var(--surface2)',borderRadius:'var(--radius-sm)',display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,border:'1px solid var(--border)'}}>
+                <div>
+                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:3}}>Data prelievo (opz.)</div>
+                  <input type="date" value={pendingDate} onChange={e=>setPendingDate(e.target.value)}
+                    style={{width:'100%',padding:'6px 8px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:3}}>Importo prelievo (opz.)</div>
+                  <input type="number" value={pendingAmt} onChange={e=>setPendingAmt(e.target.value)} placeholder="0.00"
+                    style={{width:'100%',padding:'6px 8px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)'}}/>
+                </div>
+              </div>
+            )}
           </FormRow>
 
           <ModalFooter>

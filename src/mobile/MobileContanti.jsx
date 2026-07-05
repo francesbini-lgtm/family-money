@@ -57,7 +57,7 @@ function SceltaModal({ onChoose, onClose }) {
 }
 
 // ── Utilizzo Contanti modal ───────────────────────────────
-function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
+function UtilizzoModal({ onClose, atmOptions, addCashEntry, pendingWithdrawals, addPendingWithdrawal, autoAssignAtm, rebalanceAutoAssignments }) {
   const customCats = useStore(s => s.customCats)
   const now = new Date()
   const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
@@ -67,6 +67,8 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
   const [desc,    setDesc]    = useState('')
   const [date,    setDate]    = useState(localDate)
   const [atmLink, setAtmLink] = useState('')
+  const [pendingDate, setPendingDate] = useState('')
+  const [pendingAmt,  setPendingAmt]  = useState('')
 
   const _mcats = getMergedCats(customCats)
   const cats = Object.keys(_mcats).filter(c => c !== 'Entrate' && c !== 'Non Categorizzato')
@@ -75,10 +77,29 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
   function handleSave() {
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) return
+    let atmTxId   = atmLink || null
+    let atmSource = null
+    if (atmTxId === '__nonloso__') {
+      atmTxId   = autoAssignAtm(amt)
+      atmSource = 'auto'
+      setTimeout(() => rebalanceAutoAssignments(), 0)
+    } else if (atmTxId === '__altro__') {
+      const pwId = addPendingWithdrawal({
+        date:      pendingDate || null,
+        amount:    pendingAmt ? parseFloat(pendingAmt) : null,
+        note:      desc || `Prelievo per ${cat1}`,
+        status:    'pending',
+        createdAt: new Date().toISOString(),
+      })
+      atmTxId   = pwId
+      atmSource = 'pending'
+    } else if (atmTxId) {
+      atmSource = 'manual'
+    }
     addCashEntry({
       amount: amt, cat1, cat2: cat2 || null,
       note: desc || cat1,
-      date, atmTxId: atmLink || null,
+      date, atmTxId, atmSource,
     })
     onClose()
   }
@@ -125,19 +146,35 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry }) {
           <input className="m-input" type="date" value={date} onChange={e => setDate(e.target.value)}/>
         </div>
 
-        {atmOptions.length > 0 && (
-          <div className="m-field">
-            <label className="m-label">Abbina a Prelievo ATM (opz.)</label>
-            <select className="m-select" value={atmLink} onChange={e => setAtmLink(e.target.value)}>
-              <option value="">— Non abbinare —</option>
-              {atmOptions.map(tx => (
-                <option key={tx.txId} value={tx.txId}>
-                  {dateLabel(tx._effDate||tx.date)} · {fmt(tx.amount)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="m-field">
+          <label className="m-label">Abbina a Prelievo ATM (opz.)</label>
+          <select className="m-select" value={atmLink} onChange={e => { setAtmLink(e.target.value); if(e.target.value!=='__altro__'){setPendingDate('');setPendingAmt('')} }}>
+            <option value="">— Non abbinare —</option>
+            <option value="__nonloso__">❓ Non lo so — assegna auto</option>
+            <option value="__altro__">🕐 Altro prelievo (non in banca)…</option>
+            {(pendingWithdrawals||[]).filter(pw=>pw.status==='pending').map(pw=>(
+              <option key={pw.id} value={pw.id}>⏳ {pw.date||'data?'} · {pw.amount?`€${Math.abs(pw.amount).toFixed(2)}`:''}</option>
+            ))}
+            {(atmOptions||[]).map(tx => (
+              <option key={tx.txId} value={tx.txId}>
+                {dateLabel(tx._effDate||tx.date)} · {fmt(tx.amount)}
+              </option>
+            ))}
+          </select>
+          {atmLink==='__altro__' && (
+            <div style={{marginTop:8,display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              <div>
+                <label className="m-label">Data prelievo (opz.)</label>
+                <input className="m-input" type="date" value={pendingDate} onChange={e=>setPendingDate(e.target.value)}/>
+              </div>
+              <div>
+                <label className="m-label">Importo (opz.)</label>
+                <input className="m-input" type="number" inputMode="decimal" placeholder="0.00"
+                  value={pendingAmt} onChange={e=>setPendingAmt(e.target.value)}/>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:4 }}>
           <button className="m-btn m-btn-ghost" onClick={onClose}>Annulla</button>
@@ -213,6 +250,10 @@ export default function MobileContanti({ showAdd, onCloseAdd }) {
   const deleteCashEntry = useStore(s => s.deleteCashEntry)
   const addNotaPrelievo = useStore(s => s.addNotaPrelievo)
   const deleteNotaPrelievo = useStore(s => s.deleteNotaPrelievo)
+  const pendingWithdrawals     = useStore(s => s.pendingWithdrawals)
+  const addPendingWithdrawal   = useStore(s => s.addPendingWithdrawal)
+  const autoAssignAtm          = useStore(s => s.autoAssignAtm)
+  const rebalanceAutoAssignments = useStore(s => s.rebalanceAutoAssignments)
   const nannyTS         = useStore(s => s.nannyTS)
   const colfTS          = useStore(s => s.colfTS)
   const vehExpenses     = useStore(s => s.vehExpenses)
@@ -411,6 +452,10 @@ export default function MobileContanti({ showAdd, onCloseAdd }) {
           onClose={handleClose}
           atmOptions={recentAtm}
           addCashEntry={addCashEntry}
+          pendingWithdrawals={pendingWithdrawals}
+          addPendingWithdrawal={addPendingWithdrawal}
+          autoAssignAtm={autoAssignAtm}
+          rebalanceAutoAssignments={rebalanceAutoAssignments}
         />
       )}
       {addMode === 'prelievo' && (
