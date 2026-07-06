@@ -1761,15 +1761,17 @@ function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
 
     for (const inc of incomeEntries) {
       if (usedIncomeIds.has(inc.txId)) continue
-      const incDate  = new Date(inc._effDate || inc.date)
-      const incAmt   = Math.abs(inc.amount)
-      const dateDiff = Math.abs(expDate - incDate) / 86400000
-      const amtDiff  = Math.abs(expAmt - incAmt)
+      const incDate    = new Date(inc._effDate || inc.date)
+      const incAmt     = Math.abs(inc.amount)
+      // Accredito must be on same day or AFTER the spesa (not before)
+      const signedDiff = (incDate - expDate) / 86400000
+      if (signedDiff < 0) continue
+      const amtDiff = Math.abs(expAmt - incAmt)
 
-      if (amtDiff < 0.02 && dateDiff <= 15 && dateDiff < autoDiff) {
-        autoDiff = dateDiff; autoInc = inc
-      } else if (amtDiff <= 3 && dateDiff <= 20 && dateDiff < pendingScore) {
-        pendingScore = dateDiff; pendingInc = inc
+      if (amtDiff < 0.02 && signedDiff <= 15 && signedDiff < autoDiff) {
+        autoDiff = signedDiff; autoInc = inc
+      } else if (amtDiff <= 3 && signedDiff <= 20 && signedDiff < pendingScore) {
+        pendingScore = signedDiff; pendingInc = inc
       }
     }
 
@@ -1996,6 +1998,8 @@ function SatiTxDetailModal({ tx, onClose }) {
   const updateTransaction = useStore(s => s.updateTransaction)
   const updateVehExpense  = useStore(s => s.updateVehExpense)
   const customCats        = useStore(s => s.customCats)
+  const transactions      = useStore(s => s.transactions)
+  const incTx = tx._compensatedBy ? transactions.find(t => t.txId === tx._compensatedBy) : null
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [cat1, setCat1]   = useState(tx.cat1 || '')
   const [cat2, setCat2]   = useState(tx.cat2 || '')
@@ -2100,6 +2104,12 @@ function SatiTxDetailModal({ tx, onClose }) {
               <div style={{fontSize:13,fontWeight:700,color:'var(--gold)'}}>
                 −€ {fmtIT(tx._compensatedAmt,2)} compensati
               </div>
+              {incTx && (
+                <div style={{fontSize:11,color:'var(--gold)',opacity:.8,marginTop:4}}>
+                  Accredito del {fmtDate(incTx._effDate || incTx.date)}
+                  {incTx.descAI ? ` · ${incTx.descAI}` : ''}
+                </div>
+              )}
             </div>
           )}
         </div>
