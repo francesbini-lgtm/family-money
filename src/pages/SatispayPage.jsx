@@ -1776,7 +1776,7 @@ function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
     }
 
     if (autoInc) {
-      result[exp.txId] = { status: 'matched', incomeTxId: autoInc.txId, pendingIncomeTxId: null, compensatedAmt: autoInc.amount }
+      result[exp.txId] = { status: 'matched', incomeTxId: autoInc.txId, pendingIncomeTxId: null, compensatedAmt: autoInc.amount, matchSource: 'auto' }
       usedIncomeIds.add(autoInc.txId)
     } else if (pendingInc) {
       result[exp.txId] = { status: 'pending_approval', incomeTxId: null, pendingIncomeTxId: pendingInc.txId, compensatedAmt: 0 }
@@ -1994,12 +1994,13 @@ function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
 }
 
 // ── Tx Detail Modal (Spese da compensare) ────────────────
-function SatiTxDetailModal({ tx, onClose }) {
+function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
   const updateTransaction = useStore(s => s.updateTransaction)
   const updateVehExpense  = useStore(s => s.updateVehExpense)
   const customCats        = useStore(s => s.customCats)
   const transactions      = useStore(s => s.transactions)
   const incTx = tx._compensatedBy ? transactions.find(t => t.txId === tx._compensatedBy) : null
+  const txMatch = satiMatches?.[tx.txId]
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [cat1, setCat1]   = useState(tx.cat1 || '')
   const [cat2, setCat2]   = useState(tx.cat2 || '')
@@ -2109,6 +2110,20 @@ function SatiTxDetailModal({ tx, onClose }) {
                   Accredito del {fmtDate(incTx._effDate || incTx.date)}
                   {incTx.descAI ? ` · ${incTx.descAI}` : ''}
                 </div>
+              )}
+              {txMatch?.matchSource === 'auto' && (
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:4,display:'flex',alignItems:'center',gap:4}}>
+                  <span style={{padding:'1px 6px',borderRadius:8,background:'rgba(100,100,200,.1)',border:'1px solid var(--border)',fontWeight:600}}>⟳ auto</span>
+                  abbinato automaticamente
+                </div>
+              )}
+              {onUnlink && txMatch?.status === 'matched' && (
+                <button onClick={onUnlink}
+                  style={{marginTop:8,display:'flex',alignItems:'center',gap:5,padding:'5px 10px',borderRadius:8,
+                    border:'1px solid var(--border)',background:'none',cursor:'pointer',
+                    color:'var(--text3)',fontSize:11,fontFamily:'var(--font-sans)',width:'100%',justifyContent:'center'}}>
+                  🔓 Rimuovi abbinamento
+                </button>
               )}
             </div>
           )}
@@ -2567,7 +2582,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     const m = satiMatches[expTxId]
     if (!m?.pendingIncomeTxId) return
     const inc = satiIncome.find(t => t.txId === m.pendingIncomeTxId)
-    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0, matchSource: 'manual' } }
     saveMatches(newMatches)
     applyMatch(expTxId, m.pendingIncomeTxId)
     advanceToNextPending(expTxId, newMatches)
@@ -2583,7 +2598,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
   function handleLink(expTxId, incTxId) {
     const inc = satiIncome.find(t => t.txId === incTxId)
-    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: incTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: incTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0, matchSource: 'manual' } }
     saveMatches(newMatches)
     applyMatch(expTxId, incTxId)
     setAbbinaTx(null)
@@ -3161,23 +3176,35 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   <td style={{padding:'9px 14px'}}>
                     {residual < 0.01 ? (
                       /* Fully compensated — regardless of satiMatches status */
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
                         </span>
+                        {match?.matchSource === 'auto' && (
+                          <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
+                            background:'rgba(100,100,200,.1)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:600}}>
+                            ⟳ auto
+                          </span>
+                        )}
                         {(status === 'matched') && <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
-                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>}
+                          title="Rimuovi abbinamento" style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,padding:'1px 4px',borderRadius:4,lineHeight:1}}>🔓</button>}
                       </div>
                     ) : residual < origAmt ? (
                       /* Partially compensated */
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'rgba(200,160,0,.12)',color:'var(--gold)',border:'1px solid var(--gold)55'}}>
                           ≈ parziale
                         </span>
+                        {match?.matchSource === 'auto' && (
+                          <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
+                            background:'rgba(100,100,200,.1)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:600}}>
+                            ⟳ auto
+                          </span>
+                        )}
                         {(status === 'matched') && <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
-                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>}
+                          title="Rimuovi abbinamento" style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,padding:'1px 4px',borderRadius:4,lineHeight:1}}>🔓</button>}
                       </div>
                     ) : status === 'pending_approval' ? (
                       <button onClick={e => { e.stopPropagation(); setPendingModal(t.txId) }}
@@ -3220,7 +3247,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       </div>
 
       {/* Modals */}
-      {detailTx && <SatiTxDetailModal tx={detailTx} onClose={() => setDetailTx(null)}/>}
+      {detailTx && <SatiTxDetailModal tx={detailTx} onClose={() => setDetailTx(null)} satiMatches={satiMatches} onUnlink={() => { handleUnlink(detailTx.txId); setDetailTx(null) }}/>}
       {pendingModal && (() => {
         const exp = speseDaComp.find(t => t.txId === pendingModal)
         const m   = exp && satiMatches[exp.txId]
