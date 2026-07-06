@@ -87,12 +87,14 @@
 
 /* Day cell */
 .cal-cell {
-  width: 36px; min-width: 36px; height: 48px;
+  width: 36px; min-width: 36px; max-width: 36px;
+  height: 52px; min-height: 52px; max-height: 52px;
   padding: 3px 4px; vertical-align: top;
   cursor: pointer; transition: background .1s;
   border-right: 1px solid var(--border);
   background: var(--surface);
   position: relative;
+  overflow: hidden;
 }
 .cal-cell:last-child { border-right: none; }
 .cal-cell:hover     { background: var(--accent-l) !important; }

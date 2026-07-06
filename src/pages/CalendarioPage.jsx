@@ -131,7 +131,7 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
         </div>
       )}
       {dominantCity && (
-        <div className="cal-day-city" title={dominantCity}>{dominantCity}</div>
+        <div className="cal-day-city" title={dominantCity}>{dominantCity.split(' ')[0]}</div>
       )}
     </td>
   )
