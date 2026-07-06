@@ -53,20 +53,27 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
     return t
   }, [allDayTxs, filter])
 
-  const total   = dayTxs.reduce((s, t) => s + t.amount, 0)
-  const hasData = dayTxs.length > 0
+  // When vacation quick-filter is active, show only Weekend e Vacanze costs in cell
+  const displayTxs = useMemo(() =>
+    quickFilter === 'vacation'
+      ? dayTxs.filter(t => t.cat1 === 'Weekend e Vacanze')
+      : dayTxs
+  , [dayTxs, quickFilter])
+
+  const total   = displayTxs.reduce((s, t) => s + t.amount, 0)
+  const hasData = displayTxs.length > 0
 
   // Most frequent city that day (ignore nulls / 'null' strings)
   const dominantCity = useMemo(() => {
     const freq = {}
-    for (const t of dayTxs) {
+    for (const t of displayTxs) {
       const c = t.city && t.city !== 'null' ? t.city : null
       if (c) freq[c] = (freq[c] || 0) + 1
     }
     const entries = Object.entries(freq)
     if (!entries.length) return null
     return entries.sort((a, b) => b[1] - a[1])[0][0]
-  }, [dayTxs])
+  }, [displayTxs])
 
   // Vacation overlap (manual periods — blue background)
   const vacs  = vacations.filter(v => dateStr >= v.from && dateStr <= v.to)
