@@ -3113,7 +3113,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   borderBottom:'1px solid var(--border)',
                   position:'sticky',top:0,zIndex:2,
                   whiteSpace:'nowrap',
-                  minWidth: h==='Stato' ? 160 : h==='Descrizione' ? 200 : undefined,
+                  minWidth: h==='Stato' ? 220 : h==='Descrizione' ? 200 : undefined,
                   textAlign:h.startsWith('Importo')||h==='Residuo'?'right':'left'}}>{h}</th>
               ))}
             </tr>
@@ -3216,7 +3216,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   <td style={{padding:'9px 14px'}}>
                     {residual < 0.01 ? (
                       /* Fully compensated — regardless of satiMatches status */
-                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'nowrap'}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
@@ -3235,7 +3235,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </div>
                     ) : residual < origAmt ? (
                       /* Partially compensated */
-                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'nowrap'}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'rgba(200,160,0,.12)',color:'var(--gold)',border:'1px solid var(--gold)55'}}>
                           ≈ parziale
