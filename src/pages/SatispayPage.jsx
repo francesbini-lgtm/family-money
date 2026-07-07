@@ -2001,6 +2001,12 @@ function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
   const transactions      = useStore(s => s.transactions)
   const incTx = tx._compensatedBy ? transactions.find(t => t.txId === tx._compensatedBy) : null
   const txMatch = satiMatches?.[tx.txId]
+  const modalDateWarning = (() => {
+    if (!incTx) return false
+    const incDate = new Date(incTx._effDate || incTx.date).getTime()
+    const expDate = new Date(tx._effDate || tx.date).getTime()
+    return (incDate - expDate) / 86400000 > 0
+  })()
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [cat1, setCat1]   = useState(tx.cat1 || '')
   const [cat2, setCat2]   = useState(tx.cat2 || '')
@@ -2106,9 +2112,9 @@ function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
                 −€ {fmtIT(tx._compensatedAmt,2)} compensati
               </div>
               {incTx && (
-                <div style={{fontSize:11,color:'var(--gold)',opacity:.8,marginTop:4}}>
-                  Accredito del {fmtDate(incTx._effDate || incTx.date)}
-                  {incTx.descAI ? ` · ${incTx.descAI}` : ''}
+                <div style={{fontSize:11,color:'var(--gold)',opacity:.8,marginTop:4,display:'flex',alignItems:'center',gap:4}}>
+                  <span>Accredito del {fmtDate(incTx._effDate || incTx.date)}{incTx.descAI ? ` · ${incTx.descAI}` : ''}</span>
+                  {modalDateWarning && <span title="Accredito in data successiva alla spesa" style={{fontSize:13}}>⚠️</span>}
                 </div>
               )}
               {txMatch?.matchSource === 'auto' && (
@@ -2340,7 +2346,17 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
   // ── Matches storage ─────────────────────────────────────
   const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
-  function saveMatches(m) { setAppPref('satiMatches', m) }
+  function saveMatches(m) {
+    setUndoStack(s => [...s.slice(-9), satiMatches])  // keep last 10 states
+    setAppPref('satiMatches', m)
+  }
+  function handleUndo() {
+    if (!undoStack.length) return
+    const prev = undoStack[undoStack.length - 1]
+    setUndoStack(s => s.slice(0, -1))
+    // Restore matches (without pushing to undo stack again)
+    setAppPref('satiMatches', prev)
+  }
 
   // ── Auto-match on data change ───────────────────────────
   const prevMatchesRef = useRef(null)
@@ -2381,6 +2397,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   const [pendingModal, setPendingModal] = useState(null)  // expense txId
   const [abbinaTx, setAbbinaTx]         = useState(null)  // expense tx
   const [detailTx, setDetailTx]         = useState(null)  // detail popup tx
+  const [undoStack, setUndoStack]         = useState([])         // undo stack for satiMatches
   const [showNonAbb, setShowNonAbb]     = useState(false)
   const [hideComm, setHideComm]         = useState(true)
   const [hideCompensate, setHideCompensate] = useState(false)
@@ -3061,6 +3078,16 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               style={{padding:'5px 10px',border:'1px solid var(--border)',borderRadius:8,
                 background:'var(--bg)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',
                 outline:'none',width:200}}/>
+            {undoStack.length > 0 && (
+              <button onClick={handleUndo}
+                title={`Annulla ultima azione (${undoStack.length} disponibili)`}
+                style={{display:'inline-flex',alignItems:'center',gap:4,padding:'5px 11px',
+                  border:'1px solid var(--border)',borderRadius:20,
+                  background:'var(--surface2)',color:'var(--text2)',
+                  fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
+                ↩ Undo
+              </button>
+            )}
           </div>
         </div>
 
@@ -3133,6 +3160,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               const incTx = (status === 'matched' && match?.incomeTxId)
                 ? satiIncome.find(i => i.txId === match.incomeTxId)
                 : null
+              // ⚠️ if accredito date is strictly after spesa date
+              const dateWarning = (() => {
+                if (!incTx) return false
+                const incDate = new Date(incTx._effDate || incTx.date).getTime()
+                const expDate = new Date(t._effDate || t.date).getTime()
+                return (incDate - expDate) / 86400000 > 0
+              })()
               const compensatedAmt = t._compensatedAmt
                 || (match?.compensatedAmt || 0)
                 || (incTx ? Math.abs(incTx.amount) : 0)
@@ -3181,6 +3215,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
                         </span>
+                        {dateWarning && (
+                          <span title="Accredito in data successiva alla spesa" style={{fontSize:12}}>⚠️</span>
+                        )}
                         {match?.matchSource === 'auto' && (
                           <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
                             background:'rgba(100,100,200,.1)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:600}}>
@@ -3197,6 +3234,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                           background:'rgba(200,160,0,.12)',color:'var(--gold)',border:'1px solid var(--gold)55'}}>
                           ≈ parziale
                         </span>
+                        {dateWarning && (
+                          <span title="Accredito in data successiva alla spesa" style={{fontSize:12}}>⚠️</span>
+                        )}
                         {match?.matchSource === 'auto' && (
                           <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
                             background:'rgba(100,100,200,.1)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:600}}>

@@ -16,7 +16,6 @@ function useVacations() {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const [vacations, setVacations] = useState(() => appPrefs.calendarVacations || [])
-  // Resync when async prefs arrive (avoids stale snapshot overwrite)
   useEffect(() => { setVacations(appPrefs.calendarVacations || []) }, [appPrefs.calendarVacations])
   function save(v) { setVacations(v); setAppPref('calendarVacations', v) }
   function add(vac) { save([...vacations, { id: Date.now(), ...vac }]) }
@@ -35,9 +34,12 @@ function cityToVacEmoji(city = '') {
 }
 
 // ── Day cell ──────────────────────────────────────────────
-function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFilter, onClick }) {
+function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFilter, onClick, cityOverrides, onCityEdit }) {
   const isWeekend = IS_WEEKEND(year, month, day)
   const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+
+  const [editingCity, setEditingCity] = useState(false)
+  const [cityInput, setCityInput]     = useState('')
 
   // All transactions this day (unfiltered) — needed for vacation/boat detection
   const allDayTxs = useMemo(() =>
@@ -75,6 +77,9 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
     return entries.sort((a, b) => b[1] - a[1])[0][0]
   }, [displayTxs])
 
+  // Override takes priority over auto-detected city
+  const effectiveCity = cityOverrides?.[dateStr] ?? dominantCity
+
   // Vacation overlap (manual periods — blue background)
   const vacs  = vacations.filter(v => dateStr >= v.from && dateStr <= v.to)
   const isVac = vacs.length > 0
@@ -98,12 +103,24 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
   // Boat trip
   const isBoat = boatDaySet.has(dateStr)
 
-  // Quick-filter dimming: vacation = any vacation-related day (manual OR tx-based)
+  // Quick-filter dimming
   const isAnyVac = isVac || isVacTx
   const isDimmed = (quickFilter === 'boat' && !isBoat) ||
                    (quickFilter === 'vacation' && !isAnyVac)
 
   const today = new Date().toISOString().slice(0,10) === dateStr
+
+  function startCityEdit(e) {
+    e.stopPropagation()
+    setCityInput(effectiveCity || '')
+    setEditingCity(true)
+  }
+
+  function commitCityEdit() {
+    const val = cityInput.trim()
+    onCityEdit(dateStr, val)
+    setEditingCity(false)
+  }
 
   return (
     <td
@@ -130,9 +147,111 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
           {Math.abs(Math.round(total)).toLocaleString('it-IT')}
         </div>
       )}
-      {dominantCity && (
-        <div className="cal-day-city" title={dominantCity}>{dominantCity.split(' ')[0]}</div>
+      {editingCity ? (
+        <input
+          className="cal-city-input"
+          value={cityInput}
+          onChange={e => setCityInput(e.target.value)}
+          onBlur={commitCityEdit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commitCityEdit()
+            if (e.key === 'Escape') setEditingCity(false)
+            e.stopPropagation()
+          }}
+          onClick={e => e.stopPropagation()}
+          autoFocus
+        />
+      ) : (
+        <div
+          className={`cal-day-city${effectiveCity ? '' : ' cal-day-city-empty'}`}
+          title={effectiveCity ? effectiveCity : 'Clicca per aggiungere location'}
+          onClick={startCityEdit}
+        >
+          {effectiveCity ? effectiveCity.split(' ')[0] : ''}
+        </div>
       )}
+    </td>
+  )
+}
+
+// ── Merged cell (consecutive days with same city) ─────────
+function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacations, boatDaySet, quickFilter, onCityEditRange, onClick }) {
+  const colspan = endDay - startDay + 1
+  const [editingCity, setEditingCity] = useState(false)
+  const [cityInput, setCityInput]     = useState('')
+
+  const total = useMemo(() => {
+    let sum = 0
+    for (let d = startDay; d <= endDay; d++) {
+      const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+      txs.filter(t => {
+        if ((t._effDate||t.date) !== dateStr || t.excluded) return false
+        if (filter.type === 'income'  && t.amount <= 0) return false
+        if (filter.type === 'expense' && t.amount >= 0) return false
+        if (filter.cat1 && t.cat1 !== filter.cat1) return false
+        if (quickFilter === 'vacation' && t.cat1 !== 'Weekend e Vacanze') return false
+        return true
+      }).forEach(t => { sum += t.amount })
+    }
+    return sum
+  }, [txs, filter, quickFilter, year, month, startDay, endDay])
+
+  const hasVac = useMemo(() => {
+    for (let d = startDay; d <= endDay; d++) {
+      const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+      if (vacations.some(v => dateStr >= v.from && dateStr <= v.to)) return true
+      if (txs.some(t => !t.excluded && (t._effDate||t.date) === dateStr && t.cat1 === 'Weekend e Vacanze')) return true
+    }
+    return false
+  }, [txs, vacations, year, month, startDay, endDay])
+
+  const firstDateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(startDay).padStart(2,'0')}`
+
+  function commitCityEdit() {
+    const val = cityInput.trim()
+    onCityEditRange(year, month, startDay, endDay, val)
+    setEditingCity(false)
+  }
+
+  return (
+    <td
+      className={`cal-cell cal-merged-cell${hasVac ? ' vacation' : ''}`}
+      colSpan={colspan}
+      onClick={() => onClick(firstDateStr)}
+      title={city}
+    >
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:'100%', padding:'2px 5px', gap:3 }}>
+        {total !== 0 && (
+          <div className={`cal-day-total ${total >= 0 ? 'positive' : 'negative'}`} style={{ fontSize:9, flex:1 }}>
+            {Math.abs(Math.round(total)).toLocaleString('it-IT')}
+          </div>
+        )}
+        {editingCity ? (
+          <input
+            className="cal-city-input"
+            value={cityInput}
+            onChange={e => setCityInput(e.target.value)}
+            onBlur={commitCityEdit}
+            onKeyDown={e => {
+              if (e.key === 'Enter') commitCityEdit()
+              if (e.key === 'Escape') setEditingCity(false)
+              e.stopPropagation()
+            }}
+            onClick={e => e.stopPropagation()}
+            autoFocus
+            style={{ width: '50%' }}
+          />
+        ) : (
+          <div
+            className="cal-day-city"
+            style={{ opacity:1, fontWeight:700, fontSize:9, flexShrink:0, cursor:'pointer' }}
+            onClick={e => { e.stopPropagation(); setCityInput(city || ''); setEditingCity(true) }}
+            title="Clicca per modificare location"
+          >
+            {city ? city.split(' ')[0] : ''}
+          </div>
+        )}
+      </div>
     </td>
   )
 }
@@ -211,17 +330,22 @@ export default function CalendarioPage() {
   const customCats  = useStore(s => s.customCats)
   const vehicles    = useStore(s => s.vehicles)
   const appPrefs    = useStore(s => s.appPrefs)
+  const setAppPref  = useStore(s => s.setAppPref)
   const { vacations, add: addVac, remove: removeVac } = useVacations()
 
   const now     = new Date()
   const [year,  setYear]  = useState(now.getFullYear())
   const [filter, setFilter] = useState({ type:'', cat1:'' })
   const [quickFilter, setQuickFilter] = useState(null) // 'boat' | 'vacation' | null
+  const [mergeMode, setMergeMode]     = useState(false)
   const [modal,  setModal]  = useState(null) // {dateStr, txs, vacs}
   const [showAddVac, setShowAddVac] = useState(false)
   const [showVacList, setShowVacList] = useState(false)
 
-  // ── Boat days set (🚤 / ⛵ / svg:motoscafo vehicles) ────
+  // City overrides from Firestore prefs
+  const cityOverrides = useMemo(() => appPrefs?.calendarCityOverrides || {}, [appPrefs?.calendarCityOverrides])
+
+  // ── Boat days set ────────────────────────────────────────
   const boatDaySet = useMemo(() => {
     const s = new Set()
     ;(vehicles || [])
@@ -248,6 +372,48 @@ export default function CalendarioPage() {
     transactions.filter(t => (t._effDate||(t._effDate||t.date||'')).startsWith(String(year)))
   , [transactions, year])
 
+  // Effective city per date — override takes priority, then dominant from txs
+  const effectiveCityByDate = useMemo(() => {
+    const result = {}
+    for (let m = 0; m < 12; m++) {
+      const days = DAYS_IN_MONTH(year, m)
+      for (let d = 1; d <= days; d++) {
+        const dateStr = `${year}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+        if (cityOverrides[dateStr]) {
+          result[dateStr] = cityOverrides[dateStr]
+        } else {
+          const dayTxs = txByDate[dateStr] || []
+          const freq = {}
+          dayTxs.filter(t => !t.excluded).forEach(t => {
+            const c = t.city && t.city !== 'null' ? t.city : null
+            if (c) freq[c] = (freq[c] || 0) + 1
+          })
+          const entries = Object.entries(freq)
+          if (entries.length) result[dateStr] = entries.sort((a,b) => b[1]-a[1])[0][0]
+        }
+      }
+    }
+    return result
+  }, [year, txByDate, cityOverrides])
+
+  // ── City edit handlers ───────────────────────────────────
+  function handleCityEdit(dateStr, newCity) {
+    const overrides = { ...(appPrefs?.calendarCityOverrides || {}) }
+    if (newCity) overrides[dateStr] = newCity
+    else delete overrides[dateStr]
+    setAppPref('calendarCityOverrides', overrides)
+  }
+
+  function handleCityEditRange(yr, mo, startDay, endDay, newCity) {
+    const overrides = { ...(appPrefs?.calendarCityOverrides || {}) }
+    for (let d = startDay; d <= endDay; d++) {
+      const dateStr = `${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+      if (newCity) overrides[dateStr] = newCity
+      else delete overrides[dateStr]
+    }
+    setAppPref('calendarCityOverrides', overrides)
+  }
+
   return (
     <div className="cal-page">
       {/* Header */}
@@ -268,6 +434,11 @@ export default function CalendarioPage() {
             onClick={() => setQuickFilter(q => q === 'vacation' ? null : 'vacation')}
             title="Mostra solo giorni di vacanza / weekend fuori"
           >🌴 Vacanze</button>
+          <button
+            className={'cal-filter-btn' + (mergeMode ? ' active' : '')}
+            onClick={() => setMergeMode(m => !m)}
+            title="Unisce celle consecutive con la stessa location"
+          >🔗 Unisci location</button>
 
           <div style={{width:1,height:20,background:'var(--border)',margin:'0 2px'}}/>
 
@@ -331,6 +502,7 @@ export default function CalendarioPage() {
         <span className="cal-legend-item positive-eg">+Entrate</span>
         <span className="cal-legend-item negative-eg">−Uscite</span>
         {boatDaySet.size > 0 && <span style={{fontSize:11,color:'var(--text3)'}}>🚤 = uscita barca</span>}
+        {mergeMode && <span style={{fontSize:11,color:'var(--text3)'}}>🔗 celle unite per location · clicca city per modificare</span>}
       </div>
 
       {/* Calendar grid */}
@@ -347,29 +519,93 @@ export default function CalendarioPage() {
           <tbody>
             {MONTHS.map((monthName, m) => {
               const daysInMonth = DAYS_IN_MONTH(year, m)
+
+              let cells
+              if (mergeMode) {
+                cells = []
+                let i = 1
+                while (i <= daysInMonth) {
+                  const dateStr = `${year}-${String(m+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`
+                  const city = effectiveCityByDate[dateStr]
+                  if (city) {
+                    let j = i + 1
+                    while (j <= daysInMonth) {
+                      const nd = `${year}-${String(m+1).padStart(2,'0')}-${String(j).padStart(2,'0')}`
+                      if (effectiveCityByDate[nd] !== city) break
+                      j++
+                    }
+                    if (j - i >= 2) {
+                      cells.push(
+                        <MergedCell
+                          key={i}
+                          year={year} month={m}
+                          startDay={i} endDay={j-1}
+                          city={city}
+                          txs={allTxs}
+                          filter={filter}
+                          vacations={vacations}
+                          boatDaySet={boatDaySet}
+                          quickFilter={quickFilter}
+                          onCityEditRange={handleCityEditRange}
+                          onClick={ds => {
+                            const dayTxs = txByDate[ds] || []
+                            const dayVacs = vacations.filter(v => ds >= v.from && ds <= v.to)
+                            setModal({dateStr: ds, txs: dayTxs, vacs: dayVacs})
+                          }}
+                        />
+                      )
+                      i = j
+                      continue
+                    }
+                  }
+                  // Single cell
+                  cells.push(
+                    <DayCell
+                      key={i}
+                      year={year} month={m} day={i}
+                      txs={allTxs}
+                      filter={filter}
+                      vacations={vacations}
+                      boatDaySet={boatDaySet}
+                      quickFilter={quickFilter}
+                      cityOverrides={cityOverrides}
+                      onCityEdit={handleCityEdit}
+                      onClick={(ds, txs, vacs) => setModal({dateStr: ds, txs, vacs})}
+                    />
+                  )
+                  i++
+                }
+                // Empty cells for remaining columns
+                for (let d = daysInMonth + 1; d <= 31; d++) {
+                  cells.push(<td key={d} className="cal-cell empty"/>)
+                }
+              } else {
+                cells = Array.from({length:31},(_,i)=>{
+                  const day = i + 1
+                  if (day > daysInMonth) return <td key={day} className="cal-cell empty"/>
+                  return (
+                    <DayCell
+                      key={day}
+                      year={year} month={m} day={day}
+                      txs={allTxs}
+                      filter={filter}
+                      vacations={vacations}
+                      boatDaySet={boatDaySet}
+                      quickFilter={quickFilter}
+                      cityOverrides={cityOverrides}
+                      onCityEdit={handleCityEdit}
+                      onClick={(ds, txs, vacs) => setModal({dateStr: ds, txs, vacs})}
+                    />
+                  )
+                })
+              }
+
               return (
                 <tr key={m} className="cal-month-row">
                   <td className="cal-month-label">
                     <span className="cal-month-short">{MONTHS_SHORT[m]}</span>
                   </td>
-                  {Array.from({length:31},(_,i)=>{
-                    const day = i + 1
-                    if (day > daysInMonth) {
-                      return <td key={day} className="cal-cell empty"/>
-                    }
-                    return (
-                      <DayCell
-                        key={day}
-                        year={year} month={m} day={day}
-                        txs={allTxs}
-                        filter={filter}
-                        vacations={vacations}
-                        boatDaySet={boatDaySet}
-                        quickFilter={quickFilter}
-                        onClick={(dateStr, txs, vacs) => setModal({dateStr, txs, vacs})}
-                      />
-                    )
-                  })}
+                  {cells}
                 </tr>
               )
             })}
