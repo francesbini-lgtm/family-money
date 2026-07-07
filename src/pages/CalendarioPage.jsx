@@ -338,6 +338,7 @@ export default function CalendarioPage() {
   const [filter, setFilter] = useState({ type:'', cat1:'' })
   const [quickFilter, setQuickFilter] = useState(null) // 'boat' | 'vacation' | null
   const [mergeMode, setMergeMode]     = useState(false)
+  const [hideSati, setHideSati]         = useState(true)
   const [modal,  setModal]  = useState(null) // {dateStr, txs, vacs}
   const [showAddVac, setShowAddVac] = useState(false)
   const [showVacList, setShowVacList] = useState(false)
@@ -368,9 +369,21 @@ export default function CalendarioPage() {
   }, [transactions])
 
   // All transactions for the year (for cell rendering)
-  const allTxs = useMemo(() =>
-    transactions.filter(t => (t._effDate||(t._effDate||t.date||'')).startsWith(String(year)))
-  , [transactions, year])
+  const allTxs = useMemo(() => {
+    let txs = transactions.filter(t => (t._effDate||(t._effDate||t.date||'')).startsWith(String(year)))
+    if (hideSati) {
+      txs = txs.filter(t => {
+        if (t.amount <= 0) return true  // keep expenses always
+        const d = (t.description || '').toLowerCase()
+        const m = (t.merchant || '').toLowerCase()
+        const isSatiIncome = t.descAI === 'Accredito Satispay' ||
+          t.descAI === 'Accantonamento Satispay' ||
+          d.includes('satispay') || m.includes('satispay')
+        return !isSatiIncome
+      })
+    }
+    return txs
+  }, [transactions, year, hideSati])
 
   // Effective city per date — override takes priority, then dominant from txs
   const effectiveCityByDate = useMemo(() => {
@@ -439,6 +452,11 @@ export default function CalendarioPage() {
             onClick={() => setMergeMode(m => !m)}
             title="Unisce celle consecutive con la stessa location"
           >🔗 Unisci location</button>
+          <button
+            className={'cal-filter-btn' + (hideSati ? ' active' : '')}
+            onClick={() => setHideSati(v => !v)}
+            title="Nascondi accantonamenti e accrediti Satispay"
+          >🔒 Nascondi Satispay</button>
 
           <div style={{width:1,height:20,background:'var(--border)',margin:'0 2px'}}/>
 
