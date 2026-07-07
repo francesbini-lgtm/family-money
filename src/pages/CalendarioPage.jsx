@@ -258,10 +258,25 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
 
 // ── Day detail modal ──────────────────────────────────────
 function DayModal({ dateStr, txs, vacs, onClose }) {
+  const appPrefs   = useStore(s => s.appPrefs)
+  const setAppPref = useStore(s => s.setAppPref)
   const d = new Date(dateStr)
   const label = `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
   const income  = txs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
   const expense = Math.abs(txs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+
+  const savedCity = appPrefs?.calendarCityOverrides?.[dateStr] || ''
+  const [cityVal, setCityVal] = useState(savedCity)
+  const [citySaved, setCitySaved] = useState(false)
+
+  function saveCity() {
+    const overrides = { ...(appPrefs?.calendarCityOverrides || {}) }
+    if (cityVal.trim()) overrides[dateStr] = cityVal.trim()
+    else delete overrides[dateStr]
+    setAppPref('calendarCityOverrides', overrides)
+    setCitySaved(true)
+    setTimeout(() => setCitySaved(false), 1500)
+  }
 
   return (
     <Modal title={`📅 ${label}`} onClose={onClose} width={520}>
@@ -297,6 +312,21 @@ function DayModal({ dateStr, txs, vacs, onClose }) {
           </div>
         </>
       )}
+      {/* City / location */}
+      <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid var(--border)',display:'flex',alignItems:'center',gap:8}}>
+        <span style={{fontSize:12,color:'var(--text3)',flexShrink:0}}>📍 Location:</span>
+        <input
+          value={cityVal}
+          onChange={e => { setCityVal(e.target.value); setCitySaved(false) }}
+          onKeyDown={e => { if (e.key === 'Enter') saveCity() }}
+          placeholder="es. Sestri Levante"
+          style={{flex:1,padding:'5px 10px',border:'1px solid var(--border)',borderRadius:8,
+            background:'var(--bg)',color:'var(--text)',fontSize:13,fontFamily:'var(--font-sans)',outline:'none'}}
+        />
+        <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}} onClick={saveCity}>
+          {citySaved ? '✓' : 'Salva'}
+        </button>
+      </div>
       <ModalFooter>
         <button className="btn btn-secondary" onClick={onClose}>Chiudi</button>
       </ModalFooter>
