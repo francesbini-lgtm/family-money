@@ -1999,8 +1999,12 @@ function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
   const updateVehExpense  = useStore(s => s.updateVehExpense)
   const customCats        = useStore(s => s.customCats)
   const transactions      = useStore(s => s.transactions)
-  const incTx = tx._compensatedBy ? transactions.find(t => t.txId === tx._compensatedBy) : null
   const txMatch = satiMatches?.[tx.txId]
+  const incTx = tx._compensatedBy
+    ? transactions.find(t => t.txId === tx._compensatedBy)
+    : txMatch?.incomeTxId
+      ? transactions.find(t => t.txId === txMatch.incomeTxId)
+      : null
   const modalDateWarning = (() => {
     if (!incTx) return false
     const incDate = new Date(incTx._effDate || incTx.date).getTime()
@@ -2103,13 +2107,13 @@ function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
               color:'var(--text3)',marginBottom:3}}>Descrizione originale</div>
             <div style={{fontSize:12,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || tx.descAI || '—'}</div>
           </div>
-          {tx._compensatedAmt > 0 && (
+          {(tx._compensatedAmt > 0 || txMatch?.status === 'matched') && (
             <div style={{gridColumn:'1/-1',padding:'8px 12px',background:'rgba(200,160,0,.1)',
               borderRadius:8,border:'1px solid var(--gold)'}}>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
                 color:'var(--gold)',marginBottom:3}}>Compensazione Satispay</div>
               <div style={{fontSize:13,fontWeight:700,color:'var(--gold)'}}>
-                −€ {fmtIT(tx._compensatedAmt,2)} compensati
+                −€ {fmtIT(tx._compensatedAmt || txMatch?.compensatedAmt || (incTx ? Math.abs(incTx.amount) : 0),2)} compensati
               </div>
               {incTx && (
                 <div style={{fontSize:11,color:'var(--gold)',opacity:.8,marginTop:4,display:'flex',alignItems:'center',gap:4}}>
