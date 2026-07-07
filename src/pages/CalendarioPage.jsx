@@ -256,14 +256,110 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
   )
 }
 
+// ── Inline tx editor row ─────────────────────────────────
+function TxEditRow({ tx }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats        = useStore(s => s.customCats)
+  const allCats = useMemo(() => getMergedCats(customCats), [customCats])
+  const [open, setOpen]       = useState(false)
+  const [date, setDate]       = useState(tx._effDate || tx.date || '')
+  const [descAI, setDescAI]   = useState(tx.descAI || '')
+  const [cat1, setCat1]       = useState(tx.cat1 || '')
+  const [cat2, setCat2]       = useState(tx.cat2 || '')
+  const [saved, setSaved]     = useState(false)
+
+  const cat2Options = cat1 && allCats[cat1]?.sub ? allCats[cat1].sub : []
+  const color = CATS[cat1]?.color || CATS[tx.cat1]?.color || '#888'
+
+  function handleSave() {
+    const patch = {}
+    if (date !== (tx._effDate || tx.date)) patch._effDate = date
+    if (descAI.trim() !== tx.descAI) patch.descAI = descAI.trim()
+    if (cat1 !== tx.cat1) patch.cat1 = cat1
+    if (cat2 !== tx.cat2) patch.cat2 = cat2
+    if (Object.keys(patch).length) updateTransaction(tx.txId, patch)
+    setSaved(true)
+    setTimeout(() => { setSaved(false); setOpen(false) }, 900)
+  }
+
+  return (
+    <div style={{borderRadius:'var(--radius-sm)',overflow:'hidden',border:'1px solid var(--border)'}}>
+      {/* Summary row */}
+      <div style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'var(--surface2)',cursor:'pointer'}}
+        onClick={() => setOpen(o => !o)}>
+        <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{descAI||(tx.description||'')}</div>
+          <div style={{fontSize:11,color:'var(--text3)'}}>{cat1}{cat2?` › ${cat2}`:''} · {date}</div>
+        </div>
+        <span style={{fontSize:13,fontWeight:700,color:tx.amount>0?'var(--green)':tx.amount<0?'var(--red)':'var(--text)',fontFamily:'var(--font-mono)',flexShrink:0}}>
+          {tx.amount>0?'+':''}{tx.amount<0?'-':''}{fmtIT(Math.abs(tx.amount), 2)}
+        </span>
+        <span style={{fontSize:11,color:'var(--text3)',flexShrink:0}}>{open ? '▲' : '✏️'}</span>
+      </div>
+      {/* Edit panel */}
+      {open && (
+        <div style={{padding:'12px 14px',background:'var(--bg)',display:'flex',flexDirection:'column',gap:10}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Data</div>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                style={{width:'100%',padding:'5px 8px',border:'1px solid var(--border)',borderRadius:6,
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,fontFamily:'var(--font-sans)',outline:'none',boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Descrizione AI</div>
+              <input value={descAI} onChange={e => setDescAI(e.target.value)}
+                style={{width:'100%',padding:'5px 8px',border:'1px solid var(--border)',borderRadius:6,
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,fontFamily:'var(--font-sans)',outline:'none',boxSizing:'border-box'}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Categoria L1</div>
+              <select value={cat1} onChange={e => { setCat1(e.target.value); setCat2('') }}
+                style={{width:'100%',padding:'5px 8px',border:'1px solid var(--border)',borderRadius:6,
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,fontFamily:'var(--font-sans)',outline:'none',boxSizing:'border-box'}}>
+                <option value="">—</option>
+                {Object.keys(allCats).map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:'var(--text3)',marginBottom:4,textTransform:'uppercase',letterSpacing:'.05em'}}>Categoria L2</div>
+              <select value={cat2} onChange={e => setCat2(e.target.value)}
+                disabled={!cat2Options.length}
+                style={{width:'100%',padding:'5px 8px',border:'1px solid var(--border)',borderRadius:6,
+                  background:'var(--surface)',color:'var(--text)',fontSize:13,fontFamily:'var(--font-sans)',outline:'none',boxSizing:'border-box',
+                  opacity:cat2Options.length?1:0.4}}>
+                <option value="">—</option>
+                {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+            <button className="btn btn-secondary" style={{fontSize:12}} onClick={() => setOpen(false)}>Annulla</button>
+            <button className="btn btn-primary" style={{fontSize:12}} onClick={handleSave}>
+              {saved ? '✓ Salvato' : 'Salva'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Day detail modal ──────────────────────────────────────
-function DayModal({ dateStr, txs, vacs, onClose }) {
+function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const d = new Date(dateStr)
   const label = `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
-  const income  = txs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const expense = Math.abs(txs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+
+  // In vacation mode, show only Weekend e Vacanze txs (matches cell content)
+  const visibleTxs = quickFilter === 'vacation'
+    ? txs.filter(t => t.cat1 === 'Weekend e Vacanze')
+    : txs
+
+  const income  = visibleTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+  const expense = Math.abs(visibleTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
 
   const savedCity = appPrefs?.calendarCityOverrides?.[dateStr] || ''
   const [cityVal, setCityVal] = useState(savedCity)
@@ -279,36 +375,22 @@ function DayModal({ dateStr, txs, vacs, onClose }) {
   }
 
   return (
-    <Modal title={`📅 ${label}`} onClose={onClose} width={520}>
+    <Modal title={`📅 ${label}`} onClose={onClose} width={540}>
       {vacs.length > 0 && (
         <div style={{marginBottom:12,padding:'8px 12px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--blue)',fontWeight:600}}>
           🏖 {vacs.map(v=>v.name).join(' · ')}
         </div>
       )}
-      {txs.length === 0 ? (
+      {visibleTxs.length === 0 ? (
         <div style={{textAlign:'center',padding:'20px 0',color:'var(--text3)',fontSize:13}}>Nessuna transazione questo giorno.</div>
       ) : (
         <>
-          <div style={{display:'flex',gap:16,marginBottom:14}}>
+          <div style={{display:'flex',gap:16,marginBottom:10}}>
             {income>0 && <div style={{fontSize:12}}><span style={{color:'var(--text3)'}}>Entrate: </span><strong style={{color:'var(--green)'}}>+€ {fmtIT(income, 2)}</strong></div>}
             {expense>0 && <div style={{fontSize:12}}><span style={{color:'var(--text3)'}}>Uscite: </span><strong style={{color:'var(--red)'}}>{fmtIT(expense, 2)}</strong></div>}
           </div>
-          <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:320,overflowY:'auto'}}>
-            {txs.map(t => {
-              const color = CATS[t.cat1]?.color||'#888'
-              return (
-                <div key={t.txId} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'var(--surface2)',borderRadius:'var(--radius-sm)'}}>
-                  <span style={{width:8,height:8,borderRadius:'50%',background:color,flexShrink:0}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||(t.description||'')}</div>
-                    <div style={{fontSize:11,color:'var(--text3)'}}>{t.cat1}{t.cat2?` › ${t.cat2}`:''}</div>
-                  </div>
-                  <span style={{fontSize:13,fontWeight:700,color:t.amount>0?'var(--green)':t.amount<0?'var(--red)':'var(--text)',fontFamily:'var(--font-mono)',flexShrink:0}}>
-                    {t.amount>0?'+':''}{t.amount<0?'-':''}{fmtIT(Math.abs(t.amount), 2)}
-                  </span>
-                </div>
-              )
-            })}
+          <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:360,overflowY:'auto'}}>
+            {visibleTxs.map(t => <TxEditRow key={t.txId} tx={t}/>)}
           </div>
         </>
       )}
@@ -666,6 +748,7 @@ export default function CalendarioPage() {
           dateStr={modal.dateStr}
           txs={modal.txs}
           vacs={modal.vacs}
+          quickFilter={quickFilter}
           onClose={()=>setModal(null)}
         />
       )}
