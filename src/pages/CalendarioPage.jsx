@@ -262,7 +262,7 @@ function TxEditRow({ tx }) {
   const customCats        = useStore(s => s.customCats)
   const allCats = useMemo(() => getMergedCats(customCats), [customCats])
   const [open, setOpen]       = useState(false)
-  const [date, setDate]       = useState(tx._effDate || tx.date || '')
+  const [date, setDate]       = useState(tx.competenza || tx._effDate || tx.date || '')
   const [descAI, setDescAI]   = useState(tx.descAI || '')
   const [cat1, setCat1]       = useState(tx.cat1 || '')
   const [cat2, setCat2]       = useState(tx.cat2 || '')
@@ -273,7 +273,7 @@ function TxEditRow({ tx }) {
 
   function handleSave() {
     const patch = {}
-    if (date !== (tx._effDate || tx.date)) patch._effDate = date
+    if (date !== (tx.competenza || tx._effDate || tx.date)) patch.competenza = date
     if (descAI.trim() !== tx.descAI) patch.descAI = descAI.trim()
     if (cat1 !== tx.cat1) patch.cat1 = cat1
     if (cat2 !== tx.cat2) patch.cat2 = cat2
