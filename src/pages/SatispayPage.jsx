@@ -3158,7 +3158,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               const origAmt = Math.abs(t.amount)
               // compensatedAmt: try _compensatedAmt on tx, then match record, then direct income lookup
               const incTx = (status === 'matched' && match?.incomeTxId)
-                ? satiIncome.find(i => i.txId === match.incomeTxId)
+                ? (satiIncome.find(i => i.txId === match.incomeTxId) || transactions.find(i => i.txId === match.incomeTxId))
                 : null
               // ⚠️ if accredito date is strictly after spesa date
               const dateWarning = (() => {
