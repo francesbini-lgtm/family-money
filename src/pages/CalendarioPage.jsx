@@ -372,15 +372,7 @@ export default function CalendarioPage() {
   const allTxs = useMemo(() => {
     let txs = transactions.filter(t => (t._effDate||(t._effDate||t.date||'')).startsWith(String(year)))
     if (hideSati) {
-      txs = txs.filter(t => {
-        if (t.amount <= 0) return true  // keep expenses always
-        const d = (t.description || '').toLowerCase()
-        const m = (t.merchant || '').toLowerCase()
-        const isSatiIncome = t.descAI === 'Accredito Satispay' ||
-          t.descAI === 'Accantonamento Satispay' ||
-          d.includes('satispay') || m.includes('satispay')
-        return !isSatiIncome
-      })
+      txs = txs.filter(t => !(t.descAI || '').toLowerCase().includes('satispay'))
     }
     return txs
   }, [transactions, year, hideSati])
