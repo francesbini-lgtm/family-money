@@ -367,7 +367,7 @@ export default function CalendarioPage() {
   const [year,  setYear]  = useState(now.getFullYear())
   const [filter, setFilter] = useState({ type:'', cat1:'' })
   const [quickFilter, setQuickFilter] = useState(null) // 'boat' | 'vacation' | null
-  const [mergeMode, setMergeMode]     = useState(false)
+  const mergeMode = quickFilter === 'vacation'  // auto-merge when vacation filter active
   const [hideSati, setHideSati]         = useState(true)
   const [modal,  setModal]  = useState(null) // {dateStr, txs, vacs}
   const [showAddVac, setShowAddVac] = useState(false)
@@ -419,7 +419,7 @@ export default function CalendarioPage() {
         } else {
           const dayTxs = txByDate[dateStr] || []
           const freq = {}
-          dayTxs.filter(t => !t.excluded).forEach(t => {
+          dayTxs.filter(t => !t.excluded && t.cat1 === 'Weekend e Vacanze').forEach(t => {
             const c = t.city && t.city !== 'null' ? t.city : null
             if (c) freq[c] = (freq[c] || 0) + 1
           })
@@ -469,11 +469,6 @@ export default function CalendarioPage() {
             onClick={() => setQuickFilter(q => q === 'vacation' ? null : 'vacation')}
             title="Mostra solo giorni di vacanza / weekend fuori"
           >🌴 Vacanze</button>
-          <button
-            className={'cal-filter-btn' + (mergeMode ? ' active' : '')}
-            onClick={() => setMergeMode(m => !m)}
-            title="Unisce celle consecutive con la stessa location"
-          >🔗 Unisci location</button>
           <button
             className={'cal-filter-btn' + (hideSati ? ' active' : '')}
             onClick={() => setHideSati(v => !v)}
@@ -542,7 +537,7 @@ export default function CalendarioPage() {
         <span className="cal-legend-item positive-eg">+Entrate</span>
         <span className="cal-legend-item negative-eg">−Uscite</span>
         {boatDaySet.size > 0 && <span style={{fontSize:11,color:'var(--text3)'}}>🚤 = uscita barca</span>}
-        {mergeMode && <span style={{fontSize:11,color:'var(--text3)'}}>🔗 celle unite per location · clicca city per modificare</span>}
+        {mergeMode && <span style={{fontSize:11,color:'var(--text3)'}}>Celle unite per location · clicca city per modificare</span>}
       </div>
 
       {/* Calendar grid */}
@@ -640,8 +635,20 @@ export default function CalendarioPage() {
                 })
               }
 
+              // Cross-month continuation hint
+              const lastDayStr  = `${year}-${String(m+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
+              const firstNextStr = m < 11 ? `${year}-${String(m+2).padStart(2,'0')}-01` : null
+              const cityLast  = effectiveCityByDate[lastDayStr]
+              const cityFirst = firstNextStr ? effectiveCityByDate[firstNextStr] : null
+              const continuesNext = mergeMode && cityLast && cityFirst && cityLast === cityFirst
+
+              const prevDaysInMonth = m > 0 ? DAYS_IN_MONTH(year, m-1) : null
+              const lastPrevStr = m > 0 ? `${year}-${String(m).padStart(2,'0')}-${String(prevDaysInMonth).padStart(2,'0')}` : null
+              const cityPrev = lastPrevStr ? effectiveCityByDate[lastPrevStr] : null
+              const continuesPrev = mergeMode && cityPrev && effectiveCityByDate[`${year}-${String(m+1).padStart(2,'0')}-01`] === cityPrev
+
               return (
-                <tr key={m} className="cal-month-row">
+                <tr key={m} className={`cal-month-row${continuesPrev ? ' month-continues-from-prev' : ''}${continuesNext ? ' month-continues-to-next' : ''}`}>
                   <td className="cal-month-label">
                     <span className="cal-month-short">{MONTHS_SHORT[m]}</span>
                   </td>

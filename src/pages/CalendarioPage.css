@@ -161,3 +161,13 @@
   border-right: 2px solid var(--accent) !important;
   border-left: 2px solid var(--accent) !important;
 }
+
+/* Cross-month city continuation hint */
+.month-continues-to-next td:last-of-type.cal-cell:not(.empty),
+.month-continues-to-next td.cal-merged-cell:last-of-type {
+  border-bottom: 2px dashed var(--accent) !important;
+}
+.month-continues-from-prev td:first-of-type.cal-cell:not(.cal-month-label):not(.empty),
+.month-continues-from-prev td.cal-merged-cell:first-of-type {
+  border-top: 2px dashed var(--accent) !important;
+}
