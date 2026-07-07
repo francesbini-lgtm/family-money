@@ -2009,7 +2009,7 @@ function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
     if (!incTx) return false
     const incDate = new Date(incTx._effDate || incTx.date).getTime()
     const expDate = new Date(tx._effDate || tx.date).getTime()
-    return (incDate - expDate) / 86400000 > 0
+    return (incDate - expDate) / 86400000 < 0
   })()
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [cat1, setCat1]   = useState(tx.cat1 || '')
@@ -3112,7 +3112,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                   borderBottom:'1px solid var(--border)',
                   position:'sticky',top:0,zIndex:2,
-                  textAlign:h.startsWith('Importo')?'right':'left'}}>{h}</th>
+                  whiteSpace:'nowrap',
+                  minWidth: h==='Stato' ? 160 : h==='Descrizione' ? 200 : undefined,
+                  textAlign:h.startsWith('Importo')||h==='Residuo'?'right':'left'}}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -3169,7 +3171,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                 if (!incTx) return false
                 const incDate = new Date(incTx._effDate || incTx.date).getTime()
                 const expDate = new Date(t._effDate || t.date).getTime()
-                return (incDate - expDate) / 86400000 > 0
+                return (incDate - expDate) / 86400000 < 0
               })()
               const compensatedAmt = t._compensatedAmt
                 || (match?.compensatedAmt || 0)
