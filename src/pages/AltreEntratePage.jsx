@@ -379,7 +379,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
       .filter(t => {
         if (t.txId === incomeEntry.txId || t.excluded) return false
         if (alreadyLinked.has(t.txId) || linkedToThis.has(t.txId)) return false
-        return true  // show all — no amount restriction
+        return t.amount < 0  // only expenses (negative transactions)
       })
       .map(t => ({ t, score: scoreMatch(t) }))
       .sort((a, b) => {
