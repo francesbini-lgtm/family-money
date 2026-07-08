@@ -42,6 +42,7 @@ function normalizeRalRow(r) {
 function RalEditModal({ person, data, onSave, onClose }) {
   const [rows, setRows] = useState(() =>
     [...(data[person] || [])].map(normalizeRalRow)
+      .map(r=>({...r, ral:String(r.ral??''), netto:String(r.netto??''), bonusLordo:String(r.bonusLordo??''), bonusNetto:String(r.bonusNetto??'')}))
       .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
   )
   const [newDate, setNewDate]               = useState('')
@@ -52,7 +53,7 @@ function RalEditModal({ person, data, onSave, onClose }) {
 
   function updateRow(i, field, val) {
     setRows(prev => prev.map((r, idx) => idx === i
-      ? { ...r, [field]: field === 'effectiveDate' ? val : (parseFloat(val)||0) }
+      ? { ...r, [field]: val }   // store raw string; parse only on save
       : r
     ))
   }
@@ -68,7 +69,17 @@ function RalEditModal({ person, data, onSave, onClose }) {
     }].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate)))
     setNewDate(''); setNewRal(''); setNewNetto(''); setNewBonusLordo(''); setNewBonusNetto('')
   }
-  function handleSave() { onSave({ ...data, [person]: rows }); onClose() }
+  function handleSave() {
+    const parsed = rows.map(r => ({
+      ...r,
+      ral:        parseFloat(r.ral)        || 0,
+      netto:      parseFloat(r.netto)      || 0,
+      bonusLordo: parseFloat(r.bonusLordo) || 0,
+      bonusNetto: parseFloat(r.bonusNetto) || 0,
+    }))
+    onSave({ ...data, [person]: parsed })
+    onClose()
+  }
   const color = COLORS[person] || '#888'
   return (
     <div className="en-ral-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -100,7 +111,7 @@ function RalEditModal({ person, data, onSave, onClose }) {
                     onChange={e => updateRow(i, 'ral', e.target.value)} />
                 </td>
                 <td>
-                  <input className="en-ral-input" type="number" value={r.bonusLordo||0}
+                  <input className="en-ral-input" type="number" value={r.bonusLordo??''}
                     onChange={e => updateRow(i, 'bonusLordo', e.target.value)}
                     style={{borderColor:'rgba(184,148,42,.4)'}} />
                 </td>
@@ -109,7 +120,7 @@ function RalEditModal({ person, data, onSave, onClose }) {
                     onChange={e => updateRow(i, 'netto', e.target.value)} />
                 </td>
                 <td>
-                  <input className="en-ral-input" type="number" value={r.bonusNetto||0}
+                  <input className="en-ral-input" type="number" value={r.bonusNetto??''}
                     onChange={e => updateRow(i, 'bonusNetto', e.target.value)}
                     style={{borderColor:'rgba(184,148,42,.4)'}} />
                 </td>
@@ -211,7 +222,9 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
 
   // ── Fra salary state ───────────────────────────────────
   const [fraRows, setFraRows] = useState(() =>
-    [...(ralData.Fra||[])].map(normalizeRalRow).sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate))
+    [...(ralData.Fra||[])].map(normalizeRalRow)
+      .map(r=>({...r, ral:String(r.ral??''), netto:String(r.netto??''), bonusLordo:String(r.bonusLordo??''), bonusNetto:String(r.bonusNetto??'')}))
+      .sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate))
   )
   const [fraValuta, setFraValuta] = useState(s.fraValuta||'EUR')
   const [fraND, setFraND] = useState(''); const [fraNR, setFraNR] = useState('')
@@ -220,7 +233,9 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
 
   // ── Sofi salary state ──────────────────────────────────
   const [sofiRows, setSofiRows] = useState(() =>
-    [...(ralData.Sofi||[])].map(normalizeRalRow).sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate))
+    [...(ralData.Sofi||[])].map(normalizeRalRow)
+      .map(r=>({...r, ral:String(r.ral??''), netto:String(r.netto??''), bonusLordo:String(r.bonusLordo??''), bonusNetto:String(r.bonusNetto??'')}))
+      .sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate))
   )
   const [sofiValuta, setSofiValuta] = useState(s.sofiValuta||'EUR')
   const [sofiND, setSofiND] = useState(''); const [sofiNR, setSofiNR] = useState('')
@@ -229,7 +244,7 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
 
   function mkRowUpdater(setR) {
     return (i, field, val) => setR(prev => prev.map((r,idx)=>idx===i
-      ? {...r,[field]: field==='effectiveDate'?val:(parseFloat(val)||0)}
+      ? {...r,[field]: val}   // keep raw string so cursor never jumps
       : r
     ))
   }
@@ -255,9 +270,16 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
   const addSofi    = mkRowAdder(sofiRows, setSofiRows, sofiND,setSofiND, sofiNR,setSofiNR, sofiNN,setSofiNN, sofiNBL,setSofiNBL, sofiNBN,setSofiNBN)
 
   function saveSalary(person) {
-    const rows = person==='Fra' ? fraRows : sofiRows
+    const rawRows = person==='Fra' ? fraRows : sofiRows
     const valuta = person==='Fra' ? fraValuta : sofiValuta
     const valutaKey = person==='Fra' ? 'fraValuta' : 'sofiValuta'
+    const rows = rawRows.map(r => ({
+      ...r,
+      ral:        parseFloat(r.ral)        || 0,
+      netto:      parseFloat(r.netto)      || 0,
+      bonusLordo: parseFloat(r.bonusLordo) || 0,
+      bonusNetto: parseFloat(r.bonusNetto) || 0,
+    }))
     onSaveData({ ...ralData, [person]: rows })
     onSaveSettings({ ...s, [valutaKey]: valuta })
   }
@@ -308,12 +330,12 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
                   onChange={e=>updateRow(i,'effectiveDate',e.target.value)} style={{minWidth:130}}/></td>
                 <td><input className="en-ral-input" type="number" value={r.ral}
                   onChange={e=>updateRow(i,'ral',e.target.value)}/></td>
-                <td><input className="en-ral-input" type="number" value={r.bonusLordo||0}
+                <td><input className="en-ral-input" type="number" value={r.bonusLordo??''}
                   onChange={e=>updateRow(i,'bonusLordo',e.target.value)}
                   style={{borderColor:'rgba(184,148,42,.4)'}}/></td>
                 <td><input className="en-ral-input" type="number" value={r.netto}
                   onChange={e=>updateRow(i,'netto',e.target.value)}/></td>
-                <td><input className="en-ral-input" type="number" value={r.bonusNetto||0}
+                <td><input className="en-ral-input" type="number" value={r.bonusNetto??''}
                   onChange={e=>updateRow(i,'bonusNetto',e.target.value)}
                   style={{borderColor:'rgba(184,148,42,.4)'}}/></td>
                 <td><button className="en-ral-del" onClick={()=>deleteRow(i)}>✕</button></td>
