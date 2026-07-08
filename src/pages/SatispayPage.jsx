@@ -13,6 +13,8 @@ import {
 function getSatiNotes() { return useStore.getState()?.appPrefs?.satiNotes || {} }
 function saveSatiNotes(d) { useStore.getState()?.setAppPref?.('satiNotes', d) }
 function getSatiComp()  { return useStore.getState()?.appPrefs?.satiComp || {} }
+function getSatiWarnDismissed() { return useStore.getState()?.appPrefs?.satiWarnDismissed || {} }
+function saveSatiWarnDismissed(d) { useStore.getState()?.setAppPref?.('satiWarnDismissed', d) }
 function saveSatiComp(d) { useStore.getState()?.setAppPref?.('satiComp', d) }
 
 function SatiNoteCell({ txId }) {
@@ -41,7 +43,7 @@ function SatiNoteCell({ txId }) {
       border:'1px dashed transparent',transition:'border .15s'}}
       onMouseEnter={e=>e.currentTarget.style.borderColor='var(--border)'}
       onMouseLeave={e=>e.currentTarget.style.borderColor='transparent'}>
-      {val || 'aggiungi nota...'}
+      {val || 'nota..'}
     </div>
   )
 }
@@ -2116,6 +2118,14 @@ function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
   const updateVehExpense  = useStore(s => s.updateVehExpense)
   const customCats        = useStore(s => s.customCats)
   const transactions      = useStore(s => s.transactions)
+  const appPrefs          = useStore(s => s.appPrefs)
+  const setAppPref        = useStore(s => s.setAppPref)
+  const isModalWarnDismissed = !!appPrefs?.satiWarnDismissed?.[tx.txId]
+  function toggleModalWarnDismiss() {
+    const cur = getSatiWarnDismissed()
+    if (isModalWarnDismissed) { const n={...cur}; delete n[tx.txId]; saveSatiWarnDismissed(n) }
+    else saveSatiWarnDismissed({...cur, [tx.txId]: true})
+  }
   const txMatch = satiMatches?.[tx.txId]
   const incTx = tx._compensatedBy
     ? transactions.find(t => t.txId === tx._compensatedBy)
@@ -2743,6 +2753,12 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     showToast('Transazione abbinata con successo', 'success')
   }
 
+  function toggleWarnDismiss(txId) {
+    const cur = getSatiWarnDismissed()
+    if (cur[txId]) { const n={...cur}; delete n[txId]; setAppPref('satiWarnDismissed', n) }
+    else setAppPref('satiWarnDismissed', {...cur, [txId]: true})
+  }
+
   function handleUnlink(expTxId) {
     const prevMatch = satiMatches[expTxId]
     const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
@@ -3290,6 +3306,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                 const expDate = new Date(t._effDate || t.date).getTime()
                 return (incDate - expDate) / 86400000 < 0
               })()
+              const isWarnDismissed = !!appPrefs?.satiWarnDismissed?.[t.txId]
               const compensatedAmt = t._compensatedAmt
                 || (match?.compensatedAmt || 0)
                 || (incTx ? Math.abs(incTx.amount) : 0)
@@ -3304,15 +3321,15 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   onClick={() => setDetailTx(t)}
                   onMouseEnter={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.13)' : 'var(--surface2)'}
                   onMouseLeave={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.06)' : 'transparent'}>
-                  <td style={{padding:'9px 14px'}} onClick={e => e.stopPropagation()}>
+                  <td style={{padding:'6px 12px'}} onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={selectedRows.has(t.txId)}
                       onChange={e => setSelectedRows(prev => { const n = new Set(prev); e.target.checked ? n.add(t.txId) : n.delete(t.txId); return n })}
                       style={{cursor:'pointer'}}/>
                   </td>
-                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                  <td style={{padding:'6px 12px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                     {fmtDate(t._effDate||t.date)}
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'6px 12px'}}>
                     <div style={{fontSize:13,fontWeight:500}}>{t.descAI||t.description?.slice(0,50)}</div>
                     <div style={{fontSize:11,color:'var(--text3)',display:'flex',gap:6,alignItems:'center'}}>
                       {isVeh && <span style={{fontSize:10,padding:'1px 6px',borderRadius:8,fontWeight:700,
@@ -3322,7 +3339,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       <span>{(t.description||'').slice(0,60)}</span>
                     </div>
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'6px 12px'}}>
                     {t.cat1 && (
                       <span style={{fontSize:11,padding:'3px 10px',borderRadius:10,fontWeight:600,
                         background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
@@ -3330,7 +3347,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </span>
                     )}
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'6px 12px'}}>
                     {residual < 0.01 ? (
                       /* Fully compensated — regardless of satiMatches status */
                       <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'nowrap'}}>
@@ -3338,8 +3355,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
                         </span>
-                        {dateWarning && (
-                          <span title="Accredito in data successiva alla spesa" style={{fontSize:12}}>⚠️</span>
+                        {dateWarning && !isWarnDismissed && (
+                          <span title="Accredito precedente alla spesa — clicca per ignorare" style={{fontSize:12,cursor:'pointer'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠️</span>
+                        )}
+                        {dateWarning && isWarnDismissed && (
+                          <span title="Alert ignorato — clicca per riattivare" style={{fontSize:10,cursor:'pointer',opacity:.35,textDecoration:'line-through'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠</span>
                         )}
                         {match?.matchSource === 'auto' && (
                           <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
@@ -3357,8 +3379,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                           background:'rgba(200,160,0,.12)',color:'var(--gold)',border:'1px solid var(--gold)55'}}>
                           ≈ parziale
                         </span>
-                        {dateWarning && (
-                          <span title="Accredito in data successiva alla spesa" style={{fontSize:12}}>⚠️</span>
+                        {dateWarning && !isWarnDismissed && (
+                          <span title="Accredito precedente alla spesa — clicca per ignorare" style={{fontSize:12,cursor:'pointer'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠️</span>
+                        )}
+                        {dateWarning && isWarnDismissed && (
+                          <span title="Alert ignorato — clicca per riattivare" style={{fontSize:10,cursor:'pointer',opacity:.35,textDecoration:'line-through'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠</span>
                         )}
                         {match?.matchSource === 'auto' && (
                           <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
@@ -3387,10 +3414,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </button>
                     )}
                   </td>
-                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--red)'}}>
+                  <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--red)'}}>
                     −€ {fmtIT(origAmt,2)}
                   </td>
-                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
+                  <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
                     color: residual < 0.01 ? 'var(--green)' : residual < origAmt ? 'var(--gold,#b8942a)' : 'var(--text2)'}}>
                     {residual < 0.01
                       ? <span style={{color:'var(--green)'}}>✅ — €0</span>
@@ -3398,7 +3425,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                         ? <span title={`Compensato: €${fmtIT(compensatedAmt,2)}`}>−€{fmtIT(residual,2)}</span>
                         : `−€ ${fmtIT(origAmt,2)}`}
                   </td>
-                  <td style={{padding:'9px 14px'}} onClick={e => e.stopPropagation()}>
+                  <td style={{padding:'6px 12px'}} onClick={e => e.stopPropagation()}>
                     <SatiNoteCell txId={t.txId}/>
                   </td>
                 </tr>
