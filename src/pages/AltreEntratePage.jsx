@@ -330,26 +330,68 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
 
   const eligible = useMemo(() => {
     const allLinks = getCompLinks()
-    // Expenses already linked to OTHER income entries
     const alreadyLinked = new Set(
       Object.entries(allLinks)
         .filter(([id]) => id !== String(linkKey))
         .flatMap(([,l]) => getAeLinksArray(l).map(x => x.expTxId))
     )
-    // Expenses already linked to THIS income entry (can't link twice)
     const linkedToThis = new Set(
       getAeLinksArray(allLinks[linkKey]).map(l => l.expTxId)
     )
+
+    // Scoring function: higher = better suggestion
+    function scoreMatch(t) {
+      let score = 0
+      const absT   = Math.abs(t.amount)
+      const absInc = incomeEntry.amount || 0
+      const diff   = Math.abs(absT - absInc)
+
+      // Amount similarity
+      if (diff < 0.01)  score += 100  // exact match
+      else if (diff < 1)  score += 80   // within €1
+      else if (diff < 2)  score += 60   // within €2
+      else if (diff < 5)  score += 40   // within €5
+      else if (diff < 10) score += 20   // within €10
+
+      // Date proximity
+      const tDate   = new Date(t._effDate || t.date || 0).getTime()
+      const incDate = new Date(incomeEntry._effDate || incomeEntry.date || 0).getTime()
+      const daysDiff = Math.abs(tDate - incDate) / 86400000
+      if (daysDiff < 1)       score += 50
+      else if (daysDiff < 7)  score += 35
+      else if (daysDiff < 14) score += 20
+      else if (daysDiff < 30) score += 10
+
+      // Description word overlap
+      const incWords = new Set(
+        (incomeEntry.descAI || incomeEntry.desc || incomeEntry.description || '')
+          .toLowerCase().split(/\W+/).filter(w => w.length > 3)
+      )
+      const tWords = (t.descAI || t.description || t.merchant || '')
+        .toLowerCase().split(/\W+/).filter(w => w.length > 3)
+      const overlap = tWords.filter(w => incWords.has(w)).length
+      score += overlap * 15
+
+      return score
+    }
+
     return transactions
       .filter(t => {
         if (t.txId === incomeEntry.txId || t.excluded) return false
         if (alreadyLinked.has(t.txId) || linkedToThis.has(t.txId)) return false
-        return Math.abs(t.amount) >= availableForComp - 1
+        return true  // show all — no amount restriction
       })
-      .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+      .map(t => ({ t, score: scoreMatch(t) }))
+      .sort((a, b) => {
+        // Primary: score desc; secondary: date desc
+        if (b.score !== a.score) return b.score - a.score
+        return (b.t._effDate||b.t.date||'').localeCompare(a.t._effDate||a.t.date||'')
+      })
+      .map(({ t, score }) => ({ ...t, _matchScore: score }))
   }, [transactions, incomeEntry, availableForComp])
 
   const filtered = eligible.filter(t => {
+    if (!search.trim()) return true
     const hay = `${t.description||''} ${t.merchant||''} ${t.descAI||''}`.toLowerCase()
     return hay.includes(search.toLowerCase())
   })
@@ -442,25 +484,48 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.slice(0,60).map(t => {
+                  {filtered.slice(0,80).map((t, idx) => {
                     const absAmt = Math.abs(t.amount)
-                    const isSel = selected?.txId === t.txId
+                    const isSel  = selected?.txId === t.txId
                     const isFull = absAmt <= availableForComp
+                    const score  = t._matchScore || 0
+                    // Show "suggerito" badge on high-score items (top of list, score >= 40)
+                    const isSuggested = score >= 40
+                    // Show separator between suggested and rest
+                    const prevScore = idx > 0 ? (filtered[idx-1]._matchScore||0) : score
+                    const showSep = idx > 0 && isSuggested !== (prevScore >= 40)
                     return (
-                      <tr key={t.txId} onClick={()=>setSelected(t)} style={{
-                        borderBottom:'1px solid var(--border)',cursor:'pointer',
-                        background:isSel?'var(--accent-l)':'transparent',
-                      }}>
-                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
-                        <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</td>
-                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
-                          color:t.amount>0?'var(--green)':'var(--red)'}}>
-                          {t.amount>0?'+':'−'}€ {(absAmt).toLocaleString('it-IT',{minimumFractionDigits:2})}
-                        </td>
-                        <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>
-                          {isFull ? '✅' : '⚠️'}
-                        </td>
-                      </tr>
+                      <>
+                        {showSep && (
+                          <tr key={t.txId+'-sep'}>
+                            <td colSpan={4} style={{padding:'4px 10px',background:'var(--surface2)',fontSize:10,
+                              fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',
+                              borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)'}}>
+                              Altre transazioni
+                            </td>
+                          </tr>
+                        )}
+                        <tr key={t.txId} onClick={()=>setSelected(t)} style={{
+                          borderBottom:'1px solid var(--border)',cursor:'pointer',
+                          background: isSel ? 'var(--accent-l)' : isSuggested ? 'rgba(22,163,74,.03)' : 'transparent',
+                        }}>
+                          <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:5}}>
+                            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</span>
+                            {isSuggested && <span style={{flexShrink:0,fontSize:9,padding:'1px 5px',borderRadius:6,
+                              background:'rgba(22,163,74,.12)',color:'var(--green)',fontWeight:700,border:'1px solid rgba(22,163,74,.25)'}}>
+                              ✦ suggerito
+                            </span>}
+                          </td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
+                            color:t.amount>0?'var(--green)':'var(--red)'}}>
+                            {t.amount>0?'+':'−'}€ {absAmt.toLocaleString('it-IT',{minimumFractionDigits:2})}
+                          </td>
+                          <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>
+                            {isFull ? '✅' : '⚠️'}
+                          </td>
+                        </tr>
+                      </>
                     )
                   })}
                   {filtered.length === 0 && <tr><td colSpan={5} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna transazione nell'intervallo</td></tr>}
