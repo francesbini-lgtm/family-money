@@ -60,6 +60,10 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
   const [codeResult, setCodeResult] = useState(null)
   const [selected, setSelected] = useState(null)
   const [saved, setSaved] = useState(false)
+  const [phase2, setPhase2] = useState(null)   // { residual, expTx } after partial match
+  const [p2Selected, setP2Selected] = useState(null)
+  const [p2Search, setP2Search] = useState('')
+  const [p2Saved, setP2Saved] = useState(false)
 
   const satiCompSnapshot = getSatiComp()
   const existingLinks = getLinksArray(satiCompSnapshot[incomeEntry.txId])
@@ -125,7 +129,17 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
     updateTransaction(incomeEntry.txId, { _compensatedAmt: usedSoFar + compensateAmt })
 
     setSaved(true)
-    setTimeout(onClose, 800)
+    const isPartial = compensateAmt < absExp
+    if (isPartial) {
+      // Don't close — offer to link another income for the residual
+      setTimeout(() => {
+        setSaved(false)
+        setPhase2({ residual: absExp - compensateAmt, expTx: selected })
+        setSelected(null)
+      }, 700)
+    } else {
+      setTimeout(onClose, 800)
+    }
   }
 
   function unlink() {
@@ -141,6 +155,57 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
       saveSatiComp(links)
     }
     onClose()
+  }
+
+  // Phase 2: link another income to cover residual
+  const p2AvailableIncomes = phase2 ? (() => {
+    const satiComp = getSatiComp()
+    const usedIncomeIds = new Set(
+      Object.entries(satiComp)
+        .flatMap(([incId, links]) => {
+          const arr = getLinksArray(links)
+          return arr.some(l => l.expTxId === phase2.expTx?.txId) ? [incId] : []
+        })
+    )
+    return transactions.filter(t =>
+      t.amount > 0 &&
+      !t.excluded &&
+      t.txId !== incomeEntry.txId &&
+      !usedIncomeIds.has(t.txId) &&
+      (p2Search === '' ||
+        (t.descAI||t.description||'').toLowerCase().includes(p2Search.toLowerCase()))
+    ).sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+  })() : []
+
+  function confirmPhase2() {
+    if (!p2Selected || !phase2) return
+    const links = { ...getSatiComp() }
+    const existingForInc = getLinksArray(links[p2Selected.txId])
+    const usedForInc = existingForInc.reduce((s,l) => s+(l.compensatedAmt||0), 0)
+    const available = Math.max(0, p2Selected.amount - usedForInc)
+    const compensateAmt = Math.min(phase2.residual, available)
+    if (compensateAmt <= 0) return
+
+    links[p2Selected.txId] = [...existingForInc, { expTxId: phase2.expTx.txId, compensatedAmt: compensateAmt }]
+    saveSatiComp(links)
+
+    // Update expense: add to existing _compensatedAmt
+    const expTx = transactions.find(t => t.txId === phase2.expTx.txId)
+    const prevComp = expTx?._compensatedAmt || 0
+    updateTransaction(phase2.expTx.txId, { _compensatedAmt: prevComp + compensateAmt })
+    updateTransaction(p2Selected.txId, { _compensatedAmt: usedForInc + compensateAmt })
+
+    const newResidual = phase2.residual - compensateAmt
+    setP2Saved(true)
+    setTimeout(() => {
+      if (newResidual > 0.01) {
+        // still residual — reset for another round
+        setPhase2({ residual: newResidual, expTx: phase2.expTx })
+        setP2Selected(null); setP2Search(''); setP2Saved(false)
+      } else {
+        onClose()
+      }
+    }, 700)
   }
 
   const preview = selected ? (() => {
@@ -161,6 +226,56 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
           <div style={{fontSize:16,fontWeight:800}}>🔗 Abbina a Transazione</div>
           <button onClick={onClose} style={{border:'none',background:'transparent',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
         </div>
+        {phase2 ? (
+          /* ── Phase 2: link another income for residual ── */
+          <>
+            <div style={{padding:'10px 14px',background:'rgba(200,150,0,.12)',border:'1px solid var(--gold)',borderRadius:8,marginBottom:14,fontSize:13}}>
+              <strong style={{color:'var(--gold)'}}>⚠️ Residuo €{phase2.residual.toLocaleString('it-IT',{minimumFractionDigits:2})}</strong>
+              <span style={{fontSize:12,color:'var(--text2)',marginLeft:8}}>— seleziona un'altra entrata per coprire il resto di <strong>{phase2.expTx?.descAI||phase2.expTx?.description?.slice(0,40)}</strong></span>
+            </div>
+            <input value={p2Search} onChange={e=>setP2Search(e.target.value)} placeholder="Filtra entrate disponibili…" autoFocus
+              style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,
+                fontSize:13,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)',boxSizing:'border-box',marginBottom:8}}/>
+            <div style={{flex:1,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,marginBottom:12,maxHeight:280}}>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  <tr style={{background:'var(--surface2)',position:'sticky',top:0}}>
+                    {['Data','Descrizione','Importo','Match'].map(h=>(
+                      <th key={h} style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
+                        textTransform:'uppercase',color:'var(--text3)',textAlign:h==='Importo'?'right':'left',borderBottom:'1px solid var(--border)'}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {p2AvailableIncomes.slice(0,60).map(t => {
+                    const isSel = p2Selected?.txId === t.txId
+                    const covers = t.amount >= phase2.residual
+                    return (
+                      <tr key={t.txId} onClick={()=>setP2Selected(t)}
+                        style={{borderBottom:'1px solid var(--border)',cursor:'pointer',background:isSel?'var(--accent-l)':'transparent'}}>
+                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                        <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:'var(--green)'}}>
+                          +€ {t.amount.toLocaleString('it-IT',{minimumFractionDigits:2})}
+                        </td>
+                        <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>{covers ? '✅' : '⚠️'}</td>
+                      </tr>
+                    )
+                  })}
+                  {p2AvailableIncomes.length === 0 && <tr><td colSpan={4} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna entrata disponibile</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {p2Saved && <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,marginBottom:10,fontSize:12,color:'var(--green)',fontWeight:600}}>✅ Abbinamento salvato!</div>}
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn btn-secondary" onClick={onClose}>Chiudi senza abbinare</button>
+              <button className="btn btn-primary" onClick={confirmPhase2} disabled={!p2Selected||p2Saved}>
+                Abbina residuo
+              </button>
+            </div>
+          </>
+        ) : (
+        <>
         <div style={{padding:'10px 14px',background:'var(--green-l)',border:'1px solid var(--green)',borderRadius:8,marginBottom:14,fontSize:12}}>
           <strong>Entrata:</strong> {incomeEntry.descAI||incomeEntry.description?.slice(0,50)} —
           <strong style={{color:'var(--green)'}}> +€ {incomeEntry.amount.toLocaleString('it-IT',{minimumFractionDigits:2})}</strong>
@@ -266,6 +381,8 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
           <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
           <button className="btn btn-primary" onClick={confirm} disabled={!selected||saved}>Conferma abbinamento</button>
         </div>
+        </>
+        )}
       </div>
     </div>
   )
