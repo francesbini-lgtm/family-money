@@ -301,7 +301,9 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
     marginBottom:-1, transition:'color .12s',
   })
 
-  function SalarySection({ person, rows, updateRow, deleteRow, addRow, valuta, setValuta,
+  // NB: plain render function, NOT a component — se fosse un componente definito qui dentro,
+  // ogni keystroke lo ricreerebbe (nuova identità) e React smonterebbe/rimonterebbe gli input → focus perso
+  function renderSalarySection({ person, rows, updateRow, deleteRow, addRow, valuta, setValuta,
     nd, setNd, nr, setNr, nn, setNn, nbl, setNbl, nbn, setNbn }) {
     const color = COLORS[person]||'#888'
     return (
@@ -325,7 +327,7 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
           </tr></thead>
           <tbody>
             {rows.map((r,i) => (
-              <tr key={r.effectiveDate}>
+              <tr key={i}>
                 <td><input className="en-ral-input" type="month" value={r.effectiveDate}
                   onChange={e=>updateRow(i,'effectiveDate',e.target.value)} style={{minWidth:130}}/></td>
                 <td><input className="en-ral-input" type="number" value={r.ral}
@@ -422,22 +424,18 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
         )}
 
         {/* ── Salary sections ── */}
-        {section === 'fra' && (
-          <SalarySection person="Fra"
-            rows={fraRows} updateRow={updateFra} deleteRow={deleteFra} addRow={addFra}
-            valuta={fraValuta} setValuta={setFraValuta}
-            nd={fraND} setNd={setFraND} nr={fraNR} setNr={setFraNR}
-            nn={fraNN} setNn={setFraNN} nbl={fraNBL} setNbl={setFraNBL}
-            nbn={fraNBN} setNbn={setFraNBN}/>
-        )}
-        {section === 'sofi' && (
-          <SalarySection person="Sofi"
-            rows={sofiRows} updateRow={updateSofi} deleteRow={deleteSofi} addRow={addSofi}
-            valuta={sofiValuta} setValuta={setSofiValuta}
-            nd={sofiND} setNd={setSofiND} nr={sofiNR} setNr={setSofiNR}
-            nn={sofiNN} setNn={setSofiNN} nbl={sofiNBL} setNbl={setSofiNBL}
-            nbn={sofiNBN} setNbn={setSofiNBN}/>
-        )}
+        {section === 'fra' && renderSalarySection({ person:'Fra',
+          rows:fraRows, updateRow:updateFra, deleteRow:deleteFra, addRow:addFra,
+          valuta:fraValuta, setValuta:setFraValuta,
+          nd:fraND, setNd:setFraND, nr:fraNR, setNr:setFraNR,
+          nn:fraNN, setNn:setFraNN, nbl:fraNBL, setNbl:setFraNBL,
+          nbn:fraNBN, setNbn:setFraNBN })}
+        {section === 'sofi' && renderSalarySection({ person:'Sofi',
+          rows:sofiRows, updateRow:updateSofi, deleteRow:deleteSofi, addRow:addSofi,
+          valuta:sofiValuta, setValuta:setSofiValuta,
+          nd:sofiND, setNd:setSofiND, nr:sofiNR, setNr:setSofiNR,
+          nn:sofiNN, setNn:setSofiNN, nbl:sofiNBL, setNbl:setSofiNBL,
+          nbn:sofiNBN, setNbn:setSofiNBN })}
       </div>
     </div>
   )
