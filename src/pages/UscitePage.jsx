@@ -888,10 +888,10 @@ export default function UscitePage() {
               </div>
               <div className="uscite-detail-total">
                 {fmtIT(Math.round(detailTxs.reduce((s, t) => s + Math.abs(netAmt(t)), 0)))} €
-                <span className="uscite-detail-count">{detailTxs.length} transazioni</span>
+                <span className="uscite-detail-count">{detailTxs.filter(t => netAmt(t) < 0).length} transazioni</span>
               </div>
               <div className="uscite-detail-list">
-                {detailTxs.map((t, i) => (
+                {detailTxs.filter(t => netAmt(t) < 0).map((t, i) => (
                   <div key={t.id || t.txId || i} className="uscite-detail-row"
                     style={{ cursor: t._virtual ? 'default' : 'pointer', opacity: t._virtual ? 0.7 : 1 }}
                     onClick={() => !t._virtual && setOpenTx(t)}>
@@ -899,7 +899,7 @@ export default function UscitePage() {
                     <div className="uscite-detail-desc" style={t._virtual ? {fontStyle:'italic',color:'var(--text3)'} : undefined}>
                       {t._virtual ? `⚙ Fondo: ${t.descAI || '—'}` : (t.descAI || t.description || t.desc || '—')}
                     </div>
-                    <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(netAmt(t))))}{t._compensatedAmt>0?" *":""} €</div>
+                    <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(netAmt(t))))} €</div>
                   </div>
                 ))}
               </div>
