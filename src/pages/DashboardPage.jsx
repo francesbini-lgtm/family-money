@@ -4,7 +4,7 @@ import { useFinancials } from '../hooks/useFinancials'
 import { IncomeExpenseChart, SavingsChart, CategoryDonut } from '../components/Charts'
 import { TrendingUp, TrendingDown, PiggyBank, Percent, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import './DashboardPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { useMemo, useState } from 'react'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import {
@@ -153,7 +153,7 @@ function TxModal({ tx, onClose }) {
 
   const _allCats = getMergedCats(customCats)
   const effDate = tx._effDate || tx.date || ''
-  const fmtDate = (d) => {
+  const fmtDateLong = (d) => {
     if (!d) return '—'
     const parts = d.slice(0,10).split('-')
     return parts.length===3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : d
@@ -201,8 +201,8 @@ function TxModal({ tx, onClose }) {
           border:'1px solid var(--border)',
         }}>
           {[
-            ['Data contabile', fmtDate(tx.date)],
-            ['Data valuta', fmtDate(tx.effectiveDate || tx._effDate)],
+            ['Data contabile', fmtDateLong(tx.date)],
+            ['Data valuta', fmtDateLong(tx.effectiveDate || tx._effDate)],
             ['Merchant', tx.merchant || '—'],
             ['Controparte', tx.counterpart || tx.counterparty || '—'],
             ['Città', tx.city || '—'],
@@ -574,7 +574,7 @@ function SpeseCatChart({ transactions }) {
                       onMouseLeave={e=>e.currentTarget.style.background='transparent'}
                     >
                       <span style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',flexShrink:0,width:38}}>
-                        {fmtShortDate(d)}
+                        {fmtDate(d)}
                       </span>
                       <span style={{fontSize:12,color:'var(--text2)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                         {desc || '—'}

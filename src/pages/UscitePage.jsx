@@ -15,6 +15,13 @@ import WeekendVacanzePage from './WeekendVacanzePage'
 import UtenzePage from './UtenzePage'
 import AltroPage from './AltroPage'
 
+// ── Net amount after compensation ──────────────────────────
+function netAmt(t) {
+  if (!t._compensatedAmt || t._compensatedAmt <= 0) return t.amount
+  return t.amount < 0 ? t.amount + t._compensatedAmt : t.amount
+}
+
+
 function TabPill({ label, active, onClick }) {
   return (
     <button onClick={onClick} style={{
@@ -112,7 +119,7 @@ function TxDetailModal({ tx, onClose }) {
         <button className="uscite-modal-close" onClick={onClose}>✕</button>
         <div className="uscite-modal-title">{tx.descAI || tx.description || '—'}</div>
         <div className="uscite-modal-amount" style={{color: tx.amount < 0 ? 'var(--red)' : 'var(--green)'}}>
-          {tx.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(tx.amount), 2)}
+          {tx.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(netAmt(tx)), 2)}{tx._compensatedAmt>0&&tx.amount<0?' *':''}
         </div>
         <div className="uscite-modal-grid">
           {[
@@ -293,7 +300,7 @@ export default function UscitePage() {
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
       const cat1 = t.cat1 || 'Non Categorizzato'
       const cat2 = t.cat2 || '(altro)'
-      const val = Math.abs(t.amount)
+      const val = Math.abs(netAmt(t))
 
       if (!map[cat1]) map[cat1] = {}
       if (!map[cat1][ym]) map[cat1][ym] = { total: 0, l2: {}, txs: [] }
@@ -316,7 +323,7 @@ export default function UscitePage() {
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
       if (!monthKeys.has(ym)) return
       const cat1 = t.cat1 || 'Non Categorizzato'
-      totals[cat1] = (totals[cat1] || 0) + Math.abs(t.amount)
+      totals[cat1] = (totals[cat1] || 0) + Math.abs(netAmt(t))
     })
     const sorted = Object.keys(totals).sort((a, b) => totals[b] - totals[a])
     // Move "Altro" to second-to-last
@@ -445,7 +452,7 @@ export default function UscitePage() {
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
       const cat1 = t.cat1 || 'Non Categorizzato'
       const cat2 = t.cat2 || '(altro)'
-      const val = Math.abs(t.amount)
+      const val = Math.abs(netAmt(t))
       if (!map[cat1]) map[cat1] = {}
       if (!map[cat1][ym]) map[cat1][ym] = { total: 0, l2: {} }
       map[cat1][ym].total += val
@@ -880,7 +887,7 @@ export default function UscitePage() {
                 <button className="uscite-detail-close" onClick={() => setSelected(null)}>✕</button>
               </div>
               <div className="uscite-detail-total">
-                {fmtIT(Math.round(detailTxs.reduce((s, t) => s + Math.abs(t.amount), 0)))} €
+                {fmtIT(Math.round(detailTxs.reduce((s, t) => s + Math.abs(netAmt(t)), 0)))} €
                 <span className="uscite-detail-count">{detailTxs.length} transazioni</span>
               </div>
               <div className="uscite-detail-list">
@@ -892,7 +899,7 @@ export default function UscitePage() {
                     <div className="uscite-detail-desc" style={t._virtual ? {fontStyle:'italic',color:'var(--text3)'} : undefined}>
                       {t._virtual ? `⚙ Fondo: ${t.descAI || '—'}` : (t.descAI || t.description || t.desc || '—')}
                     </div>
-                    <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(t.amount)))} €</div>
+                    <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(netAmt(t))))}{t._compensatedAmt>0?" *":""} €</div>
                   </div>
                 ))}
               </div>

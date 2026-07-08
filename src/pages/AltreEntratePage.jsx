@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { Plus, Trash2, Link, TrendingUp, RefreshCw } from 'lucide-react'
 import './AltreEntratePage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 
 const ENTRY_TYPES = ['Rimborso Costo','Prestito Ricevuto','Trasferimento','Entrata Generica']
@@ -37,6 +37,98 @@ function getAeLinksArray(linkEntry) {
 // ── Notes (Firestore via appPrefs) ──────────────────────────
 function getAeNotes() { return useStore.getState()?.appPrefs?.aeNotes || {} }
 function saveAeNotes(data) { useStore.getState()?.setAppPref?.('aeNotes', data) }
+
+// ── Clarification requests (Firestore via appPrefs) ─────────
+function getClarReqs() { return useStore.getState()?.appPrefs?.clarificationRequests || [] }
+function saveClarReqs(arr) { useStore.getState()?.setAppPref?.('clarificationRequests', arr) }
+
+function ChiarimentoModal({ entry, onClose }) {
+  const appPrefs  = useStore(s => s.appPrefs)
+  const [toUser,  setToUser]  = useState('')
+  const [sent,    setSent]    = useState(false)
+
+  const ownerNick  = appPrefs.ownerNickname || 'Admin'
+  const family     = appPrefs.family || []
+  const recipients = [
+    { nick: ownerNick, label: ownerNick },
+    ...family.map(m => ({ nick: m.nickname || m.name?.split(' ')[0] || m.name, label: m.nickname || m.name }))
+  ]
+
+  // Pre-select the other user when there are exactly 2 total
+  const others = recipients.filter(r => r.nick !== ownerNick)
+  if (!toUser && others.length === 1 && !sent) setToUser(others[0].nick)
+
+  function send() {
+    if (!toUser) return
+    const req = {
+      id: `clr-${Date.now()}`,
+      fromUser: ownerNick,
+      toUser,
+      entryKey: entry.txId || entry.id,
+      txInfo: {
+        descAI:      entry.descAI || entry.desc || '',
+        description: entry.description || '',
+        date:        entry._effDate || entry.date || '',
+        amount:      entry.amount || 0,
+        cat1:        entry.cat1 || '',
+        cat2:        entry.cat2 || '',
+        merchant:    entry.merchant || '',
+      },
+      status:       'pending',
+      note:         '',
+      requestedAt:  new Date().toISOString(),
+      respondedAt:  null,
+    }
+    saveClarReqs([...getClarReqs(), req])
+    setSent(true)
+    setTimeout(onClose, 1000)
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,
+        width:440,maxWidth:'92vw',padding:24,boxShadow:'0 8px 32px rgba(0,0,0,.2)'}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>💬 Chiedi chiarimento</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>Invia una richiesta di nota su questa entrata</div>
+        <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 14px',marginBottom:16,fontSize:12}}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{entry.descAI||entry.desc||entry.description?.slice(0,50)}</div>
+          <div style={{display:'flex',gap:12,color:'var(--text3)'}}>
+            <span>{fmtDate(entry._effDate||entry.date)}</span>
+            <span style={{color:'var(--green)',fontWeight:700}}>+€{fmtIT(entry.amount||0,2)}</span>
+            {entry.cat1 && <span>{entry.cat1}{entry.cat2?` › ${entry.cat2}`:''}</span>}
+          </div>
+        </div>
+        {others.length === 0 ? (
+          <div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>Nessun altro membro famiglia configurato nelle impostazioni.</div>
+        ) : others.length === 1 ? (
+          <div style={{fontSize:13,color:'var(--text2)',marginBottom:16}}>Chiedi a: <strong>{others[0].label}</strong></div>
+        ) : (
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>Chiedi a</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {others.map(r=>(
+                <button key={r.nick} onClick={()=>setToUser(r.nick)}
+                  style={{padding:'5px 14px',borderRadius:20,border:`2px solid ${toUser===r.nick?'var(--accent)':'var(--border)'}`,
+                    background:toUser===r.nick?'var(--accent-l)':'transparent',
+                    fontWeight:toUser===r.nick?700:400,cursor:'pointer',fontSize:13,fontFamily:'var(--font-sans)',color:'var(--text)'}}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {sent && <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,marginBottom:12,fontSize:12,color:'var(--green)',fontWeight:600}}>✅ Richiesta inviata!</div>}
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+          <button className="btn btn-primary" onClick={send} disabled={!toUser||sent||others.length===0}>
+            💬 Invia richiesta
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ── AE Categories (Firestore via appPrefs) ──────────────────
 function getAeCats() { return useStore.getState()?.appPrefs?.aeCats || {} }
@@ -227,31 +319,79 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
 
   // Support multiple links per income entry (array format)
   const existingLinks = getAeLinksArray(linkKey != null ? getCompLinks()[linkKey] : null)
-  const alreadyUsed = existingLinks.reduce((s, l) => s + (l.compensatedAmt || 0), 0)
+  // Use min(expTx.amount, compensatedAmt) — old-format links stored compensatedAmt = incomeEntry.amount
+  // which is an overestimate when the expense was smaller than the income (mode:'full')
+  const alreadyUsed = existingLinks.reduce((s, l) => {
+    const expTx = transactions.find(t => t.txId === l.expTxId)
+    const expAmt = expTx ? Math.abs(expTx.amount) : null
+    return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
+  }, 0)
   const availableForComp = Math.max(0, (incomeEntry.amount || 0) - alreadyUsed)
 
   const eligible = useMemo(() => {
     const allLinks = getCompLinks()
-    // Expenses already linked to OTHER income entries
     const alreadyLinked = new Set(
       Object.entries(allLinks)
         .filter(([id]) => id !== String(linkKey))
         .flatMap(([,l]) => getAeLinksArray(l).map(x => x.expTxId))
     )
-    // Expenses already linked to THIS income entry (can't link twice)
     const linkedToThis = new Set(
       getAeLinksArray(allLinks[linkKey]).map(l => l.expTxId)
     )
+
+    // Scoring function: higher = better suggestion
+    function scoreMatch(t) {
+      let score = 0
+      const absT   = Math.abs(t.amount)
+      const absInc = incomeEntry.amount || 0
+      const diff   = Math.abs(absT - absInc)
+
+      // Amount similarity
+      if (diff < 0.01)  score += 100  // exact match
+      else if (diff < 1)  score += 80   // within €1
+      else if (diff < 2)  score += 60   // within €2
+      else if (diff < 5)  score += 40   // within €5
+      else if (diff < 10) score += 20   // within €10
+
+      // Date proximity
+      const tDate   = new Date(t._effDate || t.date || 0).getTime()
+      const incDate = new Date(incomeEntry._effDate || incomeEntry.date || 0).getTime()
+      const daysDiff = Math.abs(tDate - incDate) / 86400000
+      if (daysDiff < 1)       score += 50
+      else if (daysDiff < 7)  score += 35
+      else if (daysDiff < 14) score += 20
+      else if (daysDiff < 30) score += 10
+
+      // Description word overlap
+      const incWords = new Set(
+        (incomeEntry.descAI || incomeEntry.desc || incomeEntry.description || '')
+          .toLowerCase().split(/\W+/).filter(w => w.length > 3)
+      )
+      const tWords = (t.descAI || t.description || t.merchant || '')
+        .toLowerCase().split(/\W+/).filter(w => w.length > 3)
+      const overlap = tWords.filter(w => incWords.has(w)).length
+      score += overlap * 15
+
+      return score
+    }
+
     return transactions
       .filter(t => {
         if (t.txId === incomeEntry.txId || t.excluded) return false
         if (alreadyLinked.has(t.txId) || linkedToThis.has(t.txId)) return false
-        return Math.abs(t.amount) >= availableForComp - 1
+        return t.amount < 0  // only expenses (negative transactions)
       })
-      .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+      .map(t => ({ t, score: scoreMatch(t) }))
+      .sort((a, b) => {
+        // Primary: score desc; secondary: date desc
+        if (b.score !== a.score) return b.score - a.score
+        return (b.t._effDate||b.t.date||'').localeCompare(a.t._effDate||a.t.date||'')
+      })
+      .map(({ t, score }) => ({ ...t, _matchScore: score }))
   }, [transactions, incomeEntry, availableForComp])
 
   const filtered = eligible.filter(t => {
+    if (!search.trim()) return true
     const hay = `${t.description||''} ${t.merchant||''} ${t.descAI||''}`.toLowerCase()
     return hay.includes(search.toLowerCase())
   })
@@ -278,10 +418,11 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
     const existingArr = getAeLinksArray(links[linkKey])
     links[linkKey] = [...existingArr, { expTxId: selected.txId, mode: isFull ? 'full' : 'partial', compensatedAmt: compensateAmt }]
     saveCompLinks(links)
-    if (isFull) {
-      updateTransaction(selected.txId, { excluded: true, _compensatedBy: linkKey })
-    } else {
-      updateTransaction(selected.txId, { _compensatedAmt: compensateAmt, _compensatedBy: linkKey })
+    // Expense: keep visible, show net cost (never exclude)
+    updateTransaction(selected.txId, { _compensatedAmt: compensateAmt, _compensatedBy: String(linkKey), excluded: false })
+    // Income: show residual = income - totalCompensated as _compensatedAmt*
+    if (incomeEntry.txId) {
+      updateTransaction(incomeEntry.txId, { _compensatedAmt: alreadyUsed + compensateAmt })
     }
     setSaved(true)
     setTimeout(onClose, 800)
@@ -343,25 +484,48 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.slice(0,60).map(t => {
+                  {filtered.slice(0,80).map((t, idx) => {
                     const absAmt = Math.abs(t.amount)
-                    const isSel = selected?.txId === t.txId
+                    const isSel  = selected?.txId === t.txId
                     const isFull = absAmt <= availableForComp
+                    const score  = t._matchScore || 0
+                    // Show "suggerito" badge on high-score items (top of list, score >= 40)
+                    const isSuggested = score >= 40
+                    // Show separator between suggested and rest
+                    const prevScore = idx > 0 ? (filtered[idx-1]._matchScore||0) : score
+                    const showSep = idx > 0 && isSuggested !== (prevScore >= 40)
                     return (
-                      <tr key={t.txId} onClick={()=>setSelected(t)} style={{
-                        borderBottom:'1px solid var(--border)',cursor:'pointer',
-                        background:isSel?'var(--accent-l)':'transparent',
-                      }}>
-                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{(t._effDate||(t._effDate||t.date||'')).slice(5).replace('-','/')}</td>
-                        <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</td>
-                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
-                          color:t.amount>0?'var(--green)':'var(--red)'}}>
-                          {t.amount>0?'+':'−'}€ {(absAmt).toLocaleString('it-IT',{minimumFractionDigits:2})}
-                        </td>
-                        <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>
-                          {isFull ? '✅' : '⚠️'}
-                        </td>
-                      </tr>
+                      <>
+                        {showSep && (
+                          <tr key={t.txId+'-sep'}>
+                            <td colSpan={4} style={{padding:'4px 10px',background:'var(--surface2)',fontSize:10,
+                              fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',
+                              borderTop:'1px solid var(--border)',borderBottom:'1px solid var(--border)'}}>
+                              Altre transazioni
+                            </td>
+                          </tr>
+                        )}
+                        <tr key={t.txId} onClick={()=>setSelected(t)} style={{
+                          borderBottom:'1px solid var(--border)',cursor:'pointer',
+                          background: isSel ? 'var(--accent-l)' : isSuggested ? 'rgba(22,163,74,.03)' : 'transparent',
+                        }}>
+                          <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:5}}>
+                            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</span>
+                            {isSuggested && <span style={{flexShrink:0,fontSize:9,padding:'1px 5px',borderRadius:6,
+                              background:'rgba(22,163,74,.12)',color:'var(--green)',fontWeight:700,border:'1px solid rgba(22,163,74,.25)'}}>
+                              ✦ suggerito
+                            </span>}
+                          </td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
+                            color:t.amount>0?'var(--green)':'var(--red)'}}>
+                            {t.amount>0?'+':'−'}€ {absAmt.toLocaleString('it-IT',{minimumFractionDigits:2})}
+                          </td>
+                          <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>
+                            {isFull ? '✅' : '⚠️'}
+                          </td>
+                        </tr>
+                      </>
                     )
                   })}
                   {filtered.length === 0 && <tr><td colSpan={5} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna transazione nell'intervallo</td></tr>}
@@ -622,6 +786,7 @@ export default function AltreEntratePage() {
   const entries   = appPrefs?.altreEntrateManual || []
   const compLinks = appPrefs?.compLinks || {}
   const [compensaEntry, setCompensaEntry] = useState(null)
+  const [chiarimentoEntry, setChiarimentoEntry] = useState(null)
   const aeNotes = appPrefs?.aeNotes || {}
   const aeCats  = appPrefs?.aeCats || {}
   const nicknames = useMemo(() => getUserNicknames(), [])
@@ -634,15 +799,20 @@ export default function AltreEntratePage() {
 
   // Detect non-salary income from bank transactions, excluding Satispay
   const autoEntries = useMemo(() => {
+    const compLinks = useStore.getState()?.appPrefs?.compLinks || {}
     return transactions.filter(t => {
       if (t.amount <= 0 || t.excluded) return false
       const cat2low = (t.cat2||'').toLowerCase()
+      const desc = (t.description||'').toUpperCase()
+      const merch = (t.merchant||'').toUpperCase()
+      const descAI = (t.descAI||'').toUpperCase()
+      // PayPal incomes (linked via PayPal abbinamento or with compLinks) — always include
+      const isPayPalTx = desc.includes('PAYPAL') || merch.includes('PAYPAL') || descAI.includes('PAYPAL')
+      if (isPayPalTx) return true
       // Exclude salary / personal entries (Fra, Sofi, etc.) by nickname config AND explicit list
       if (t.cat1 === 'Entrate' && nicknames.some(n => t.cat2 === n)) return false
       if (t.cat1 === 'Entrate' && EXCLUDED_L2.includes(cat2low)) return false
       // Exclude Satispay
-      const desc = (t.description||'').toUpperCase()
-      const merch = (t.merchant||'').toUpperCase()
       if (t.cat1 === 'Satispay' || cat2low === 'satispay') return false
       if (desc.includes('SATISPAY') || merch.includes('SATISPAY')) return false
       if (t._forcedBalance) return false
@@ -729,7 +899,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','Note',''].map(h=>(
+              {['Data','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','💬','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
@@ -739,7 +909,7 @@ export default function AltreEntratePage() {
                 const compLink = compLinks[e.txId || e.id]
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(d=>(d.length>=10?`${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(0,4)}`:d))(e.date||'')}</td>
+                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</td>
                     <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
                       <div style={{fontSize:13,fontWeight:500,display:'flex',alignItems:'center'}}>
                         {e.descAI||e.desc||e.description?.slice(0,40)}
@@ -778,12 +948,14 @@ export default function AltreEntratePage() {
                           <button onClick={()=>{
                             const linkKey = e.txId || e.id
                             const links = { ...getCompLinks() }
-                            // Un-exclude ALL linked expense transactions
+                            // Clear all linked expense transactions
                             getAeLinksArray(links[linkKey]).forEach(l => {
                               if (l.expTxId) useStore.getState().updateTransaction(l.expTxId, { excluded: false, _compensatedAmt: null, _compensatedBy: null })
                             })
                             delete links[linkKey]
                             saveCompLinks(links)
+                            // Clear income residual display
+                            if (e.txId) useStore.getState().updateTransaction(e.txId, { _compensatedAmt: null })
                           }} style={{border:'none',background:'transparent',cursor:'pointer',color:'var(--red)',fontSize:11,padding:0}}>✕</button>
                         </div>
                       )}
@@ -793,15 +965,14 @@ export default function AltreEntratePage() {
                     </td>
                     <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                       {compLink ? (() => {
-                        // Handle both old single-object format and new array format
-                        let totalUsed
-                        if (Array.isArray(compLink)) {
-                          totalUsed = compLink.reduce((s, l) => s + (l.compensatedAmt || 0), 0)
-                        } else {
-                          // Old format: use actual expense amount for accuracy
-                          const expTx = transactions.find(t => t.txId === compLink.expTxId)
-                          totalUsed = expTx ? Math.abs(expTx.amount) : (compLink.compensatedAmt || e.amount || 0)
-                        }
+                        // Use min(expTx.amount, compensatedAmt) for both formats
+                        // Old single-object links stored compensatedAmt = incomeEntry.amount (overestimate)
+                        const _linksArr = Array.isArray(compLink) ? compLink : [compLink]
+                        const totalUsed = _linksArr.reduce((s, l) => {
+                          const expTx = transactions.find(t => t.txId === l.expTxId)
+                          const expAmt = expTx ? Math.abs(expTx.amount) : null
+                          return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
+                        }, 0)
                         const residuo = Math.max(0, (e.amount||0) - totalUsed)
                         return residuo > 0.005
                           ? (
@@ -815,6 +986,26 @@ export default function AltreEntratePage() {
                           )
                           : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
                       })() : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>}
+                    </td>
+                    <td style={{padding:'6px 10px',textAlign:'center'}}>
+                      {(() => {
+                        const reqs = (useStore.getState()?.appPrefs?.clarificationRequests || [])
+                          .filter(r => r.entryKey === entryKey)
+                        const pending = reqs.find(r => r.status === 'pending')
+                        const last    = reqs[reqs.length - 1]
+                        return (
+                          <button
+                            title={pending ? 'Chiarimento in attesa di risposta' : last?.status==='responded' ? 'Chiarimento ricevuto' : 'Chiedi chiarimento'}
+                            onClick={()=>setChiarimentoEntry(e)}
+                            style={{border:'none',background:'none',cursor:'pointer',fontSize:15,
+                              opacity: pending ? 1 : last ? 0.75 : 0.3,
+                              filter: pending ? 'none' : 'none',
+                              position:'relative'}}>
+                            {pending ? '💬' : last?.status==='responded' ? '✅' : '💬'}
+                            {pending && <span style={{position:'absolute',top:-2,right:-2,width:6,height:6,borderRadius:'50%',background:'var(--accent)',display:'block'}}/>}
+                          </button>
+                        )
+                      })()}
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       <NoteCell entryKey={entryKey} notes={aeNotes} onSave={saveNote}/>
@@ -840,6 +1031,12 @@ export default function AltreEntratePage() {
           incomeEntry={compensaEntry}
           transactions={transactions}
           onClose={()=>setCompensaEntry(null)}
+        />
+      )}
+      {chiarimentoEntry && (
+        <ChiarimentoModal
+          entry={chiarimentoEntry}
+          onClose={()=>setChiarimentoEntry(null)}
         />
       )}
     </div>

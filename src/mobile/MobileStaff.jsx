@@ -9,6 +9,7 @@
  *   onAdd       callback to open the FAB form (managed by MobileApp)
  */
 import { useState, useMemo } from 'react'
+import Portal from './Portal'
 import { fmtIT } from '../utils/format'
 
 const fmt = n => '€ ' + fmtIT(Math.abs(n || 0), 2)
@@ -40,6 +41,7 @@ function AddModal({ onClose, addMonth, defaultRate }) {
   }
 
   return (
+    <Portal>
     <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="m-modal">
         <div className="m-modal-handle" />
@@ -99,6 +101,7 @@ function AddModal({ onClose, addMonth, defaultRate }) {
         </div>
       </div>
     </div>
+    </Portal>
   )
 }
 

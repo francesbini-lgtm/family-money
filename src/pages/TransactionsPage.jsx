@@ -10,15 +10,11 @@ import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
 // aiRules.js removed — AI naming rules now stored in Firestore via appPrefs
 import './TransactionsPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
-function fmtDate(dateStr) {
-  const m = (dateStr||'').match(/\d{4}-(\d{2})-(\d{2})/)
-  if (!m) return dateStr || '—'
-  return `${parseInt(m[2])} ${MONTHS[parseInt(m[1])-1]}`
-}
+// fmtDate imported from utils/format
 
 // ── KPI bar ───────────────────────────────────────────────
 const SALDO_PIN = '182218'
@@ -230,6 +226,7 @@ function ConditionRow({ cond, idx, total, onChange, onRemove }) {
         onChange={e=>{const f=e.target.value; onChange({...cond,field:f,op:f==='importo'?'=':'contiene',value:''})}}
         style={SEL_STYLE}>
         <option value="merchant">Merchant</option>
+        <option value="descAI">Descrizione AI</option>
         <option value="description">Descrizione</option>
         <option value="counterpart">Controparte</option>
         <option value="importo">Importo</option>
@@ -2442,7 +2439,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)
   const [descOpen,    setDescOpen]    = useState(false)
   const [mixCatOpen,  setMixCatOpen]  = useState(false)
-  const [amtPopup,    setAmtPopup]    = useState(false)
+  const [amtPopup,    setAmtPopup]    = useState(null)  // {x,y} when open, null when closed
   const pillRef = useRef(null)
 
   const isIncome = tx.amount > 0
@@ -2471,7 +2468,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
           checked={selected?.has(tx.txId)||false}
           onChange={e=>{const next=new Set(selected||[]);e.target.checked?next.add(tx.txId):next.delete(tx.txId);setSelected?.(next)}}/>
       </td>
-      <td style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
+      <td className="tx-cod-cell" style={{padding:'4px 6px',whiteSpace:'nowrap'}}>
         <button
           onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{_nonRecurring:!tx._nonRecurring})}}
           title={tx._nonRecurring?'Non ricorrente — clicca per rimuovere':'Segna come non ricorrente'}
@@ -2666,12 +2663,22 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                 <span
                   style={{color:'var(--gold)',cursor:'pointer'}}
                   title="Importo rettificato — clicca per dettaglio"
-                  onClick={e=>{e.stopPropagation();setAmtPopup(v=>!v)}}>
+                  onClick={e=>{
+                    e.stopPropagation()
+                    if (amtPopup) { setAmtPopup(null); return }
+                    const r = e.currentTarget.getBoundingClientRect()
+                    setAmtPopup({ x: r.right, y: r.bottom + 4 })
+                  }}>
                   {fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:2}}>*</span>
                 </span>
                 {amtPopup && (
+                  <>
+                  <div style={{position:'fixed',inset:0,zIndex:9998}} onClick={e=>{e.stopPropagation();setAmtPopup(null)}}/>
                   <div onClick={e=>e.stopPropagation()} style={{
-                    position:'absolute',right:0,top:'100%',zIndex:999,
+                    position:'fixed',
+                    right: window.innerWidth - amtPopup.x,
+                    top: amtPopup.y,
+                    zIndex:9999,
                     background:'var(--surface)',border:'1px solid var(--border)',
                     borderRadius:10,padding:'12px 16px',minWidth:220,
                     boxShadow:'0 8px 24px rgba(0,0,0,.18)',fontSize:13,whiteSpace:'nowrap'}}>
@@ -2688,8 +2695,9 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                       <span style={{color:'var(--text2)'}}>Netto</span>
                       <span style={{fontWeight:700,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount)-tx._compensatedAmt,2)} €</span>
                     </div>
-                    <button onClick={()=>setAmtPopup(false)} style={{marginTop:10,width:'100%',padding:'5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',cursor:'pointer',fontSize:12,color:'var(--text2)'}}>Chiudi</button>
+                    <button onClick={()=>setAmtPopup(null)} style={{marginTop:10,width:'100%',padding:'5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',cursor:'pointer',fontSize:12,color:'var(--text2)'}}>Chiudi</button>
                   </div>
+                  </>
                 )}
               </>
             ) : fmtIT(Math.abs(tx.amount), 2)}
@@ -2698,6 +2706,144 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
         return null
       })}
     </tr>
+  )
+}
+
+// ── Split transaction modal ───────────────────────────────
+function SplitTxModal({ tx, onClose }) {
+  const addTransactions   = useStore(s => s.addTransactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats        = useStore(s => s.customCats)
+  const catDefs           = getMergedCats(customCats)
+
+  const sign   = tx.amount < 0 ? -1 : 1
+  const absAmt = Math.abs(tx.amount)
+
+  const [splitAmt, setSplitAmt] = useState((absAmt / 2).toFixed(2))
+  const [desc,     setDesc]     = useState(tx.descAI || tx.description || '')
+  const [cat1,     setCat1]     = useState(tx.cat1 || '')
+  const [cat2,     setCat2]     = useState(tx.cat2 || '')
+  const [done,     setDone]     = useState(false)
+
+  const splitNum  = parseFloat(splitAmt) || 0
+  const remaining = Math.round((absAmt - splitNum) * 100) / 100
+  const valid     = splitNum > 0.01 && splitNum < absAmt - 0.01
+
+  const subCats = catDefs[cat1]?.sub || []
+
+  function doSplit() {
+    if (!valid) return
+    const newTxId = 'split-' + Date.now().toString(36).toUpperCase()
+    updateTransaction(tx.txId, {
+      amount: Math.round(remaining * sign * 100) / 100,
+      _hasSplit: true,
+    })
+    addTransactions([{
+      txId:        newTxId,
+      date:        tx.date,
+      _effDate:    tx._effDate,
+      amount:      Math.round(splitNum * sign * 100) / 100,
+      description: tx.description,
+      descAI:      desc.trim() || tx.descAI || tx.description,
+      cat1, cat2,
+      account:     tx.account,
+      merchant:    tx.merchant,
+      city:        tx.city,
+      conf:        100,
+      aiEnriched:  true,
+      userEditedCat:  true,
+      userEditedDesc: true,
+      _splitFrom:  tx.txId,
+    }])
+    setDone(true)
+    setTimeout(onClose, 1100)
+  }
+
+  const inp = { width:'100%', padding:'8px 10px', border:'1px solid var(--border)', borderRadius:6,
+    fontSize:13, background:'var(--surface)', color:'var(--text)', outline:'none', fontFamily:'var(--font-sans)',
+    boxSizing:'border-box' }
+  const lbl = { fontSize:11, fontWeight:700, color:'var(--text3)', marginBottom:4, display:'block',
+    textTransform:'uppercase', letterSpacing:'.05em' }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:9999,
+      display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:'var(--surface)',borderRadius:16,padding:28,width:'100%',maxWidth:480,
+        boxShadow:'0 20px 60px rgba(0,0,0,.25)',display:'flex',flexDirection:'column',gap:18}}>
+
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:700}}>✂ Dividi transazione</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>1 tx → 2 transazioni separate</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'var(--text3)',padding:4}}>✕</button>
+        </div>
+
+        {/* Original tx info */}
+        <div style={{background:'var(--surface2)',borderRadius:8,padding:'10px 14px',fontSize:12}}>
+          <div style={{color:'var(--text3)',marginBottom:4}}>Transazione originale</div>
+          <div style={{display:'flex',justifyContent:'space-between',fontWeight:700}}>
+            <span style={{color:'var(--text)'}}>{tx.descAI || tx.description}</span>
+            <span style={{fontFamily:'var(--font-mono)',color: sign<0?'var(--red)':'var(--green)'}}>
+              {sign<0?'-':'+'}{fmtIT(absAmt,2)}
+            </span>
+          </div>
+        </div>
+
+        {/* Split amount */}
+        <div>
+          <label style={lbl}>Importo da separare (€)</label>
+          <input style={inp} type="number" min="0.01" max={absAmt-0.01} step="0.01"
+            value={splitAmt} onChange={e=>setSplitAmt(e.target.value)}/>
+          {valid && (
+            <div style={{marginTop:6,fontSize:11,color:'var(--text3)',display:'flex',gap:16}}>
+              <span>Originale rimane: <strong style={{fontFamily:'var(--font-mono)'}}>{fmtIT(remaining,2)}</strong></span>
+              <span>Nuova tx: <strong style={{fontFamily:'var(--font-mono)'}}>{fmtIT(splitNum,2)}</strong></span>
+            </div>
+          )}
+          {!valid && splitNum > 0 && (
+            <div style={{marginTop:4,fontSize:11,color:'var(--red)'}}>
+              Importo deve essere tra 0,01 e {fmtIT(absAmt-0.01,2)}
+            </div>
+          )}
+        </div>
+
+        {/* Description for new tx */}
+        <div>
+          <label style={lbl}>Descrizione nuova transazione</label>
+          <input style={inp} value={desc} onChange={e=>setDesc(e.target.value)}
+            placeholder={tx.descAI || tx.description}/>
+        </div>
+
+        {/* Category for new tx */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div>
+            <label style={lbl}>Categoria L1</label>
+            <select style={inp} value={cat1} onChange={e=>{setCat1(e.target.value);setCat2('')}}>
+              <option value="">— Seleziona —</option>
+              {Object.keys(catDefs).map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Categoria L2</label>
+            <select style={inp} value={cat2} onChange={e=>setCat2(e.target.value)} disabled={!subCats.length}>
+              <option value="">— Seleziona —</option>
+              {subCats.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Actions */}
+        {done
+          ? <div style={{textAlign:'center',fontSize:15,fontWeight:700,color:'var(--green)'}}>✅ Transazione divisa</div>
+          : <button onClick={doSplit} disabled={!valid}
+              style={{padding:'11px',background:valid?'var(--accent)':'var(--border)',color:valid?'#fff':'var(--text3)',
+                border:'none',borderRadius:8,fontSize:14,fontWeight:700,cursor:valid?'pointer':'not-allowed',transition:'opacity .15s'}}>
+              ✂ Dividi
+            </button>}
+      </div>
+    </div>
   )
 }
 
@@ -2894,6 +3040,7 @@ export default function TransactionsPage() {
   const [feedbackTx,     setFeedbackTx]     = useState(null)
   const [selected,       setSelected]       = useState(new Set())
   const [mergeTxOpen,    setMergeTxOpen]    = useState(false)
+  const [splitTxOpen,    setSplitTxOpen]    = useState(false)
   const [bulkEditOpen,   setBulkEditOpen]   = useState(false)
   const [openCatTxId,    setOpenCatTxId]    = useState(null)
   const [showRegDate,    setShowRegDate]    = useState(false)
@@ -3139,6 +3286,12 @@ export default function TransactionsPage() {
             onClick={()=>{selected.forEach(id=>{const t=store.transactions.find(x=>x.txId===id);if(t?.excluded)store.updateTransaction(id,{excluded:false})});setSelected(new Set())}}>
             ↩ Ripristina
           </button>
+          {selected.size === 1 && (
+            <button className="btn btn-ghost" style={{fontSize:12,color:'var(--accent)',border:'1px solid var(--accent)',borderRadius:6,padding:'4px 10px',fontWeight:700}}
+              onClick={()=>setSplitTxOpen(true)}>
+              ✂ Dividi
+            </button>
+          )}
           {selected.size >= 2 && selected.size <= 3 && (
             <button className="btn btn-ghost" style={{fontSize:12,color:'var(--accent)',border:'1px solid var(--accent)',borderRadius:6,padding:'4px 10px',fontWeight:700}}
               onClick={()=>setMergeTxOpen(true)}>
@@ -3167,6 +3320,13 @@ export default function TransactionsPage() {
           onClose={() => { setBulkEditOpen(false); setSelected(new Set()) }}
         />
       )}
+
+      {splitTxOpen && selected.size === 1 && (() => {
+        const tx = store.transactions.find(t => selected.has(t.txId))
+        return tx ? (
+          <SplitTxModal tx={tx} onClose={()=>{ setSplitTxOpen(false); setSelected(new Set()) }}/>
+        ) : null
+      })()}
 
       {mergeTxOpen && selected.size >= 2 && selected.size <= 3 && (
         <MergeTransactionsModal
@@ -3213,7 +3373,7 @@ export default function TransactionsPage() {
                     checked={filtered.length>0 && filtered.every(t=>selected.has(t.txId))}
                     onChange={e=>setSelected(e.target.checked?new Set(filtered.map(t=>t.txId)):new Set())}/>
                 </th>
-                <th className="tx-th" style={{width:64,cursor:'pointer'}} onClick={()=>toggleSort('txId')}>Cod. {sortIcon('txId')}</th>
+                <th className="tx-th" style={{width:50,cursor:'pointer'}} onClick={()=>toggleSort('txId')}>Cod. {sortIcon('txId')}</th>
                 {(colOrder||DEFAULT_ORDER).filter(id=>visibleCols.has(id)||ALL_COLUMNS.find(c=>c.id===id)?.alwaysOn).map(id=>{
                   const filterBtn = (colId) => (
                     <button onClick={e=>openColFilter(colId,e)} style={{
@@ -3257,9 +3417,8 @@ export default function TransactionsPage() {
           </table>
         )}
         {filtered.some(t => t._compensatedAmt > 0) && (
-          <div style={{fontSize:11,color:'var(--gold)',padding:'8px 14px',background:'rgba(200,160,0,.05)',borderTop:'1px solid var(--border)',textAlign:'right',cursor:'pointer'}}
-            onClick={()=>window.location.hash='#/satispay'}>
-            * Importo rettificato — spesa compensata da entrata Satispay. Clicca per dettaglio →
+          <div style={{fontSize:11,color:'var(--gold)',padding:'8px 14px',background:'rgba(200,160,0,.05)',borderTop:'1px solid var(--border)',textAlign:'right'}}>
+            * Importo rettificato — transazione compensata (clicca sull'importo per dettaglio)
           </div>
         )}
       </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import Portal from './Portal'
 import { useStore }   from '../store/useStore'
 import { useAuth }    from '../auth/AuthContext'
 import { getMergedCats } from '../data/categories'
@@ -256,11 +257,12 @@ function CatRulePopup({ tx, cat1, cat2, transactions, onSave, onClose }) {
     fontFamily:'var(--font-sans)', textAlign:'left',
   }
   return (
+    <Portal>
     <div style={{position:'fixed',inset:0,zIndex:9999,background:'rgba(0,0,0,.55)',
-      display:'flex',alignItems:'flex-end'}}
+      display:'flex',alignItems:'flex-end',justifyContent:'center'}}
       onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
       <div style={{background:'var(--surface)',borderRadius:'18px 18px 0 0',
-        padding:'20px 16px',width:'100%',boxSizing:'border-box',
+        padding:'20px 16px',width:'100%',maxWidth:430,boxSizing:'border-box',
         paddingBottom:'calc(16px + env(safe-area-inset-bottom,0px))'}}>
         <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>🏷️ Regola categoria</div>
         <div style={{fontSize:13,color:'var(--text2)',marginBottom:10}}>
@@ -288,6 +290,7 @@ function CatRulePopup({ tx, cat1, cat2, transactions, onSave, onClose }) {
         </div>
       </div>
     </div>
+    </Portal>
   )
 }
 
@@ -1183,6 +1186,7 @@ export default function MobileDiscovery() {
 
       {/* ── Popups ── */}
       {descRulePopup && (
+        <Portal>
         <RuleApplyPopup
           tx={descRulePopup.tx}
           match={descRulePopup.match}
@@ -1192,6 +1196,7 @@ export default function MobileDiscovery() {
           onApply={handleApplyDescRule}
           onClose={()=>setDescRulePopup(null)}
         />
+        </Portal>
       )}
       {catRulePopup && (
         <CatRulePopup

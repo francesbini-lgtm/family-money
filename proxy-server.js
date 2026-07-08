@@ -89,7 +89,7 @@ function callGemini(prompt, key, res) {
   const isOAuth = key.startsWith('AQ.') || key.startsWith('ya29.')
   const path = isOAuth
     ? '/v1beta/models/gemini-1.5-flash:generateContent'
-    : `/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`
+    : `/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`
 
   const options = {
     hostname: 'generativelanguage.googleapis.com',
@@ -116,7 +116,7 @@ function callGemini(prompt, key, res) {
   proxyReq.end()
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`✓ AI Proxy running on http://localhost:${PORT}`)
   console.log(`  Supports: OpenAI (sk-...) and Gemini (AIzaSy... / AQ.)`)
   console.log(`  App: http://localhost:3002`)

@@ -102,6 +102,7 @@ export const useStore = create((set, get) => ({
   ceciliaGoals:  [],   // Cecilia savings goals
   cashEntries:   [],   // manual cash spending log
   notePrelievi:        [],   // mobile ATM withdrawal notes (for future matching)
+  pendingWithdrawals:  [],   // temporary withdrawals pending bank reconciliation
   discoverySkipRules:  [],   // descAI strings permanently skipped in Discovery
   energyBills:   [],   // utility bills (luce/gas/acqua)
   salaries:      [],   // RAL e netto annui per persona
@@ -147,7 +148,7 @@ export const useStore = create((set, get) => ({
 
   // ── Load all from Firestore ───────────────────────────
   loadAllData: async (userId) => {
-    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi, skipRules] = await Promise.all([
+    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi, skipRules, pendingW] = await Promise.all([
       loadCollection('transactions'),
       loadCollection('loans'),
       loadCollection('scadenze'),
@@ -168,6 +169,7 @@ export const useStore = create((set, get) => ({
       loadUserAccounts(userId),
       loadCollection('note_prelievi'),
       loadCollection('discovery_skip_rules'),
+      loadCollection('pending_withdrawals'),
     ])
     set({
       transactions: txs.map(enrichTx).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')),
@@ -175,7 +177,7 @@ export const useStore = create((set, get) => ({
       vehExpenses: vehExp, vacations: vac,
       nannyTS: nan, colfTS: col, portfolios: port, satiPots: sati,
       ceciliaGoals: cec, cashEntries: cash, energyBills: energy,
-      notePrelievi, discoverySkipRules: skipRules,
+      notePrelievi, discoverySkipRules: skipRules, pendingWithdrawals: pendingW,
       aiChatHistory: chat.sort((a,b)=>a.ts-b.ts),
       aiRules: rules,
       rimborsiCosts: rimb,
@@ -204,6 +206,7 @@ export const useStore = create((set, get) => ({
     }
     // Historical cash-sync: push any already-linked cash transactions to DB
     setTimeout(() => get().syncCashTransactions(), 500)
+    setTimeout(() => get().reconcilePendingWithdrawals(), 700)
     // Compute/backfill user field for all transactions (after prefs + accounts are loaded)
     setTimeout(() => get().recomputeUsers(), 800)
     // Migrate old compensation: old code set excluded:true on fully-compensated expenses.
@@ -732,6 +735,147 @@ export const useStore = create((set, get) => ({
     deleteDocument('note_prelievi',id)
   },
 
+  // ── Pending Withdrawals ──────────────────────────────
+  addPendingWithdrawal: (pw) => {
+    const item = { ...pw, id: uid() }
+    set(s => ({ pendingWithdrawals: [item, ...s.pendingWithdrawals] }))
+    saveDocument('pending_withdrawals', item.id, item)
+    return item.id
+  },
+  updatePendingWithdrawal: (id, patch) => {
+    set(s => ({ pendingWithdrawals: s.pendingWithdrawals.map(x => x.id===id ? {...x,...patch} : x) }))
+    const pw = get().pendingWithdrawals.find(x => x.id===id)
+    if (pw) saveDocument('pending_withdrawals', id, {...pw,...patch})
+  },
+  deletePendingWithdrawal: (id) => {
+    set(s => ({ pendingWithdrawals: s.pendingWithdrawals.filter(x => x.id!==id) }))
+    deleteDocument('pending_withdrawals', id)
+  },
+
+  // ── Cash logic helpers ───────────────────────────────────
+  // Total amount used/assigned from a specific ATM withdrawal txId
+  computeAtmUsed: (txId) => {
+    const { appPrefs, nannyTS, colfTS, cashEntries } = get()
+    const nannyRecon = appPrefs?.nannyRecon || {}
+    const colfRecon  = appPrefs?.colfRecon  || {}
+    const atmMeta    = appPrefs?.atmMeta    || {}
+    let total = 0
+    ;(atmMeta[txId]?.links || []).forEach(l => { total += (l.amount || 0) })
+    ;(nannyTS || []).forEach(e => {
+      if (nannyRecon[e.id]?.txId === txId) total += (nannyRecon[e.id].nannyAmt || e.totale || 0)
+    })
+    ;(colfTS || []).forEach(e => {
+      if (colfRecon[e.id]?.txId === txId) total += (colfRecon[e.id].nannyAmt || e.totale || 0)
+    })
+    ;(cashEntries || []).forEach(e => {
+      if (e.atmTxId === txId) total += (e.amount || 0)
+    })
+    return Math.round(total * 100) / 100
+  },
+
+  // Auto-assign a cash expense to the best available ATM withdrawal
+  autoAssignAtm: (amount) => {
+    const { transactions } = get()
+    const computeUsed = get().computeAtmUsed
+    const atmTxs = transactions
+      .filter(t => !t.excluded && t.cat1 === 'Contanti' && t.amount < 0)
+      .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+    for (const tx of atmTxs) {
+      const used = computeUsed(tx.txId)
+      const remaining = Math.abs(tx.amount) - used
+      if (remaining >= amount - 0.01) return tx.txId
+    }
+    return atmTxs[0]?.txId || null
+  },
+
+  // Rebalance all auto-assigned cash entries after a manual change
+  rebalanceAutoAssignments: () => {
+    const { cashEntries, transactions, appPrefs, nannyTS, colfTS } = get()
+    const atmTxs = transactions
+      .filter(t => !t.excluded && t.cat1 === 'Contanti' && t.amount < 0)
+      .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+    if (atmTxs.length === 0) return
+    const autoEntries = cashEntries.filter(e => e.atmSource === 'auto')
+    if (autoEntries.length === 0) return
+    const nannyRecon = appPrefs?.nannyRecon || {}
+    const colfRecon  = appPrefs?.colfRecon  || {}
+    const atmMeta    = appPrefs?.atmMeta    || {}
+    // Base usage per ATM (from non-auto sources)
+    const baseUsed = new Map()
+    atmTxs.forEach(tx => {
+      let total = 0
+      ;(atmMeta[tx.txId]?.links || []).forEach(l => { total += (l.amount || 0) })
+      ;(nannyTS || []).forEach(e => { if (nannyRecon[e.id]?.txId === tx.txId) total += (nannyRecon[e.id].nannyAmt || e.totale || 0) })
+      ;(colfTS || []).forEach(e => { if (colfRecon[e.id]?.txId === tx.txId) total += (colfRecon[e.id].nannyAmt || e.totale || 0) })
+      cashEntries.filter(e => e.atmSource !== 'auto' && e.atmTxId === tx.txId)
+        .forEach(e => { total += (e.amount || 0) })
+      baseUsed.set(tx.txId, Math.round(total * 100) / 100)
+    })
+    // Re-assign each auto entry greedily
+    const dynamicUsed = new Map(atmTxs.map(tx => [tx.txId, baseUsed.get(tx.txId) || 0]))
+    const updated = []
+    for (const entry of autoEntries) {
+      let bestTxId = null
+      for (const tx of atmTxs) {
+        const used = dynamicUsed.get(tx.txId) || 0
+        const remaining = Math.abs(tx.amount) - used
+        if (remaining >= (entry.amount || 0) - 0.01) { bestTxId = tx.txId; break }
+      }
+      if (!bestTxId) bestTxId = atmTxs[0].txId
+      dynamicUsed.set(bestTxId, (dynamicUsed.get(bestTxId) || 0) + (entry.amount || 0))
+      if (bestTxId !== entry.atmTxId) {
+        const patched = { ...entry, atmTxId: bestTxId }
+        updated.push(patched)
+        saveDocument('cash_entries', patched.id, patched)
+      }
+    }
+    if (updated.length > 0) {
+      set(s => ({
+        cashEntries: s.cashEntries.map(e =>
+          e.atmSource === 'auto' ? (updated.find(u => u.id === e.id) || e) : e
+        )
+      }))
+    }
+  },
+
+  // Reconcile pending withdrawals with real ATM transactions
+  reconcilePendingWithdrawals: () => {
+    const { pendingWithdrawals, transactions, cashEntries } = get()
+    const pending = (pendingWithdrawals || []).filter(pw => pw.status === 'pending')
+    if (pending.length === 0) return
+    const atmTxs = transactions.filter(t => !t.excluded && t.cat1 === 'Contanti' && t.amount < 0)
+    const pwUpdates = {}
+    const ceUpdates = {}
+    for (const pw of pending) {
+      let candidates = atmTxs
+      if (pw.amount) candidates = candidates.filter(t => Math.abs(Math.abs(t.amount) - pw.amount) < 0.01)
+      if (pw.date) {
+        const pwTime = new Date(pw.date).getTime()
+        candidates = candidates.filter(t => {
+          const tTime = new Date(t._effDate || t.date || '').getTime()
+          return !isNaN(tTime) && Math.abs(tTime - pwTime) <= 5 * 86400000
+        })
+      }
+      if (candidates.length === 1) {
+        const realTxId = candidates[0].txId
+        const matched = { ...pw, status: 'matched', matchedTxId: realTxId }
+        pwUpdates[pw.id] = matched
+        saveDocument('pending_withdrawals', pw.id, matched)
+        ;(cashEntries || []).filter(e => e.atmTxId === pw.id).forEach(e => {
+          const patched = { ...e, atmTxId: realTxId, atmSource: 'manual', atmPendingId: pw.id }
+          ceUpdates[e.id] = patched
+          saveDocument('cash_entries', patched.id, patched)
+        })
+      }
+    }
+    if (Object.keys(pwUpdates).length > 0) {
+      set(s => ({
+        pendingWithdrawals: s.pendingWithdrawals.map(pw => pwUpdates[pw.id] || pw),
+        cashEntries: s.cashEntries.map(e => ceUpdates[e.id] || e),
+      }))
+    }
+  },
+
   // ── Discovery skip rules ──────────────────────────────
   addDiscoverySkipRule: (arg) => {
     const descAI = typeof arg === 'string' ? arg : (arg?.descAI || '')
@@ -1008,8 +1152,9 @@ export const useStore = create((set, get) => ({
   },
 
   // Returns true if a KING rule matches this transaction — used to block non-king overwrites
-  isKingProtected: (description, amount) => {
-    const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false)
+  // excludeRuleId: skip this rule from the check (used when running a king rule on itself)
+  isKingProtected: (description, amount, excludeRuleId = null) => {
+    const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false && r.id !== excludeRuleId)
     if (!kingRules.length) return false
     const desc = (description || '').toLowerCase()
     const amt  = Math.abs(amount || 0)
@@ -1152,7 +1297,8 @@ export const useStore = create((set, get) => ({
       const tx = transactions[i]
       if (onProgress) onProgress(i + 1, transactions.length)
       // King rules always win — never let a non-king single rule overwrite them
-      if (s.isKingProtected(tx.description, tx.amount)) continue
+      // Pass ruleId so a king rule running on itself is not blocked by its own protection
+      if (s.isKingProtected(tx.description, tx.amount, ruleId)) continue
       const patch = {}
 
       const desc = (tx.description || tx.descAI || '').toLowerCase()

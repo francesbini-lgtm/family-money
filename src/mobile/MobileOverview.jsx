@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
+import Portal from './Portal'
 import { useStore } from '../store/useStore'
 import { CATS } from '../data/categories'
 import { useFinancials } from '../hooks/useFinancials'
@@ -372,16 +373,17 @@ export default function MobileOverview() {
 
     {/* ── AI Chat popup overlay ─────────────────────────── */}
     {chatOpen && (
+      <Portal>
       <div style={{
         position: 'fixed', inset: 0, zIndex: 200,
         background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(4px)',
-        display: 'flex', flexDirection: 'column',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
       }} onClick={e => { if (e.target === e.currentTarget) setChatOpen(false) }}>
         <div style={{
           marginTop: 'auto',
           background: 'var(--bg)', borderRadius: '20px 20px 0 0',
           height: '85vh', display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
+          overflow: 'hidden', width: '100%', maxWidth: 430,
         }}>
           {/* Header */}
           <div style={{
@@ -468,6 +470,7 @@ export default function MobileOverview() {
           </div>
         </div>
       </div>
+      </Portal>
     )}
   </>
   )

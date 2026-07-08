@@ -1,18 +1,20 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { CATS, getMergedCats } from '../data/categories'
 import { Plus, Trash2, Edit2, Check, X, Link } from 'lucide-react'
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList
 } from 'recharts'
 
 // ── Sati entrate notes + comp links (Firestore via appPrefs) ─
 function getSatiNotes() { return useStore.getState()?.appPrefs?.satiNotes || {} }
 function saveSatiNotes(d) { useStore.getState()?.setAppPref?.('satiNotes', d) }
 function getSatiComp()  { return useStore.getState()?.appPrefs?.satiComp || {} }
+function getSatiWarnDismissed() { return useStore.getState()?.appPrefs?.satiWarnDismissed || {} }
+function saveSatiWarnDismissed(d) { useStore.getState()?.setAppPref?.('satiWarnDismissed', d) }
 function saveSatiComp(d) { useStore.getState()?.setAppPref?.('satiComp', d) }
 
 function SatiNoteCell({ txId }) {
@@ -41,7 +43,7 @@ function SatiNoteCell({ txId }) {
       border:'1px dashed transparent',transition:'border .15s'}}
       onMouseEnter={e=>e.currentTarget.style.borderColor='var(--border)'}
       onMouseLeave={e=>e.currentTarget.style.borderColor='transparent'}>
-      {val || 'aggiungi nota...'}
+      {val || 'nota..'}
     </div>
   )
 }
@@ -60,6 +62,10 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
   const [codeResult, setCodeResult] = useState(null)
   const [selected, setSelected] = useState(null)
   const [saved, setSaved] = useState(false)
+  const [phase2, setPhase2] = useState(null)   // { residual, expTx } after partial match
+  const [p2Selected, setP2Selected] = useState(null)
+  const [p2Search, setP2Search] = useState('')
+  const [p2Saved, setP2Saved] = useState(false)
 
   const satiCompSnapshot = getSatiComp()
   const existingLinks = getLinksArray(satiCompSnapshot[incomeEntry.txId])
@@ -125,7 +131,17 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
     updateTransaction(incomeEntry.txId, { _compensatedAmt: usedSoFar + compensateAmt })
 
     setSaved(true)
-    setTimeout(onClose, 800)
+    const isPartial = compensateAmt < absExp
+    if (isPartial) {
+      // Don't close — offer to link another income for the residual
+      setTimeout(() => {
+        setSaved(false)
+        setPhase2({ residual: absExp - compensateAmt, expTx: selected })
+        setSelected(null)
+      }, 700)
+    } else {
+      setTimeout(onClose, 800)
+    }
   }
 
   function unlink() {
@@ -141,6 +157,57 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
       saveSatiComp(links)
     }
     onClose()
+  }
+
+  // Phase 2: link another income to cover residual
+  const p2AvailableIncomes = phase2 ? (() => {
+    const satiComp = getSatiComp()
+    const usedIncomeIds = new Set(
+      Object.entries(satiComp)
+        .flatMap(([incId, links]) => {
+          const arr = getLinksArray(links)
+          return arr.some(l => l.expTxId === phase2.expTx?.txId) ? [incId] : []
+        })
+    )
+    return transactions.filter(t =>
+      t.amount > 0 &&
+      !t.excluded &&
+      t.txId !== incomeEntry.txId &&
+      !usedIncomeIds.has(t.txId) &&
+      (p2Search === '' ||
+        (t.descAI||t.description||'').toLowerCase().includes(p2Search.toLowerCase()))
+    ).sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+  })() : []
+
+  function confirmPhase2() {
+    if (!p2Selected || !phase2) return
+    const links = { ...getSatiComp() }
+    const existingForInc = getLinksArray(links[p2Selected.txId])
+    const usedForInc = existingForInc.reduce((s,l) => s+(l.compensatedAmt||0), 0)
+    const available = Math.max(0, p2Selected.amount - usedForInc)
+    const compensateAmt = Math.min(phase2.residual, available)
+    if (compensateAmt <= 0) return
+
+    links[p2Selected.txId] = [...existingForInc, { expTxId: phase2.expTx.txId, compensatedAmt: compensateAmt }]
+    saveSatiComp(links)
+
+    // Update expense: add to existing _compensatedAmt
+    const expTx = transactions.find(t => t.txId === phase2.expTx.txId)
+    const prevComp = expTx?._compensatedAmt || 0
+    updateTransaction(phase2.expTx.txId, { _compensatedAmt: prevComp + compensateAmt })
+    updateTransaction(p2Selected.txId, { _compensatedAmt: usedForInc + compensateAmt })
+
+    const newResidual = phase2.residual - compensateAmt
+    setP2Saved(true)
+    setTimeout(() => {
+      if (newResidual > 0.01) {
+        // still residual — reset for another round
+        setPhase2({ residual: newResidual, expTx: phase2.expTx })
+        setP2Selected(null); setP2Search(''); setP2Saved(false)
+      } else {
+        onClose()
+      }
+    }, 700)
   }
 
   const preview = selected ? (() => {
@@ -161,6 +228,56 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
           <div style={{fontSize:16,fontWeight:800}}>🔗 Abbina a Transazione</div>
           <button onClick={onClose} style={{border:'none',background:'transparent',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
         </div>
+        {phase2 ? (
+          /* ── Phase 2: link another income for residual ── */
+          <>
+            <div style={{padding:'10px 14px',background:'rgba(200,150,0,.12)',border:'1px solid var(--gold)',borderRadius:8,marginBottom:14,fontSize:13}}>
+              <strong style={{color:'var(--gold)'}}>⚠️ Residuo €{phase2.residual.toLocaleString('it-IT',{minimumFractionDigits:2})}</strong>
+              <span style={{fontSize:12,color:'var(--text2)',marginLeft:8}}>— seleziona un'altra entrata per coprire il resto di <strong>{phase2.expTx?.descAI||phase2.expTx?.description?.slice(0,40)}</strong></span>
+            </div>
+            <input value={p2Search} onChange={e=>setP2Search(e.target.value)} placeholder="Filtra entrate disponibili…" autoFocus
+              style={{width:'100%',padding:'7px 10px',border:'1px solid var(--border)',borderRadius:6,
+                fontSize:13,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)',boxSizing:'border-box',marginBottom:8}}/>
+            <div style={{flex:1,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,marginBottom:12,maxHeight:280}}>
+              <table style={{width:'100%',borderCollapse:'collapse'}}>
+                <thead>
+                  <tr style={{background:'var(--surface2)',position:'sticky',top:0}}>
+                    {['Data','Descrizione','Importo','Match'].map(h=>(
+                      <th key={h} style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
+                        textTransform:'uppercase',color:'var(--text3)',textAlign:h==='Importo'?'right':'left',borderBottom:'1px solid var(--border)'}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {p2AvailableIncomes.slice(0,60).map(t => {
+                    const isSel = p2Selected?.txId === t.txId
+                    const covers = t.amount >= phase2.residual
+                    return (
+                      <tr key={t.txId} onClick={()=>setP2Selected(t)}
+                        style={{borderBottom:'1px solid var(--border)',cursor:'pointer',background:isSel?'var(--accent-l)':'transparent'}}>
+                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                        <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:'var(--green)'}}>
+                          +€ {t.amount.toLocaleString('it-IT',{minimumFractionDigits:2})}
+                        </td>
+                        <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>{covers ? '✅' : '⚠️'}</td>
+                      </tr>
+                    )
+                  })}
+                  {p2AvailableIncomes.length === 0 && <tr><td colSpan={4} style={{padding:16,textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessuna entrata disponibile</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {p2Saved && <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,marginBottom:10,fontSize:12,color:'var(--green)',fontWeight:600}}>✅ Abbinamento salvato!</div>}
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn btn-secondary" onClick={onClose}>Chiudi senza abbinare</button>
+              <button className="btn btn-primary" onClick={confirmPhase2} disabled={!p2Selected||p2Saved}>
+                Abbina residuo
+              </button>
+            </div>
+          </>
+        ) : (
+        <>
         <div style={{padding:'10px 14px',background:'var(--green-l)',border:'1px solid var(--green)',borderRadius:8,marginBottom:14,fontSize:12}}>
           <strong>Entrata:</strong> {incomeEntry.descAI||incomeEntry.description?.slice(0,50)} —
           <strong style={{color:'var(--green)'}}> +€ {incomeEntry.amount.toLocaleString('it-IT',{minimumFractionDigits:2})}</strong>
@@ -217,7 +334,7 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
                     const isFull = absAmt <= availableForComp
                     return (
                       <tr key={t.txId} onClick={()=>setSelected(t)} style={{borderBottom:'1px solid var(--border)',cursor:'pointer',background:isSel?'var(--accent-l)':'transparent'}}>
-                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{(t._effDate||(t._effDate||t.date||'')).slice(5).replace('-','/')}</td>
+                        <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                         <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description?.slice(0,40)}</td>
                         <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:t.amount>0?'var(--green)':'var(--red)'}}>
                           {t.amount>0?'+':'−'}€ {absAmt.toLocaleString('it-IT',{minimumFractionDigits:2})}
@@ -266,6 +383,8 @@ function SatiCompensaModal({ incomeEntry, transactions, onClose }) {
           <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
           <button className="btn btn-primary" onClick={confirm} disabled={!selected||saved}>Conferma abbinamento</button>
         </div>
+        </>
+        )}
       </div>
     </div>
   )
@@ -548,9 +667,11 @@ function AbbinaModal({ pot, ym, currentLinked, onClose, onLink, allPots, onLinkO
             color: deltaOk ? 'var(--green)' : delta > 0 ? '#f59e0b' : 'var(--red)'}}>
             {deltaOk && Math.abs(delta) < 0.01
               ? '✅ Delta = 0'
-              : deltaOk && delta > 0
-                ? `✅ Delta coperto da ${selectedOtherPot?.name}`
-                : `Delta ${delta > 0 ? '+' : ''}€ ${fmtIT(delta,2)}`}
+              : deltaOk && delta > 0 && deltaMatchesOther
+                ? `✅ Delta coperto da ${selectedOtherPot.name}`
+                : deltaOk && delta > 0
+                  ? `+€ ${fmtIT(delta,2)} eccedente`
+                  : `Delta ${delta > 0 ? '+' : ''}€ ${fmtIT(delta,2)}`}
           </div>
         </div>
 
@@ -977,7 +1098,8 @@ function FundCard({ pot, allPots }) {
       const linkedAmt = pot.data?.[ym]?.linkedAmt
       const mt = monthTotal(ym)
       const exact = linkedAmt!=null ? Math.abs(linkedAmt-mt)<0.01 : true
-      return { linked, exact }
+      const delta = pot.data?.[ym]?.linkedDelta || 0
+      return { linked, exact, delta }
     }
 
     const mt = monthTotal(ym)
@@ -1164,6 +1286,17 @@ function FundCard({ pot, allPots }) {
       })
     }
 
+    // Compute selectedTotal to detect delta (tx amounts may exceed the pot total)
+    const txIdArr = Array.isArray(txIds) ? txIds : (txIds ? [txIds] : [])
+    const totalAmt = amt || 0
+    const selectedTotal = txIdArr.reduce((s, id) => {
+      const tx = transactions.find(t => t.txId === id)
+      return s + Math.abs(tx?.amount || 0)
+    }, 0)
+    const linkedDelta = selectedTotal > totalAmt + 0.01
+      ? Math.round((selectedTotal - totalAmt) * 100) / 100
+      : 0
+
     // Save the link on the pot
     const prev = pot.data?.[ym] || {}
     updateSatiPot(pot.id, { data:{
@@ -1172,18 +1305,20 @@ function FundCard({ pot, allPots }) {
         ...prev,
         linked: txIds,
         linkedAmt: amt,
+        linkedDelta: linkedDelta || null,
         // Mark explicitly unlinked so auto-detection is suppressed
         explicitUnlinked: !txIds ? true : false
       }
     }})
 
-    // Auto-generate category splits on linked transactions
-    const txIdArr = Array.isArray(txIds) ? txIds : (txIds ? [txIds] : [])
-    const totalAmt = amt || 0
+    // Auto-generate category splits on linked transactions.
+    // Use selectedTotal as the denominator so splits sum to totalAmt (accantonamento),
+    // leaving the delta portion unattributed to any voce.
+    const splitDenom = selectedTotal > 0 ? selectedTotal : totalAmt
     txIdArr.forEach(txId => {
       const tx = transactions.find(t => t.txId === txId)
       if (!tx) return
-      const splits = computeSatiSplits(ym, tx.amount, totalAmt)
+      const splits = computeSatiSplits(ym, tx.amount, splitDenom)
       updateTransaction(txId, {
         splits,
         descAI: 'Accantonamento Satispay',
@@ -1608,10 +1743,15 @@ function FundCard({ pot, allPots }) {
                 )
                 if (status) return (
                   <td key={ym} style={cellStyle}>
-                    <button onClick={()=>setAbbina(ym)} title="Abbinamento trovato — clicca per modificare"
+                    <button onClick={()=>setAbbina(ym)}
+                      title={status.delta > 0.01 ? `Abbinato con delta +€${fmtIT(status.delta,2)} eccedente` : 'Abbinamento trovato — clicca per modificare'}
                       style={{border:'none',background:'transparent',cursor:'pointer',padding:0,
                         display:'flex',alignItems:'center',justifyContent:'flex-end',width:'100%'}}>
-                      <span style={{fontSize:14,lineHeight:1}}>{status.exact ? '✅' : '⚠️'}</span>
+                      {status.exact && status.delta <= 0.01
+                        ? <span style={{fontSize:14,lineHeight:1}}>✅</span>
+                        : status.exact && status.delta > 0.01
+                          ? <span style={{fontSize:15,lineHeight:1,fontWeight:900,color:'#ea580c'}}>✓</span>
+                          : <span style={{fontSize:14,lineHeight:1}}>⚠️</span>}
                     </button>
                   </td>
                 )
@@ -1652,6 +1792,27 @@ function FundCard({ pot, allPots }) {
                 )
               })}
             </tr>
+            {/* Delta TX row — visible only when at least one month has a delta */}
+            {visYMs.some(ym => (pot.data?.[ym]?.linkedDelta || 0) > 0.01) && (
+              <tr style={{background:'var(--surface)'}}>
+                <td/>
+                <td style={{padding:'3px 6px',whiteSpace:'nowrap'}}>
+                  <span style={{fontSize:9,fontWeight:700,color:'#ea580c',
+                    textTransform:'uppercase',letterSpacing:'.06em'}}>Delta TX</span>
+                </td>
+                <td/><td/>
+                {visYMs.map(ym => {
+                  const delta = pot.data?.[ym]?.linkedDelta || 0
+                  return (
+                    <td key={ym} style={{padding:'3px 6px',textAlign:'right',
+                      fontFamily:'var(--font-mono)',fontSize:11,
+                      color: delta > 0.01 ? '#ea580c' : 'var(--text3)'}}>
+                      {delta > 0.01 ? `+${fmtIT(delta,2)}` : '—'}
+                    </td>
+                  )
+                })}
+              </tr>
+            )}
           </tfoot>
         </table>
       </div>
@@ -1719,20 +1880,22 @@ function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
 
     for (const inc of incomeEntries) {
       if (usedIncomeIds.has(inc.txId)) continue
-      const incDate  = new Date(inc._effDate || inc.date)
-      const incAmt   = Math.abs(inc.amount)
-      const dateDiff = Math.abs(expDate - incDate) / 86400000
-      const amtDiff  = Math.abs(expAmt - incAmt)
+      const incDate    = new Date(inc._effDate || inc.date)
+      const incAmt     = Math.abs(inc.amount)
+      // Accredito must be on same day or AFTER the spesa (not before)
+      const signedDiff = (incDate - expDate) / 86400000
+      if (signedDiff < 0) continue
+      const amtDiff = Math.abs(expAmt - incAmt)
 
-      if (amtDiff < 0.02 && dateDiff <= 15 && dateDiff < autoDiff) {
-        autoDiff = dateDiff; autoInc = inc
-      } else if (amtDiff <= 3 && dateDiff <= 20 && dateDiff < pendingScore) {
-        pendingScore = dateDiff; pendingInc = inc
+      if (amtDiff < 0.02 && signedDiff <= 15 && signedDiff < autoDiff) {
+        autoDiff = signedDiff; autoInc = inc
+      } else if (amtDiff <= 3 && signedDiff <= 20 && signedDiff < pendingScore) {
+        pendingScore = signedDiff; pendingInc = inc
       }
     }
 
     if (autoInc) {
-      result[exp.txId] = { status: 'matched', incomeTxId: autoInc.txId, pendingIncomeTxId: null, compensatedAmt: autoInc.amount }
+      result[exp.txId] = { status: 'matched', incomeTxId: autoInc.txId, pendingIncomeTxId: null, compensatedAmt: autoInc.amount, matchSource: 'auto' }
       usedIncomeIds.add(autoInc.txId)
     } else if (pendingInc) {
       result[exp.txId] = { status: 'pending_approval', incomeTxId: null, pendingIncomeTxId: pendingInc.txId, compensatedAmt: 0 }
@@ -1950,10 +2113,31 @@ function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
 }
 
 // ── Tx Detail Modal (Spese da compensare) ────────────────
-function SatiTxDetailModal({ tx, onClose }) {
+function SatiTxDetailModal({ tx, onClose, onUnlink, satiMatches }) {
   const updateTransaction = useStore(s => s.updateTransaction)
   const updateVehExpense  = useStore(s => s.updateVehExpense)
   const customCats        = useStore(s => s.customCats)
+  const transactions      = useStore(s => s.transactions)
+  const appPrefs          = useStore(s => s.appPrefs)
+  const setAppPref        = useStore(s => s.setAppPref)
+  const isModalWarnDismissed = !!appPrefs?.satiWarnDismissed?.[tx.txId]
+  function toggleModalWarnDismiss() {
+    const cur = getSatiWarnDismissed()
+    if (isModalWarnDismissed) { const n={...cur}; delete n[tx.txId]; saveSatiWarnDismissed(n) }
+    else saveSatiWarnDismissed({...cur, [tx.txId]: true})
+  }
+  const txMatch = satiMatches?.[tx.txId]
+  const incTx = tx._compensatedBy
+    ? transactions.find(t => t.txId === tx._compensatedBy)
+    : txMatch?.incomeTxId
+      ? transactions.find(t => t.txId === txMatch.incomeTxId)
+      : null
+  const modalDateWarning = (() => {
+    if (!incTx) return false
+    const incDate = new Date(incTx._effDate || incTx.date).getTime()
+    const expDate = new Date(tx._effDate || tx.date).getTime()
+    return (incDate - expDate) / 86400000 < 0
+  })()
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [cat1, setCat1]   = useState(tx.cat1 || '')
   const [cat2, setCat2]   = useState(tx.cat2 || '')
@@ -2034,7 +2218,7 @@ function SatiTxDetailModal({ tx, onClose }) {
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
           {[
-            ['Data', effDate ? effDate.slice(0,10).split('-').reverse().join('/') : '—'],
+            ['Data', effDate ? fmtDate(effDate) : '—'],
             ['Conto', tx.account || '—'],
             ['Categoria attuale', tx.cat1 ? `${tx.cat1}${tx.cat2 ? ' › '+tx.cat2 : ''}` : '—'],
             ['Importo originale', `−€ ${fmtIT(Math.abs(tx.amount),2)}`],
@@ -2050,14 +2234,34 @@ function SatiTxDetailModal({ tx, onClose }) {
               color:'var(--text3)',marginBottom:3}}>Descrizione originale</div>
             <div style={{fontSize:12,color:'var(--text2)',wordBreak:'break-word'}}>{tx.description || tx.descAI || '—'}</div>
           </div>
-          {tx._compensatedAmt > 0 && (
+          {(tx._compensatedAmt > 0 || txMatch?.status === 'matched') && (
             <div style={{gridColumn:'1/-1',padding:'8px 12px',background:'rgba(200,160,0,.1)',
               borderRadius:8,border:'1px solid var(--gold)'}}>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
                 color:'var(--gold)',marginBottom:3}}>Compensazione Satispay</div>
               <div style={{fontSize:13,fontWeight:700,color:'var(--gold)'}}>
-                −€ {fmtIT(tx._compensatedAmt,2)} compensati
+                −€ {fmtIT(tx._compensatedAmt || txMatch?.compensatedAmt || (incTx ? Math.abs(incTx.amount) : 0),2)} compensati
               </div>
+              {incTx && (
+                <div style={{fontSize:11,color:'var(--gold)',opacity:.8,marginTop:4,display:'flex',alignItems:'center',gap:4}}>
+                  <span>Accredito del {fmtDate(incTx._effDate || incTx.date)}{incTx.descAI ? ` · ${incTx.descAI}` : ''}</span>
+                  {modalDateWarning && <span title="Accredito in data successiva alla spesa" style={{fontSize:13}}>⚠️</span>}
+                </div>
+              )}
+              {txMatch?.matchSource === 'auto' && (
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:4,display:'flex',alignItems:'center',gap:4}}>
+                  <span style={{padding:'1px 6px',borderRadius:8,background:'rgba(100,100,200,.1)',border:'1px solid var(--border)',fontWeight:600}}>⟳ auto</span>
+                  abbinato automaticamente
+                </div>
+              )}
+              {onUnlink && txMatch?.status === 'matched' && (
+                <button onClick={onUnlink}
+                  style={{marginTop:8,display:'flex',alignItems:'center',gap:5,padding:'5px 10px',borderRadius:8,
+                    border:'1px solid var(--border)',background:'none',cursor:'pointer',
+                    color:'var(--text3)',fontSize:11,fontFamily:'var(--font-sans)',width:'100%',justifyContent:'center'}}>
+                  🔓 Rimuovi abbinamento
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2129,6 +2333,105 @@ function SatiTxDetailModal({ tx, onClose }) {
   )
 }
 
+// ── Custom tooltip for "Spese non compensate" bar chart ──
+function SatiBarTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload || {}
+  const hasTx = (d.totalTxs?.length || 0) + (d.incomeTxs?.length || 0) > 0
+  if (!hasTx) return null
+  return (
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,
+      padding:'10px 14px',fontSize:11,maxWidth:290,maxHeight:240,overflowY:'auto',
+      boxShadow:'0 4px 20px rgba(0,0,0,.15)',lineHeight:1.5,pointerEvents:'none'}}>
+      <div style={{fontWeight:700,marginBottom:8,color:'var(--text)',fontSize:12}}>{label}</div>
+      {d.totalTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--red)',fontWeight:700,marginBottom:4,fontSize:10,
+            textTransform:'uppercase',letterSpacing:'.05em'}}>Addebiti non compensati</div>
+          {d.totalTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--red)',fontWeight:700,flexShrink:0}}>
+                -{fmtIT(t._residual ?? Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+      {d.incomeTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--green)',fontWeight:700,
+            margin:`${(d.totalTxs?.length||0)>0?8:0}px 0 4px`,
+            fontSize:10,textTransform:'uppercase',letterSpacing:'.05em'}}>Accrediti non abbinati</div>
+          {d.incomeTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--green)',fontWeight:700,flexShrink:0}}>
+                +{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+function SatiBarTotalTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload || {}
+  const hasTx = (d.totalTxs?.length || 0) + (d.incomeTxs?.length || 0) > 0
+  if (!hasTx) return null
+  return (
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,
+      padding:'10px 14px',fontSize:11,maxWidth:290,maxHeight:240,overflowY:'auto',
+      boxShadow:'0 4px 20px rgba(0,0,0,.15)',lineHeight:1.5,pointerEvents:'none'}}>
+      <div style={{fontWeight:700,marginBottom:8,color:'var(--text)',fontSize:12}}>{label}</div>
+      {d.totalTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--red)',fontWeight:700,marginBottom:4,fontSize:10,
+            textTransform:'uppercase',letterSpacing:'.05em'}}>Addebiti totali</div>
+          {d.totalTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--red)',fontWeight:700,flexShrink:0}}>
+                -{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+      {d.incomeTxs?.length > 0 && (
+        <>
+          <div style={{color:'var(--green)',fontWeight:700,
+            margin:`${(d.totalTxs?.length||0)>0?8:0}px 0 4px`,
+            fontSize:10,textTransform:'uppercase',letterSpacing:'.05em'}}>Accrediti totali</div>
+          {d.incomeTxs.map((t,i) => (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,paddingBottom:2}}>
+              <span style={{color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',
+                whiteSpace:'nowrap',maxWidth:200}}>
+                {t.descAI || t.description || '—'}
+              </span>
+              <span style={{fontFamily:'var(--font-mono)',color:'var(--green)',fontWeight:700,flexShrink:0}}>
+                +{fmtIT(Math.abs(t.amount),2)}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) {
   const appPrefs          = useStore(s => s.appPrefs)
@@ -2174,7 +2477,17 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
   // ── Matches storage ─────────────────────────────────────
   const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
-  function saveMatches(m) { setAppPref('satiMatches', m) }
+  function saveMatches(m) {
+    setUndoStack(s => [...s.slice(-9), satiMatches])  // keep last 10 states
+    setAppPref('satiMatches', m)
+  }
+  function handleUndo() {
+    if (!undoStack.length) return
+    const prev = undoStack[undoStack.length - 1]
+    setUndoStack(s => s.slice(0, -1))
+    // Restore matches (without pushing to undo stack again)
+    setAppPref('satiMatches', prev)
+  }
 
   // ── Auto-match on data change ───────────────────────────
   const prevMatchesRef = useRef(null)
@@ -2215,12 +2528,15 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   const [pendingModal, setPendingModal] = useState(null)  // expense txId
   const [abbinaTx, setAbbinaTx]         = useState(null)  // expense tx
   const [detailTx, setDetailTx]         = useState(null)  // detail popup tx
+  const [undoStack, setUndoStack]         = useState([])         // undo stack for satiMatches
   const [showNonAbb, setShowNonAbb]     = useState(false)
   const [hideComm, setHideComm]         = useState(true)
   const [hideCompensate, setHideCompensate] = useState(false)
   const [showUnmatchedIncome, setShowUnmatchedIncome] = useState(false)
   const [search, setSearch]             = useState('')
   const [showCatConfig, setShowCatConfig] = useState(false)
+  const [selectedRows, setSelectedRows]   = useState(new Set())
+  const [showTotalsTable, setShowTotalsTable] = useState(false)
   const [catDraftL1, setCatDraftL1]     = useState('')
   const [catDraftL2, setCatDraftL2]     = useState('')
   const customCats = useStore(s => s.customCats)
@@ -2253,11 +2569,22 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   // ── Unmatched income rows ────────────────────────────────
   const unmatchedIncomeRows = useMemo(() => {
     if (!showUnmatchedIncome) return []
-    return satiIncome.filter(t =>
+    let list = satiIncome.filter(t =>
       !t.excluded &&
       (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched')
     )
-  }, [showUnmatchedIncome, satiIncome, satiMatches])
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(t =>
+        (t.descAI||'').toLowerCase().includes(q) ||
+        (t.description||'').toLowerCase().includes(q) ||
+        (t.cat1||'').toLowerCase().includes(q) ||
+        (t.cat2||'').toLowerCase().includes(q) ||
+        String(Math.abs(t.amount)).includes(q)
+      )
+    }
+    return list
+  }, [showUnmatchedIncome, satiIncome, satiMatches, search])
 
   // Combined rows: spese + accrediti non abbinati, sorted by date desc
   const combinedRows = useMemo(() => {
@@ -2270,6 +2597,11 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       return db.localeCompare(da)
     })
   }, [filteredRows, unmatchedIncomeRows, showUnmatchedIncome])
+
+  // ── Multi-select abbinamento ──────────────────────────────
+  const selectedAccrediti = useMemo(() => [...selectedRows].filter(id => combinedRows.find(r => r.txId === id && r._rowType === 'accredito')), [selectedRows, combinedRows])
+  const selectedSpese     = useMemo(() => [...selectedRows].filter(id => combinedRows.find(r => r.txId === id && r._rowType === 'spesa')), [selectedRows, combinedRows])
+  const canAbbina = selectedAccrediti.length >= 1 && selectedSpese.length >= 1
 
   // ── KPIs ─────────────────────────────────────────────────
   const totSpese      = speseDaComp.reduce((s,t) => s + Math.abs(t.amount), 0)
@@ -2288,6 +2620,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   // ── Available income for manual linking ─────────────────
   const matchedIncomeIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
   const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
+  // excluded (matched) accrediti — not in satiIncome prop (filtered out upstream)
+  const excludedIncome   = useMemo(() =>
+    transactions.filter(t => matchedIncomeIds.has(t.txId) && t.amount > 0)
+  , [transactions, satiMatches]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Migration: fix all matched income/expense txs to current rules ──
   const migrationDoneRef = useRef(false)
@@ -2394,7 +2730,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     const m = satiMatches[expTxId]
     if (!m?.pendingIncomeTxId) return
     const inc = satiIncome.find(t => t.txId === m.pendingIncomeTxId)
-    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: m.pendingIncomeTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0, matchSource: 'manual' } }
     saveMatches(newMatches)
     applyMatch(expTxId, m.pendingIncomeTxId)
     advanceToNextPending(expTxId, newMatches)
@@ -2410,11 +2746,17 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
   function handleLink(expTxId, incTxId) {
     const inc = satiIncome.find(t => t.txId === incTxId)
-    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: incTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0 } }
+    const newMatches = { ...satiMatches, [expTxId]: { status: 'matched', incomeTxId: incTxId, pendingIncomeTxId: null, compensatedAmt: inc?.amount || 0, matchSource: 'manual' } }
     saveMatches(newMatches)
     applyMatch(expTxId, incTxId)
     setAbbinaTx(null)
     showToast('Transazione abbinata con successo', 'success')
+  }
+
+  function toggleWarnDismiss(txId) {
+    const cur = getSatiWarnDismissed()
+    if (cur[txId]) { const n={...cur}; delete n[txId]; setAppPref('satiWarnDismissed', n) }
+    else setAppPref('satiWarnDismissed', {...cur, [txId]: true})
   }
 
   function handleUnlink(expTxId) {
@@ -2422,6 +2764,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     const newMatches = { ...satiMatches, [expTxId]: { status: 'unmatched', incomeTxId: null, pendingIncomeTxId: null, compensatedAmt: 0 } }
     saveMatches(newMatches)
     removeMatch(expTxId, prevMatch?.incomeTxId || null)
+  }
+
+  function handleQuickAbbina() {
+    if (selectedAccrediti.length !== 1) { showToast('Seleziona esattamente 1 accredito', 'warning'); return }
+    if (selectedSpese.length === 0) { showToast('Seleziona almeno 1 spesa', 'warning'); return }
+    selectedSpese.forEach(expId => handleLink(expId, selectedAccrediti[0]))
+    setSelectedRows(new Set())
   }
 
   function saveCatFilters(filters) {
@@ -2562,6 +2911,199 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
 
 
+      {/* ── Istogramma importi totali annuali ── */}
+      {(() => {
+        const currentYear = new Date().getFullYear()
+        const years = []
+        for (let y = 2022; y <= currentYear; y++) years.push(y)
+
+        const barAnnual = years.map(year => {
+          const yr = String(year)
+          const totalTxs      = speseDaComp.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const total         = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const incomeTxs     = satiIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const income        = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          const incomeExclTxs = excludedIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          const incomeExcl    = incomeExclTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
+          return {
+            label: yr,
+            total:       Math.round(total      * 100) / 100,
+            income:      Math.round(income     * 100) / 100,
+            incomeExcl:  Math.round(incomeExcl * 100) / 100,
+            incomeTotal: Math.round((income + incomeExcl) * 100) / 100,
+            totalTxs,
+            incomeTxs,
+            incomeExclTxs,
+          }
+        })
+
+        if (barAnnual.every(b => b.total === 0 && b.income === 0)) return null
+
+        // unique cat pairs for breakdown table
+        const catKeys = [...new Map(
+          speseDaComp
+            .filter(t => t.cat1)
+            .map(t => [`${t.cat1}|${t.cat2||''}`, { cat1: t.cat1, cat2: t.cat2||'' }])
+        ).values()].sort((a,b) => `${a.cat1}${a.cat2}`.localeCompare(`${b.cat1}${b.cat2}`))
+
+        return (
+          <>
+            <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:'var(--text2)'}}>
+                  📊 Spese e accrediti totali per anno
+                </div>
+                <button onClick={() => setShowTotalsTable(v => !v)}
+                  title="Breakdown per categoria"
+                  style={{border:`1px solid ${showTotalsTable?'var(--accent)':'var(--border)'}`,
+                    background:showTotalsTable?'var(--accent-l,#e8f0ff)':'var(--surface2)',
+                    borderRadius:6,padding:'4px 9px',cursor:'pointer',fontSize:13,
+                    color:showTotalsTable?'var(--accent)':'var(--text3)'}}>
+                  ▦
+                </button>
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={barAnnual} margin={{top:24,right:8,bottom:0,left:0}} barSize={40} barCategoryGap="35%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                  <XAxis dataKey="label" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                  <YAxis hide/>
+                  <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
+                    wrapperStyle={{paddingBottom:6}}
+                    formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
+                  <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali">
+                    <LabelList dataKey="total" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:10,fill:'var(--red)',fontWeight:700}}/>
+                  </Bar>
+                  <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati"/>
+                  <Bar dataKey="incomeExcl" stackId="acc" fill="#15803d" opacity={0.85} radius={[4,4,0,0]} name="Accrediti abbinati">
+                    <LabelList dataKey="incomeTotal" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:10,fill:'#15803d',fontWeight:700}}/>
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* ── Tabella breakdown per categoria/anno ── */}
+            {showTotalsTable && (
+              <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:1000,
+                display:'flex',alignItems:'center',justifyContent:'center'}}
+                onClick={() => setShowTotalsTable(false)}>
+                <div style={{background:'var(--surface)',borderRadius:14,
+                  maxWidth:920,width:'92%',maxHeight:'82vh',overflow:'hidden',
+                  display:'flex',flexDirection:'column',boxShadow:'0 8px 40px rgba(0,0,0,.3)'}}
+                  onClick={e => e.stopPropagation()}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                    padding:'14px 20px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
+                    <div style={{fontWeight:700,fontSize:14}}>Spese per categoria e anno (€)</div>
+                    <button onClick={() => setShowTotalsTable(false)}
+                      style={{border:'none',background:'none',cursor:'pointer',fontSize:18,color:'var(--text3)',lineHeight:1}}>✕</button>
+                  </div>
+                  <div style={{overflowY:'auto',flex:1}}>
+                    {(() => {
+                      const now3 = new Date()
+                      const accAnno = String(now3.getFullYear())
+                      const monthsElapsed = now3.getMonth() + 1
+                      const thBase = {padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                        textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                        borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:2,
+                        textAlign:'right',whiteSpace:'nowrap'}
+                      return (
+                        <table style={{width:'100%',borderCollapse:'collapse'}}>
+                          <thead>
+                            <tr>
+                              <th style={{...thBase,textAlign:'left',minWidth:180}}>Categoria</th>
+                              {years.map(y => <th key={y} style={thBase}>{y}</th>)}
+                              <th style={{...thBase,borderLeft:'2px solid var(--border)'}}>Media/anno</th>
+                              <th style={{...thBase,color:'var(--accent)'}}>Media ACC Anno</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {catKeys.map(({ cat1, cat2 }) => {
+                              const rowAmts = years.map(year =>
+                                speseDaComp
+                                  .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && (t._effDate||t.date||'').startsWith(String(year)))
+                                  .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              )
+                              const rowTotal = rowAmts.reduce((s,v) => s + v, 0)
+                              if (rowTotal < 0.01) return null
+                              const rowAvg  = rowTotal / years.length
+                              const sumAccAnno = speseDaComp
+                                .filter(t => t.cat1===cat1 && (t.cat2||'')===cat2 && (t._effDate||t.date||'').startsWith(accAnno))
+                                .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              const avg6m   = (sumAccAnno / monthsElapsed) * 12
+                              const catColor = CATS[cat1]?.color || 'var(--accent)'
+                              return (
+                                <tr key={`${cat1}|${cat2}`} style={{borderBottom:'1px solid var(--border)'}}>
+                                  <td style={{padding:'9px 16px',fontSize:12}}>
+                                    <span style={{fontSize:11,padding:'2px 9px',borderRadius:10,fontWeight:600,
+                                      background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
+                                      {cat2 || cat1}
+                                    </span>
+                                    {cat2 && <span style={{fontSize:10,color:'var(--text3)',marginLeft:5}}>{cat1}</span>}
+                                  </td>
+                                  {rowAmts.map((amt,i) => (
+                                    <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                      fontFamily:'var(--font-mono)',color:amt>0.01?'var(--text)':'var(--text3)'}}>
+                                      {amt > 0.01 ? `${fmtIT(amt,2)}` : '—'}
+                                    </td>
+                                  ))}
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',
+                                    borderLeft:'2px solid var(--border)'}}>
+                                    {fmtIT(rowAvg,2)}
+                                  </td>
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>
+                                    {avg6m > 0.01 ? `${fmtIT(avg6m,2)}` : '—'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                            {(() => {
+                              const colTotals = years.map(year =>
+                                speseDaComp
+                                  .filter(t => (t._effDate||t.date||'').startsWith(String(year)))
+                                  .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              )
+                              const grand     = colTotals.reduce((s,v) => s + v, 0)
+                              const grandAvg  = grand / years.length
+                              const grandAcc   = speseDaComp
+                                .filter(t => (t._effDate||t.date||'').startsWith(accAnno))
+                                .reduce((s,t) => s + Math.abs(t.amount), 0)
+                              const grandAvg6m = (grandAcc / monthsElapsed) * 12
+                              return (
+                                <tr style={{borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
+                                  <td style={{padding:'9px 16px',fontSize:12,fontWeight:700}}>Media</td>
+                                  {colTotals.map((amt,i) => (
+                                    <td key={i} style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                      fontFamily:'var(--font-mono)',fontWeight:700,color:amt>0.01?'var(--red)':'var(--text3)'}}>
+                                      {amt > 0.01 ? `${fmtIT(amt,2)}` : '—'}
+                                    </td>
+                                  ))}
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)',
+                                    borderLeft:'2px solid var(--border)'}}>
+                                    {fmtIT(grandAvg,2)}
+                                  </td>
+                                  <td style={{padding:'9px 14px',fontSize:12,textAlign:'right',
+                                    fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>
+                                    {grandAvg6m > 0.01 ? `${fmtIT(grandAvg6m,2)}` : '—'}
+                                  </td>
+                                </tr>
+                              )
+                            })()}
+                          </tbody>
+                        </table>
+                      )
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )
+      })()}
+
       {/* ── Istogramma spese non compensate ultimi 24 mesi ── */}
       {(() => {
         const now = new Date()
@@ -2570,21 +3112,29 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
           const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
           const label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)
           // sum expenses in this month that are NOT compensated (or only partially)
-          const total = speseDaComp.filter(t => {
-            const tYm = (t._effDate||t.date||'').slice(0,7)
-            return tYm === ym
-          }).reduce((s,t) => {
-            const m = satiMatches[t.txId]
-            const orig = Math.abs(t.amount)
-            const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
-            return s + Math.max(0, orig - comp)
-          }, 0)
-          const income = satiIncome.filter(t =>
+          const totalTxsForMonth = speseDaComp
+            .filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
+            .map(t => {
+              const m = satiMatches[t.txId]
+              const orig = Math.abs(t.amount)
+              const comp = t._compensatedAmt || (m?.status==='matched' ? (m.compensatedAmt||0) : 0)
+              return { ...t, _residual: Math.max(0, orig - comp) }
+            })
+            .filter(t => t._residual > 0.01)
+          const total = totalTxsForMonth.reduce((s,t) => s + t._residual, 0)
+          const incomeTxsForMonth = satiIncome.filter(t =>
             !t.excluded &&
             (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched') &&
             (t._effDate||t.date||'').slice(0,7) === ym
-          ).reduce((s,t) => s + Math.abs(t.amount), 0)
-          return { label, total: Math.round(total * 100) / 100, income: Math.round(income * 100) / 100 }
+          )
+          const income = incomeTxsForMonth.reduce((s,t) => s + Math.abs(t.amount), 0)
+          return {
+            label,
+            total: Math.round(total * 100) / 100,
+            income: Math.round(income * 100) / 100,
+            totalTxs: totalTxsForMonth,
+            incomeTxs: incomeTxsForMonth,
+          }
         })
 
         if (bar24.every(b => b.total === 0 && b.income === 0)) return null
@@ -2599,14 +3149,12 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
-                <Tooltip
-                  formatter={(v, name) => [`€ ${fmtIT(v,0)}`, name]}
-                  contentStyle={{fontSize:12,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8}}
-                  cursor={{fill:'var(--surface2)'}}/>
+                <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
+                  wrapperStyle={{paddingBottom:6}}
+                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
+                <Tooltip content={<SatiBarTooltip />} cursor={{fill:'var(--surface2)'}}/>
                 <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti non compensati"/>
                 <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati"/>
-                <Legend iconType="circle" iconSize={8}
-                  formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -2651,29 +3199,61 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               }}>
               💳 Accrediti
             </button>
+            {selectedRows.size > 0 && (
+              <button onClick={handleQuickAbbina} disabled={!canAbbina}
+                style={{display:'inline-flex',alignItems:'center',gap:5,padding:'5px 13px',
+                  border:`1px solid ${canAbbina?'var(--green)':'var(--border)'}`,borderRadius:20,
+                  background:canAbbina?'var(--green-l,#d1fae5)':'var(--surface2)',
+                  color:canAbbina?'var(--green)':'var(--text3)',
+                  fontSize:11,fontWeight:700,cursor:canAbbina?'pointer':'default',fontFamily:'var(--font-sans)',
+                  opacity:canAbbina?1:0.5}}>
+                🔗 Abbina ({selectedRows.size})
+              </button>
+            )}
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Cerca..."
               style={{padding:'5px 10px',border:'1px solid var(--border)',borderRadius:8,
                 background:'var(--bg)',color:'var(--text)',fontSize:12,fontFamily:'var(--font-sans)',
                 outline:'none',width:200}}/>
+            {undoStack.length > 0 && (
+              <button onClick={handleUndo}
+                title={`Annulla ultima azione (${undoStack.length} disponibili)`}
+                style={{display:'inline-flex',alignItems:'center',gap:4,padding:'5px 11px',
+                  border:'1px solid var(--border)',borderRadius:20,
+                  background:'var(--surface2)',color:'var(--text2)',
+                  fontSize:11,fontWeight:600,cursor:'pointer',fontFamily:'var(--font-sans)',whiteSpace:'nowrap'}}>
+                ↩ Undo
+              </button>
+            )}
           </div>
         </div>
 
         {/* Table */}
+        <div style={{overflowY:'auto',maxHeight:'calc(100vh - 420px)'}}>
         <table style={{width:'100%',borderCollapse:'collapse'}}>
           <thead>
             <tr>
-              {['Data','Descrizione','Categoria','Stato','Importo originale','Residuo'].map(h => (
+              <th style={{padding:'9px 14px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',
+                position:'sticky',top:0,zIndex:2,width:36}}>
+                <input type="checkbox"
+                  checked={combinedRows.length > 0 && combinedRows.every(r => selectedRows.has(r.txId))}
+                  onChange={e => setSelectedRows(e.target.checked ? new Set(combinedRows.map(r => r.txId)) : new Set())}
+                  style={{cursor:'pointer'}}/>
+              </th>
+              {['Data','Descrizione','Categoria','Stato','Importo originale','Residuo','Note'].map(h => (
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                   textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                   borderBottom:'1px solid var(--border)',
-                  textAlign:h.startsWith('Importo')?'right':'left'}}>{h}</th>
+                  position:'sticky',top:0,zIndex:2,
+                  whiteSpace:'nowrap',
+                  minWidth: h==='Stato' ? 220 : h==='Descrizione' ? 200 : undefined,
+                  textAlign:h.startsWith('Importo')||h==='Residuo'?'right':'left'}}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {combinedRows.length === 0 && (
-              <tr><td colSpan={6} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
+              <tr><td colSpan={8} style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
                 {search ? 'Nessun risultato' : 'Nessuna spesa da compensare — configura le categorie L1›L2 nel fondo'}
               </td></tr>
             )}
@@ -2681,6 +3261,11 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               if (t._rowType === 'accredito') {
                 return (
                   <tr key={t.txId} style={{borderBottom:'1px solid var(--border)', background:'var(--blue-l,#e8f4ff)'}}>
+                    <td style={{padding:'9px 14px'}} onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedRows.has(t.txId)}
+                        onChange={e => setSelectedRows(prev => { const n = new Set(prev); e.target.checked ? n.add(t.txId) : n.delete(t.txId); return n })}
+                        style={{cursor:'pointer'}}/>
+                    </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>
                       {fmtDate(t._effDate||t.date)}
                     </td>
@@ -2697,9 +3282,12 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </span>
                     </td>
                     <td style={{padding:'10px 14px',fontSize:13,fontWeight:700,color:'var(--green)',textAlign:'right'}}>
-                      +€ {fmtIT(Math.abs(t.amount))}
+                      +€ {fmtIT(Math.abs(t.amount),2)}
                     </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',textAlign:'right'}}>—</td>
+                    <td style={{padding:'10px 14px'}} onClick={e => e.stopPropagation()}>
+                      <SatiNoteCell txId={t.txId}/>
+                    </td>
                   </tr>
                 )
               }
@@ -2709,8 +3297,16 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               const origAmt = Math.abs(t.amount)
               // compensatedAmt: try _compensatedAmt on tx, then match record, then direct income lookup
               const incTx = (status === 'matched' && match?.incomeTxId)
-                ? satiIncome.find(i => i.txId === match.incomeTxId)
+                ? (satiIncome.find(i => i.txId === match.incomeTxId) || transactions.find(i => i.txId === match.incomeTxId))
                 : null
+              // ⚠️ if accredito date is strictly after spesa date
+              const dateWarning = (() => {
+                if (!incTx) return false
+                const incDate = new Date(incTx._effDate || incTx.date).getTime()
+                const expDate = new Date(t._effDate || t.date).getTime()
+                return (incDate - expDate) / 86400000 < 0
+              })()
+              const isWarnDismissed = !!appPrefs?.satiWarnDismissed?.[t.txId]
               const compensatedAmt = t._compensatedAmt
                 || (match?.compensatedAmt || 0)
                 || (incTx ? Math.abs(incTx.amount) : 0)
@@ -2725,10 +3321,15 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   onClick={() => setDetailTx(t)}
                   onMouseEnter={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.13)' : 'var(--surface2)'}
                   onMouseLeave={e => e.currentTarget.style.background = isVeh ? 'rgba(184,148,42,.06)' : 'transparent'}>
-                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                  <td style={{padding:'6px 12px'}} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedRows.has(t.txId)}
+                      onChange={e => setSelectedRows(prev => { const n = new Set(prev); e.target.checked ? n.add(t.txId) : n.delete(t.txId); return n })}
+                      style={{cursor:'pointer'}}/>
+                  </td>
+                  <td style={{padding:'6px 12px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                     {fmtDate(t._effDate||t.date)}
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'6px 12px'}}>
                     <div style={{fontSize:13,fontWeight:500}}>{t.descAI||t.description?.slice(0,50)}</div>
                     <div style={{fontSize:11,color:'var(--text3)',display:'flex',gap:6,alignItems:'center'}}>
                       {isVeh && <span style={{fontSize:10,padding:'1px 6px',borderRadius:8,fontWeight:700,
@@ -2738,7 +3339,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       <span>{(t.description||'').slice(0,60)}</span>
                     </div>
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'6px 12px'}}>
                     {t.cat1 && (
                       <span style={{fontSize:11,padding:'3px 10px',borderRadius:10,fontWeight:600,
                         background:catColor+'20',color:catColor,whiteSpace:'nowrap'}}>
@@ -2746,26 +3347,54 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </span>
                     )}
                   </td>
-                  <td style={{padding:'9px 14px'}}>
+                  <td style={{padding:'6px 12px'}}>
                     {residual < 0.01 ? (
                       /* Fully compensated — regardless of satiMatches status */
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'nowrap'}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'var(--green-l)',color:'var(--green)',border:'1px solid var(--green)33'}}>
                           ✅ compensata
                         </span>
+                        {dateWarning && !isWarnDismissed && (
+                          <span title="Accredito precedente alla spesa — clicca per ignorare" style={{fontSize:12,cursor:'pointer'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠️</span>
+                        )}
+                        {dateWarning && isWarnDismissed && (
+                          <span title="Alert ignorato — clicca per riattivare" style={{fontSize:10,cursor:'pointer',opacity:.35,textDecoration:'line-through'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠</span>
+                        )}
+                        {match?.matchSource === 'auto' && (
+                          <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
+                            background:'rgba(100,100,200,.1)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:600}}>
+                            ⟳ auto
+                          </span>
+                        )}
                         {(status === 'matched') && <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
-                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>}
+                          title="Rimuovi abbinamento" style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,padding:'1px 4px',borderRadius:4,lineHeight:1}}>🔓</button>}
                       </div>
                     ) : residual < origAmt ? (
                       /* Partially compensated */
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'nowrap'}}>
                         <span style={{fontSize:11,padding:'2px 8px',borderRadius:12,fontWeight:700,
                           background:'rgba(200,160,0,.12)',color:'var(--gold)',border:'1px solid var(--gold)55'}}>
                           ≈ parziale
                         </span>
+                        {dateWarning && !isWarnDismissed && (
+                          <span title="Accredito precedente alla spesa — clicca per ignorare" style={{fontSize:12,cursor:'pointer'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠️</span>
+                        )}
+                        {dateWarning && isWarnDismissed && (
+                          <span title="Alert ignorato — clicca per riattivare" style={{fontSize:10,cursor:'pointer',opacity:.35,textDecoration:'line-through'}}
+                            onClick={e=>{e.stopPropagation();toggleWarnDismiss(t.txId)}}>⚠</span>
+                        )}
+                        {match?.matchSource === 'auto' && (
+                          <span title="Abbinamento automatico" style={{fontSize:9,padding:'1px 5px',borderRadius:8,
+                            background:'rgba(100,100,200,.1)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:600}}>
+                            ⟳ auto
+                          </span>
+                        )}
                         {(status === 'matched') && <button onClick={e => { e.stopPropagation(); handleUnlink(t.txId) }}
-                          style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:'2px 4px',borderRadius:4}}>✏️</button>}
+                          title="Rimuovi abbinamento" style={{border:'none',background:'none',cursor:'pointer',color:'var(--text3)',fontSize:12,padding:'1px 4px',borderRadius:4,lineHeight:1}}>🔓</button>}
                       </div>
                     ) : status === 'pending_approval' ? (
                       <button onClick={e => { e.stopPropagation(); setPendingModal(t.txId) }}
@@ -2785,10 +3414,10 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                       </button>
                     )}
                   </td>
-                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--red)'}}>
+                  <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--red)'}}>
                     −€ {fmtIT(origAmt,2)}
                   </td>
-                  <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
+                  <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
                     color: residual < 0.01 ? 'var(--green)' : residual < origAmt ? 'var(--gold,#b8942a)' : 'var(--text2)'}}>
                     {residual < 0.01
                       ? <span style={{color:'var(--green)'}}>✅ — €0</span>
@@ -2796,15 +3425,19 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                         ? <span title={`Compensato: €${fmtIT(compensatedAmt,2)}`}>−€{fmtIT(residual,2)}</span>
                         : `−€ ${fmtIT(origAmt,2)}`}
                   </td>
+                  <td style={{padding:'6px 12px'}} onClick={e => e.stopPropagation()}>
+                    <SatiNoteCell txId={t.txId}/>
+                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
+        </div>{/* end scroll wrapper */}
       </div>
 
       {/* Modals */}
-      {detailTx && <SatiTxDetailModal tx={detailTx} onClose={() => setDetailTx(null)}/>}
+      {detailTx && <SatiTxDetailModal tx={detailTx} onClose={() => setDetailTx(null)} satiMatches={satiMatches} onUnlink={() => { handleUnlink(detailTx.txId); setDetailTx(null) }}/>}
       {pendingModal && (() => {
         const exp = speseDaComp.find(t => t.txId === pendingModal)
         const m   = exp && satiMatches[exp.txId]
@@ -2847,8 +3480,8 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   )
 }
 
-// ── date formatter ────────────────────────────────────────
-function fmtDate(d) {
+// ── date formatter (legacy dd/MM/yyyy — kept for compatibility) ──
+function fmtDateLong(d) {
   const p = (d||'').split('-')
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : d || ''
 }
@@ -3673,7 +4306,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
                   background: i % 2 === 0 ? 'transparent' : 'var(--surface2)',
                   borderBottom:'1px solid var(--border2)'}}>
                   <td style={{padding:'6px 10px',fontSize:11,fontFamily:'var(--font-mono)',
-                    color:'var(--text3)',whiteSpace:'nowrap'}}>{t._effDate||t.date}</td>
+                    color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                   <td style={{padding:'6px 10px',maxWidth:240}}>
                     <div style={{fontSize:12,fontWeight:600,color:'var(--text)',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -3851,7 +4484,9 @@ function NonAbbinateModal({ onClose }) {
 
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div>
-            <div style={{fontSize:16,fontWeight:800}}>⚠️ Accantonamenti non abbinati ({rows.length})</div>
+            <div style={{fontSize:16,fontWeight:800}}>
+              ⚠️ Accantonamenti non abbinati ({filtered.length}{filtered.length < rows.length ? ` di ${rows.length}` : ''})
+            </div>
             <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
               Uscite Satispay (−) non collegate a nessun fondo di accantonamento
             </div>
@@ -3910,7 +4545,7 @@ function NonAbbinateModal({ onClose }) {
                   background: i % 2 === 0 ? 'transparent' : 'var(--surface2)',
                   borderBottom:'1px solid var(--border2)'}}>
                   <td style={{padding:'6px 10px',fontSize:11,fontFamily:'var(--font-mono)',
-                    color:'var(--text3)',whiteSpace:'nowrap'}}>{t._effDate||t.date}</td>
+                    color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                   <td style={{padding:'6px 10px',maxWidth:220}}>
                     <div style={{fontSize:12,fontWeight:600,color:'var(--text)',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -4035,6 +4670,7 @@ export default function SatispayPage() {
   })
   const accantonamentiNonAbbinati = satiUscite.filter(t => {
     if (isAltroSatiVarie(t)) return false
+    if (t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca') return false
     return !allLinkedToFund.has(t.txId)
   })
 

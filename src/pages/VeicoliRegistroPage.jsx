@@ -10,7 +10,7 @@ import {
 } from 'recharts'
 import { Plus, Trash2, Link } from 'lucide-react'
 import './VeicoliRegistroPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 
 const VEH_ICONS = ['🚗','🚙','🚕','🏎','🚐','🛻','🏍','🚤','⛵','🚁','🛵','🚌',
@@ -130,10 +130,7 @@ function getLast6Months() {
   return r
 }
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
-const fmtDate = d => {
-  const m = (d||'').match(/(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${parseInt(m[3])} ${MONTHS_IT[parseInt(m[2])-1]} ${m[1]}` : d||'—'
-}
+// fmtDate imported from utils/format
 
 // ── Add/Edit Vehicle Modal ────────────────────────────────
 function VehicleModal({ vehicle, onClose }) {
@@ -644,7 +641,7 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
           <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:6}}>
             {scadenze.map(s=>(
               <span key={s.key} style={{fontSize:10,padding:'2px 7px',borderRadius:5,background:s.bg,color:s.color,fontWeight:700}}>
-                {s.icon} {s.key.slice(0,4)}: {s.date?.slice(5).replace('-','/')} {s.label}
+                {s.icon} {s.key.slice(0,4)}: {fmtDate(s.date)} {s.label}
               </span>
             ))}
           </div>

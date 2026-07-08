@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 import { Plus, Trash2, Edit2, Target, TrendingUp, Gift } from 'lucide-react'
 import './CeciliaPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 
 const GOAL_ICONS = ['🎓','🚗','🏠','✈️','💻','📚','🎮','💒','🌍','💰','🎁','⭐']
 
@@ -558,7 +558,7 @@ export default function CeciliaPage() {
               <tbody>
                 {cecTxs.slice(0,10).map(t=>(
                   <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{(t._effDate||t.date).slice(5).replace('-','/')}</td>
+                    <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{fmtDate(t._effDate||t.date)}</td>
                     <td style={{padding:'9px 14px',fontSize:13,fontWeight:500}}>{t.descAI||t.description.slice(0,40)}</td>
                     <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{t.cat2||'—'}</td>
                     <td style={{padding:'9px 14px',fontSize:13,fontWeight:700,color:'var(--red)',textAlign:'right',fontFamily:'var(--font-mono)'}}>
