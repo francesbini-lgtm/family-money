@@ -2439,7 +2439,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)
   const [descOpen,    setDescOpen]    = useState(false)
   const [mixCatOpen,  setMixCatOpen]  = useState(false)
-  const [amtPopup,    setAmtPopup]    = useState(false)
+  const [amtPopup,    setAmtPopup]    = useState(null)  // {x,y} when open, null when closed
   const pillRef = useRef(null)
 
   const isIncome = tx.amount > 0
@@ -2663,12 +2663,22 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                 <span
                   style={{color:'var(--gold)',cursor:'pointer'}}
                   title="Importo rettificato — clicca per dettaglio"
-                  onClick={e=>{e.stopPropagation();setAmtPopup(v=>!v)}}>
+                  onClick={e=>{
+                    e.stopPropagation()
+                    if (amtPopup) { setAmtPopup(null); return }
+                    const r = e.currentTarget.getBoundingClientRect()
+                    setAmtPopup({ x: r.right, y: r.bottom + 4 })
+                  }}>
                   {fmtIT(Math.abs(tx.amount) - tx._compensatedAmt, 2)}<span style={{fontSize:9,marginLeft:2}}>*</span>
                 </span>
                 {amtPopup && (
+                  <>
+                  <div style={{position:'fixed',inset:0,zIndex:9998}} onClick={e=>{e.stopPropagation();setAmtPopup(null)}}/>
                   <div onClick={e=>e.stopPropagation()} style={{
-                    position:'absolute',right:0,top:'100%',zIndex:999,
+                    position:'fixed',
+                    right: window.innerWidth - amtPopup.x,
+                    top: amtPopup.y,
+                    zIndex:9999,
                     background:'var(--surface)',border:'1px solid var(--border)',
                     borderRadius:10,padding:'12px 16px',minWidth:220,
                     boxShadow:'0 8px 24px rgba(0,0,0,.18)',fontSize:13,whiteSpace:'nowrap'}}>
@@ -2685,8 +2695,9 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                       <span style={{color:'var(--text2)'}}>Netto</span>
                       <span style={{fontWeight:700,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount)-tx._compensatedAmt,2)} €</span>
                     </div>
-                    <button onClick={()=>setAmtPopup(false)} style={{marginTop:10,width:'100%',padding:'5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',cursor:'pointer',fontSize:12,color:'var(--text2)'}}>Chiudi</button>
+                    <button onClick={()=>setAmtPopup(null)} style={{marginTop:10,width:'100%',padding:'5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',cursor:'pointer',fontSize:12,color:'var(--text2)'}}>Chiudi</button>
                   </div>
+                  </>
                 )}
               </>
             ) : fmtIT(Math.abs(tx.amount), 2)}
