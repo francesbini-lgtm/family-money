@@ -641,15 +641,20 @@ export default function AltreEntratePage() {
 
   // Detect non-salary income from bank transactions, excluding Satispay
   const autoEntries = useMemo(() => {
+    const compLinks = useStore.getState()?.appPrefs?.compLinks || {}
     return transactions.filter(t => {
       if (t.amount <= 0 || t.excluded) return false
       const cat2low = (t.cat2||'').toLowerCase()
+      const desc = (t.description||'').toUpperCase()
+      const merch = (t.merchant||'').toUpperCase()
+      const descAI = (t.descAI||'').toUpperCase()
+      // PayPal incomes (linked via PayPal abbinamento or with compLinks) — always include
+      const isPayPalTx = desc.includes('PAYPAL') || merch.includes('PAYPAL') || descAI.includes('PAYPAL')
+      if (isPayPalTx) return true
       // Exclude salary / personal entries (Fra, Sofi, etc.) by nickname config AND explicit list
       if (t.cat1 === 'Entrate' && nicknames.some(n => t.cat2 === n)) return false
       if (t.cat1 === 'Entrate' && EXCLUDED_L2.includes(cat2low)) return false
       // Exclude Satispay
-      const desc = (t.description||'').toUpperCase()
-      const merch = (t.merchant||'').toUpperCase()
       if (t.cat1 === 'Satispay' || cat2low === 'satispay') return false
       if (desc.includes('SATISPAY') || merch.includes('SATISPAY')) return false
       if (t._forcedBalance) return false

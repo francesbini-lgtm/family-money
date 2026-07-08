@@ -77,6 +77,91 @@ function daysDiff(d1, d2) {
   return Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
 }
 
+// ── PayPal compensation helpers (uses same compLinks key as AltreEntrate) ──
+function getPpCompLinks() { return useStore.getState()?.appPrefs?.compLinks || {} }
+function savePpCompLinks(d) { useStore.getState()?.setAppPref?.('compLinks', d) }
+function getPpLinksArray(entry) {
+  if (!entry) return []
+  return Array.isArray(entry) ? entry : [entry]
+}
+
+// ── PayPal Abbinamento confirmation modal ─────────────────
+function PaypalAbbinamentoModal({ incomes, expenses, onConfirm, onClose }) {
+  // Compute how each income covers each expense (greedy)
+  const preview = (() => {
+    const incRem = incomes.map(t => ({ ...t, rem: t.amount }))
+    const expRem = expenses.map(t => ({ ...t, rem: Math.abs(t.amount) }))
+    const pairs = []
+    for (const exp of expRem) {
+      for (const inc of incRem) {
+        if (inc.rem <= 0 || exp.rem <= 0) continue
+        const comp = Math.min(inc.rem, exp.rem)
+        pairs.push({ inc, exp, comp })
+        inc.rem -= comp
+        exp.rem -= comp
+      }
+    }
+    return { pairs, incRem, expRem }
+  })()
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,width:520,maxWidth:'92vw',maxHeight:'85vh',overflowY:'auto',padding:24,boxShadow:'0 8px 32px rgba(0,0,0,.2)'}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:16}}>🔗 Abbina transazioni PayPal</div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+          <div style={{background:'rgba(22,163,74,.08)',border:'1px solid rgba(22,163,74,.25)',borderRadius:8,padding:'10px 14px'}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>Entrate</div>
+            {incomes.map(t => (
+              <div key={t.txId} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,marginBottom:4}}>
+                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{t.descAI||t.merchant||t.description?.slice(0,30)}</span>
+                <span style={{fontWeight:700,color:'var(--green)',whiteSpace:'nowrap',fontFamily:'var(--font-mono)'}}>+€{t.amount.toLocaleString('it-IT',{minimumFractionDigits:2})}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{background:'rgba(214,78,78,.06)',border:'1px solid rgba(214,78,78,.2)',borderRadius:8,padding:'10px 14px'}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>Uscite</div>
+            {expenses.map(t => (
+              <div key={t.txId} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,marginBottom:4}}>
+                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{t.descAI||t.merchant||t.description?.slice(0,30)}</span>
+                <span style={{fontWeight:700,color:'var(--red,#d64e4e)',whiteSpace:'nowrap',fontFamily:'var(--font-mono)'}}>−€{Math.abs(t.amount).toLocaleString('it-IT',{minimumFractionDigits:2})}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 14px',marginBottom:16}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>Compensazioni</div>
+          {preview.pairs.map((p,i) => (
+            <div key={i} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,marginBottom:4}}>
+              <span style={{color:'var(--green)',fontWeight:600,fontFamily:'var(--font-mono)'}}>+€{p.comp.toLocaleString('it-IT',{minimumFractionDigits:2})}</span>
+              <span style={{color:'var(--text3)'}}>da</span>
+              <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{p.inc.descAI||p.inc.merchant||'entrata'}</span>
+              <span style={{color:'var(--text3)'}}>→</span>
+              <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{p.exp.descAI||p.exp.merchant||'uscita'}</span>
+            </div>
+          ))}
+          {preview.incRem.some(t => t.rem > 0.005) && (
+            <div style={{marginTop:6,fontSize:11,color:'var(--gold)'}}>
+              ⚠️ Residuo entrate: {preview.incRem.filter(t=>t.rem>0.005).map(t=>`€${t.rem.toLocaleString('it-IT',{minimumFractionDigits:2})}`).join(', ')}
+            </div>
+          )}
+          {preview.expRem.some(t => t.rem > 0.005) && (
+            <div style={{marginTop:4,fontSize:11,color:'var(--red,#d64e4e)'}}>
+              ⚠️ Non coperte: {preview.expRem.filter(t=>t.rem>0.005).map(t=>`€${t.rem.toLocaleString('it-IT',{minimumFractionDigits:2})}`).join(', ')}
+            </div>
+          )}
+        </div>
+
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+          <button className="btn btn-primary" onClick={onConfirm}>Conferma abbinamento</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Cat dot ───────────────────────────────────────────────
 function CatDot({ cat1 }) {
   const color = CATS[cat1]?.color || '#aaa'
@@ -993,6 +1078,8 @@ export default function PaypalPage() {
   const [abbinaTx, setAbbinaTx]           = useState(null)  // bank tx to link to an import
   const [autoAbbinaResults, setAutoAbbinaResults] = useState(null)  // [{imp, tx}] after auto-abbina
   const [reclassifying, setReclassifying]         = useState(false)
+  const [ppSelIds, setPpSelIds]                   = useState(new Set())
+  const [ppAbbinaModal, setPpAbbinaModal]         = useState(false)
 
   const paypalImports = useMemo(
     () => appPrefs?.paypalImports || [],
@@ -1079,6 +1166,51 @@ export default function PaypalPage() {
       return m.includes(q) || desc.includes(q) || descAI.includes(q) || cat1.includes(q) || cat2.includes(q) || d.includes(q) || amt.includes(q)
     })
   }, [sortedTxs, search, hideComm])
+
+  // ── PayPal multi-select abbinamento ──────────────────────
+  const ppSelList = useMemo(() => [...ppSelIds].map(id => filteredTxs.find(t => t.txId === id) || paypalTxs.find(t => t.txId === id)).filter(Boolean), [ppSelIds, filteredTxs, paypalTxs])
+  const ppIncomes  = ppSelList.filter(t => t.amount > 0)
+  const ppExpenses = ppSelList.filter(t => t.amount < 0)
+  const ppCanAbbina = ppIncomes.length > 0 && ppExpenses.length > 0
+
+  function handlePpAbbina() {
+    const incomes  = [...ppIncomes].sort((a,b) => b.amount - a.amount)
+    const expenses = [...ppExpenses].sort((a,b) => a.amount - b.amount)
+    const links    = { ...getPpCompLinks() }
+    const incRem   = new Map(incomes.map(t  => [t.txId, t.amount]))
+    const expRem   = new Map(expenses.map(t => [t.txId, Math.abs(t.amount)]))
+    const incUsed  = new Map(incomes.map(t  => [t.txId, 0]))
+    const expComp  = new Map()
+    const expBy    = new Map()
+
+    for (const exp of expenses) {
+      for (const inc of incomes) {
+        const avail = incRem.get(inc.txId)
+        const need  = expRem.get(exp.txId)
+        if (avail <= 0 || need <= 0) continue
+        const comp = Math.min(avail, need)
+        links[inc.txId] = [...getPpLinksArray(links[inc.txId]), { expTxId: exp.txId, compensatedAmt: comp }]
+        incRem.set(inc.txId, avail - comp)
+        incUsed.set(inc.txId, (incUsed.get(inc.txId)||0) + comp)
+        expRem.set(exp.txId, need - comp)
+        expComp.set(exp.txId, (expComp.get(exp.txId)||0) + comp)
+        if (!expBy.has(exp.txId)) expBy.set(exp.txId, inc.txId)
+      }
+    }
+
+    savePpCompLinks(links)
+    expenses.forEach(exp => {
+      const comp = expComp.get(exp.txId) || 0
+      if (comp > 0) updateTransaction(exp.txId, { _compensatedAmt: comp, _compensatedBy: expBy.get(exp.txId) || null })
+    })
+    incomes.forEach(inc => {
+      const used = incUsed.get(inc.txId) || 0
+      if (used > 0) updateTransaction(inc.txId, { _compensatedAmt: used })
+    })
+    setPpSelIds(new Set())
+    setPpAbbinaModal(false)
+    showToast('✅ Abbinamento PayPal salvato!')
+  }
 
   function handleImport(newItems) {
     // Safety dedup: never store an item already in paypalImports
@@ -1461,6 +1593,25 @@ export default function PaypalPage() {
 
       {/* Main transactions table */}
       <div className="pp-table-card">
+        {/* PayPal multi-select abbina bar */}
+        {ppSelIds.size > 0 && (
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 14px',background:'var(--accent-l)',border:'1px solid var(--accent)',borderRadius:8,marginBottom:8,fontSize:13}}>
+            <span style={{fontWeight:600}}>{ppSelIds.size} selezionate</span>
+            <span style={{color:'var(--text3)',fontSize:12}}>
+              {ppIncomes.length > 0 && <span style={{color:'var(--green)'}}>+€{ppIncomes.reduce((s,t)=>s+t.amount,0).toLocaleString('it-IT',{minimumFractionDigits:2})}</span>}
+              {ppIncomes.length > 0 && ppExpenses.length > 0 && <span style={{margin:'0 4px'}}>·</span>}
+              {ppExpenses.length > 0 && <span style={{color:'var(--red,#d64e4e)'}}>−€{ppExpenses.reduce((s,t)=>s+Math.abs(t.amount),0).toLocaleString('it-IT',{minimumFractionDigits:2})}</span>}
+            </span>
+            <div style={{flex:1}}/>
+            <button className="btn btn-ghost" style={{fontSize:12,padding:'4px 10px'}} onClick={()=>setPpSelIds(new Set())}>✕ Deseleziona</button>
+            <button
+              className="btn btn-primary"
+              style={{fontSize:12,padding:'4px 12px',opacity:ppCanAbbina?1:.45}}
+              disabled={!ppCanAbbina}
+              onClick={()=>setPpAbbinaModal(true)}
+            >🔗 Abbina{ppCanAbbina ? ` (${ppIncomes.length}+${ppExpenses.length})` : ''}</button>
+          </div>
+        )}
         <div className="pp-table-header">
           <div className="pp-table-title">Transazioni PayPal ({filteredTxs.length}{(search || hideComm) ? `/${paypalTxs.length}` : ''})</div>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -1488,6 +1639,16 @@ export default function PaypalPage() {
           <table className="pp-table">
             <thead>
               <tr>
+                <th className="pp-th" style={{width:32,padding:'6px 4px 6px 10px'}}>
+                  <input type="checkbox"
+                    checked={filteredTxs.length > 0 && filteredTxs.every(t => ppSelIds.has(t.txId))}
+                    onChange={e => {
+                      if (e.target.checked) setPpSelIds(new Set(filteredTxs.map(t => t.txId)))
+                      else setPpSelIds(new Set())
+                    }}
+                    style={{cursor:'pointer'}}
+                  />
+                </th>
                 <th className="pp-th">Data</th>
                 <th className="pp-th">Merchant</th>
                 <th className="pp-th">AI descr</th>
@@ -1501,6 +1662,7 @@ export default function PaypalPage() {
                 const totalInc = filteredTxs.filter(t => t.amount > 0).reduce((s,t) => s + t.amount, 0)
                 return (
                   <tr style={{ background:'var(--surface2)', borderTop:'2px solid var(--border)' }}>
+                    <th className="pp-th"/>
                     <th className="pp-th" style={{ color:'var(--text3)', fontWeight:500, fontSize:11, letterSpacing:'.03em' }}>
                       {filteredTxs.length} righe
                     </th>
@@ -1523,6 +1685,7 @@ export default function PaypalPage() {
                     <th className="pp-th"/>
                     <th className="pp-th"/>
                     <th className="pp-th"/>
+                    <th className="pp-th"/>
                   </tr>
                 )
               })()}
@@ -1530,13 +1693,25 @@ export default function PaypalPage() {
             <tbody>
               {filteredTxs.map(t => {
                 const pendingImp = paypalImports.find(i => i.status === 'pending_approval' && i.pendingTxId === t.txId)
+                const isSel = ppSelIds.has(t.txId)
                 return (
                   <tr
                     key={t.txId}
                     className="pp-tr pp-tr-clickable"
                     onClick={() => setSelectedTx(t)}
-                    style={t._flagged ? { background: '#fff7ed' } : undefined}
+                    style={{...(t._flagged ? { background: '#fff7ed' } : {}), ...(isSel ? { background:'var(--accent-l)' } : {})}}
                   >
+                    <td className="pp-td" style={{padding:'6px 4px 6px 10px'}} onClick={e => {
+                      e.stopPropagation()
+                      setPpSelIds(prev => {
+                        const next = new Set(prev)
+                        if (next.has(t.txId)) next.delete(t.txId)
+                        else next.add(t.txId)
+                        return next
+                      })
+                    }}>
+                      <input type="checkbox" readOnly checked={isSel} style={{cursor:'pointer',pointerEvents:'none'}}/>
+                    </td>
                     <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
                     <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
                     <td className="pp-td" style={{ color:'var(--text3)', fontSize:12, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
@@ -1661,6 +1836,15 @@ export default function PaypalPage() {
           transactions={transactions}
           onConfirm={handleAutoAbbinaConfirm}
           onClose={() => setAutoAbbinaResults(null)}
+        />
+      )}
+
+      {ppAbbinaModal && ppCanAbbina && (
+        <PaypalAbbinamentoModal
+          incomes={ppIncomes}
+          expenses={ppExpenses}
+          onConfirm={handlePpAbbina}
+          onClose={() => setPpAbbinaModal(false)}
         />
       )}
     </div>
