@@ -154,16 +154,22 @@ const DEST_BEACH_KEYWORDS = ['mare','sard','rimini','cost','bagn','lido','lignan
 const DEST_MOUNTAIN_KEYWORDS = ['mont','alp','dolomit','aosta','neve','ski','snowboard','courmayeur','livigno','madonna','sestriere','bormio','cervinia','cortina','trentino','val di fass','val garden','alta badia','davos','zermatt','innsbruck','salzburg','chamonix']
 const DEST_CITY_KEYWORDS = ['roma','milano','madrid','parigi','paris','londra','london','berlino','berlin','amsterdam','dublino','dublin','barcellona','barcelona','lisbona','lisbon','vienna','praga','prague','budapest','new york','tokyo','venezia','venice','firenze','florence','torino','napoli','bologna','stoccolma','stockholm','copenaghen','copenhagen','oslo','helsinki','bruxelles','brussels','monaco','munich','zurigo','zurich','ginevra','geneva','atene','athens','istanbul','dubai']
 
-export function destCategoryEmoji(city = '') {
-  const n = (city || '').toLowerCase()
-  if (DEST_BEACH_KEYWORDS.some(k => n.includes(k))) return '🏖️'
-  if (DEST_MOUNTAIN_KEYWORDS.some(k => n.includes(k))) return '⛷️'
-  if (DEST_CITY_KEYWORDS.some(k => n.includes(k))) return '🏙️'
-  return '✈️'
+export const DEST_TYPES = ['Mare', 'Montagna', 'Città', 'Altro']
+
+export function labelToEmoji(label) {
+  return label === 'Mare' ? '🏖️' : label === 'Montagna' ? '⛷️' : label === 'Città' ? '🏙️' : '✈️'
 }
+
 export function destCategoryLabel(city = '') {
-  const e = destCategoryEmoji(city)
-  return e === '🏖️' ? 'Mare' : e === '⛷️' ? 'Montagna' : e === '🏙️' ? 'Città' : 'Altro'
+  const n = (city || '').toLowerCase()
+  if (DEST_BEACH_KEYWORDS.some(k => n.includes(k))) return 'Mare'
+  if (DEST_MOUNTAIN_KEYWORDS.some(k => n.includes(k))) return 'Montagna'
+  if (DEST_CITY_KEYWORDS.some(k => n.includes(k))) return 'Città'
+  return 'Altro'
+}
+
+export function destCategoryEmoji(city = '') {
+  return labelToEmoji(destCategoryLabel(city))
 }
 
 // ── Candidati vacanza/weekend NON ancora confermati dall'utente ──────────────

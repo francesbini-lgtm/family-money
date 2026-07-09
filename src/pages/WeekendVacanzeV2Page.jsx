@@ -7,6 +7,7 @@ import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations
 import {
   vacationSpendInRange, allDatesBetween, dominantVacationType,
   destCategoryEmoji, destCategoryLabel, computeCandidateVacations,
+  DEST_TYPES, labelToEmoji,
 } from '../data/vacationRules'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -74,6 +75,26 @@ function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '�
     >
       {display}
     </span>
+  )
+}
+
+// ── Selettore Mare / Montagna / Città / Altro — mostra solo l'emoji, click per cambiare ──
+function DestTypeSelect({ value, onSave }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onSave(e.target.value)}
+      title={`Destinazione: ${value} — clicca per cambiare`}
+      style={{
+        border: 'none', background: 'transparent', cursor: 'pointer',
+        fontSize: 14, appearance: 'none', WebkitAppearance: 'none',
+        padding: 0, marginRight: 4, color: 'inherit'
+      }}
+    >
+      {DEST_TYPES.map(t => (
+        <option key={t} value={t}>{labelToEmoji(t)} {t}</option>
+      ))}
+    </select>
   )
 }
 
@@ -205,7 +226,7 @@ export default function WeekendVacanzeV2Page() {
   const pieData = useMemo(() => {
     const counts = {}
     last5.forEach(v => {
-      const label = destCategoryLabel(v.city)
+      const label = v.destType || destCategoryLabel(v.city)
       counts[label] = (counts[label] || 0) + 1
     })
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
@@ -347,6 +368,7 @@ export default function WeekendVacanzeV2Page() {
                       <th style={thStyle}>A</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Notti</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Spese TX</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Costo/notte</th>
                       <th style={thStyle}></th>
                     </tr>
                   </thead>
@@ -355,7 +377,8 @@ export default function WeekendVacanzeV2Page() {
                       const nights = nightsBetween(v.from, v.to)
                       const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
                       const spend = vacationSpendInRange(transactions, v.from, v.to)
-                      const emoji = destCategoryEmoji(v.city)
+                      const destType = v.destType || destCategoryLabel(v.city)
+                      const costPerNight = spend > 0 ? spend / Math.max(nights, 1) : 0
 
                       return (
                         <tr key={v.id} style={{ transition: 'background .1s' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'} onMouseLeave={e => e.currentTarget.style.background = ''}>
@@ -369,7 +392,7 @@ export default function WeekendVacanzeV2Page() {
                           </td>
                           {/* Dove */}
                           <td style={{ ...tdStyle, fontWeight: 700 }}>
-                            <span style={{ marginRight: 4 }}>{emoji}</span>
+                            <DestTypeSelect value={destType} onSave={val => upd(v, 'destType', val)} />
                             <EditCell value={v.city} onSave={val => upd(v, 'city', val)} width={110} />
                           </td>
                           {/* Date */}
@@ -384,6 +407,10 @@ export default function WeekendVacanzeV2Page() {
                           {/* Spese TX */}
                           <td style={{ ...numTd, color: spend > 0 ? 'var(--text1)' : 'var(--text3)' }}>
                             {spend > 0 ? `€ ${fmtIT(spend, 0)}` : '—'}
+                          </td>
+                          {/* Costo/notte */}
+                          <td style={{ ...numTd, color: costPerNight > 0 ? 'var(--text1)' : 'var(--text3)' }}>
+                            {costPerNight > 0 ? `€ ${fmtIT(costPerNight, 0)}` : '—'}
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'center' }}>
                             <button onClick={() => removeRow(v)} title="Elimina / segna come non vacanza" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center' }}>
