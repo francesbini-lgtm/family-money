@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { Plus, Trash2, Search, Check, X as XIcon } from 'lucide-react'
 import { fmtIT } from '../utils/format'
@@ -101,7 +101,7 @@ function DestTypeSelect({ value, onSave }) {
 export default function WeekendVacanzeV2Page() {
   const transactions = useStore(s => s.transactions)
   const { vacations, add, update, remove } = useVacations()
-  const { notVacationDates, mark } = useNotVacationDates()
+  const { notVacationDates, mark, unmark } = useNotVacationDates()
 
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ dest: '', dateFrom: '', dateTo: '' })
@@ -109,7 +109,15 @@ export default function WeekendVacanzeV2Page() {
   const [candCityOverride, setCandCityOverride] = useState({})
   const [selectedCand, setSelectedCand] = useState(new Set())
   const [mergeName, setMergeName] = useState('')
+  const [undo, setUndo] = useState(null) // { label, onUndo }
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
+
+  // Snackbar "Annulla" — resta visibile 8s dopo un'eliminazione/ignora, poi scompare
+  useEffect(() => {
+    if (!undo) return
+    const t = setTimeout(() => setUndo(null), 8000)
+    return () => clearTimeout(t)
+  }, [undo])
 
   function toggleCand(id) {
     setSelectedCand(s => {
@@ -144,10 +152,30 @@ export default function WeekendVacanzeV2Page() {
   }
 
   // "Elimina" = segna tutti i giorni del periodo come "non vacanza" (flagga le eventuali
-  // transazioni Weekend e Vacanze per la revisione competenza) + rimuove il record dichiarato
+  // transazioni Weekend e Vacanze per la revisione competenza) + rimuove il record dichiarato.
+  // Reversibile per 8s tramite la snackbar "Annulla" (setUndo)
   function removeRow(v) {
-    mark(allDatesBetween(v.from, v.to))
+    const dates = allDatesBetween(v.from, v.to)
+    mark(dates)
     remove(v.id)
+    setUndo({
+      label: `Vacanza "${v.city || v.name || 'senza nome'}" eliminata`,
+      onUndo: () => {
+        unmark(dates)
+        add({ name: v.name || 'Weekend e Vacanze', from: v.from, to: v.to, city: v.city, destType: v.destType })
+        setUndo(null)
+      }
+    })
+  }
+
+  // Rimuove TUTTE le esclusioni "non vacanza" — utile se una vacanza confermata è stata
+  // eliminata per sbaglio più di 8s fa e non è più recuperabile con "Annulla": i giorni
+  // tornano candidati (se hanno ancora spese "Weekend e Vacanze" non coperte da un periodo dichiarato)
+  function restoreAllExcluded() {
+    if (!notVacationDates.length) return
+    const ok = window.confirm(`Ripristinare ${notVacationDates.length} giorni esclusi? Torneranno a comparire come candidate da confermare (se hanno ancora spese "Weekend e Vacanze").`)
+    if (!ok) return
+    unmark(notVacationDates)
   }
 
   function save() {
@@ -165,6 +193,10 @@ export default function WeekendVacanzeV2Page() {
 
   function ignoreCandidate(cand) {
     mark(cand.dates)
+    setUndo({
+      label: `Candidata "${cand.city || cand.type}" ignorata`,
+      onUndo: () => { unmark(cand.dates); setUndo(null) }
+    })
   }
 
   // Unisce 2+ candidate selezionate (es. Ammarnas + Sorsele + Stockholm-Arl) in
@@ -435,6 +467,14 @@ export default function WeekendVacanzeV2Page() {
             Rilevati dalle spese categorizzate "Weekend e Vacanze": giorni vicini nella stessa località sono già uniti in una riga.
             Conferma per farli comparire nella tabella, oppure ignora se non è una vacanza. Se lo stesso viaggio tocca più
             località (es. tappe diverse in Svezia), spunta le righe interessate e uniscile con un nome comune.
+            {notVacationDates.length > 0 && (
+              <>
+                {' '}Hai eliminato o ignorato qualcosa per sbaglio?{' '}
+                <span onClick={restoreAllExcluded} style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}>
+                  🔄 Ripristina tutti i giorni esclusi ({notVacationDates.length})
+                </span>
+              </>
+            )}
           </div>
           {selectedCand.size >= 2 && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 10px', background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -495,6 +535,24 @@ export default function WeekendVacanzeV2Page() {
             })}
           </div>
         </Modal>
+      )}
+
+      {/* Snackbar "Annulla" — dopo elimina riga o ignora candidata, per 8s */}
+      {undo && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
+          background: 'var(--text1)', color: 'var(--surface)', borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,.25)', zIndex: 3000, fontSize: 13
+        }}>
+          <span>{undo.label}</span>
+          <button onClick={undo.onUndo} style={{ background: 'none', border: 'none', color: 'inherit', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', fontSize: 13, padding: 0 }}>
+            Annulla
+          </button>
+          <button onClick={() => setUndo(null)} title="Chiudi" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: 0, display: 'flex' }}>
+            <XIcon size={13} />
+          </button>
+        </div>
       )}
     </div>
   )
