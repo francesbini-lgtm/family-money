@@ -68,8 +68,8 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
       : dayTxs
   , [dayTxs, quickFilter])
 
-  // Spese compensate a zero non contano come "dato presente" nella cella
-  const shownDisplayTxs = displayTxs.filter(t => !(t.amount < 0 && netAmt(t) === 0))
+  // Spese compensate a zero (o quasi, per arrotondamenti float) non contano come "dato presente" nella cella
+  const shownDisplayTxs = displayTxs.filter(t => !(t.amount < 0 && Math.abs(netAmt(t)) < 0.005))
 
   const total   = shownDisplayTxs.reduce((s, t) => s + netAmt(t), 0)
   const hasData = shownDisplayTxs.length > 0
@@ -367,8 +367,8 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
     ? txs.filter(t => t.cat1 === 'Weekend e Vacanze')
     : txs
 
-  // Spese compensate a zero (netAmt === 0 dopo compensazione) non vanno mostrate
-  const shownTxs = visibleTxs.filter(t => !(t.amount < 0 && netAmt(t) === 0))
+  // Spese compensate a zero (o quasi, per arrotondamenti float) non vanno mostrate
+  const shownTxs = visibleTxs.filter(t => !(t.amount < 0 && Math.abs(netAmt(t)) < 0.005))
 
   const income  = shownTxs.filter(t=>t.amount>0).reduce((s,t)=>s+netAmt(t),0)
   const expense = Math.abs(shownTxs.filter(t=>t.amount<0).reduce((s,t)=>s+netAmt(t),0))
@@ -500,6 +500,7 @@ export default function CalendarioPage() {
   const txByDate = useMemo(() => {
     const idx = {}
     transactions.forEach(t => {
+      if (t.excluded) return
       if (!(t._effDate||t.date)) return
       if (!idx[t._effDate||t.date]) idx[t._effDate||t.date] = []
       idx[t._effDate||t.date].push(t)
