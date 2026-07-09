@@ -68,8 +68,11 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
       : dayTxs
   , [dayTxs, quickFilter])
 
-  const total   = displayTxs.reduce((s, t) => s + netAmt(t), 0)
-  const hasData = displayTxs.length > 0
+  // Spese compensate a zero non contano come "dato presente" nella cella
+  const shownDisplayTxs = displayTxs.filter(t => !(t.amount < 0 && netAmt(t) === 0))
+
+  const total   = shownDisplayTxs.reduce((s, t) => s + netAmt(t), 0)
+  const hasData = shownDisplayTxs.length > 0
 
   // Most frequent city that day (ignore nulls / 'null' strings)
   const dominantCity = useMemo(() => {
@@ -364,22 +367,25 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
     ? txs.filter(t => t.cat1 === 'Weekend e Vacanze')
     : txs
 
-  const income  = visibleTxs.filter(t=>t.amount>0).reduce((s,t)=>s+netAmt(t),0)
-  const expense = Math.abs(visibleTxs.filter(t=>t.amount<0).reduce((s,t)=>s+netAmt(t),0))
+  // Spese compensate a zero (netAmt === 0 dopo compensazione) non vanno mostrate
+  const shownTxs = visibleTxs.filter(t => !(t.amount < 0 && netAmt(t) === 0))
+
+  const income  = shownTxs.filter(t=>t.amount>0).reduce((s,t)=>s+netAmt(t),0)
+  const expense = Math.abs(shownTxs.filter(t=>t.amount<0).reduce((s,t)=>s+netAmt(t),0))
 
   const savedCity = appPrefs?.calendarCityOverrides?.[dateStr] || ''
 
   // Dominant city from this day's transactions (fallback when no manual override saved)
   const dominantCity = useMemo(() => {
     const freq = {}
-    for (const t of visibleTxs) {
+    for (const t of shownTxs) {
       const c = t.city && t.city !== 'null' ? t.city : null
       if (c) freq[c] = (freq[c] || 0) + 1
     }
     const entries = Object.entries(freq)
     if (!entries.length) return null
     return entries.sort((a, b) => b[1] - a[1])[0][0]
-  }, [visibleTxs])
+  }, [shownTxs])
 
   const locationLabel = savedCity || dominantCity || ''
 
@@ -402,7 +408,7 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
           🏖 {vacs.map(v=>v.name).join(' · ')}
         </div>
       )}
-      {visibleTxs.length === 0 ? (
+      {shownTxs.length === 0 ? (
         <div style={{textAlign:'center',padding:'20px 0',color:'var(--text3)',fontSize:13}}>Nessuna transazione questo giorno.</div>
       ) : (
         <>
@@ -411,7 +417,7 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
             {expense>0 && <div style={{fontSize:12}}><span style={{color:'var(--text3)'}}>Uscite: </span><strong style={{color:'var(--red)'}}>{fmtIT(expense, 2)}</strong></div>}
           </div>
           <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:360,overflowY:'auto'}}>
-            {visibleTxs.map(t => <TxEditRow key={t.txId} tx={t}/>)}
+            {shownTxs.map(t => <TxEditRow key={t.txId} tx={t}/>)}
           </div>
         </>
       )}
