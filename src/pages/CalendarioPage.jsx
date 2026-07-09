@@ -374,7 +374,7 @@ function TxEditRow({ tx }) {
 }
 
 // ── Day detail modal ──────────────────────────────────────
-function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
+function DayModal({ dateStr, txs, vacs, quickFilter, onClose, isNotVac, onMarkNotVacation, onUnmarkNotVacation }) {
   const appPrefs   = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
   const d = new Date(dateStr)
@@ -426,6 +426,11 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
           🏖 {vacs.map(v=>v.name).join(' · ')}
         </div>
       )}
+      {isNotVac && (
+        <div style={{marginBottom:12,padding:'8px 12px',background:'#fef3e2',borderRadius:'var(--radius-sm)',fontSize:13,color:'#b8792a',fontWeight:600}}>
+          🚫 Segnato come "non vacanza" — le spese "Weekend e Vacanze" di questo giorno sono da rivedere competenza
+        </div>
+      )}
       {shownTxs.length === 0 ? (
         <div style={{textAlign:'center',padding:'20px 0',color:'var(--text3)',fontSize:13}}>Nessuna transazione questo giorno.</div>
       ) : (
@@ -455,6 +460,17 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
         </button>
       </div>
       <ModalFooter>
+        {isNotVac ? (
+          <button className="btn btn-secondary" onClick={onUnmarkNotVacation}>
+            ✅ Segna come vacanza
+          </button>
+        ) : (
+          <button className="btn btn-secondary" style={{color:'#b8792a'}}
+            title="Le spese 'Weekend e Vacanze' di questo giorno verranno flaggate da rivedere competenza"
+            onClick={onMarkNotVacation}>
+            🚫 Non è vacanza
+          </button>
+        )}
         <button className="btn btn-secondary" onClick={onClose}>Chiudi</button>
       </ModalFooter>
     </Modal>
@@ -915,6 +931,9 @@ export default function CalendarioPage() {
           vacs={modal.vacs}
           quickFilter={quickFilter}
           onClose={()=>setModal(null)}
+          isNotVac={notVacSet.has(modal.dateStr)}
+          onMarkNotVacation={() => { markNotVac([modal.dateStr]); setModal(null) }}
+          onUnmarkNotVacation={() => { unmarkNotVac([modal.dateStr]); setModal(null) }}
         />
       )}
 
