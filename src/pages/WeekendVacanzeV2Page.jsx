@@ -11,7 +11,7 @@ import {
 } from '../data/vacationRules'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
+  PieChart, Pie, Cell, LabelList,
 } from 'recharts'
 
 function nightsBetween(from, to) {
@@ -255,6 +255,18 @@ export default function WeekendVacanzeV2Page() {
     return years5.map(y => byY[y])
   }, [last5, transactions, years5])
 
+  // Giorni totali (Weekend/Vacanze) per anno — da/a inclusi, quindi notti+1
+  const barDaysData = useMemo(() => {
+    const byY = {}
+    years5.forEach(y => { byY[y] = { year: y, Weekend: 0, Vacanze: 0 } })
+    last5.forEach(v => {
+      const yr = String(getYear(v))
+      const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
+      byY[yr][type] += nightsBetween(v.from, v.to) + 1
+    })
+    return years5.map(y => byY[y])
+  }, [last5, transactions, years5])
+
   const pieData = useMemo(() => {
     const counts = {}
     last5.forEach(v => {
@@ -272,6 +284,26 @@ export default function WeekendVacanzeV2Page() {
 
   const weekendCount = last5.filter(v => (dominantVacationType(transactions, v.from, v.to) || 'Weekend') === 'Weekend').length
   const vacanzeCount = last5.length - weekendCount
+
+  // Etichette totale in cima alle barre impilate (Weekend+Vacanze) — usate come LabelList content
+  function SpendTotalLabel({ x, y, width, index }) {
+    const total = (barData[index]?.Weekend || 0) + (barData[index]?.Vacanze || 0)
+    if (!total) return null
+    return (
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+        {`€ ${fmtIT(Math.round(total))}`}
+      </text>
+    )
+  }
+  function DaysTotalLabel({ x, y, width, index }) {
+    const total = (barDaysData[index]?.Weekend || 0) + (barDaysData[index]?.Vacanze || 0)
+    if (!total) return null
+    return (
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+        {`${total} gg`}
+      </text>
+    )
+  }
 
   const thStyle = {
     padding: '8px 10px', fontSize: 11, fontWeight: 700,
@@ -310,15 +342,32 @@ export default function WeekendVacanzeV2Page() {
       {confirmed.length > 0 && (
         <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', padding: 16, marginBottom: 20 }}>
           <div style={{ minWidth: 180 }}>
-            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Weekend vs Vacanze ({years5[0]}–{years5[4]})</div>
+            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Spesa Weekend vs Vacanze ({years5[0]}–{years5[4]})</div>
             <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={barData} margin={{ top: 6, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
+              <BarChart data={barData} margin={{ top: 22, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
                 <XAxis dataKey="year" tick={{ fontSize: 11, fill: 'var(--text2)' }} axisLine={{ stroke: '#e0dcd8' }} tickLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={32}
                   tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
                 <Tooltip formatter={(value, name) => [`€ ${fmtIT(Math.round(value))}`, name]} />
                 <Bar dataKey="Weekend" stackId="a" fill={TYPE_COLORS.Weekend} radius={[0, 0, 0, 0]} isAnimationActive={false} />
-                <Bar dataKey="Vacanze" stackId="a" fill={TYPE_COLORS.Vacanze} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="Vacanze" stackId="a" fill={TYPE_COLORS.Vacanze} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                  <LabelList content={<SpendTotalLabel />} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ minWidth: 180 }}>
+            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Giorni di vacanza per anno ({years5[0]}–{years5[4]})</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={barDaysData} margin={{ top: 22, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: 'var(--text2)' }} axisLine={{ stroke: '#e0dcd8' }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={28} />
+                <Tooltip formatter={(value, name) => [`${value} giorni`, name]} />
+                <Bar dataKey="Weekend" stackId="a" fill={TYPE_COLORS.Weekend} radius={[0, 0, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="Vacanze" stackId="a" fill={TYPE_COLORS.Vacanze} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                  <LabelList content={<DaysTotalLabel />} />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
