@@ -705,20 +705,13 @@ export default function EntratePage() {
     [...allYears].reverse().map(year => {
       const yStr = String(year)
       const yTxs = incomeTxs.filter(t => (t._effDate||t.date).startsWith(yStr))
-      // fraRaw/sofiRaw = intero importo delle transazioni (bonus incluso). fraBonus/sofiBonus è
-      // la porzione taggata come bonus (bonusMap, editabile da BonusCell). fra/sofi mostrati in
-      // tabella sono SOLO la base (raw - bonus), stessa convenzione di buildRow() usata dal grafico
-      // sopra — così "€ X (+Y bonus)" è una somma genuina (X+Y) e non bonus già incluso in X.
-      const fraRaw  = yTxs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + t.amount, 0)
-      const sofiRaw = yTxs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + t.amount, 0)
-      const fraBonus  = yTxs.filter(t => t.cat2==='Fra').reduce((s,t) => s+(bonusMap[t.txId]?.amt||0), 0)
-      const sofiBonus = yTxs.filter(t => t.cat2==='Sofi').reduce((s,t) => s+(bonusMap[t.txId]?.amt||0), 0)
-      const fra   = fraRaw  - fraBonus
-      const sofi  = sofiRaw - sofiBonus
-      const total = fraRaw + sofiRaw   // totale reale incassato — invariato
+      // fra/sofi = intero importo delle transazioni (bonus incluso, senza scorporo in tabella)
+      const fra   = yTxs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + t.amount, 0)
+      const sofi  = yTxs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + t.amount, 0)
+      const total = fra + sofi
       const months   = new Set(yTxs.map(t => (t._effDate||t.date).slice(0,7))).size
       const avgMonth = months > 0 ? total / months : 0
-      return { year, fra, sofi, total, avgMonth, months, fraBonus, sofiBonus }
+      return { year, fra, sofi, total, avgMonth, months }
     })
   , [allYears, incomeTxs, bonusMap])
 
@@ -988,11 +981,9 @@ export default function EntratePage() {
                       </td>
                       <td style={{padding:'10px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13}}>
                         <span style={{color:COLORS.Fra,fontWeight:600}}>€ {fmtIT(y.fra,0)}</span>
-                        {y.fraBonus>0 && <span style={{fontSize:10,color:COLORS['Fra-Bonus'],marginLeft:4}}>(+{fmtIT(y.fraBonus,0)} bonus)</span>}
                       </td>
                       <td style={{padding:'10px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13}}>
                         <span style={{color:COLORS.Sofi,fontWeight:600}}>€ {fmtIT(y.sofi,0)}</span>
-                        {y.sofiBonus>0 && <span style={{fontSize:10,color:COLORS['Sofi-Bonus'],marginLeft:4}}>(+{fmtIT(y.sofiBonus,0)} bonus)</span>}
                       </td>
                       <td style={{padding:'10px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:'var(--green)'}}>
                         € {fmtIT(y.total,0)}
