@@ -705,13 +705,19 @@ export default function EntratePage() {
     [...allYears].reverse().map(year => {
       const yStr = String(year)
       const yTxs = incomeTxs.filter(t => (t._effDate||t.date).startsWith(yStr))
-      const fra   = yTxs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + t.amount, 0)
-      const sofi  = yTxs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + t.amount, 0)
-      const total = fra + sofi
-      const months   = new Set(yTxs.map(t => (t._effDate||t.date).slice(0,7))).size
-      const avgMonth = months > 0 ? total / months : 0
+      // fraRaw/sofiRaw = intero importo delle transazioni (bonus incluso). fraBonus/sofiBonus è
+      // la porzione taggata come bonus (bonusMap, editabile da BonusCell). fra/sofi mostrati in
+      // tabella sono SOLO la base (raw - bonus), stessa convenzione di buildRow() usata dal grafico
+      // sopra — così "€ X (+Y bonus)" è una somma genuina (X+Y) e non bonus già incluso in X.
+      const fraRaw  = yTxs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + t.amount, 0)
+      const sofiRaw = yTxs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + t.amount, 0)
       const fraBonus  = yTxs.filter(t => t.cat2==='Fra').reduce((s,t) => s+(bonusMap[t.txId]?.amt||0), 0)
       const sofiBonus = yTxs.filter(t => t.cat2==='Sofi').reduce((s,t) => s+(bonusMap[t.txId]?.amt||0), 0)
+      const fra   = fraRaw  - fraBonus
+      const sofi  = sofiRaw - sofiBonus
+      const total = fraRaw + sofiRaw   // totale reale incassato — invariato
+      const months   = new Set(yTxs.map(t => (t._effDate||t.date).slice(0,7))).size
+      const avgMonth = months > 0 ? total / months : 0
       return { year, fra, sofi, total, avgMonth, months, fraBonus, sofiBonus }
     })
   , [allYears, incomeTxs, bonusMap])
