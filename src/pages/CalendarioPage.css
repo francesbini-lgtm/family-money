@@ -153,6 +153,7 @@
 }
 
 /* Multi-select mode (dichiarazione vacanza) */
+.cal-selecting { user-select: none; }
 .cal-cell.selectable { cursor: cell; }
 .cal-cell.cell-selected {
   background: #fde68a !important;

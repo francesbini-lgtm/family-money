@@ -1197,6 +1197,7 @@ export const useStore = create((set, get) => ({
     const multiRules    = (s.aiRules || []).filter(r => r.enabled !== false)
     const catRules      = (s.appPrefs?.catRules || []).filter(r => r.enabled !== false)
     const vacations     = s.appPrefs?.calendarVacations || []
+    const notVacationDates = s.appPrefs?.calendarNotVacationDates || []
 
     const patches = []   // { txId, patch }
 
@@ -1259,13 +1260,14 @@ export const useStore = create((set, get) => ({
       }
 
       // 4. Vacanze dichiarate (Calendario) → riassegnazione a "Weekend e Vacanze" +
-      //    flag "da rivedere competenza" se la categoria è Weekend e Vacanze ma la data
-      //    di competenza non cade in nessun periodo dichiarato vacanza.
+      //    flag "da rivedere competenza" se la categoria è Weekend e Vacanze ma il giorno
+      //    è stato esplicitamente marcato "non vacanza" (click su cella blu in Calendario,
+      //    o "elimina" nella tabella Weekend e Vacanze v2).
       //    La riassegnazione di categoria rispetta userEditedCat; il flag di revisione no
       //    (è un segnale di qualità dati, non una modifica di categoria).
       {
         const effDate = tx._effDate || tx.competenza || tx.date
-        const vacPatch = computeVacationPatch({ ...tx, ...patch }, vacations, effDate)
+        const vacPatch = computeVacationPatch({ ...tx, ...patch }, vacations, effDate, notVacationDates)
         if (!tx.userEditedCat && vacPatch.cat1) {
           patch.cat1 = vacPatch.cat1
           patch.cat2 = vacPatch.cat2

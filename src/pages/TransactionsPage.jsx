@@ -1964,6 +1964,7 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
     // Vacanze dichiarate nel Calendario — usate più sotto per la riassegnazione automatica
     // a "Weekend e Vacanze" e per il flag "da rivedere competenza"
     const declaredVacations = appPrefs?.calendarVacations || []
+    const notVacationDates  = appPrefs?.calendarNotVacationDates || []
     const missing = []
     if (!geminiKey) missing.push('Gemini AI (AI Prompt)')
     if (!placesKey) missing.push('Google Places (AI Prompt)')
@@ -2074,9 +2075,10 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
 
           // 4. Vacanze dichiarate (Calendario) → riassegnazione a "Weekend e Vacanze" per
           //    spese vacanza-eligible (alimentari, ristoranti, carburante, hotel) la cui data
-          //    di competenza cade in un periodo dichiarato vacanza
+          //    di competenza cade in un periodo dichiarato vacanza (mai se il giorno è stato
+          //    esplicitamente marcato "non vacanza")
           const effDateForVac = t._effDate || t.competenza || t.date
-          const vacHit = t.amount < 0 && t.cat1 !== 'Weekend e Vacanze'
+          const vacHit = t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' && !notVacationDates.includes(effDateForVac)
             ? findVacationForDate(effDateForVac, declaredVacations)
             : null
           if (vacHit && isVacationEligible(t)) {
@@ -2091,11 +2093,11 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
           const catProtected = !!curTx?.userEditedCat ||
             (typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount))
           const finalCat1 = catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null)
-          // Flag "da rivedere competenza": categoria (finale) Weekend e Vacanze ma la data
-          // non cade in nessun periodo dichiarato vacanza — indipendente da catProtected,
+          // Flag "da rivedere competenza": categoria (finale) Weekend e Vacanze ma il giorno
+          // è stato esplicitamente marcato "non vacanza" — indipendente da catProtected,
           // è un segnale di qualità dati, non una modifica di categoria
           const flagCompetenza = finalCat1 === 'Weekend e Vacanze' &&
-            !findVacationForDate(curTx?._effDate || effDateForVac, declaredVacations)
+            notVacationDates.includes(curTx?._effDate || effDateForVac)
           updateTransaction(t.txId, {
             descAI:        t.descAI,
             city:          curTx?.cityUserEdited ? curTx.city : t.city,  // respect manual edits
