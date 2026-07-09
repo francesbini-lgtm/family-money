@@ -1,9 +1,17 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Search, Check, X as XIcon } from 'lucide-react'
 import { fmtIT } from '../utils/format'
+import Modal from '../components/Modal'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
-import { computeVacationPeriods, vacationSpendInRange, allDatesBetween } from '../data/vacationRules'
+import {
+  vacationSpendInRange, allDatesBetween, dominantVacationType,
+  destCategoryEmoji, destCategoryLabel, computeCandidateVacations,
+} from '../data/vacationRules'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell,
+} from 'recharts'
 
 function nightsBetween(from, to) {
   if (!from || !to) return 0
@@ -14,6 +22,13 @@ function getYear(v) {
   if (v.from) return parseInt(v.from.slice(0, 4))
   return null
 }
+
+function fmtDate(d) {
+  return d ? d.split('-').reverse().join('/') : '—'
+}
+
+const PIE_COLORS = { Mare: '#0ea5e9', Montagna: '#16a34a', Città: '#b45309', Altro: '#94a3b8' }
+const TYPE_COLORS = { Vacanze: '#2563eb', Weekend: '#b45309' }
 
 // ── Editable cell: text/date — click to edit ──────────────
 function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '—', align = 'left' }) {
@@ -69,29 +84,34 @@ export default function WeekendVacanzeV2Page() {
 
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ dest: '', dateFrom: '', dateTo: '' })
+  const [showCandidates, setShowCandidates] = useState(false)
+  const [candCityOverride, setCandCityOverride] = useState({})
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
-  // Elenco unificato: periodi dichiarati in Calendario + periodi rilevati automaticamente
-  // dalle transazioni "Weekend e Vacanze" non ancora dichiarati né esclusi — vedi
-  // computeVacationPeriods() in src/data/vacationRules.js. Perfettamente sincronizzato
-  // con Calendario > Vacanze: stessa fonte dati (appPrefs.calendarVacations / .calendarNotVacationDates)
-  const periods = useMemo(
-    () => computeVacationPeriods(transactions, vacations, notVacationDates),
+  // Solo le vacanze/weekend CONFERMATE dall'utente (appPrefs.calendarVacations) — le
+  // candidate auto-rilevate ma non confermate NON compaiono più qui, vanno prima
+  // confermate dal pannello "🔍 Da confermare" (computeCandidateVacations)
+  const confirmed = useMemo(
+    () => vacations.map(v => ({ ...v, declared: true })),
+    [vacations]
+  )
+
+  // Candidate: giorni con spesa "Weekend e Vacanze" non ancora coperti da un periodo
+  // dichiarato né esclusi — raggruppati per vicinanza di date E stessa località
+  const candidates = useMemo(
+    () => computeCandidateVacations(transactions, vacations, notVacationDates),
     [transactions, vacations, notVacationDates]
   )
 
-  // Aggiorna un campo: se il periodo è già dichiarato, aggiorna il record; se è solo
-  // "rilevato" (virtuale, non ancora in appPrefs.calendarVacations), lo crea al primo edit
   function upd(v, field, value) {
-    if (v.declared) update(v.id, { [field]: value })
-    else add({ name: v.name || 'Weekend e Vacanze', from: v.from, to: v.to, city: v.city, [field]: value })
+    update(v.id, { [field]: value })
   }
 
   // "Elimina" = segna tutti i giorni del periodo come "non vacanza" (flagga le eventuali
-  // transazioni Weekend e Vacanze per la revisione competenza) + rimuove il record dichiarato se presente
+  // transazioni Weekend e Vacanze per la revisione competenza) + rimuove il record dichiarato
   function removeRow(v) {
     mark(allDatesBetween(v.from, v.to))
-    if (v.declared) remove(v.id)
+    remove(v.id)
   }
 
   function save() {
@@ -101,15 +121,25 @@ export default function WeekendVacanzeV2Page() {
     setForm({ dest: '', dateFrom: '', dateTo: '' })
   }
 
+  function confirmCandidate(cand) {
+    const city = candCityOverride[cand.id] ?? cand.city ?? ''
+    add({ name: 'Weekend e Vacanze', from: cand.from, to: cand.to, city })
+    setCandCityOverride(o => { const n = { ...o }; delete n[cand.id]; return n })
+  }
+
+  function ignoreCandidate(cand) {
+    mark(cand.dates)
+  }
+
   // Sort: within each year, by from desc
   const sorted = useMemo(() => {
-    return [...periods].sort((a, b) => {
+    return [...confirmed].sort((a, b) => {
       const ya = getYear(a) || 0
       const yb = getYear(b) || 0
       if (ya !== yb) return yb - ya
       return (b.from || '').localeCompare(a.from || '')
     })
-  }, [periods])
+  }, [confirmed])
 
   const byYear = useMemo(() => {
     const groups = {}
@@ -121,6 +151,46 @@ export default function WeekendVacanzeV2Page() {
     })
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
   }, [sorted])
+
+  // ── Statistiche ultimi 5 anni (solo vacanze confermate) ──────────────────
+  const years5 = useMemo(() => {
+    const y = new Date().getFullYear()
+    return Array.from({ length: 5 }, (_, i) => String(y - 4 + i))
+  }, [])
+
+  const last5 = useMemo(
+    () => confirmed.filter(v => years5.includes(String(getYear(v)))),
+    [confirmed, years5]
+  )
+
+  const barData = useMemo(() => {
+    const byY = {}
+    years5.forEach(y => { byY[y] = { year: y, Weekend: 0, Vacanze: 0 } })
+    last5.forEach(v => {
+      const yr = String(getYear(v))
+      const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
+      byY[yr][type] += vacationSpendInRange(transactions, v.from, v.to)
+    })
+    return years5.map(y => byY[y])
+  }, [last5, transactions, years5])
+
+  const pieData = useMemo(() => {
+    const counts = {}
+    last5.forEach(v => {
+      const label = destCategoryLabel(v.city)
+      counts[label] = (counts[label] || 0) + 1
+    })
+    return Object.entries(counts).map(([name, value]) => ({ name, value }))
+  }, [last5])
+
+  const avgCost = useMemo(() => {
+    if (!last5.length) return 0
+    const tot = last5.reduce((s, v) => s + vacationSpendInRange(transactions, v.from, v.to), 0)
+    return tot / last5.length
+  }, [last5, transactions])
+
+  const weekendCount = last5.filter(v => (dominantVacationType(transactions, v.from, v.to) || 'Weekend') === 'Weekend').length
+  const vacanzeCount = last5.length - weekendCount
 
   const thStyle = {
     padding: '8px 10px', fontSize: 11, fontWeight: 700,
@@ -138,17 +208,63 @@ export default function WeekendVacanzeV2Page() {
   return (
     <div style={{ padding: '24px 28px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>✈️ Weekend e Vacanze v2</h1>
           <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 4 }}>
-            Sincronizzato con Calendario &gt; Vacanze — clicca su qualsiasi cella per modificarla
+            Solo vacanze confermate — sincronizzato con Calendario &gt; Vacanze
           </div>
         </div>
-        <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-          <Plus size={14} /> Aggiungi
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowCandidates(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: candidates.length ? 'var(--gold-l,#fef9e7)' : 'var(--surface2)', color: candidates.length ? 'var(--gold,#b45309)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+            <Search size={14} /> Da confermare {candidates.length > 0 && `(${candidates.length})`}
+          </button>
+          <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+            <Plus size={14} /> Aggiungi
+          </button>
+        </div>
       </div>
+
+      {/* Statistiche ultimi 5 anni */}
+      {confirmed.length > 0 && (
+        <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', padding: 16, marginBottom: 20 }}>
+          <div style={{ minWidth: 180 }}>
+            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Weekend vs Vacanze ({years5[0]}–{years5[4]})</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={barData} margin={{ top: 6, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: 'var(--text2)' }} axisLine={{ stroke: '#e0dcd8' }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={32}
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
+                <Tooltip formatter={(value, name) => [`€ ${fmtIT(Math.round(value))}`, name]} />
+                <Bar dataKey="Weekend" stackId="a" fill={TYPE_COLORS.Weekend} radius={[0, 0, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="Vacanze" stackId="a" fill={TYPE_COLORS.Vacanze} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {pieData.length > 0 && (
+            <div style={{ minWidth: 150 }}>
+              <div style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Mare / Montagna / Città</div>
+              <PieChart width={150} height={140}>
+                <Pie data={pieData} dataKey="value" nameKey="name" cx={70} cy={68} innerRadius={30} outerRadius={58} isAnimationActive={false}>
+                  {pieData.map(entry => <Cell key={entry.name} fill={PIE_COLORS[entry.name] || '#94a3b8'} />)}
+                </Pie>
+                <Tooltip formatter={(value, name) => [`${value} viaggi`, name]} />
+              </PieChart>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginLeft: 'auto' }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 700, letterSpacing: '.04em' }}>COSTO MEDIO</div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>€ {fmtIT(Math.round(avgCost))}</div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text3)' }}>
+              <span style={{ color: TYPE_COLORS.Weekend, fontWeight: 700 }}>{weekendCount}</span> weekend · <span style={{ color: TYPE_COLORS.Vacanze, fontWeight: 700 }}>{vacanzeCount}</span> vacanze
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add form */}
       {showAdd && (
@@ -173,11 +289,14 @@ export default function WeekendVacanzeV2Page() {
       )}
 
       {/* Empty state */}
-      {periods.length === 0 ? (
+      {confirmed.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 24px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text3)' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>✈️</div>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: 'var(--text1)' }}>Nessuna vacanza rilevata</div>
-          <div style={{ fontSize: 13 }}>Dichiara una vacanza dal Calendario (modalità 🌴 Vacanze) o clicca "Aggiungi" qui.</div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: 'var(--text1)' }}>Nessuna vacanza confermata</div>
+          <div style={{ fontSize: 13 }}>
+            Dichiara una vacanza dal Calendario (modalità 🌴 Vacanze), clicca "Aggiungi" qui,
+            {candidates.length > 0 ? ` oppure conferma una delle ${candidates.length} candidate rilevate.` : ' oppure attendi che l\'AI ne rilevi qualcuna dalle spese.'}
+          </div>
         </div>
       ) : (
         byYear.map(([year, vacs]) => {
@@ -206,22 +325,23 @@ export default function WeekendVacanzeV2Page() {
                   <tbody>
                     {vacs.map(v => {
                       const nights = nightsBetween(v.from, v.to)
-                      const type = nights >= 3 ? 'Vacanze' : 'Weekend'
+                      const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
                       const spend = vacationSpendInRange(transactions, v.from, v.to)
+                      const emoji = destCategoryEmoji(v.city)
 
                       return (
                         <tr key={v.id} style={{ transition: 'background .1s' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'} onMouseLeave={e => e.currentTarget.style.background = ''}>
-                          {/* Tipo (derivato dalla durata, non editabile) */}
+                          {/* Tipo (derivato dal cat2 dominante delle transazioni, non editabile) */}
                           <td style={tdStyle}>
                             <span style={{
                               fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700,
                               background: type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
                               color: type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
                             }}>{type}</span>
-                            {!v.declared && <span title="Rilevata automaticamente dalle transazioni, non ancora dichiarata" style={{ marginLeft: 5, fontSize: 9, color: 'var(--text3)' }}>🔍 auto</span>}
                           </td>
                           {/* Dove */}
                           <td style={{ ...tdStyle, fontWeight: 700 }}>
+                            <span style={{ marginRight: 4 }}>{emoji}</span>
                             <EditCell value={v.city} onSave={val => upd(v, 'city', val)} width={110} />
                           </td>
                           {/* Date */}
@@ -232,7 +352,7 @@ export default function WeekendVacanzeV2Page() {
                             <EditCell value={v.to || ''} type="date" onSave={val => upd(v, 'to', val)} width={110} />
                           </td>
                           {/* Notti */}
-                          <td style={numTd}>{nights > 0 ? nights : '—'}</td>
+                          <td style={numTd}>{nights}</td>
                           {/* Spese TX */}
                           <td style={{ ...numTd, color: spend > 0 ? 'var(--text1)' : 'var(--text3)' }}>
                             {spend > 0 ? `€ ${fmtIT(spend, 0)}` : '—'}
@@ -251,6 +371,50 @@ export default function WeekendVacanzeV2Page() {
             </div>
           )
         })
+      )}
+
+      {/* Pannello "Vacanze da confermare" */}
+      {showCandidates && (
+        <Modal title="🔍 Vacanze e weekend da confermare" onClose={() => setShowCandidates(false)} width={620}>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14 }}>
+            Rilevati dalle spese categorizzate "Weekend e Vacanze": giorni vicini nella stessa località sono già uniti in una riga.
+            Conferma per farli comparire nella tabella, oppure ignora se non è una vacanza.
+          </div>
+          <div style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {candidates.length === 0 && (
+              <div style={{ textAlign: 'center', padding: 24, color: 'var(--text3)', fontSize: 13 }}>Nessuna candidata al momento 🎉</div>
+            )}
+            {candidates.map(cand => {
+              const emoji = destCategoryEmoji(candCityOverride[cand.id] ?? cand.city)
+              return (
+                <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700, flexShrink: 0,
+                    background: cand.type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
+                    color: cand.type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
+                  }}>{cand.type}</span>
+                  <span>{emoji}</span>
+                  <input
+                    value={candCityOverride[cand.id] ?? cand.city ?? ''}
+                    onChange={e => setCandCityOverride(o => ({ ...o, [cand.id]: e.target.value }))}
+                    placeholder="Dove"
+                    style={{ ...inp, width: 130, flexShrink: 0 }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--text2)', flexShrink: 0 }}>{fmtDate(cand.from)} → {fmtDate(cand.to)}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text3)', flexShrink: 0 }}>€ {fmtIT(cand.spend, 0)}</span>
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                    <button onClick={() => confirmCandidate(cand)} title="Confermo, è una vacanza/weekend" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      <Check size={12} /> Confermo
+                    </button>
+                    <button onClick={() => ignoreCandidate(cand)} title="Non è una vacanza" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                      <XIcon size={12} /> Ignora
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Modal>
       )}
     </div>
   )

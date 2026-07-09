@@ -133,6 +133,103 @@ export function vacationSpendInRange(transactions, from, to) {
     }, 0)
 }
 
+// Tipo dominante (Weekend / Vacanze) nell'intervallo, in base al cat2 più frequente
+// tra le transazioni "Weekend e Vacanze" (non più su base "numero di notti")
+export function dominantVacationType(transactions, from, to) {
+  const freq = {}
+  ;(transactions || []).forEach(t => {
+    if (t.excluded || t.cat1 !== 'Weekend e Vacanze') return
+    const d = t._effDate || t.date
+    if (!d || d < from || d > to) return
+    const c2 = t.cat2 === 'Vacanze' ? 'Vacanze' : 'Weekend'
+    freq[c2] = (freq[c2] || 0) + 1
+  })
+  const entries = Object.entries(freq)
+  if (!entries.length) return null
+  return entries.sort((a, b) => b[1] - a[1])[0][0]
+}
+
+// ── Classificazione destinazione (Mare / Montagna / Città) da nome località ──
+const DEST_BEACH_KEYWORDS = ['mare','sard','rimini','cost','bagn','lido','lignan','riccione','cattolica','riviera','tropea','sicil','calabr','puglia','salent','amalfi','elba','capri','ischia','taormin','eolie','positano','gallipoli','otranto','vieste','ibiza','mykonos','maiorca','tenerife','palermo','catania','miami','maldive','seychelles','sharm','hurghada','cancun']
+const DEST_MOUNTAIN_KEYWORDS = ['mont','alp','dolomit','aosta','neve','ski','snowboard','courmayeur','livigno','madonna','sestriere','bormio','cervinia','cortina','trentino','val di fass','val garden','alta badia','davos','zermatt','innsbruck','salzburg','chamonix']
+const DEST_CITY_KEYWORDS = ['roma','milano','madrid','parigi','paris','londra','london','berlino','berlin','amsterdam','dublino','dublin','barcellona','barcelona','lisbona','lisbon','vienna','praga','prague','budapest','new york','tokyo','venezia','venice','firenze','florence','torino','napoli','bologna','stoccolma','stockholm','copenaghen','copenhagen','oslo','helsinki','bruxelles','brussels','monaco','munich','zurigo','zurich','ginevra','geneva','atene','athens','istanbul','dubai']
+
+export function destCategoryEmoji(city = '') {
+  const n = (city || '').toLowerCase()
+  if (DEST_BEACH_KEYWORDS.some(k => n.includes(k))) return '🏖️'
+  if (DEST_MOUNTAIN_KEYWORDS.some(k => n.includes(k))) return '⛷️'
+  if (DEST_CITY_KEYWORDS.some(k => n.includes(k))) return '🏙️'
+  return '✈️'
+}
+export function destCategoryLabel(city = '') {
+  const e = destCategoryEmoji(city)
+  return e === '🏖️' ? 'Mare' : e === '⛷️' ? 'Montagna' : e === '🏙️' ? 'Città' : 'Altro'
+}
+
+// ── Candidati vacanza/weekend NON ancora confermati dall'utente ──────────────
+// Raggruppa i giorni con spesa "Weekend e Vacanze" (esclusi quelli già coperti da
+// un periodo dichiarato o marcati "non vacanza") in cluster: giorni ravvicinati
+// (gap <= CANDIDATE_GAP_DAYS) E con la stessa località dominante vengono uniti in
+// un'unica riga candidata, invece di restare tante righe di 1 giorno ciascuna.
+const CANDIDATE_GAP_DAYS = 3
+
+export function computeCandidateVacations(transactions, declaredVacations = [], notVacationDates = []) {
+  const notSet = new Set(notVacationDates)
+  const declared = declaredVacations || []
+  const isCovered = d => declared.some(v => d >= v.from && d <= v.to)
+
+  // giorno → città dominante quel giorno (può essere null)
+  const dayCity = {}
+  ;(transactions || []).forEach(t => {
+    if (t.excluded || t.cat1 !== 'Weekend e Vacanze') return
+    const d = t._effDate || t.date
+    if (!d || notSet.has(d) || isCovered(d)) return
+    const c = t.city && t.city !== 'null' ? t.city : null
+    if (!(d in dayCity)) dayCity[d] = {}
+    if (c) dayCity[d][c] = (dayCity[d][c] || 0) + 1
+  })
+
+  const sortedDates = Object.keys(dayCity).sort()
+  if (!sortedDates.length) return []
+
+  const cityOf = d => {
+    const freq = dayCity[d]
+    const entries = Object.entries(freq || {})
+    return entries.length ? entries.sort((a, b) => b[1] - a[1])[0][0] : null
+  }
+
+  const clusters = []
+  let cur = null
+  for (const d of sortedDates) {
+    const c = cityOf(d)
+    if (cur) {
+      const prevDate = new Date(cur.dates[cur.dates.length - 1] + 'T00:00:00')
+      const gapDays = Math.round((new Date(d + 'T00:00:00') - prevDate) / 86400000)
+      const sameCity = !c || !cur.city || c === cur.city
+      if (gapDays <= CANDIDATE_GAP_DAYS && sameCity) {
+        cur.dates.push(d)
+        if (c) cur.city = c
+        continue
+      }
+      clusters.push(cur)
+    }
+    cur = { dates: [d], city: c }
+  }
+  if (cur) clusters.push(cur)
+
+  return clusters.map((cl, i) => {
+    const from = cl.dates[0], to = cl.dates[cl.dates.length - 1]
+    return {
+      id: `candidate-${from}-${i}`,
+      dates: cl.dates,
+      from, to,
+      city: cl.city || dominantCityInRange(transactions, from, to),
+      type: dominantVacationType(transactions, from, to) || 'Weekend',
+      spend: vacationSpendInRange(transactions, from, to),
+    }
+  }).sort((a, b) => b.from.localeCompare(a.from))
+}
+
 // ── Elenco unificato dei periodi vacanza per la tabella "Weekend e Vacanze v2" ──
 // Combina i periodi dichiarati esplicitamente (appPrefs.calendarVacations, "declared: true")
 // con i periodi rilevati automaticamente dalle transazioni cat1 "Weekend e Vacanze" che NON
