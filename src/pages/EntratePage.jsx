@@ -34,9 +34,15 @@ const DEFAULT_RAL_DATA = {
 }
 
 // ── RAL edit modal ────────────────────────────────────────
-// Normalize: ensure effectiveDate exists (backward compat with year-only rows)
-function normalizeRalRow(r) {
-  return { ...r, effectiveDate: r.effectiveDate || (r.year ? `${r.year}-01` : '') }
+// Normalize: ensure effectiveDate exists (backward compat con righe solo-anno) e
+// valuta esista (backward compat con righe create prima che la valuta fosse per-riga:
+// eredita la vecchia valuta "globale per persona" se presente, altrimenti EUR)
+function normalizeRalRow(r, legacyValuta) {
+  return {
+    ...r,
+    effectiveDate: r.effectiveDate || (r.year ? `${r.year}-01` : ''),
+    valuta: r.valuta || legacyValuta || 'EUR',
+  }
 }
 
 function RalEditModal({ person, data, onSave, onClose }) {
@@ -221,26 +227,27 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
   }
 
   // ── Fra salary state ───────────────────────────────────
+  // La valuta è ora per-riga (per periodo), non più unica per persona — ogni riga
+  // porta il proprio campo `valuta`. normalizeRalRow eredita la vecchia valuta
+  // globale (s.fraValuta) solo come fallback per righe salvate prima di questa modifica.
   const [fraRows, setFraRows] = useState(() =>
-    [...(ralData.Fra||[])].map(normalizeRalRow)
+    [...(ralData.Fra||[])].map(r=>normalizeRalRow(r, s.fraValuta))
       .map(r=>({...r, ral:String(r.ral??''), netto:String(r.netto??''), bonusLordo:String(r.bonusLordo??''), bonusNetto:String(r.bonusNetto??'')}))
       .sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate))
   )
-  const [fraValuta, setFraValuta] = useState(s.fraValuta||'EUR')
   const [fraND, setFraND] = useState(''); const [fraNR, setFraNR] = useState('')
   const [fraNN, setFraNN] = useState(''); const [fraNBL, setFraNBL] = useState('')
-  const [fraNBN, setFraNBN] = useState('')
+  const [fraNBN, setFraNBN] = useState(''); const [fraNV, setFraNV] = useState('EUR')
 
   // ── Sofi salary state ──────────────────────────────────
   const [sofiRows, setSofiRows] = useState(() =>
-    [...(ralData.Sofi||[])].map(normalizeRalRow)
+    [...(ralData.Sofi||[])].map(r=>normalizeRalRow(r, s.sofiValuta))
       .map(r=>({...r, ral:String(r.ral??''), netto:String(r.netto??''), bonusLordo:String(r.bonusLordo??''), bonusNetto:String(r.bonusNetto??'')}))
       .sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate))
   )
-  const [sofiValuta, setSofiValuta] = useState(s.sofiValuta||'EUR')
   const [sofiND, setSofiND] = useState(''); const [sofiNR, setSofiNR] = useState('')
   const [sofiNN, setSofiNN] = useState(''); const [sofiNBL, setSofiNBL] = useState('')
-  const [sofiNBN, setSofiNBN] = useState('')
+  const [sofiNBN, setSofiNBN] = useState(''); const [sofiNV, setSofiNV] = useState('EUR')
 
   function mkRowUpdater(setR) {
     return (i, field, val) => setR(prev => prev.map((r,idx)=>idx===i
@@ -249,39 +256,39 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
     ))
   }
   function mkRowDeleter(setR) { return (i) => setR(prev=>prev.filter((_,idx)=>idx!==i)) }
-  function mkRowAdder(rows, setR, nd, setND, nr, setNR, nn, setNN, nbl, setNBL, nbn, setNBN) {
+  function mkRowAdder(rows, setR, nd, setND, nr, setNR, nn, setNN, nbl, setNBL, nbn, setNBN, nv, setNV) {
     return () => {
       if (!nd) return
       if (rows.find(r=>r.effectiveDate===nd)) return
       setR(prev=>[...prev,{
-        effectiveDate:nd, year:parseInt(nd.slice(0,4)),
+        effectiveDate:nd, year:parseInt(nd.slice(0,4)), valuta:nv||'EUR',
         ral:parseFloat(nr)||0, netto:parseFloat(nn)||0,
         bonusLordo:parseFloat(nbl)||0, bonusNetto:parseFloat(nbn)||0,
       }].sort((a,b)=>a.effectiveDate.localeCompare(b.effectiveDate)))
-      setND(''); setNR(''); setNN(''); setNBL(''); setNBN('')
+      setND(''); setNR(''); setNN(''); setNBL(''); setNBN(''); setNV('EUR')
     }
   }
 
   const updateFra  = mkRowUpdater(setFraRows)
   const deleteFra  = mkRowDeleter(setFraRows)
-  const addFra     = mkRowAdder(fraRows, setFraRows, fraND,setFraND, fraNR,setFraNR, fraNN,setFraNN, fraNBL,setFraNBL, fraNBN,setFraNBN)
+  const addFra     = mkRowAdder(fraRows, setFraRows, fraND,setFraND, fraNR,setFraNR, fraNN,setFraNN, fraNBL,setFraNBL, fraNBN,setFraNBN, fraNV,setFraNV)
   const updateSofi = mkRowUpdater(setSofiRows)
   const deleteSofi = mkRowDeleter(setSofiRows)
-  const addSofi    = mkRowAdder(sofiRows, setSofiRows, sofiND,setSofiND, sofiNR,setSofiNR, sofiNN,setSofiNN, sofiNBL,setSofiNBL, sofiNBN,setSofiNBN)
+  const addSofi    = mkRowAdder(sofiRows, setSofiRows, sofiND,setSofiND, sofiNR,setSofiNR, sofiNN,setSofiNN, sofiNBL,setSofiNBL, sofiNBN,setSofiNBN, sofiNV,setSofiNV)
 
+  // La valuta ora viaggia dentro ogni riga (r.valuta) — non c'è più un valutaKey
+  // a livello di persona da salvare separatamente in ralSettings
   function saveSalary(person) {
     const rawRows = person==='Fra' ? fraRows : sofiRows
-    const valuta = person==='Fra' ? fraValuta : sofiValuta
-    const valutaKey = person==='Fra' ? 'fraValuta' : 'sofiValuta'
     const rows = rawRows.map(r => ({
       ...r,
+      valuta:     r.valuta || 'EUR',
       ral:        parseFloat(r.ral)        || 0,
       netto:      parseFloat(r.netto)      || 0,
       bonusLordo: parseFloat(r.bonusLordo) || 0,
       bonusNetto: parseFloat(r.bonusNetto) || 0,
     }))
     onSaveData({ ...ralData, [person]: rows })
-    onSaveSettings({ ...s, [valutaKey]: valuta })
   }
 
   const inp = {
@@ -303,24 +310,17 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
 
   // NB: plain render function, NOT a component — se fosse un componente definito qui dentro,
   // ogni keystroke lo ricreerebbe (nuova identità) e React smonterebbe/rimonterebbe gli input → focus perso
-  function renderSalarySection({ person, rows, updateRow, deleteRow, addRow, valuta, setValuta,
-    nd, setNd, nr, setNr, nn, setNn, nbl, setNbl, nbn, setNbn }) {
+  function renderSalarySection({ person, rows, updateRow, deleteRow, addRow,
+    nd, setNd, nr, setNr, nn, setNn, nbl, setNbl, nbn, setNbn, nv, setNv }) {
     const color = COLORS[person]||'#888'
     return (
       <div>
-        {/* Currency selector */}
-        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14,padding:'8px 12px',
-          background:'var(--surface2)',borderRadius:8}}>
-          <span style={{fontSize:12,fontWeight:700,color}}>💱 Valuta {person}</span>
-          <select value={valuta} onChange={e=>setValuta(e.target.value)}
-            style={{...inp,width:'auto',fontFamily:'var(--font-sans)'}}>
-            {currencies.map(c=><option key={c}>{c}</option>)}
-          </select>
-          {valuta!=='EUR' && <span style={{fontSize:11,color:'var(--text3)'}}>→ tasso da "Tassi di cambio"</span>}
+        <div style={{fontSize:11,color:'var(--text3)',marginBottom:12}}>
+          La valuta si imposta per singolo periodo (riga) — utile se {person} ha cambiato valuta di stipendio nel tempo (es. trasferimento all'estero).
         </div>
         <table className="en-ral-table">
           <thead><tr>
-            <th>Data inizio</th><th>RAL</th>
+            <th>Data inizio</th><th>Valuta</th><th>RAL</th>
             <th style={{color:'var(--gold,#b8942a)'}}>+ Lordo Bonus</th>
             <th>Netto annuo</th>
             <th style={{color:'var(--gold,#b8942a)'}}>+ Netto Bonus</th><th></th>
@@ -330,6 +330,12 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
               <tr key={i}>
                 <td><input className="en-ral-input" type="month" value={r.effectiveDate}
                   onChange={e=>updateRow(i,'effectiveDate',e.target.value)} style={{minWidth:130}}/></td>
+                <td>
+                  <select value={r.valuta||'EUR'} onChange={e=>updateRow(i,'valuta',e.target.value)}
+                    style={{...inp,fontFamily:'var(--font-sans)'}}>
+                    {currencies.map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </td>
                 <td><input className="en-ral-input" type="number" value={r.ral}
                   onChange={e=>updateRow(i,'ral',e.target.value)}/></td>
                 <td><input className="en-ral-input" type="number" value={r.bonusLordo??''}
@@ -346,6 +352,12 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
             <tr className="en-ral-add-row">
               <td><input className="en-ral-input" type="month" value={nd}
                 onChange={e=>setNd(e.target.value)} style={{minWidth:130}}/></td>
+              <td>
+                <select value={nv} onChange={e=>setNv(e.target.value)}
+                  style={{...inp,fontFamily:'var(--font-sans)'}}>
+                  {currencies.map(c=><option key={c}>{c}</option>)}
+                </select>
+              </td>
               <td><input className="en-ral-input" type="number" placeholder="RAL" value={nr}
                 onChange={e=>setNr(e.target.value)}/></td>
               <td><input className="en-ral-input" type="number" placeholder="Bonus lordo" value={nbl}
@@ -426,16 +438,14 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
         {/* ── Salary sections ── */}
         {section === 'fra' && renderSalarySection({ person:'Fra',
           rows:fraRows, updateRow:updateFra, deleteRow:deleteFra, addRow:addFra,
-          valuta:fraValuta, setValuta:setFraValuta,
           nd:fraND, setNd:setFraND, nr:fraNR, setNr:setFraNR,
           nn:fraNN, setNn:setFraNN, nbl:fraNBL, setNbl:setFraNBL,
-          nbn:fraNBN, setNbn:setFraNBN })}
+          nbn:fraNBN, setNbn:setFraNBN, nv:fraNV, setNv:setFraNV })}
         {section === 'sofi' && renderSalarySection({ person:'Sofi',
           rows:sofiRows, updateRow:updateSofi, deleteRow:deleteSofi, addRow:addSofi,
-          valuta:sofiValuta, setValuta:setSofiValuta,
           nd:sofiND, setNd:setSofiND, nr:sofiNR, setNr:setSofiNR,
           nn:sofiNN, setNn:setSofiNN, nbl:sofiNBL, setNbl:setSofiNBL,
-          nbn:sofiNBN, setNbn:setSofiNBN })}
+          nbn:sofiNBN, setNbn:setSofiNBN, nv:sofiNV, setNv:setSofiNV })}
       </div>
     </div>
   )
@@ -616,7 +626,7 @@ export default function EntratePage() {
 
   // RAL / Netto chart state — read directly from appPrefs (reactive via Zustand)
   const ralData     = appPrefs?.ralData     || DEFAULT_RAL_DATA
-  const ralSettings = appPrefs?.ralSettings || { fraValuta: 'EUR', sofiValuta: 'EUR', fxRate: 1 }
+  const ralSettings = appPrefs?.ralSettings || { fxRate: 1 }
   const [ralView,         setRalView]         = useState('netto') // 'ral' | 'netto'
   const [ralWithBonus,    setRalWithBonus]     = useState(false)
   const [showRalSettings, setShowRalSettings]  = useState(false)
@@ -801,10 +811,12 @@ export default function EntratePage() {
 
           {/* Charts — respond to toggle */}
           {(() => {
-            // Build RAL chart data using effectiveDate-based row lookup + global FX
+            // Build RAL chart data using effectiveDate-based row lookup. La valuta è
+            // per-riga (r.valuta) — ogni periodo può avere una valuta diversa, non più
+            // un'unica valuta fissa per persona.
             const fraRows  = (ralData.Fra  || []).map(normalizeRalRow)
             const sofiRows = (ralData.Sofi || []).map(normalizeRalRow)
-            const hasNonEur = (ralSettings.fraValuta||'EUR') !== 'EUR' || (ralSettings.sofiValuta||'EUR') !== 'EUR'
+            const hasNonEur = fraRows.some(r => (r.valuta||'EUR') !== 'EUR') || sofiRows.some(r => (r.valuta||'EUR') !== 'EUR')
             // Derive years from all effectiveDates
             const allDates = [
               ...fraRows.map(r => r.effectiveDate || `${r.year}-01`),
@@ -814,8 +826,8 @@ export default function EntratePage() {
             const ralChartData = ralYears.map(yr => {
               const frR = getActiveRalForYear(fraRows, yr)
               const soR = getActiveRalForYear(sofiRows, yr)
-              const fraFx  = (ralSettings.fraValuta||'EUR')  !== 'EUR' ? getYearFxRate(yr, ralSettings) : 1
-              const sofiFx = (ralSettings.sofiValuta||'EUR') !== 'EUR' ? getYearFxRate(yr, ralSettings) : 1
+              const fraFx  = frR && (frR.valuta||'EUR') !== 'EUR' ? getYearFxRate(yr, ralSettings) : 1
+              const sofiFx = soR && (soR.valuta||'EUR') !== 'EUR' ? getYearFxRate(yr, ralSettings) : 1
               return {
                 year: String(yr),
                 'Fra RAL':            frR ? frR.ral * fraFx : undefined,
