@@ -86,7 +86,22 @@ export default function WeekendVacanzeV2Page() {
   const [form, setForm] = useState({ dest: '', dateFrom: '', dateTo: '' })
   const [showCandidates, setShowCandidates] = useState(false)
   const [candCityOverride, setCandCityOverride] = useState({})
+  const [selectedCand, setSelectedCand] = useState(new Set())
+  const [mergeName, setMergeName] = useState('')
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
+
+  function toggleCand(id) {
+    setSelectedCand(s => {
+      const n = new Set(s)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+  function closeCandidatesPanel() {
+    setShowCandidates(false)
+    setSelectedCand(new Set())
+    setMergeName('')
+  }
 
   // Solo le vacanze/weekend CONFERMATE dall'utente (appPrefs.calendarVacations) — le
   // candidate auto-rilevate ma non confermate NON compaiono più qui, vanno prima
@@ -129,6 +144,19 @@ export default function WeekendVacanzeV2Page() {
 
   function ignoreCandidate(cand) {
     mark(cand.dates)
+  }
+
+  // Unisce 2+ candidate selezionate (es. Ammarnas + Sorsele + Stockholm-Arl) in
+  // un'unica vacanza confermata con un nome comune (es. "Svezia") — utile quando
+  // lo stesso viaggio tocca più località/aeroporti diversi giorno per giorno
+  function mergeSelected() {
+    const sel = candidates.filter(c => selectedCand.has(c.id))
+    if (sel.length < 2 || !mergeName.trim()) return
+    const from = sel.reduce((m, c) => (!m || c.from < m) ? c.from : m, null)
+    const to = sel.reduce((m, c) => (!m || c.to > m) ? c.to : m, null)
+    add({ name: mergeName.trim(), from, to, city: mergeName.trim() })
+    setSelectedCand(new Set())
+    setMergeName('')
   }
 
   // Sort: within each year, by from desc
@@ -216,7 +244,7 @@ export default function WeekendVacanzeV2Page() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setShowCandidates(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: candidates.length ? 'var(--gold-l,#fef9e7)' : 'var(--surface2)', color: candidates.length ? 'var(--gold,#b45309)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+          <button onClick={() => setShowCandidates(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: candidates.length ? 'var(--gold-l,#fef9e7)' : 'var(--surface2)', color: candidates.length ? 'var(--gold,#b45309)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
             <Search size={14} /> Da confermare {candidates.length > 0 && `(${candidates.length})`}
           </button>
           <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
@@ -375,11 +403,29 @@ export default function WeekendVacanzeV2Page() {
 
       {/* Pannello "Vacanze da confermare" */}
       {showCandidates && (
-        <Modal title="🔍 Vacanze e weekend da confermare" onClose={() => setShowCandidates(false)} width={620}>
+        <Modal title="🔍 Vacanze e weekend da confermare" onClose={closeCandidatesPanel} width={640}>
           <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14 }}>
             Rilevati dalle spese categorizzate "Weekend e Vacanze": giorni vicini nella stessa località sono già uniti in una riga.
-            Conferma per farli comparire nella tabella, oppure ignora se non è una vacanza.
+            Conferma per farli comparire nella tabella, oppure ignora se non è una vacanza. Se lo stesso viaggio tocca più
+            località (es. tappe diverse in Svezia), spunta le righe interessate e uniscile con un nome comune.
           </div>
+          {selectedCand.size >= 2 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 10px', background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>🔗 {selectedCand.size} selezionate</span>
+              <input
+                value={mergeName}
+                onChange={e => setMergeName(e.target.value)}
+                placeholder="Nome vacanza, es. Svezia"
+                style={{ ...inp, width: 180 }}
+              />
+              <button onClick={mergeSelected} disabled={!mergeName.trim()} style={{ padding: '6px 12px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 12, opacity: mergeName.trim() ? 1 : 0.5 }}>
+                Unisci in una vacanza
+              </button>
+              <button onClick={() => setSelectedCand(new Set())} style={{ padding: '6px 10px', background: 'none', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+                Annulla selezione
+              </button>
+            </div>
+          )}
           <div style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {candidates.length === 0 && (
               <div style={{ textAlign: 'center', padding: 24, color: 'var(--text3)', fontSize: 13 }}>Nessuna candidata al momento 🎉</div>
@@ -387,7 +433,14 @@ export default function WeekendVacanzeV2Page() {
             {candidates.map(cand => {
               const emoji = destCategoryEmoji(candCityOverride[cand.id] ?? cand.city)
               return (
-                <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, flexWrap: 'wrap' }}>
+                <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: selectedCand.has(cand.id) ? '1px solid var(--accent)' : '1px solid var(--border)', background: selectedCand.has(cand.id) ? 'var(--surface2)' : 'transparent', borderRadius: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedCand.has(cand.id)}
+                    onChange={() => toggleCand(cand.id)}
+                    title="Seleziona per unire con altre candidate"
+                    style={{ flexShrink: 0, cursor: 'pointer' }}
+                  />
                   <span style={{
                     fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700, flexShrink: 0,
                     background: cand.type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
