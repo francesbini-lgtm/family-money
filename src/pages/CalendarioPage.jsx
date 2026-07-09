@@ -213,6 +213,16 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
 
   const firstDateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(startDay).padStart(2,'0')}`
 
+  // Weekend anche per le celle unite (modalità 🌴 Vacanze) — vero solo se TUTTI i
+  // giorni coperti dalla cella sono sabato/domenica (una cella unita che mescola
+  // giorni feriali e weekend non viene tratteggiata, sarebbe fuorviante)
+  const isWeekendCell = useMemo(() => {
+    for (let d = startDay; d <= endDay; d++) {
+      if (!IS_WEEKEND(year, month, d)) return false
+    }
+    return true
+  }, [year, month, startDay, endDay])
+
   // Tutte le date coperte da questa cella unita — usate per la selezione multipla
   const rangeDates = useMemo(() => {
     const arr = []
@@ -230,7 +240,7 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
 
   return (
     <td
-      className={`cal-cell cal-merged-cell${hasVac ? ' vacation' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
+      className={`cal-cell cal-merged-cell${isWeekendCell ? ' weekend' : ''}${hasVac ? ' vacation' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
       colSpan={colspan}
       onClick={() => { if (!selectMode) onClick(firstDateStr) }}
       onMouseDown={selectMode ? (e => { e.preventDefault(); onCellMouseDown(rangeDates) }) : undefined}
