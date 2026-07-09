@@ -368,6 +368,21 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
   const expense = Math.abs(visibleTxs.filter(t=>t.amount<0).reduce((s,t)=>s+netAmt(t),0))
 
   const savedCity = appPrefs?.calendarCityOverrides?.[dateStr] || ''
+
+  // Dominant city from this day's transactions (fallback when no manual override saved)
+  const dominantCity = useMemo(() => {
+    const freq = {}
+    for (const t of visibleTxs) {
+      const c = t.city && t.city !== 'null' ? t.city : null
+      if (c) freq[c] = (freq[c] || 0) + 1
+    }
+    const entries = Object.entries(freq)
+    if (!entries.length) return null
+    return entries.sort((a, b) => b[1] - a[1])[0][0]
+  }, [visibleTxs])
+
+  const locationLabel = savedCity || dominantCity || ''
+
   const [cityVal, setCityVal] = useState(savedCity)
   const [citySaved, setCitySaved] = useState(false)
 
@@ -381,7 +396,7 @@ function DayModal({ dateStr, txs, vacs, quickFilter, onClose }) {
   }
 
   return (
-    <Modal title={`📅 ${label}`} onClose={onClose} width={540}>
+    <Modal title={`📅 ${label}${locationLabel ? ` · ${locationLabel}` : ''}`} onClose={onClose} width={540}>
       {vacs.length > 0 && (
         <div style={{marginBottom:12,padding:'8px 12px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--blue)',fontWeight:600}}>
           🏖 {vacs.map(v=>v.name).join(' · ')}
