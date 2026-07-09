@@ -5,6 +5,7 @@ import {
   loadUserAccounts, saveUserAccounts, batchSaveDocuments,
 } from '../services/firestore'
 import { generateDescAI, parseRow } from '../data/csvParser'
+import { computeVacationPatch } from '../data/vacationRules'
 
 
 // ── Resolve user from card → member mapping (pure, no store) ─
@@ -1195,6 +1196,7 @@ export const useStore = create((set, get) => ({
     const namingRules   = (s.appPrefs?.aiNamingRules || []).filter(r => r.enabled !== false)
     const multiRules    = (s.aiRules || []).filter(r => r.enabled !== false)
     const catRules      = (s.appPrefs?.catRules || []).filter(r => r.enabled !== false)
+    const vacations     = s.appPrefs?.calendarVacations || []
 
     const patches = []   // { txId, patch }
 
@@ -1256,7 +1258,22 @@ export const useStore = create((set, get) => ({
         }
       }
 
-      // 4. System rule: positive amount → always Entrate L1
+      // 4. Vacanze dichiarate (Calendario) → riassegnazione a "Weekend e Vacanze" +
+      //    flag "da rivedere competenza" se la categoria è Weekend e Vacanze ma la data
+      //    di competenza non cade in nessun periodo dichiarato vacanza.
+      //    La riassegnazione di categoria rispetta userEditedCat; il flag di revisione no
+      //    (è un segnale di qualità dati, non una modifica di categoria).
+      {
+        const effDate = tx._effDate || tx.competenza || tx.date
+        const vacPatch = computeVacationPatch({ ...tx, ...patch }, vacations, effDate)
+        if (!tx.userEditedCat && vacPatch.cat1) {
+          patch.cat1 = vacPatch.cat1
+          patch.cat2 = vacPatch.cat2
+        }
+        if ('flagCompetenza' in vacPatch) patch.flagCompetenza = vacPatch.flagCompetenza
+      }
+
+      // 5. System rule: positive amount → always Entrate L1
       const finalCat1 = patch.cat1 || tx.cat1
       if (tx.amount > 0 && finalCat1 && finalCat1 !== 'Entrate') {
         patch.cat1 = 'Entrate'
@@ -1511,6 +1528,7 @@ export const useStore = create((set, get) => ({
       if(filters.type && t.type!==filters.type) return false
       if(filters.conf==='low' && (t.conf||0)>=70) return false
       if(filters.flagged && !t._flagged) return false
+      if(filters.reviewCompetenza && !t.flagCompetenza) return false
       return true
     })
     set({ filteredTx: result })

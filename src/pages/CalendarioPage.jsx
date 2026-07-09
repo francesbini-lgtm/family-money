@@ -25,8 +25,38 @@ function useVacations() {
   useEffect(() => { setVacations(appPrefs.calendarVacations || []) }, [appPrefs.calendarVacations])
   function save(v) { setVacations(v); setAppPref('calendarVacations', v) }
   function add(vac) { save([...vacations, { id: Date.now(), ...vac }]) }
+  // Aggiunge più periodi in un colpo solo (evita id/Date.now() duplicati e scritture concorrenti)
+  function addMultiple(vacsArr) {
+    const withIds = vacsArr.map((v, i) => ({ id: Date.now() + i, ...v }))
+    save([...vacations, ...withIds])
+  }
   function remove(id) { save(vacations.filter(v => v.id !== id)) }
-  return { vacations, add, remove }
+  return { vacations, add, addMultiple, remove }
+}
+
+// ── Raggruppa date (YYYY-MM-DD) in periodi consecutivi ────
+// es. ['2026-07-01','2026-07-02','2026-07-05'] → [['2026-07-01','2026-07-02'],['2026-07-05','2026-07-05']]
+function groupConsecutiveDates(dates) {
+  const sorted = [...dates].sort()
+  const runs = []
+  if (!sorted.length) return runs
+  let start = sorted[0]
+  let prev  = sorted[0]
+  for (let i = 1; i < sorted.length; i++) {
+    const d = sorted[i]
+    const prevDate = new Date(prev + 'T00:00:00')
+    prevDate.setDate(prevDate.getDate() + 1)
+    const expected = prevDate.toISOString().slice(0, 10)
+    if (d === expected) {
+      prev = d
+    } else {
+      runs.push([start, prev])
+      start = d
+      prev = d
+    }
+  }
+  runs.push([start, prev])
+  return runs
 }
 
 // ── Vacation emoji from city name ─────────────────────────
@@ -40,7 +70,7 @@ function cityToVacEmoji(city = '') {
 }
 
 // ── Day cell ──────────────────────────────────────────────
-function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFilter, onClick, cityOverrides, onCityEdit }) {
+function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFilter, onClick, cityOverrides, onCityEdit, selectMode, selected, onToggleSelect }) {
   const isWeekend = IS_WEEKEND(year, month, day)
   const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
 
@@ -140,9 +170,11 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
         today      ? 'today' : '',
         hasData    ? 'has-data' : '',
         isDimmed   ? 'dimmed' : '',
+        selectMode ? 'selectable' : '',
+        selected   ? 'cell-selected' : '',
       ].filter(Boolean).join(' ')}
-      onClick={() => onClick(dateStr, dayTxs, vacs)}
-      title={[...vacs.map(v => v.name), isBoat ? '🚤 Uscita in barca' : ''].filter(Boolean).join(' · ')}
+      onClick={() => selectMode ? onToggleSelect([dateStr]) : onClick(dateStr, dayTxs, vacs)}
+      title={selectMode ? dateStr : [...vacs.map(v => v.name), isBoat ? '🚤 Uscita in barca' : ''].filter(Boolean).join(' · ')}
     >
       <div className="cal-day-num">{day}</div>
       {(isBoat || vacIcon) && (
@@ -174,7 +206,7 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
         <div
           className={`cal-day-city${effectiveCity ? '' : ' cal-day-city-empty'}`}
           title={effectiveCity ? effectiveCity : 'Clicca per aggiungere location'}
-          onClick={startCityEdit}
+          onClick={selectMode ? undefined : startCityEdit}
         >
           {effectiveCity ? effectiveCity.split(' ')[0] : ''}
         </div>
@@ -184,7 +216,7 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
 }
 
 // ── Merged cell (consecutive days with same city) ─────────
-function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacations, boatDaySet, quickFilter, onCityEditRange, onClick }) {
+function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacations, boatDaySet, quickFilter, onCityEditRange, onClick, selectMode, selected, onToggleSelect }) {
   const colspan = endDay - startDay + 1
   const [editingCity, setEditingCity] = useState(false)
   const [cityInput, setCityInput]     = useState('')
@@ -216,6 +248,15 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
 
   const firstDateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(startDay).padStart(2,'0')}`
 
+  // Tutte le date coperte da questa cella unita — usate per la selezione multipla
+  const rangeDates = useMemo(() => {
+    const arr = []
+    for (let d = startDay; d <= endDay; d++) {
+      arr.push(`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`)
+    }
+    return arr
+  }, [year, month, startDay, endDay])
+
   function commitCityEdit() {
     const val = cityInput.trim()
     onCityEditRange(year, month, startDay, endDay, val)
@@ -224,10 +265,10 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
 
   return (
     <td
-      className={`cal-cell cal-merged-cell${hasVac ? ' vacation' : ''}`}
+      className={`cal-cell cal-merged-cell${hasVac ? ' vacation' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
       colSpan={colspan}
-      onClick={() => onClick(firstDateStr)}
-      title={city}
+      onClick={() => selectMode ? onToggleSelect(rangeDates) : onClick(firstDateStr)}
+      title={selectMode ? `${rangeDates[0]} → ${rangeDates[rangeDates.length-1]}` : city}
     >
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:'100%', padding:'2px 5px', gap:3 }}>
         {total !== 0 && (
@@ -254,7 +295,7 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
           <div
             className="cal-day-city"
             style={{ opacity:1, fontWeight:700, fontSize:9, flexShrink:0, cursor:'pointer' }}
-            onClick={e => { e.stopPropagation(); setCityInput(city || ''); setEditingCity(true) }}
+            onClick={selectMode ? undefined : e => { e.stopPropagation(); setCityInput(city || ''); setEditingCity(true) }}
             title="Clicca per modificare location"
           >
             {city ? city.split(' ')[0] : ''}
@@ -463,6 +504,25 @@ function AddVacationModal({ onSave, onClose }) {
   )
 }
 
+// ── Barra di conferma selezione giorni (dichiarazione vacanza) ─────
+function SelectionConfirmBar({ count, onConfirm, onCancel }) {
+  const [name, setName] = useState('Vacanza')
+  const [city, setCity] = useState('')
+  return (
+    <div className="cal-select-bar">
+      <span style={{fontSize:13,fontWeight:700,whiteSpace:'nowrap'}}>🏖 {count} {count===1?'giorno':'giorni'} selezionat{count===1?'o':'i'}</span>
+      <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nome vacanza" style={{width:140}} autoFocus/>
+      <input value={city} onChange={e=>setCity(e.target.value)} placeholder="Location (es. Sestri Levante)" style={{width:180}}/>
+      <button className="btn btn-primary" style={{fontSize:12,whiteSpace:'nowrap'}}
+        disabled={!name.trim()}
+        onClick={()=>onConfirm(name.trim(), city.trim())}>
+        ✅ Conferma vacanza
+      </button>
+      <button className="btn btn-secondary" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={onCancel}>Annulla</button>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function CalendarioPage() {
   const { transactions } = useStore()
@@ -470,7 +530,7 @@ export default function CalendarioPage() {
   const vehicles    = useStore(s => s.vehicles)
   const appPrefs    = useStore(s => s.appPrefs)
   const setAppPref  = useStore(s => s.setAppPref)
-  const { vacations, add: addVac, remove: removeVac } = useVacations()
+  const { vacations, add: addVac, addMultiple: addVacMultiple, remove: removeVac } = useVacations()
 
   const now     = new Date()
   const [year,  setYear]  = useState(now.getFullYear())
@@ -481,6 +541,40 @@ export default function CalendarioPage() {
   const [modal,  setModal]  = useState(null) // {dateStr, txs, vacs}
   const [showAddVac, setShowAddVac] = useState(false)
   const [showVacList, setShowVacList] = useState(false)
+
+  // ── Selezione multipla giorni (dichiarazione vacanza) — solo in modalità 🌴 Vacanze
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedDates, setSelectedDates] = useState(() => new Set())
+
+  function toggleSelectDates(dateStrs) {
+    setSelectedDates(prev => {
+      const next = new Set(prev)
+      const allIn = dateStrs.every(d => next.has(d))
+      if (allIn) dateStrs.forEach(d => next.delete(d))
+      else       dateStrs.forEach(d => next.add(d))
+      return next
+    })
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelectedDates(new Set())
+  }
+
+  // Conferma: crea uno o più periodi vacanza (uno per gruppo di date consecutive)
+  // ed eventualmente salva la location su ogni giorno selezionato
+  function confirmVacationSelection(name, city) {
+    const dates = [...selectedDates]
+    if (!dates.length) return
+    const runs = groupConsecutiveDates(dates)
+    addVacMultiple(runs.map(([from, to]) => ({ name, from, to, ...(city ? { city } : {}) })))
+    if (city) {
+      const overrides = { ...(appPrefs?.calendarCityOverrides || {}) }
+      dates.forEach(d => { overrides[d] = city })
+      setAppPref('calendarCityOverrides', overrides)
+    }
+    exitSelectMode()
+  }
 
   // City overrides from Firestore prefs
   const cityOverrides = useMemo(() => appPrefs?.calendarCityOverrides || {}, [appPrefs?.calendarCityOverrides])
@@ -576,9 +670,22 @@ export default function CalendarioPage() {
           >🚤 Barca</button>
           <button
             className={'cal-filter-btn' + (quickFilter === 'vacation' ? ' active' : '')}
-            onClick={() => setQuickFilter(q => q === 'vacation' ? null : 'vacation')}
+            onClick={() => {
+              setQuickFilter(q => {
+                const next = q === 'vacation' ? null : 'vacation'
+                if (next !== 'vacation') exitSelectMode()
+                return next
+              })
+            }}
             title="Mostra solo giorni di vacanza / weekend fuori"
           >🌴 Vacanze</button>
+          {quickFilter === 'vacation' && (
+            <button
+              className={'cal-filter-btn' + (selectMode ? ' active' : '')}
+              onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+              title="Seleziona più giorni per dichiarare una vacanza e la location"
+            >🖊️ Seleziona giorni</button>
+          )}
           <button
             className={'cal-filter-btn' + (hideSati ? ' active' : '')}
             onClick={() => setHideSati(v => !v)}
@@ -611,7 +718,7 @@ export default function CalendarioPage() {
         <div className="cal-vac-list">
           {vacations.map(v=>(
             <div key={v.id} className="cal-vac-item">
-              <span style={{fontSize:12,fontWeight:600}}>{v.name}</span>
+              <span style={{fontSize:12,fontWeight:600}}>{v.name}{v.city ? ` · 📍 ${v.city}` : ''}</span>
               <span style={{fontSize:11,color:'var(--text3)'}}>{v.from} → {v.to}</span>
               <button className="btn btn-ghost" style={{padding:'1px 4px',color:'var(--text3)'}} onClick={()=>removeVac(v.id)}><X size={10}/></button>
             </div>
@@ -647,7 +754,8 @@ export default function CalendarioPage() {
         <span className="cal-legend-item positive-eg">+Entrate</span>
         <span className="cal-legend-item negative-eg">−Uscite</span>
         {boatDaySet.size > 0 && <span style={{fontSize:11,color:'var(--text3)'}}>🚤 = uscita barca</span>}
-        {mergeMode && <span style={{fontSize:11,color:'var(--text3)'}}>Celle unite per location · clicca city per modificare</span>}
+        {mergeMode && !selectMode && <span style={{fontSize:11,color:'var(--text3)'}}>Celle unite per location · clicca city per modificare</span>}
+        {selectMode && <span style={{fontSize:11,color:'#b8792a',fontWeight:700}}>🖊️ Clicca i giorni da dichiarare come vacanza, poi conferma nome e location in basso</span>}
       </div>
 
       {/* Calendar grid */}
@@ -680,6 +788,8 @@ export default function CalendarioPage() {
                       j++
                     }
                     if (j - i >= 2) {
+                      const mergedDates = []
+                      for (let d = i; d <= j - 1; d++) mergedDates.push(`${year}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`)
                       cells.push(
                         <MergedCell
                           key={i}
@@ -692,6 +802,9 @@ export default function CalendarioPage() {
                           boatDaySet={boatDaySet}
                           quickFilter={quickFilter}
                           onCityEditRange={handleCityEditRange}
+                          selectMode={selectMode}
+                          selected={selectMode && mergedDates.every(d => selectedDates.has(d))}
+                          onToggleSelect={toggleSelectDates}
                           onClick={ds => {
                             const dayTxs = txByDate[ds] || []
                             const dayVacs = vacations.filter(v => ds >= v.from && ds <= v.to)
@@ -715,6 +828,9 @@ export default function CalendarioPage() {
                       quickFilter={quickFilter}
                       cityOverrides={cityOverrides}
                       onCityEdit={handleCityEdit}
+                      selectMode={selectMode}
+                      selected={selectMode && selectedDates.has(dateStr)}
+                      onToggleSelect={toggleSelectDates}
                       onClick={(ds, txs, vacs) => setModal({dateStr: ds, txs, vacs})}
                     />
                   )
@@ -786,6 +902,15 @@ export default function CalendarioPage() {
         <AddVacationModal
           onSave={addVac}
           onClose={()=>setShowAddVac(false)}
+        />
+      )}
+
+      {/* Barra di conferma selezione giorni vacanza */}
+      {selectMode && selectedDates.size > 0 && (
+        <SelectionConfirmBar
+          count={selectedDates.size}
+          onConfirm={confirmVacationSelection}
+          onCancel={exitSelectMode}
         />
       )}
     </div>

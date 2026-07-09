@@ -8,6 +8,7 @@ import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
+import { isVacationEligible, findVacationForDate } from '../data/vacationRules'
 // aiRules.js removed — AI naming rules now stored in Firestore via appPrefs
 import './TransactionsPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
@@ -1960,6 +1961,9 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
     const { appPrefs } = useStore.getState()
     const geminiKey = appPrefs?.geminiKey || localStorage.getItem('fm-gemini-key') || ''
     const placesKey = appPrefs?.placesKey || localStorage.getItem('fm-places-key') || ''
+    // Vacanze dichiarate nel Calendario — usate più sotto per la riassegnazione automatica
+    // a "Weekend e Vacanze" e per il flag "da rivedere competenza"
+    const declaredVacations = appPrefs?.calendarVacations || []
     const missing = []
     if (!geminiKey) missing.push('Gemini AI (AI Prompt)')
     if (!placesKey) missing.push('Google Places (AI Prompt)')
@@ -2068,12 +2072,30 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
             t.cat2 = ''
           }
 
+          // 4. Vacanze dichiarate (Calendario) → riassegnazione a "Weekend e Vacanze" per
+          //    spese vacanza-eligible (alimentari, ristoranti, carburante, hotel) la cui data
+          //    di competenza cade in un periodo dichiarato vacanza
+          const effDateForVac = t._effDate || t.competenza || t.date
+          const vacHit = t.amount < 0 && t.cat1 !== 'Weekend e Vacanze'
+            ? findVacationForDate(effDateForVac, declaredVacations)
+            : null
+          if (vacHit && isVacationEligible(t)) {
+            t.cat1 = 'Weekend e Vacanze'
+            t.cat2 = 'Vacanze'
+          }
+
           // Fetch current tx to check manual overrides
           const curTx = useStore.getState().transactions.find(s => s.txId === t.txId)
           // Never overwrite categories the user set manually, or king-protected txs
           const _isKingProtected = useStore.getState().isKingProtected
           const catProtected = !!curTx?.userEditedCat ||
             (typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount))
+          const finalCat1 = catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null)
+          // Flag "da rivedere competenza": categoria (finale) Weekend e Vacanze ma la data
+          // non cade in nessun periodo dichiarato vacanza — indipendente da catProtected,
+          // è un segnale di qualità dati, non una modifica di categoria
+          const flagCompetenza = finalCat1 === 'Weekend e Vacanze' &&
+            !findVacationForDate(curTx?._effDate || effDateForVac, declaredVacations)
           updateTransaction(t.txId, {
             descAI:        t.descAI,
             city:          curTx?.cityUserEdited ? curTx.city : t.city,  // respect manual edits
@@ -2081,9 +2103,10 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
             card:          t.card,
             merchant:      t.merchant      ?? null,
             counterpart:   t.counterpart   ?? null,
-            cat1:          catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null),
+            cat1:          finalCat1,
             cat2:          catProtected ? (curTx?.cat2 ?? '')   : (t.cat2 || ''),
             conf:          catProtected ? (curTx?.conf ?? null) : (t.conf || null),
+            flagCompetenza,
             aiEnriched:    true,
             aiEnrichedAt:  t.aiEnrichedAt,
             aiCategorized: true,
@@ -2304,16 +2327,18 @@ function QuickFilters({ transactions, hideComm, setHideComm, hideSmall, setHideS
     uncat:  allTxs.filter(t=>!t.excluded&&t.cat1&&t.cat1!=='Non Categorizzato'&&!t.cat2).length,
     review:  allTxs.filter(t=>(t.conf||0)<70).length,
     flagged: allTxs.filter(t=>t._flagged).length,
+    revCompetenza: allTxs.filter(t=>!t.excluded&&t.flagCompetenza).length,
     thisM:   allTxs.filter(t=>!t.excluded&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).length,
   }
 
   const pills = [
-    {id:'all',     label:'Tutte',        count:counts.all,    active:!filters.type&&!filters.cat1&&!filters.dateFrom&&!filters.conf&&!filters.flagged, action:()=>store.clearFilters()},
+    {id:'all',     label:'Tutte',        count:counts.all,    active:!filters.type&&!filters.cat1&&!filters.dateFrom&&!filters.conf&&!filters.flagged&&!filters.reviewCompetenza, action:()=>store.clearFilters()},
     {id:'income',  label:'Entrate',      count:counts.income, active:filters.type==='Income', action:()=>store.setFilter('type',filters.type==='Income'?'':'Income')},
     {id:'expense', label:'Uscite',       count:counts.expense,active:filters.type==='Expense',action:()=>store.setFilter('type',filters.type==='Expense'?'':'Expense')},
     {id:'uncat',   label:'Non cat L2',   count:counts.uncat,  active:filterNoCat2, warn:counts.uncat>0, action:()=>setFilterNoCat2(v=>!v)},
     {id:'review',  label:'Da rivedere',  count:counts.review, active:filters.conf==='low',    warn:counts.review>0,action:()=>store.setFilter('conf',filters.conf==='low'?'':'low')},
     {id:'flagged', label:'🚩 To review',  count:counts.flagged,active:!!filters.flagged,        warn:counts.flagged>0,action:()=>store.setFilter('flagged',filters.flagged?'':'1')},
+    {id:'revCompetenza', label:'🔁 Rivedere competenza', count:counts.revCompetenza, active:!!filters.reviewCompetenza, warn:counts.revCompetenza>0, action:()=>store.setFilter('reviewCompetenza',filters.reviewCompetenza?'':'1')},
     {id:'thisM',   label:'Questo mese',  count:counts.thisM,  active:filters.dateFrom===thisYM+'-01', action:()=>{
       if(filters.dateFrom===thisYM+'-01') store.clearFilters()
       else { store.setFilter('dateFrom',thisYM+'-01'); store.setFilter('dateTo',thisYM+'-31') }
@@ -2457,6 +2482,7 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
     <tr className={'tx-row'+(tx.excluded?' excluded':'')}
       style={{background: (() => {
         if (tx._flagged) return 'rgba(220,50,50,0.04)'
+        if (tx.flagCompetenza) return 'rgba(230,150,20,0.06)'
         const isB = tx.isBonifico || /bonifico/i.test(tx.description||'')
         const isP = /\bprelievo\b/i.test(tx.description||'') && !isB
         if (tx._compensatedAmt > 0) return 'rgba(42,92,138,0.07)'
@@ -2484,6 +2510,14 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
             color: tx._flagged ? 'var(--red)' : 'var(--text3)',
             fontWeight: tx._flagged ? 700 : 400,
             ...(tx.excluded?{textDecoration:'line-through',opacity:.5}:{})}}>{tx.txId}</button>
+        {tx.flagCompetenza && (
+          <button
+            onClick={e=>{e.stopPropagation();updateTransaction(tx.txId,{flagCompetenza:false})}}
+            title="Categoria Weekend e Vacanze ma la data non cade in nessuna vacanza dichiarata nel Calendario — probabile competenza da correggere. Clicca per rimuovere il flag."
+            style={{fontSize:10,padding:'2px 5px',marginLeft:2,borderRadius:4,cursor:'pointer',
+              background:'rgba(230,150,20,0.15)',border:'1.5px solid rgba(230,150,20,0.5)',
+              color:'#b8792a',fontWeight:700}}>🔁</button>
+        )}
       </td>
 
       {cols.map(id => {
@@ -3092,6 +3126,7 @@ export default function TransactionsPage() {
     if (filters.dateTo)   txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) <= filters.dateTo)
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
     if (filters.flagged)        txs = txs.filter(t => !!t._flagged)
+    if (filters.reviewCompetenza) txs = txs.filter(t => !!t.flagCompetenza)
     if ((filters.accounts||[]).length > 0) txs = txs.filter(t => filters.accounts.includes(t.account))
     if (hideComm)  txs = txs.filter(t => {
       const c2 = (t.cat2 || '').toLowerCase()
