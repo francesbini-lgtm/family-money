@@ -2450,6 +2450,57 @@ function SatiBarTotalTooltip({ active, payload, label }) {
   )
 }
 
+// ── Breakdown transazioni al click su una barra/segmento del grafico annuale ──
+const CHART_DRILL_META = {
+  total:      { title: 'Addebiti', emoji: '🧾', color: 'var(--red)' },
+  income:     { title: 'Accrediti non abbinati', emoji: '💚', color: '#4ade80' },
+  incomeExcl: { title: 'Accrediti abbinati', emoji: '💚', color: '#15803d' },
+}
+function ChartDrillModal({ year, kind, txs, onClose }) {
+  const meta = CHART_DRILL_META[kind] || CHART_DRILL_META.total
+  const sorted = [...(txs || [])].sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
+  const total = sorted.reduce((s, t) => s + Math.abs(t.amount), 0)
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: 'var(--surface)', borderRadius: 14, padding: '24px 28px', width: 560, maxHeight: '82vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,.2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{meta.emoji} {meta.title} — {year}</div>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, color: 'var(--text3)' }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+          {sorted.length} {sorted.length === 1 ? 'transazione' : 'transazioni'} · totale <strong style={{ color: meta.color }}>€ {fmtIT(total, 2)}</strong>
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1, borderRadius: 8, border: '1px solid var(--border)' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr style={{ background: 'var(--surface2)', position: 'sticky', top: 0 }}>
+                {['Data', 'Descrizione', 'Importo'].map(h => (
+                  <th key={h} style={{ padding: '8px 12px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text3)', borderBottom: '1px solid var(--border)', textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 && (
+                <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>Nessuna transazione</td></tr>
+              )}
+              {sorted.map(t => (
+                <tr key={t.txId} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{fmtDate(t._effDate || t.date)}</td>
+                  <td style={{ padding: '8px 12px', fontSize: 13 }}>{t.descAI || t.description?.slice(0, 60) || '—'}</td>
+                  <td style={{ padding: '8px 12px', fontSize: 13, fontWeight: 700, textAlign: 'right', fontFamily: 'var(--font-mono)', color: t.amount < 0 ? 'var(--red)' : 'var(--green)' }}>
+                    {t.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(t.amount), 2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── SatiIncomeSection ─────────────────────────────────────
 function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) {
   const appPrefs          = useStore(s => s.appPrefs)
@@ -2555,6 +2606,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   const [showCatConfig, setShowCatConfig] = useState(false)
   const [selectedRows, setSelectedRows]   = useState(new Set())
   const [showTotalsTable, setShowTotalsTable] = useState(false)
+  const [chartDrill, setChartDrill]     = useState(null) // { year, kind: 'total'|'income'|'incomeExcl', txs } — breakdown al click su una barra/segmento del grafico annuale
   const [catDraftL1, setCatDraftL1]     = useState('')
   const [catDraftL2, setCatDraftL2]     = useState('')
   const customCats = useStore(s => s.customCats)
@@ -3003,15 +3055,18 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   <Legend iconType="circle" iconSize={8} verticalAlign="top" align="right"
                     wrapperStyle={{paddingBottom:6}}
                     formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
-                  <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali">
+                  <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti totali"
+                    cursor="pointer" onClick={(_, index) => setChartDrill({ year: barAnnual[index].label, kind: 'total', txs: barAnnual[index].totalTxs })}>
                     <LabelList dataKey="total" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
                       style={{fontSize:10,fill:'var(--red)',fontWeight:700}}/>
                   </Bar>
-                  <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati">
+                  <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati"
+                    cursor="pointer" onClick={(_, index) => setChartDrill({ year: barAnnual[index].label, kind: 'income', txs: barAnnual[index].incomeTxs })}>
                     <LabelList dataKey="income" position="center" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
                       style={{fontSize:9,fill:'#14532d',fontWeight:700}}/>
                   </Bar>
-                  <Bar dataKey="incomeExcl" stackId="acc" fill="#15803d" opacity={0.85} radius={[4,4,0,0]} name="Accrediti abbinati">
+                  <Bar dataKey="incomeExcl" stackId="acc" fill="#15803d" opacity={0.85} radius={[4,4,0,0]} name="Accrediti abbinati"
+                    cursor="pointer" onClick={(_, index) => setChartDrill({ year: barAnnual[index].label, kind: 'incomeExcl', txs: barAnnual[index].incomeExclTxs })}>
                     <LabelList dataKey="incomeExcl" position="center" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
                       style={{fontSize:9,fill:'#fff',fontWeight:700}}/>
                     <LabelList content={<IncomeTotalLabel/>}/>
@@ -3480,6 +3535,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       </div>
 
       {/* Modals */}
+      {chartDrill && <ChartDrillModal year={chartDrill.year} kind={chartDrill.kind} txs={chartDrill.txs} onClose={() => setChartDrill(null)}/>}
       {detailTx && <SatiTxDetailModal tx={detailTx} onClose={() => setDetailTx(null)} satiMatches={satiMatches} onUnlink={() => { handleUnlink(detailTx.txId); setDetailTx(null) }}/>}
       {pendingModal && (() => {
         const exp = speseDaComp.find(t => t.txId === pendingModal)
