@@ -71,11 +71,11 @@ function buildMonthGroups(txs) {
     })
 }
 
-// Prima/ultima data plausibile per l'estratto di un mese CSV "ym" (es. "2026-04"): un
-// estratto non può mai precedere il mese a cui si riferisce, e nella pratica arriva di
-// solito entro 1-2 mesi dopo — usato per NON abbinare in automatico un estratto lontano
-// nel tempo solo perché l'importo coincide per caso (bug reale trovato: Apr 2026 abbinato
-// in automatico a un estratto di Ago 2025 solo perché l'importo era vicino)
+// Regola precisa (confermata dall'utente): l'estratto di un mese di spesa "ym" (es.
+// "2026-04") gira SEMPRE e SOLO nel mese immediatamente successivo (es. i primi giorni
+// di maggio) — mai nello stesso mese, mai due mesi dopo. Usato per NON abbinare in
+// automatico un estratto con una data qualunque solo perché l'importo coincide per caso
+// (bug reale trovato: Apr 2026 abbinato in automatico a un estratto di Ago 2025).
 function monthKeyAdd(ym, n) {
   const [y, m] = ym.split('-').map(Number)
   const d = new Date(y, m - 1 + n, 1)
@@ -83,7 +83,8 @@ function monthKeyAdd(ym, n) {
 }
 function isPlausibleEstrattoDate(estrattoDate, ym) {
   if (!estrattoDate) return false
-  return estrattoDate >= `${ym}-01` && estrattoDate < `${monthKeyAdd(ym, 3)}-01`
+  const nextMonth = monthKeyAdd(ym, 1)
+  return estrattoDate >= `${nextMonth}-01` && estrattoDate < `${monthKeyAdd(ym, 2)}-01`
 }
 
 // Transazioni del conto corrente che sembrano un "estratto conto" per questa carta
