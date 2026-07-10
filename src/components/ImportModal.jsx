@@ -42,13 +42,14 @@ function buildMonthGroups(txs) {
   txs.forEach(t => {
     const ym = (t.date || '').slice(0, 7)
     if (!ym) return
-    if (!map[ym]) map[ym] = { month: ym, label: monthLabel(ym), txs: [], total: 0 }
+    if (!map[ym]) map[ym] = { month: ym, label: monthLabel(ym), txs: [], total: 0, net: 0 }
     map[ym].txs.push(t)
     map[ym].total += Math.abs(t.amount)
+    map[ym].net   += t.amount   // somma CON segno — serve a garantire il saldo invariato (vedi handleCardReconcileConfirm)
   })
   return Object.values(map)
     .sort((a, b) => a.month.localeCompare(b.month))
-    .map(g => ({ ...g, total: Math.round(g.total * 100) / 100 }))
+    .map(g => ({ ...g, total: Math.round(g.total * 100) / 100, net: Math.round(g.net * 100) / 100 }))
 }
 
 // Transazioni del conto corrente che sembrano un "estratto conto" per questa carta
@@ -133,6 +134,9 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
           Ogni mese va abbinato all'estratto conto già presente sul conto corrente prima di poter importare le sue spese —
           solo i mesi abbinati verranno importati. Se un mese non ha ancora un estratto (es. carta non ancora addebitata),
           lascialo così: potrai reimportare lo stesso CSV più avanti quando l'estratto sarà arrivato.
+          <strong style={{ color: 'var(--text2)' }}> Il saldo del conto corrente non cambia mai</strong>: l'estratto viene tolto dal
+          totale (per non contarlo due volte) solo nella stessa misura in cui il dettaglio importato lo rimpiazza — un'eventuale
+          differenza viene aggiunta come rettifica automatica, così i soldi realmente usciti dal conto restano sempre gli stessi.
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
@@ -235,7 +239,7 @@ export default function ImportModal({ onClose }) {
 
   // Build display label for each account: name · *card4 · owner nickname
   function accountLabel(a) {
-    const icon = a.type === 'carta' ? '💳' : '🏦'
+    const icon = (a.type === 'carta_credito' || a.type === 'carta_debito') ? '💳' : '🏦'
     const card = a.card4 ? ` · *${a.card4}` : ''
     let owner = ''
     if (a.memberId) {
@@ -289,7 +293,9 @@ export default function ImportModal({ onClose }) {
   // dedupAgainst: se passato, i doppioni vengono controllati SOLO contro questo
   // sottoinsieme di transazioni (richiesto per le carte: solo import precedenti
   // della stessa carta, non l'intero DB) — vedi addTransactions in useStore.js
-  async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths } = {}) {
+  // extraTxs: eventuali righe di "rettifica" (vedi handleCardReconcileConfirm) —
+  // salvate direttamente, SENZA passare da AI (sono già complete/categorizzate)
+  async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs } = {}) {
     let finalTxs = txsToImport
     if (useAI) {
       startTimeRef.current = Date.now()
@@ -333,6 +339,12 @@ export default function ImportModal({ onClose }) {
 
     const added = addTransactions(finalTxs, dedupAgainst ? { dedupAgainst } : undefined)
 
+    // Righe di rettifica (garanzia saldo invariato) — salvate a parte, non hanno bisogno di dedup speciale
+    let correctionsCount = 0
+    if (extraTxs?.length) {
+      correctionsCount = addTransactions(extraTxs)
+    }
+
     setStatus({ phase:'save', pct:85, current:Math.floor(finalTxs.length*0.85),
       total:finalTxs.length, eta:null, message:'Sincronizzazione database…' })
     await new Promise(r => setTimeout(r, 200))
@@ -344,7 +356,7 @@ export default function ImportModal({ onClose }) {
     const dupes   = Math.max(0, finalTxs.length - (typeof added==='number' ? added : finalTxs.length))
 
     setStatus(null)
-    setDone({ total:finalTxs.length, aiCount, dupes, skippedMonths: skippedMonths || [] })
+    setDone({ total:finalTxs.length, aiCount, dupes, skippedMonths: skippedMonths || [], correctionsCount })
     setTimeout(onClose, 2500)
   }
 
@@ -387,8 +399,11 @@ export default function ImportModal({ onClose }) {
       message:`✓ Lette ${allParsed.length} transazioni dal CSV` })
 
     // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──
+    // NOTA: solo "carta_credito" — è l'unico tipo con un estratto conto mensile
+    // aggregato da riconciliare; una carta di debito addebita in tempo reale,
+    // riga per riga, quindi non ha un "estratto" con cui fare il match.
     const selectedAccountObj = userAccounts.find(a => a.name === account)
-    if (selectedAccountObj?.type === 'carta' && selectedAccountObj?.card4) {
+    if (selectedAccountObj?.type === 'carta_credito' && selectedAccountObj?.card4) {
       const monthGroups = buildMonthGroups(allParsed)
       const candidates  = findEstrattoCandidates(useStore.getState().transactions, selectedAccountObj)
       snapshotTxsRef.current = null   // niente ancora salvato, nessun rollback necessario
@@ -402,11 +417,19 @@ export default function ImportModal({ onClose }) {
   }
 
   // ── Conferma riconciliazione carta ──────────────────────────
+  // GARANZIA saldo invariato: l'estratto escluso tolto dal saldo del conto corrente deve
+  // essere rimpiazzato da un importo di dettaglio ESATTAMENTE identico. Se la somma (con
+  // segno) delle transazioni del CSV per un mese non coincide al centesimo con l'estratto
+  // (differenza di arrotondamento, piccola commissione non nel dettaglio, o abbinamento
+  // "differenza lieve"/"mismatch" confermato comunque), viene aggiunta automaticamente una
+  // riga di rettifica per l'esatta differenza — così il saldo del conto NON cambia mai,
+  // indipendentemente dalla qualità dell'abbinamento.
   async function handleCardReconcileConfirm({ matchedMonths, estrattoTxIdsToExclude }) {
     const { account: acc, monthGroups, allParsed } = cardReconcile
     const card4 = acc.card4
+    const allTxsNow = useStore.getState().transactions
 
-    // 1. Escludi gli estratti abbinati dal conto corrente
+    // 1. Escludi gli estratti abbinati dal conto corrente — SOLO ora, ad avvenuta conferma
     estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, { excluded: true, reconciled: true }))
 
     // 2. Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
@@ -419,8 +442,39 @@ export default function ImportModal({ onClose }) {
         cardImportEstrattoTxId: matchedMonthSet.get((t.date || '').slice(0, 7)),
       }))
 
+    // 2b. Rettifica automatica per garantire saldo invariato (vedi nota sopra)
+    const yr2 = String(new Date().getFullYear()).slice(2)
+    const correctionTxs = []
+    matchedMonths.forEach(({ month, estrattoTxId }) => {
+      const g         = monthGroups.find(mm => mm.month === month)
+      const estrattoTx = allTxsNow.find(t => t.txId === estrattoTxId)
+      if (!g || !estrattoTx) return
+      const residual = Math.round((estrattoTx.amount - g.net) * 100) / 100
+      if (Math.abs(residual) < 0.01) return   // combacia già al centesimo, nessuna rettifica necessaria
+      correctionTxs.push({
+        txId:          `${yr2}-RETT-${Date.now()}-${month}`,
+        date:          estrattoTx.date,
+        date_reg:      estrattoTx.date,
+        isBonifico:    false,
+        time:          null, card: card4, counterpart: null, merchant: null, city: null, streetHint: null,
+        account:       acc.name,
+        description:   `Rettifica riconciliazione carta *${card4} — differenza estratto/dettaglio ${monthLabel(month)}`,
+        descAI:        `Rettifica *${card4}`,
+        amount:        residual,
+        type:          residual >= 0 ? 'Income' : 'Expense',
+        cat1:          estrattoTx.cat1 || 'Non Categorizzato',
+        cat2:          estrattoTx.cat2 || '',
+        conf:          1,
+        excluded:      false,
+        aiCategorized: true,
+        cardImportCard4: card4,
+        cardImportEstrattoTxId: estrattoTxId,
+        cardImportCorrection: true,
+      })
+    })
+
     // 3. Doppioni controllati solo contro precedenti import della STESSA carta
-    const dedupAgainst = useStore.getState().transactions.filter(t => t.cardImportCard4 === card4)
+    const dedupAgainst = allTxsNow.filter(t => t.cardImportCard4 === card4)
 
     // 4. Mesi non abbinati (es. estratto non ancora arrivato) restano fuori — si reimporta più avanti
     const skippedMonths = monthGroups.filter(g => !matchedMonthSet.has(g.month)).map(g => g.label)
@@ -428,7 +482,7 @@ export default function ImportModal({ onClose }) {
     setCardReconcile(null)
     startTimeRef.current = Date.now()
     setStatus({ phase:'ai', pct:0, current:0, total:txsToImport.length, eta:null, message:'Preparazione…' })
-    await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths })
+    await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs })
   }
 
   function handleCardReconcileCancel() {
@@ -586,6 +640,9 @@ export default function ImportModal({ onClose }) {
               {done.aiCount>0 && <div><Sparkles size={12} color="var(--gold)"/> {done.aiCount} categorizzate con Gemini AI</div>}
               {done.dupes>0  && <div style={{color:'var(--text3)'}}>🔄 {done.dupes} duplicate scartate</div>}
               <div style={{color:'var(--text3)'}}>💾 Salvate su Firestore</div>
+              {done.correctionsCount>0 && (
+                <div style={{color:'var(--text3)'}}>⚖️ {done.correctionsCount} rettifica{done.correctionsCount===1?'':'che'} automatica{done.correctionsCount===1?'':'he'} per mantenere il saldo del conto invariato</div>
+              )}
               {done.skippedMonths?.length > 0 && (
                 <div style={{color:'var(--gold)',marginTop:6}}>
                   ⏳ Mes{done.skippedMonths.length===1?'e':'i'} non abbinat{done.skippedMonths.length===1?'o':'i'} (estratto non ancora presente sul conto): {done.skippedMonths.join(', ')} — reimporta il CSV più avanti.
