@@ -179,11 +179,14 @@ function UtilityChartCard({ type, transactions, merchants, years }) {
   , [typeTxs, years])
 
   // Righe per la mini-tabella sotto il grafico: solo i mesi in cui è arrivato almeno
-  // un addebito (in uno qualsiasi dei 3 anni), max 5, più recenti prima.
+  // un addebito (in uno qualsiasi dei 3 anni), max 5, in ordine cronologico (Gen→Dic).
   const monthRows = useMemo(() => {
     const withData = chartData.filter(row => years.some(y => row[y] != null))
-    return withData.slice(-5).reverse()
+    return withData.slice(-5)
   }, [chartData, years])
+
+  // Tabella dettaglio: chiusa di default, si apre solo su click dell'utente.
+  const [tableOpen, setTableOpen] = useState(false)
 
   const allVals = useMemo(() =>
     typeTxs.map(t => Math.abs(t.amount)).filter(v => v > 0)
@@ -241,32 +244,41 @@ function UtilityChartCard({ type, transactions, merchants, years }) {
         </div>
       )}
 
-      {/* Mini-tabella: mesi con addebito (righe) × anni (colonne), max 5 righe */}
+      {/* Mini-tabella: mesi con addebito (righe) × anni (colonne), max 5 righe, chiusa di default */}
       {monthRows.length > 0 && (
         <div style={{marginTop:10,borderTop:'1px solid var(--border)',paddingTop:6}}>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
-            <thead>
-              <tr>
-                <th style={{textAlign:'left',padding:'3px 4px',color:'var(--text3)',fontWeight:700,fontSize:10,textTransform:'uppercase'}}>Mese</th>
-                {years.map((y,i) => (
-                  <th key={y} style={{textAlign:'right',padding:'3px 4px',color:YEAR_COLORS[i],fontWeight:700}}>{y}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {monthRows.map(row => (
-                <tr key={row.label} style={{borderTop:'1px solid var(--border)'}}>
-                  <td style={{padding:'4px 4px',color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{row.label}</td>
+          <button onClick={() => setTableOpen(o => !o)} style={{
+            display:'flex',alignItems:'center',gap:6,width:'100%',background:'none',border:'none',
+            cursor:'pointer',padding:'2px 4px',fontSize:10,fontWeight:700,textTransform:'uppercase',
+            letterSpacing:'.03em',color:'var(--text3)'}}>
+            <span style={{display:'inline-block',transition:'transform .15s',transform:tableOpen?'rotate(90deg)':'rotate(0deg)'}}>▸</span>
+            Dettaglio mensile
+          </button>
+          {tableOpen && (
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginTop:4}}>
+              <thead>
+                <tr>
+                  <th style={{textAlign:'left',padding:'3px 4px',color:'var(--text3)',fontWeight:700,fontSize:10,textTransform:'uppercase'}}>Mese</th>
                   {years.map((y,i) => (
-                    <td key={y} style={{padding:'4px 4px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:600,
-                      color: row[y]!=null ? 'var(--text)' : 'var(--text3)', opacity: row[y]!=null ? 1 : .4}}>
-                      {row[y]!=null ? `€ ${fmtIT(row[y],0)}` : '—'}
-                    </td>
+                    <th key={y} style={{textAlign:'right',padding:'3px 4px',color:YEAR_COLORS[i],fontWeight:700}}>{y}</th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {monthRows.map(row => (
+                  <tr key={row.label} style={{borderTop:'1px solid var(--border)'}}>
+                    <td style={{padding:'4px 4px',color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{row.label}</td>
+                    {years.map((y,i) => (
+                      <td key={y} style={{padding:'4px 4px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:600,
+                        color: row[y]!=null ? 'var(--text)' : 'var(--text3)', opacity: row[y]!=null ? 1 : .4}}>
+                        {row[y]!=null ? `€ ${fmtIT(row[y],0)}` : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
