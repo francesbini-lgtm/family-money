@@ -47,13 +47,28 @@ function monthLabel(ym) {
   return `${MONTH_NAMES[idx] || m} ${y}`
 }
 
-// Raggruppa le transazioni appena lette dal CSV per mese (YYYY-MM) — usato per la
-// riconciliazione: ogni mese va abbinato a UN estratto conto reale prima di poter
-// essere importato (vedi CardImportReconcileModal)
+// Chiave mese (YYYY-MM) usata per raggruppare/riconciliare l'import carta — SEMPRE
+// sulla data di contabilità (date_reg), MAI sulla data valuta (date). Importante:
+// il file caricato spesso ha entrambe le date (se il CSV/XLS le riporta, il parser
+// in csvParser.js le legge già tutte e due — date=valuta, date_reg=contabile,
+// entrambe salvate sulla transazione), ma la data valuta di una spesa a cavallo tra
+// due mesi può differire dalla data di contabilità di qualche giorno, e finire nel
+// mese "sbagliato" rispetto a come la banca aggrega davvero l'estratto conto — che è
+// sempre organizzato per data di contabilità. Usare la data valuta qui farebbe
+// sballare il totale mensile calcolato e quindi il confronto/abbinamento con
+// l'estratto conto reale (findEstrattoCandidates/isPlausibleEstrattoDate sotto).
+function cardMonthKey(t) {
+  return (t.date_reg || t.date || '').slice(0, 7)
+}
+
+// Raggruppa le transazioni appena lette dal CSV per mese (YYYY-MM, data di
+// contabilità — vedi cardMonthKey) — usato per la riconciliazione: ogni mese va
+// abbinato a UN estratto conto reale prima di poter essere importato (vedi
+// CardImportReconcileModal)
 function buildMonthGroups(txs) {
   const map = {}
   txs.forEach(t => {
-    const ym = (t.date || '').slice(0, 7)
+    const ym = cardMonthKey(t)
     if (!ym) return
     if (!map[ym]) map[ym] = { month: ym, label: monthLabel(ym), txs: [], net: 0 }
     map[ym].txs.push(t)
@@ -500,11 +515,11 @@ export default function ImportModal({ onClose }) {
     // 2. Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
     const matchedMonthSet = new Map(matchedMonths.map(m => [m.month, m.estrattoTxId]))
     const txsToImport = allParsed
-      .filter(t => matchedMonthSet.has((t.date || '').slice(0, 7)))
+      .filter(t => matchedMonthSet.has(cardMonthKey(t)))
       .map(t => ({
         ...t,
         cardImportCard4: card4,
-        cardImportEstrattoTxId: matchedMonthSet.get((t.date || '').slice(0, 7)),
+        cardImportEstrattoTxId: matchedMonthSet.get(cardMonthKey(t)),
       }))
 
     // 2b. Rettifica automatica per garantire saldo invariato (vedi nota sopra)
