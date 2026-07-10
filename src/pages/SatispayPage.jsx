@@ -1840,6 +1840,23 @@ function FundCard({ pot, allPots }) {
   )
 }
 
+// ── Insieme "entrate già abbinate" — unifica le due fonti che possono divergere ──
+// Un'entrata Satispay è "abbinata" se: (a) esiste un satiMatches[expTxId] con
+// status='matched' e quell'incomeTxId, OPPURE (b) una spesa la referenzia
+// direttamente via _compensatedBy (lo stesso campo che usa il popup di dettaglio
+// transazione, SatiTxDetailModal, per mostrare "Accredito del ..."). Le due fonti
+// possono disallinearsi (es. dopo una migrazione/fix che ha toccato solo una delle
+// due), quindi qualunque punto debba sapere "quali entrate sono già usate" deve
+// unirle — altrimenti un'entrata risulta "non abbinata" (o assente dai grafici/
+// contatori) anche se la spesa collegata mostra chiaramente "✅ compensata".
+function getMatchedIncomeIds(satiMatches, transactions) {
+  const ids = new Set(
+    Object.values(satiMatches || {}).filter(m => m.status === 'matched' && m.incomeTxId).map(m => m.incomeTxId)
+  )
+  ;(transactions || []).forEach(t => { if (t.amount < 0 && t._compensatedBy) ids.add(t._compensatedBy) })
+  return ids
+}
+
 // ── Auto-match helper ─────────────────────────────────────
 // Regola: importo esatto ≤15 giorni → auto | ±3€ ≤20 giorni → da confermare
 function autoMatchSati(expenses, incomeEntries, existingMatches = {}) {
@@ -2050,7 +2067,8 @@ function SatiAbbinaTxModal({ expense, availableIncome, onLink, onClose }) {
 
 // ── Non abbinate income overlay ───────────────────────────
 function SatiNonAbbinateOverlay({ incomeEntries, satiMatches, onClose }) {
-  const matchedIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
+  const transactions = useStore(s => s.transactions)
+  const matchedIds = getMatchedIncomeIds(satiMatches, transactions)
   const unmatched = incomeEntries
     .filter(t => t.cat1 === 'Entrate' && t.cat2 === 'SATISPAY' && !matchedIds.has(t.txId))
     .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
@@ -2618,7 +2636,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   ).length
 
   // ── Available income for manual linking ─────────────────
-  const matchedIncomeIds = new Set(Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId))
+  const matchedIncomeIds = getMatchedIncomeIds(satiMatches, transactions)
   const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
   // excluded (matched) accrediti — not in satiIncome prop (filtered out upstream)
   const excludedIncome   = useMemo(() =>
@@ -4200,9 +4218,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
   const [abbinaTx, setAbbinaTx] = useState(null)
   const { transactions, satiPots, setAppPref, appPrefs, updateTransaction } = useStore()
 
-  const matchedIds = new Set(
-    Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId)
-  )
+  const matchedIds = getMatchedIncomeIds(satiMatches, transactions)
   const rows = satiIncome.filter(t => !matchedIds.has(t.txId))
 
   const isComm = t => t.descAI === 'Commissioni' || t.cat2 === 'Commissione Banca'
@@ -4700,9 +4716,7 @@ export default function SatispayPage() {
 
   // Counts for header buttons
   const satiMatches = appPrefs?.satiMatches || {}
-  const matchedIncomeIds = new Set(
-    Object.values(satiMatches).filter(m => m.status==='matched' && m.incomeTxId).map(m => m.incomeTxId)
-  )
+  const matchedIncomeIds = getMatchedIncomeIds(satiMatches, transactions)
   const accreditiNonAbbinati = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
 
   // Accantonamenti non abbinati: negative Satispay txs not linked to any fund
