@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
-import { categorizeBatch } from '../data/aiService'
+import { categorizeBatch, hasGeminiKey } from '../data/aiService'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
 // spin animation added via CSS
@@ -400,6 +400,19 @@ export default function ImportModal({ onClose }) {
   // ── Import ────────────────────────────────────────────────
   async function handleImport() {
     if (!files.length) return
+
+    // ── Check chiave AI PRIMA di qualsiasi altra cosa (parse/riconciliazione/salvataggio) ──
+    // categorizeBatch() già gestisce la chiave mancante con un fallback silenzioso (transazioni
+    // salvate ma NON categorizzate/arricchite, vedi console.warn interno) — l'utente deve saperlo
+    // PRIMA di importare, non scoprirlo dopo controllando i dati importati.
+    if (useAI && !hasGeminiKey()) {
+      const proceed = window.confirm(
+        'Manca la chiave AI (Gemini) nelle Impostazioni.\n\n' +
+        'Vuoi continuare comunque? Le tue transazioni verranno importate ma NON verranno categorizzate/arricchite dall\'AI.'
+      )
+      if (!proceed) return
+    }
+
     setError(null); setDone(null)
     abortRef.current = false
     startTimeRef.current = Date.now()

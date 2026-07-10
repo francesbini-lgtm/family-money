@@ -55,6 +55,12 @@ function getApiKey() {
   return k || localStorage.getItem('fm-gemini-key') || ''
 }
 
+// Usato da DashboardPage (alert chiave mancante) e ImportModal (check pre-import)
+// — stessa identica logica/fallback di getApiKey(), esposta pubblicamente.
+export function hasGeminiKey() {
+  return !!getApiKey()
+}
+
 function getPlacesKey() {
   const k = useStore.getState().appPrefs?.placesKey || ''
   return k || localStorage.getItem('fm-places-key') || ''

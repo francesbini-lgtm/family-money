@@ -7,6 +7,8 @@ import './DashboardPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { useMemo, useState } from 'react'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
+import { hasGeminiKey } from '../data/aiService'
+import { navigateRef } from '../utils/navigate'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar,
@@ -14,6 +16,38 @@ import {
 } from 'recharts'
 
 const MONTHS_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+// ── Alert chiave AI mancante ──────────────────────────────
+// Stesso stile/urgenza della OfflineBanner (rosso, in alto), ma qui in Home
+// invece che globale, perché è un problema di configurazione, non di rete.
+function GeminiKeyAlert() {
+  const geminiKey = useStore(s => s.appPrefs?.geminiKey)
+    || (typeof window !== 'undefined' ? localStorage.getItem('fm-gemini-key') : '') || ''
+
+  if (geminiKey) return null
+
+  return (
+    <div style={{
+      background:'var(--red)', color:'#fff', borderRadius:10,
+      padding:'12px 18px', marginBottom:16,
+      display:'flex', alignItems:'center', justifyContent:'space-between',
+      gap:14, flexWrap:'wrap',
+    }}>
+      <span style={{display:'flex', alignItems:'center', gap:10, fontSize:13, fontWeight:600}}>
+        <span style={{fontSize:17}}>⚠️</span>
+        Nessuna chiave AI (Gemini) risulta salvata nelle Impostazioni — aggiungila urgentemente: senza chiave le transazioni importate NON vengono categorizzate/arricchite dall'AI.
+      </span>
+      <button
+        onClick={() => navigateRef.current?.('settings')}
+        style={{
+          background:'#fff', color:'var(--red)', border:'none', borderRadius:8,
+          padding:'7px 14px', fontSize:12, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap',
+        }}>
+        Vai alle Impostazioni →
+      </button>
+    </div>
+  )
+}
 
 // ── Helper: calcola totale spese effettive per mese (satiLinked → splits) ──
 function expTotal(transactions, ym) {
@@ -868,7 +902,7 @@ export default function DashboardPage() {
   const { transactions } = useStore()
 
   if (isEmpty) return (
-    <div className="dash-page"><EmptyState /></div>
+    <div className="dash-page"><GeminiKeyAlert /><EmptyState /></div>
   )
 
   const now = new Date()
@@ -884,6 +918,8 @@ export default function DashboardPage() {
 
   return (
     <div className="dash-page">
+
+      <GeminiKeyAlert />
 
       {/* Header */}
       <div className="dash-header">
