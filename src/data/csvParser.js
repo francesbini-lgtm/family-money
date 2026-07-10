@@ -397,20 +397,9 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
   const headers = splitLine(lines[hi], sep).map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
 
   // Column detection — works across UniCredit, Fineco, BNL, Credem, generic
-  // colDateReg = data registrazione/contabile (when transaction was posted to account —
-  // per le carte è la data che conta per la riconciliazione mensile con l'estratto,
-  // vedi cardMonthKey() in ImportModal.jsx). 'contabil' (non solo 'data contabile') per
-  // matchare anche header come "Data Contabilizzazione"/"Contabilizzato il" — bug reale:
-  // un file con questa dicitura non veniva riconosciuto, e colDateReg restava -1 quindi
-  // ricadeva sempre sulla data valuta anche quando il file aveva entrambe le colonne.
-  const colDateReg = (() => {
-    const checks = ['data registrazione','registrazione','booking date','contabil']
-    for (const key of checks) {
-      const idx = headers.findIndex(h => h.includes(key))
-      if (idx >= 0) return idx
-    }
-    return -1 // not found
-  })()
+  // colDate = data valuta — calcolato PRIMA di colDateReg perché quest'ultimo, nel
+  // pattern più comune sulle carte (header "Data" + "Data Valuta", vedi sotto), deve
+  // sapere quale colonna è già stata presa come valuta per non riprenderla.
   const colDate = (() => {
     // Prefer 'data valuta' over 'data operazione' for accounting date
     const checks = ['data valuta','valuta','data operazione','data op','data','date']
@@ -419,6 +408,25 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
       if (idx >= 0) return idx
     }
     return 0
+  })()
+  // colDateReg = data registrazione/contabile (when transaction was posted to account —
+  // per le carte è la data che conta per la riconciliazione mensile con l'estratto,
+  // vedi cardMonthKey() in ImportModal.jsx).
+  const colDateReg = (() => {
+    const checks = ['data registrazione','registrazione','booking date','contabil']
+    for (const key of checks) {
+      const idx = headers.findIndex(h => h.includes(key))
+      if (idx >= 0) return idx
+    }
+    // Pattern reale trovato su un file utente: header "Data" (contabile) + "Data
+    // Valuta" (valuta), senza nessuna delle parole sopra — un header ESATTAMENTE
+    // "data" (non "data valuta"/"data operazione"/ecc.) diverso dalla colonna già
+    // presa come valuta è quasi sempre la data di contabilità. Bug reale: prima
+    // questo caso restituiva -1 e faceva ricadere tutto sulla valuta anche con
+    // entrambe le colonne presenti nel file.
+    const plainDataIdx = headers.findIndex((h, i) => h === 'data' && i !== colDate)
+    if (plainDataIdx >= 0) return plainDataIdx
+    return -1 // not found
   })()
   const colDesc = (() => {
     const checks = ['descrizione','causale','descrizione operazione','movimento','narration','details']
