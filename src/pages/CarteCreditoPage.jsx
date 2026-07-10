@@ -1,31 +1,89 @@
 import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 function fmtDate(d) {
   const m = (d||'').match(/\d{4}-(\d{2})-(\d{2})/)
   return m ? `${parseInt(m[2])} ${MONTHS[parseInt(m[1])-1]}` : (d||'—')
 }
+function fmtMonthLabel(ym) {
+  const mm = (ym||'').match(/^(\d{4})-(\d{2})$/)
+  return mm ? `${MONTHS[parseInt(mm[2])-1]} '${mm[1].slice(2)}` : ym
+}
+
+// Riga di "estratto conto carta" ancora non riconciliata (non ancora sostituita
+// dal dettaglio importato via CSV/XLS) — stessa firma testuale usata in
+// ImportModal.jsx (findEstrattoCandidates), più il segnale descAI indicato
+// dall'utente ("Carte di credito").
+const CARD_LUMP_REGEX = /estratto|utilizzo carte|carta di credito/i
+
+function CardChartTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null
+  const daAbbinare = payload.find(p=>p.dataKey==='daAbbinare')?.value || 0
+  const importato  = payload.find(p=>p.dataKey==='importato')?.value || 0
+  return (
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,
+      padding:'8px 12px',fontSize:12,boxShadow:'0 4px 14px rgba(0,0,0,.15)'}}>
+      <div style={{fontWeight:700,marginBottom:4}}>{label}</div>
+      {importato > 0 && (
+        <div style={{color:'var(--accent)'}}>Importato: € {fmtIT(importato,2)}</div>
+      )}
+      {daAbbinare > 0 && (
+        <div style={{color:'var(--gold)'}}>Da abbinare: € {fmtIT(daAbbinare,2)}</div>
+      )}
+      <div style={{marginTop:4,paddingTop:4,borderTop:'1px solid var(--border)',fontWeight:700}}>
+        Totale: € {fmtIT(daAbbinare+importato,2)}
+      </div>
+    </div>
+  )
+}
 
 export default function CarteCreditoPage() {
   const transactions = useStore(s => s.transactions)
 
+  // Solo le transazioni ITEMIZZATE, importate via il breakdown CSV/XLS carta
+  // (sostituiscono l'estratto aggregato, che viene escluso al momento della conferma)
   const cardTxs = useMemo(() =>
-    transactions.filter(t => !t.excluded && t.card && t.card !== 'null' && t.card !== 'undefined')
+    transactions.filter(t => !t.excluded && t.cardImportCard4)
       .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   , [transactions])
 
-  const uniqueCards = useMemo(() => [...new Set(cardTxs.map(t=>t.card))], [cardTxs])
+  const uniqueCards = useMemo(() => [...new Set(cardTxs.map(t=>t.cardImportCard4))], [cardTxs])
 
   const totalSpesa = cardTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0)
-  const avgSpesa   = cardTxs.filter(t=>t.amount<0).length > 0 
-    ? totalSpesa / cardTxs.filter(t=>t.amount<0).length : 0
 
-  // Most used card
-  const cardCounts = {}
-  cardTxs.forEach(t => { cardCounts[t.card] = (cardCounts[t.card]||0) + 1 })
-  const topCard = Object.entries(cardCounts).sort((a,b)=>b[1]-a[1])[0]
+  // Righe di estratto conto carta ancora NON abbinate/riconciliate (non ancora escluse
+  // perché non è ancora stato importato il dettaglio via CSV/XLS per quel mese/carta)
+  const lumpTxs = useMemo(() =>
+    transactions.filter(t =>
+      !t.excluded && t.amount < 0 &&
+      ((t.descAI||'').trim().toLowerCase() === 'carte di credito' || CARD_LUMP_REGEX.test(t.description||''))
+    )
+  , [transactions])
+  const lumpTotal = lumpTxs.reduce((s,t)=>s+Math.abs(t.amount),0)
+
+  // Istogramma mensile: utilizzo carte combinato (dettaglio importato + estratti in attesa)
+  const monthlyData = useMemo(() => {
+    const map = {}
+    const add = (ym, key, amt) => {
+      if (!ym) return
+      if (!map[ym]) map[ym] = { ym, daAbbinare:0, importato:0 }
+      map[ym][key] += amt
+    }
+    lumpTxs.forEach(t => add((t._effDate||t.date||'').slice(0,7), 'daAbbinare', Math.abs(t.amount)))
+    cardTxs.filter(t=>t.amount<0).forEach(t => add((t._effDate||t.date||'').slice(0,7), 'importato', Math.abs(t.amount)))
+    return Object.values(map)
+      .sort((a,b)=>a.ym.localeCompare(b.ym))
+      .map(m => ({ ...m, label: fmtMonthLabel(m.ym) }))
+  }, [lumpTxs, cardTxs])
+
+  const avgMensile = monthlyData.length > 0
+    ? monthlyData.reduce((s,m)=>s+m.daAbbinare+m.importato,0) / monthlyData.length
+    : 0
 
   return (
     <div style={{padding:'28px 32px',maxWidth:980}}>
@@ -46,7 +104,7 @@ export default function CarteCreditoPage() {
         <div>
           <div style={{fontSize:13,fontWeight:700,color:'var(--gold)'}}>Sezione in costruzione</div>
           <div style={{fontSize:12,color:'var(--text2)'}}>
-            Questa pagina mostrerà analisi avanzate sull'utilizzo delle carte. Per ora visualizza le transazioni con carta collegata.
+            Questa pagina mostrerà analisi avanzate sull'utilizzo delle carte. Per ora visualizza le transazioni importate col dettaglio carta.
           </div>
         </div>
       </div>
@@ -54,10 +112,10 @@ export default function CarteCreditoPage() {
       {/* KPIs */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12,marginBottom:24}}>
         {[
-          ['Carte rilevate', uniqueCards.length || '—', 'var(--accent)'],
-          ['Spesa totale su carte', totalSpesa > 0 ? `€ ${fmtIT(totalSpesa,0)}` : '—', 'var(--red)'],
-          ['Carta più usata', topCard ? `*${topCard[0]} (${topCard[1]} tx)` : '—', 'var(--text)'],
-          ['Media per transazione', avgSpesa > 0 ? `€ ${fmtIT(avgSpesa,0)}` : '—', 'var(--text2)'],
+          ['Utilizzo medio/mese', avgMensile > 0 ? `€ ${fmtIT(avgMensile,0)}` : '—', 'var(--accent)'],
+          ['Estratti da abbinare', lumpTxs.length > 0 ? `${lumpTxs.length} (€ ${fmtIT(lumpTotal,0)})` : '0', lumpTxs.length > 0 ? 'var(--gold)' : 'var(--text2)'],
+          ['Carte rilevate', uniqueCards.length || '—', 'var(--text)'],
+          ['Spesa importata (dettaglio)', totalSpesa > 0 ? `€ ${fmtIT(totalSpesa,0)}` : '—', 'var(--red)'],
         ].map(([l,v,c])=>(
           <div key={l} className="card" style={{padding:'14px 18px',borderLeft:`3px solid ${c}`}}>
             <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text3)',marginBottom:5}}>{l}</div>
@@ -66,21 +124,45 @@ export default function CarteCreditoPage() {
         ))}
       </div>
 
+      {/* Istogramma mensile utilizzo carte */}
+      {monthlyData.length > 0 && (
+        <div className="card" style={{padding:'16px 18px',marginBottom:24}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+            <span style={{fontSize:14,fontWeight:700}}>Utilizzo carte per mese</span>
+            <div style={{display:'flex',gap:14,fontSize:11,color:'var(--text3)'}}>
+              <span><span style={{display:'inline-block',width:9,height:9,borderRadius:2,background:'var(--accent)',marginRight:5}}/>Importato</span>
+              <span><span style={{display:'inline-block',width:9,height:9,borderRadius:2,background:'var(--gold)',marginRight:5}}/>Da abbinare</span>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={monthlyData} margin={{top:6,right:8,left:0,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+              <XAxis dataKey="label" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={{stroke:'var(--border)'}} tickLine={false}/>
+              <YAxis tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={40}
+                tickFormatter={v => `€${fmtIT(v,0)}`}/>
+              <Tooltip content={<CardChartTooltip/>} cursor={{fill:'var(--surface2)'}}/>
+              <Bar dataKey="importato" stackId="a" fill="var(--accent)" radius={[0,0,0,0]}/>
+              <Bar dataKey="daAbbinare" stackId="a" fill="var(--gold)" radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       {/* Table */}
       {cardTxs.length === 0 ? (
         <div style={{textAlign:'center',padding:'48px 24px',background:'var(--surface)',
           border:'1px solid var(--border)',borderRadius:'var(--radius)'}}>
           <div style={{fontSize:36,marginBottom:12}}>💳</div>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Nessuna transazione con carta</div>
+          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Nessuna transazione importata</div>
           <div style={{fontSize:13,color:'var(--text3)'}}>
-            Le transazioni con carta verranno rilevate automaticamente dopo l'importazione del CSV.
+            Le transazioni appariranno qui dopo aver importato ed abbinato l'estratto conto carta tramite CSV/XLS.
           </div>
         </div>
       ) : (
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',
             display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <span style={{fontSize:14,fontWeight:700}}>Transazioni su Carta</span>
+            <span style={{fontSize:14,fontWeight:700}}>Transazioni importate (dettaglio carta)</span>
             <span style={{fontSize:12,color:'var(--text3)'}}>{cardTxs.length} transazioni · {uniqueCards.length} carte</span>
           </div>
           <div style={{overflowX:'auto'}}>
@@ -109,7 +191,7 @@ export default function CarteCreditoPage() {
                     <td style={{padding:'8px 14px'}}>
                       <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',
                         borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',
-                        color:'var(--text2)',fontWeight:700}}>*{t.card}</span>
+                        color:'var(--text2)',fontWeight:700}}>*{t.cardImportCard4}</span>
                     </td>
                     <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',
                       fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)'}}>
