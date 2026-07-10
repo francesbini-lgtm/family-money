@@ -418,16 +418,46 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
       const idx = headers.findIndex(h => h.includes(key))
       if (idx >= 0) return idx
     }
-    // Pattern reale trovato su un file utente: header "Data" (contabile) + "Data
-    // Valuta" (valuta), senza nessuna delle parole sopra — un header ESATTAMENTE
-    // "data" (non "data valuta"/"data operazione"/ecc.) diverso dalla colonna già
-    // presa come valuta è quasi sempre la data di contabilità. Bug reale: prima
-    // questo caso restituiva -1 e faceva ricadere tutto sulla valuta anche con
-    // entrambe le colonne presenti nel file.
-    const plainDataIdx = headers.findIndex((h, i) => h === 'data' && i !== colDate)
-    if (plainDataIdx >= 0) return plainDataIdx
+    // Nessuna parola nota trovata (es. header "Data" + "Data Valuta", o diciture
+    // ancora diverse mai viste) — qualunque ALTRA colonna che parli comunque di
+    // "data"/"date" è una seconda candidata plausibile. Quale delle due sia
+    // valuta e quale contabile lo decide poi il controllo sul CONTENUTO qui
+    // sotto (la data valuta è sempre uguale o precedente alla contabile) — non ci
+    // affidiamo più solo all'header, che può cambiare dicitura in ogni file.
+    const otherDateIdx = headers.findIndex((h, i) => i !== colDate && (h.includes('data') || h.includes('date')))
+    if (otherDateIdx >= 0) return otherDateIdx
     return -1 // not found
   })()
+
+  // ── Verifica di sicurezza sul CONTENUTO, non sull'header ─────────────────
+  // Gli header non sono affidabili al 100%: la dicitura cambia da banca a banca
+  // e può non contenere affatto le parole "valuta"/"contabile" (già successo — vedi
+  // bug reale sopra). Ma un fatto è sempre vero indipendentemente dall'header: la
+  // data valuta è SEMPRE uguale o precedente alla data di contabilità, mai
+  // successiva (la contabilizzazione avviene lo stesso giorno o dopo che il
+  // movimento ha valuta). Quindi se scorrendo un campione di righe la colonna che
+  // pensiamo essere "valuta" risulta ripetutamente DOPO quella che pensiamo essere
+  // "contabile", le abbiamo scambiate — capita quando l'header non usa nessuna
+  // delle parole note. Basta anche solo un paio di righe con date diverse per
+  // avere un segnale attendibile in un senso o nell'altro.
+  let [colDateFinal, colDateRegFinal] = [colDate, colDateReg]
+  if (colDateReg >= 0 && colDateReg !== colDate) {
+    let regAfterValuta = 0   // atteso: contabile >= valuta
+    let regBeforeValuta = 0  // sospetto: colonne scambiate
+    for (let i = hi + 1; i < lines.length && (regAfterValuta + regBeforeValuta) < 15; i++) {
+      const cols = splitLine(lines[i].trim(), sep)
+      if (cols.length <= Math.max(colDate, colDateReg)) continue
+      const dValuta = parseDate(cols[colDate]    || '')
+      const dReg     = parseDate(cols[colDateReg] || '')
+      if (!dValuta || !dReg || dValuta === dReg) continue // stesso giorno: nessun segnale
+      if (dReg > dValuta) regAfterValuta++
+      else regBeforeValuta++
+    }
+    if (regBeforeValuta > regAfterValuta && regBeforeValuta >= 2) {
+      [colDateFinal, colDateRegFinal] = [colDateReg, colDate]
+    }
+  }
+
   const colDesc = (() => {
     const checks = ['descrizione','causale','descrizione operazione','movimento','narration','details']
     for (const key of checks) {
@@ -457,8 +487,8 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
     const cols = splitLine(line, sep)
     if (cols.length < 3) continue
 
-    const rawDate    = cols[colDate    >= 0 ? colDate    : 0] || ''
-    const rawDateReg = cols[colDateReg >= 0 ? colDateReg : colDate >= 0 ? colDate : 0] || ''
+    const rawDate    = cols[colDateFinal    >= 0 ? colDateFinal    : 0] || ''
+    const rawDateReg = cols[colDateRegFinal >= 0 ? colDateRegFinal : colDateFinal >= 0 ? colDateFinal : 0] || ''
     const desc    = (cols[colDesc >= 0 ? colDesc : 2] || '').replace(/\s+/g, ' ').trim()
     let amount
     if (typeof colAmt === 'object' && colAmt.fineco) {
