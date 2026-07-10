@@ -475,6 +475,12 @@ export default function ImportModal({ onClose }) {
     const card4 = acc.card4
     const allTxsNow = useStore.getState().transactions
 
+    // Tutta l'operazione (esclusione estratti + import dettaglio + eventuale rettifica) deve
+    // essere UN'UNICA voce nello stack Undo dell'app: un solo "Annulla" deve disfare tutto
+    // insieme, altrimenti l'estratto resta escluso anche dopo che il dettaglio importato è
+    // stato rimosso con Undo (bug segnalato dall'utente — richiedeva un ripristino manuale).
+    useStore.getState().beginTxUndoBatch()
+
     // 1. Escludi gli estratti abbinati dal conto corrente — SOLO ora, ad avvenuta conferma
     estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, { excluded: true, reconciled: true }))
 
@@ -528,7 +534,14 @@ export default function ImportModal({ onClose }) {
     setCardReconcile(null)
     startTimeRef.current = Date.now()
     setStatus({ phase:'ai', pct:0, current:0, total:txsToImport.length, eta:null, message:'Preparazione…' })
-    await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs })
+    try {
+      await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs })
+    } finally {
+      // Commesso SEMPRE (anche se l'utente annulla a metà durante l'AI): così l'esclusione
+      // dell'estratto — già avvenuta e già salvata su Firestore a questo punto — resta
+      // comunque disfabile con un Annulla, invece di restare "orfana" e non recuperabile
+      useStore.getState().commitTxUndoBatch(`Riconciliazione carta *${card4} (${matchedMonths.length} mes${matchedMonths.length===1?'e':'i'})`)
+    }
   }
 
   function handleCardReconcileCancel() {
