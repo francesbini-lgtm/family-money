@@ -95,6 +95,29 @@ export async function saveDocument(colName, id, data) {
   }
 }
 
+// ── Merge (mai overwrite totale) — per i "documenti singleton" condivisi
+// (user_settings/app_prefs, custom_cats, city_overrides, location_exclusions)
+// che aggregano MOLTE preferenze diverse in un unico documento Firestore.
+// Poiché loadAllData() carica questi documenti una tantum (nessun realtime
+// listener), una sessione/tab rimasta aperta con una copia locale "vecchia"
+// che poi chiama saveDocument su UNA sola preferenza sovrascriveva l'INTERO
+// documento con quella copia vecchia, cancellando in silenzio qualunque altra
+// preferenza (soprannomi, chiave AI, vacanze dichiarate, fornitori Utenze...)
+// modificata nel frattempo da un'altra sessione/dispositivo. merge:true fa sì
+// che Firestore unisca i campi (anche annidati) invece di sostituire tutto.
+export async function mergeDocument(colName, id, data) {
+  if (!_householdId) return
+  try {
+    await setDoc(
+      doc(db, hCol(colName), String(id)),
+      { ...data, _updated: Date.now() },
+      { merge: true }
+    )
+  } catch (e) {
+    console.warn(`mergeDocument(${colName}/${id}) error:`, e.message)
+  }
+}
+
 export async function loadDocument(colName, id) {
   if (!_householdId) return null
   try {

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import {
   loadCollection, saveDocument, deleteDocument, loadDocument,
   saveBatch, subscribeToCollection, deleteAllFromCollection,
-  loadUserAccounts, saveUserAccounts, batchSaveDocuments,
+  loadUserAccounts, saveUserAccounts, batchSaveDocuments, mergeDocument,
 } from '../services/firestore'
 import { generateDescAI, parseRow } from '../data/csvParser'
 import { computeVacationPatch } from '../data/vacationRules'
@@ -922,26 +922,26 @@ export const useStore = create((set, get) => ({
   // ── Custom categories ────────────────────────────────
   setCustomCats: (cats) => {
     set({ customCats: cats })
-    saveDocument('user_settings','custom_cats',{ cats })
+    mergeDocument('user_settings','custom_cats',{ cats })
   },
 
   // ── Location exclusions ───────────────────────────────────
   addLocationExclusion: (term) => {
     const list = [...new Set([...get().locationExclusions, term.trim()])]
     set({ locationExclusions: list })
-    saveDocument('user_settings', 'location_exclusions', { list })
+    mergeDocument('user_settings', 'location_exclusions', { list })
   },
   removeLocationExclusion: (term) => {
     const list = get().locationExclusions.filter(e => e !== term)
     set({ locationExclusions: list })
-    saveDocument('user_settings', 'location_exclusions', { list })
+    mergeDocument('user_settings', 'location_exclusions', { list })
   },
 
   // ── City overrides — permanent, immutable cache ──────────
   setCityOverride: (merchant, city) => {
     const updated = { ...get().cityOverrides, [merchant]: city }
     set({ cityOverrides: updated })
-    saveDocument('user_settings', 'city_overrides', updated)
+    mergeDocument('user_settings', 'city_overrides', updated)
   },
 
   // ── App preferences (Firestore user_settings/app_prefs) ──
@@ -1057,8 +1057,14 @@ export const useStore = create((set, get) => ({
 
   setAppPref: (key, value) => {
     set(s => ({ appPrefs: { ...s.appPrefs, [key]: value } }))
-    const updated = { ...get().appPrefs, [key]: value }
-    saveDocument('user_settings', 'app_prefs', updated)
+    // mergeDocument (merge:true) invece di saveDocument (overwrite totale): app_prefs
+    // è un documento condiviso con DECINE di preferenze diverse (soprannomi, chiave AI,
+    // vacanze dichiarate, fornitori Utenze, compLinks...) e loadAllData() lo carica una
+    // tantum, senza realtime listener. Con l'overwrite totale, una sessione/tab rimasta
+    // aperta da prima che un'altra sessione modificasse qualcos'altro finiva per
+    // cancellare in silenzio quelle modifiche al primo setAppPref successivo — causa
+    // reale di sparizioni "casuali" di dati non correlati tra loro (vedi memoria).
+    mergeDocument('user_settings', 'app_prefs', { [key]: value })
     // Trigger cash-sync when reconciliation data changes
     if (key === 'nannyRecon' || key === 'colfRecon' || key === 'satiMatches') {
       setTimeout(() => get().syncCashTransactions(), 0)
