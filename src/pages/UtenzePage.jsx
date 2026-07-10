@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { getYM, getLast6Months, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { Plus, Settings2 } from 'lucide-react'
 import { fmtIT } from '../utils/format'
 import './EnergiePage.css'
@@ -57,7 +57,7 @@ function MerchantSettingsModal({ onClose }) {
         Aggiungi i nomi dei fornitori per ogni tipo di utenza. Le transazioni vengono
         riconosciute automaticamente in base a questi keyword.
       </div>
-      {UTILITY_TYPES.map(type => (
+      {UTILITY_TYPES.filter(type => type.id !== 'altro').map(type => (
         <div key={type.id} style={{marginBottom:20}}>
           <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:8}}>
             <span style={{fontSize:16}}>{type.icon}</span>
@@ -96,6 +96,15 @@ function MerchantSettingsModal({ onClose }) {
           </div>
         </div>
       ))}
+      <div style={{marginBottom:6,padding:'10px 12px',borderRadius:8,
+        background:'var(--surface2)',border:'1px solid var(--border)'}}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:3}}>🏠 Altro</div>
+        <div style={{fontSize:12,color:'var(--text3)'}}>
+          Nessun fornitore da configurare: include automaticamente tutte le transazioni
+          categorizzate come <em>Casa › Utenze</em> che non corrispondono a nessun fornitore
+          configurato sopra (Luce, Gas, Acqua, Internet/Tel).
+        </div>
+      </div>
       <ModalFooter>
         <button className="btn btn-primary" onClick={onClose}>Chiudi</button>
       </ModalFooter>
@@ -104,26 +113,24 @@ function MerchantSettingsModal({ onClose }) {
 }
 
 // ── Utility Chart Card (da transazioni reali) ────────────
+// Grafico "dot line" multi-anno: una linea per ciascuno degli ultimi 3 anni,
+// Gen→Dic in ascissa, l'anno corrente tratteggiato (dati parziali).
 function UtilityChartCard({ type, transactions, merchants }) {
   const MON = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+  const YEAR_STYLES = [
+    { opacity: 0.4,  dashed: false }, // 2 anni fa
+    { opacity: 0.7,  dashed: false }, // anno scorso
+    { opacity: 1,    dashed: true  }, // anno corrente (tratteggiato, dati parziali)
+  ]
 
-  // Last 12 months
-  const months = useMemo(() => {
-    const now = new Date()
-    const ms = []
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-      ms.push({ ym, label: MON[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2) })
-    }
-    return ms
-  }, [])
+  const currentYear = new Date().getFullYear()
+  const years = useMemo(() => [currentYear-2, currentYear-1, currentYear], [currentYear])
 
   const typeTxs = useMemo(() => {
     return transactions.filter(t => {
       if (t.excluded) return false
       if (type.id === 'altro') {
-        // "altro" = utenze che non matchano altri tipi
+        // "altro" = utenze che non matchano altri tipi (leftover Casa › Utenze)
         const matched = UTILITY_TYPES.filter(u => u.id !== 'altro').some(u => {
           const list = merchants[u.id] || []
           const hay = `${t.merchant||''} ${t.description||''} ${t.descAI||''} ${t.counterpart||''}`.toLowerCase()
@@ -141,21 +148,32 @@ function UtilityChartCard({ type, transactions, merchants }) {
     })
   }, [transactions, merchants, type])
 
+  // Dati: 12 righe (Gen…Dic), una colonna per anno (chiave = anno come stringa)
   const chartData = useMemo(() =>
-    months.map(({ ym, label }) => ({
-      label,
-      importo: Math.abs(typeTxs.filter(t => (t._effDate||t.date||'').startsWith(ym)).reduce((s,t) => s+t.amount, 0))
-    }))
-  , [months, typeTxs])
+    MON.map((label, mIdx) => {
+      const row = { label }
+      years.forEach(y => {
+        const ym = `${y}-${String(mIdx+1).padStart(2,'0')}`
+        const sum = Math.abs(typeTxs.filter(t => (t._effDate||t.date||'').startsWith(ym)).reduce((s,t) => s+t.amount, 0))
+        row[y] = sum > 0 ? sum : null
+      })
+      return row
+    })
+  , [typeTxs, years])
 
-  const nonZero = chartData.filter(d => d.importo > 0)
-  const avg     = nonZero.length > 0 ? nonZero.reduce((s,d) => s+d.importo, 0) / nonZero.length : 0
-  const lastAmt = nonZero.length > 0 ? nonZero[nonZero.length-1].importo : 0
-  const hasData = nonZero.length > 0
+  const allVals = useMemo(() =>
+    typeTxs.map(t => Math.abs(t.amount)).filter(v => v > 0)
+  , [typeTxs])
+  const hasData  = allVals.length > 0
+  const avg      = hasData ? typeTxs.reduce((s,t)=>s+Math.abs(t.amount),0) / typeTxs.length : 0
+  const lastTx   = hasData ? [...typeTxs].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))[0] : null
+  const lastAmt  = lastTx ? Math.abs(lastTx.amount) : 0
+
+  const fornitori = (merchants[type.id] || []).filter(m => m.trim())
 
   return (
     <div className="card util-card">
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <span style={{fontSize:20}}>{type.icon}</span>
           <div style={{fontSize:14,fontWeight:700}}>{type.label}</div>
@@ -168,41 +186,45 @@ function UtilityChartCard({ type, transactions, merchants }) {
         </div>
       </div>
 
+      {fornitori.length > 0 && (
+        <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>
+          Fornitore: <span style={{color:'var(--text2)',fontWeight:600}}>{fornitori.join(', ')}</span>
+        </div>
+      )}
+
       {hasData ? (
-        <ResponsiveContainer width="100%" height={80}>
-          <AreaChart data={nonZero} margin={{top:4,right:2,bottom:0,left:2}}>
-            <defs>
-              <linearGradient id={`g-${type.id}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={type.color} stopOpacity={0.3}/>
-                <stop offset="95%" stopColor={type.color} stopOpacity={0}/>
-              </linearGradient>
-            </defs>
+        <ResponsiveContainer width="100%" height={120}>
+          <LineChart data={chartData} margin={{top:4,right:6,bottom:0,left:2}}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
             <XAxis dataKey="label" tick={{fontSize:8,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-            <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`,'Importo']}
+            <Tooltip formatter={v=>v==null?['—','']:[`€ ${fmtIT(v,0)}`,'Importo']}
               contentStyle={{fontSize:10,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px'}}/>
-            <Area type="monotone" dataKey="importo" stroke={type.color} strokeWidth={2}
-              fill={`url(#g-${type.id})`} dot={false}/>
-          </AreaChart>
+            <Legend wrapperStyle={{fontSize:10}}/>
+            {years.map((y, i) => (
+              <Line key={y} type="monotone" dataKey={y} name={String(y)}
+                stroke={type.color} strokeOpacity={YEAR_STYLES[i].opacity}
+                strokeWidth={2} strokeDasharray={YEAR_STYLES[i].dashed ? '5 4' : undefined}
+                dot={{ r: 3, fill: type.color, fillOpacity: YEAR_STYLES[i].opacity, strokeWidth: 0 }}
+                connectNulls activeDot={{ r: 4 }}/>
+            ))}
+          </LineChart>
         </ResponsiveContainer>
       ) : (
-        <div style={{height:80,display:'flex',alignItems:'center',justifyContent:'center',
+        <div style={{height:120,display:'flex',alignItems:'center',justifyContent:'center',
           color:'var(--text3)',fontSize:11,fontStyle:'italic'}}>
           Nessuna transazione
         </div>
       )}
 
-      {/* Last 3 txs */}
+      {/* Last 3 txs — solo data + importo, la descrizione AI è sempre la stessa (es. "Bolletta Energia") */}
       {typeTxs.length > 0 && (
         <div style={{marginTop:8,borderTop:'1px solid var(--border)',paddingTop:6}}>
-          {[...typeTxs].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3).map(t => (
+          {[...typeTxs].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')).slice(0,3).map(t => (
             <div key={t.txId} className="util-bill-row">
               <span style={{color:'var(--text3)',fontFamily:'var(--font-mono)',minWidth:60,fontSize:11}}>
                 {(t._effDate||(t._effDate||t.date||'')).slice(0,7)}
               </span>
-              <span style={{flex:1,fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {t.descAI||t.description||''}
-              </span>
-              <span style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:12,color:type.color}}>
+              <span style={{flex:1,fontFamily:'var(--font-mono)',fontWeight:700,fontSize:12,color:type.color,textAlign:'right'}}>
                 € {fmtIT(Math.abs(t.amount),2)}
               </span>
             </div>
@@ -472,11 +494,15 @@ export default function UtenzePage() {
         ))}
       </div>
 
-      {/* Utility cards grid */}
+      {/* Utility cards grid — i tipi con fornitore configurabile (tutti tranne "Altro")
+          si mostrano solo se almeno un fornitore è stato indicato in Impostazioni;
+          "Altro" (leftover automatico Casa › Utenze) è sempre visibile. */}
       <div className="util-grid" style={{marginBottom:28}}>
-        {UTILITY_TYPES.map(t => (
-          <UtilityChartCard key={t.id} type={t} transactions={transactions} merchants={merchants}/>
-        ))}
+        {UTILITY_TYPES
+          .filter(t => t.id === 'altro' || (merchants[t.id]||[]).some(m => m.trim()))
+          .map(t => (
+            <UtilityChartCard key={t.id} type={t} transactions={transactions} merchants={merchants}/>
+          ))}
       </div>
 
       {/* Transactions table */}
