@@ -27,6 +27,19 @@ async function fileToCSVText(file) {
   return rows.map(r => r.map(escCell).join(',')).join('\n')
 }
 
+// Alcuni export di carte includono, in mezzo alle transazioni vere, righe di
+// riepilogo/totale mensile (es. "Maggio 2026" con solo un importo aggregato, senza
+// data né commerciante). Questi totali NON vanno mai fidati/importati come se fossero
+// una spesa reale: i totali per mese li calcoliamo sempre noi dalle transazioni singole
+// (vedi buildMonthGroups). Pattern stretto per non scartare mai una vera transazione.
+const ITALIAN_MONTHS_RE = '(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)'
+function isMonthSummaryRow(desc) {
+  const d = (desc || '').trim().toLowerCase()
+  if (!d) return false
+  const re = new RegExp(`^(totale|subtotale|riepilogo)?\\s*${ITALIAN_MONTHS_RE}\\s+\\d{4}$`, 'i')
+  return re.test(d)
+}
+
 const MONTH_NAMES = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 function monthLabel(ym) {
   const [y, m] = (ym || '').split('-')
@@ -385,6 +398,14 @@ export default function ImportModal({ onClose }) {
       setError(`Errore leggendo il file: ${e.message || e}`)
       setStatus(null); return
     }
+
+    // Scarta eventuali righe di riepilogo/totale mensile presenti nel file (es. "Maggio
+    // 2026" con solo un importo aggregato) — teniamo SOLO le transazioni singole, i
+    // totali per mese li calcoliamo sempre noi da quelle (vedi buildMonthGroups più sotto)
+    const parsedCount = allParsed.length
+    allParsed = allParsed.filter(t => !isMonthSummaryRow(t.description) && !isMonthSummaryRow(t.descAI))
+    const summaryRowsDropped = parsedCount - allParsed.length
+
     allParsed.sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
 
     if (!allParsed.length) {
@@ -396,7 +417,8 @@ export default function ImportModal({ onClose }) {
 
     setStatus({ phase:'parse', pct:100, current:allParsed.length,
       total:allParsed.length, eta:null,
-      message:`✓ Lette ${allParsed.length} transazioni dal CSV` })
+      message:`✓ Lette ${allParsed.length} transazioni dal CSV`
+        + (summaryRowsDropped > 0 ? ` (scartate ${summaryRowsDropped} righe di riepilogo mensile)` : '') })
 
     // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──
     // NOTA: solo "carta_credito" — è l'unico tipo con un estratto conto mensile
