@@ -55,14 +55,35 @@ function buildMonthGroups(txs) {
   txs.forEach(t => {
     const ym = (t.date || '').slice(0, 7)
     if (!ym) return
-    if (!map[ym]) map[ym] = { month: ym, label: monthLabel(ym), txs: [], total: 0, net: 0 }
+    if (!map[ym]) map[ym] = { month: ym, label: monthLabel(ym), txs: [], net: 0 }
     map[ym].txs.push(t)
-    map[ym].total += Math.abs(t.amount)
-    map[ym].net   += t.amount   // somma CON segno — serve a garantire il saldo invariato (vedi handleCardReconcileConfirm)
+    map[ym].net += t.amount   // somma CON segno — è quella che conta per confrontare con l'estratto reale
   })
   return Object.values(map)
     .sort((a, b) => a.month.localeCompare(b.month))
-    .map(g => ({ ...g, total: Math.round(g.total * 100) / 100, net: Math.round(g.net * 100) / 100 }))
+    .map(g => {
+      const net = Math.round(g.net * 100) / 100
+      // "total" = |net|, NON la somma dei valori assoluti delle singole righe: se nel mese
+      // c'è un rimborso/accredito insieme alle spese (es. un reso Amazon), sommare gli
+      // importi assoluti gonfia il totale rispetto a quello che l'estratto conto reale
+      // mostra davvero (che è sempre un movimento netto) — bug reale trovato con un file utente
+      return { ...g, net, total: Math.abs(net) }
+    })
+}
+
+// Prima/ultima data plausibile per l'estratto di un mese CSV "ym" (es. "2026-04"): un
+// estratto non può mai precedere il mese a cui si riferisce, e nella pratica arriva di
+// solito entro 1-2 mesi dopo — usato per NON abbinare in automatico un estratto lontano
+// nel tempo solo perché l'importo coincide per caso (bug reale trovato: Apr 2026 abbinato
+// in automatico a un estratto di Ago 2025 solo perché l'importo era vicino)
+function monthKeyAdd(ym, n) {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1 + n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+function isPlausibleEstrattoDate(estrattoDate, ym) {
+  if (!estrattoDate) return false
+  return estrattoDate >= `${ym}-01` && estrattoDate < `${monthKeyAdd(ym, 3)}-01`
 }
 
 // Transazioni del conto corrente che sembrano un "estratto conto" per questa carta
@@ -92,8 +113,10 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
     const used = new Set()
     const init = {}
     monthGroups.forEach(g => {
-      const ok = candidates.find(c => !used.has(c.txId) && g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.02)
-      const partial = !ok && candidates.find(c => !used.has(c.txId) && g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.08)
+      // Solo candidati con una data plausibile per QUESTO mese (non prima, non troppo dopo)
+      const plausible = candidates.filter(c => !used.has(c.txId) && isPlausibleEstrattoDate(c.date, g.month))
+      const ok      = plausible.find(c => g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.02)
+      const partial = !ok && plausible.find(c => g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.08)
       const match = ok || partial
       if (match) { init[g.month] = match.txId; used.add(match.txId) }
       else init[g.month] = null
