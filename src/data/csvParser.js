@@ -397,9 +397,14 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
   const headers = splitLine(lines[hi], sep).map(h => h.trim().toLowerCase().replace(/['"]/g, ''))
 
   // Column detection — works across UniCredit, Fineco, BNL, Credem, generic
-  // colDateReg = data registrazione (when transaction was posted to account)
+  // colDateReg = data registrazione/contabile (when transaction was posted to account —
+  // per le carte è la data che conta per la riconciliazione mensile con l'estratto,
+  // vedi cardMonthKey() in ImportModal.jsx). 'contabil' (non solo 'data contabile') per
+  // matchare anche header come "Data Contabilizzazione"/"Contabilizzato il" — bug reale:
+  // un file con questa dicitura non veniva riconosciuto, e colDateReg restava -1 quindi
+  // ricadeva sempre sulla data valuta anche quando il file aveva entrambe le colonne.
   const colDateReg = (() => {
-    const checks = ['data registrazione','registrazione','booking date','data contabile']
+    const checks = ['data registrazione','registrazione','booking date','contabil']
     for (const key of checks) {
       const idx = headers.findIndex(h => h.includes(key))
       if (idx >= 0) return idx
