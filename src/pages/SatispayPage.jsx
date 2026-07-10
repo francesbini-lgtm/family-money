@@ -2730,6 +2730,22 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       }
     })
 
+    // 1b) Catch-all: qualunque accredito ancora escluso e marcato 'Accredito Satispay',
+    //     ANCHE se il relativo satiMatches non esiste più (dati storici, abbinamento
+    //     rimosso in passato con un meccanismo diverso, drift) — non deve MAI restare
+    //     escluso, altrimenti quei soldi reali continuerebbero a sparire dal saldo
+    transactions.forEach(t => {
+      if (t.excluded && t.amount > 0 && t.descAI === 'Accredito Satispay') {
+        const patch = { excluded: false }
+        if (!t._compensatedAmt) {
+          const linkedExp = t._compensatedBy ? transactions.find(e => e.txId === t._compensatedBy) : null
+          patch._compensatedAmt = linkedExp ? Math.min(t.amount, Math.abs(linkedExp.amount)) : t.amount
+          if (!t._compensatedBy && linkedExp) patch._compensatedBy = linkedExp.txId
+        }
+        updateTransaction(t.txId, patch)
+      }
+    })
+
     // 2) Broad historical fix: ANY excluded expense with _compensatedBy set
     //    (old applyMatch excluded fully-covered expenses — undo that)
     transactions.forEach(t => {
