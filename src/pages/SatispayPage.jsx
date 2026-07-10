@@ -2637,12 +2637,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   }, [speseDaComp, hideComm, hideCompensate, search, satiMatches])
 
   // ── Unmatched income rows ────────────────────────────────
+  // NOTA: da quando l'accredito abbinato non viene più escluso (garanzia saldo reale),
+  // "abbinato" si determina SOLO tramite matchedIncomeIds (satiMatches/_compensatedBy),
+  // mai più tramite t.excluded — altrimenti gli accrediti già abbinati ricomparirebbero qui
   const unmatchedIncomeRows = useMemo(() => {
     if (!showUnmatchedIncome) return []
-    let list = satiIncome.filter(t =>
-      !t.excluded &&
-      (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched')
-    )
+    const matchedIds = getMatchedIncomeIds(satiMatches, transactions)
+    let list = satiIncome.filter(t => !matchedIds.has(t.txId))
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(t =>
@@ -2654,7 +2655,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
       )
     }
     return list
-  }, [showUnmatchedIncome, satiIncome, satiMatches, search])
+  }, [showUnmatchedIncome, satiIncome, satiMatches, search, transactions])
 
   // Combined rows: spese + accrediti non abbinati, sorted by date desc
   const combinedRows = useMemo(() => {
@@ -2690,7 +2691,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   // ── Available income for manual linking ─────────────────
   const matchedIncomeIds = getMatchedIncomeIds(satiMatches, transactions)
   const availableIncome  = satiIncome.filter(t => !matchedIncomeIds.has(t.txId))
-  // excluded (matched) accrediti — not in satiIncome prop (filtered out upstream)
+  // accrediti già abbinati ("consumati" da una spesa) — NON più esclusi (contano nel
+  // saldo reale), sono già dentro satiIncome insieme ai non abbinati: qui li isoliamo
+  // esplicitamente via matchedIncomeIds per i grafici/liste "abbinati" vs "non abbinati"
   const excludedIncome   = useMemo(() =>
     transactions.filter(t => matchedIncomeIds.has(t.txId) && t.amount > 0)
   , [transactions, satiMatches]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -2702,22 +2705,28 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
     migrationDoneRef.current = true
 
     // 1) Fix satiMatches-tracked pairs
+    // MIGRAZIONE saldo reale: prima l'accredito abbinato restava escluso per sempre (bug:
+    // soldi realmente arrivati in banca sparivano dal saldo Patrimonio/Dashboard). Ora
+    // l'accredito NON deve mai essere escluso — viene un-escluso e riceve _compensatedAmt/
+    // _compensatedBy (residuo calcolabile via netAmt), esattamente come già succede per
+    // la spesa. Questa migrazione sistema anche i dati storici già esclusi in passato.
     const matched = Object.entries(satiMatches).filter(([,m]) => m.status === 'matched' && m.incomeTxId)
     matched.forEach(([expTxId, m]) => {
-      // Fix income: ensure excluded + correct name 'Accredito Satispay'
+      const exp = transactions.find(t => t.txId === expTxId)
       const inc = transactions.find(t => t.txId === m.incomeTxId)
+      const absExp = exp ? Math.abs(exp.amount) : 0
+      const comp = (exp && exp._compensatedAmt) || Math.min(m.compensatedAmt || 0, absExp || (inc?.amount || 0))
+      // Fix expense: un-exclude, keep _compensatedAmt
+      if (exp && (exp.excluded || !exp._compensatedAmt)) {
+        updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: exp._compensatedBy || m.incomeTxId })
+      }
+      // Fix income: MAI più escluso per compensazione — un-escludi e assegna il residuo
       if (inc) {
         const patch = {}
-        if (!inc.excluded) patch.excluded = true
+        if (inc.excluded) patch.excluded = false
         if (inc.descAI !== 'Accredito Satispay') patch.descAI = 'Accredito Satispay'
+        if (!inc._compensatedAmt) { patch._compensatedAmt = comp; patch._compensatedBy = expTxId }
         if (Object.keys(patch).length) updateTransaction(m.incomeTxId, patch)
-      }
-      // Fix expense: un-exclude, keep _compensatedAmt
-      const exp = transactions.find(t => t.txId === expTxId)
-      if (exp && exp.excluded) {
-        const absExp = Math.abs(exp.amount)
-        const comp = exp._compensatedAmt || Math.min(m.compensatedAmt || 0, absExp)
-        updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp })
       }
     })
 
@@ -2745,19 +2754,24 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Actions ──────────────────────────────────────────────
+  // GARANZIA saldo reale: l'accredito NON viene MAI escluso — resta sempre nel saldo di
+  // Patrimonio/Dashboard/Transazioni, perché sono soldi realmente arrivati in banca.
+  // Sia la spesa che l'accredito ricevono _compensatedAmt (il MINIMO tra i due importi,
+  // cioè quanto si "annullano a vicenda") + _compensatedBy (riferimento incrociato).
+  // Il lato con importo MAGGIORE resta con un residuo reale e visibile; il lato con
+  // importo MINORE (o uguale) va a "netAmt zero" — a quel punto è nascosto SOLO dalla
+  // lista Transazioni (vedi TransactionsPage.jsx), mai dal calcolo del saldo.
   function applyMatch(expTxId, incTxId) {
     const inc = satiIncome.find(t => t.txId === incTxId)
     const compensatedAmt = inc?.amount || 0
-    // 1) Exclude the income + rename to 'Accredito Satispay'
-    if (inc) {
-      updateTransaction(incTxId, { excluded: true, descAI: 'Accredito Satispay' })
-    }
-    // 2) Compensate expense — veh expenses tracked via satiMatches only; bank txs also updated
+    let comp = compensatedAmt
+
+    // Compensate expense — veh expenses tracked via satiMatches only; bank txs also updated
     if (!expTxId.startsWith('veh-')) {
       const exp = transactions.find(t => t.txId === expTxId)
       if (exp) {
         const absExp = Math.abs(exp.amount)
-        const comp = Math.min(compensatedAmt, absExp)
+        comp = Math.min(compensatedAmt, absExp)
         updateTransaction(expTxId, { excluded: false, _compensatedAmt: comp, _compensatedBy: incTxId })
         // Sanity check: if somehow net becomes positive, warn
         const net = absExp - compensatedAmt
@@ -2766,12 +2780,15 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
         }
       }
     }
+    if (inc) {
+      updateTransaction(incTxId, { excluded: false, descAI: 'Accredito Satispay', _compensatedAmt: comp, _compensatedBy: expTxId })
+    }
   }
 
   function removeMatch(expTxId, incTxId) {
-    // Restore income tx
+    // Restore income tx — pulisce anche i campi di compensazione
     if (incTxId) {
-      updateTransaction(incTxId, { excluded: false, descAI: 'Accredito Satispay' })
+      updateTransaction(incTxId, { excluded: false, descAI: 'Accredito Satispay', _compensatedAmt: null, _compensatedBy: null })
     }
     // Restore expense tx (bank txs only — veh expenses tracked via satiMatches)
     if (!expTxId.startsWith('veh-')) {
@@ -2991,7 +3008,9 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
           const yr = String(year)
           const totalTxs      = speseDaComp.filter(t => (t._effDate||t.date||'').startsWith(yr))
           const total         = totalTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
-          const incomeTxs     = satiIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
+          // "Accrediti non abbinati" = satiIncome MENO quelli già abbinati (matchedIncomeIds) —
+          // da quando l'accredito abbinato non è più escluso, satiIncome li contiene entrambi
+          const incomeTxs     = satiIncome.filter(t => !matchedIncomeIds.has(t.txId) && (t._effDate||t.date||'').startsWith(yr))
           const income        = incomeTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
           const incomeExclTxs = excludedIncome.filter(t => (t._effDate||t.date||'').startsWith(yr))
           const incomeExcl    = incomeExclTxs.reduce((s,t) => s + Math.abs(t.amount), 0)
@@ -3215,8 +3234,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
             .filter(t => t._residual > 0.01)
           const total = totalTxsForMonth.reduce((s,t) => s + t._residual, 0)
           const incomeTxsForMonth = satiIncome.filter(t =>
-            !t.excluded &&
-            (!satiMatches[t.txId] || satiMatches[t.txId]?.status === 'unmatched') &&
+            !matchedIncomeIds.has(t.txId) &&
             (t._effDate||t.date||'').slice(0,7) === ym
           )
           const income = incomeTxsForMonth.reduce((s,t) => s + Math.abs(t.amount), 0)
