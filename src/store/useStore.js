@@ -1092,8 +1092,9 @@ export const useStore = create((set, get) => ({
 
     for (const rule of rules) {
       if (!rule.conditions?.length) continue
-      // Check all conditions (AND logic)
-      const matches = rule.conditions.every(cond => {
+      // rule.logic: 'and' (default, tutte le condizioni) oppure 'or' (almeno una)
+      const combine = rule.logic === 'or' ? Array.prototype.some : Array.prototype.every
+      const matches = combine.call(rule.conditions, cond => {
         const val = (cond.value || '').toLowerCase()
         const val2 = (cond.value2 || '').toLowerCase()
         switch(cond.field) {
@@ -1165,7 +1166,8 @@ export const useStore = create((set, get) => ({
     const amt  = Math.abs(amount || 0)
     return kingRules.some(rule => {
       if (!rule.conditions?.length) return false
-      return rule.conditions.every(cond => {
+      const combine = rule.logic === 'or' ? Array.prototype.some : Array.prototype.every
+      return combine.call(rule.conditions, cond => {
         const val = (cond.value || '').toLowerCase()
         switch (cond.field) {
           case 'anywhere': case 'description': case 'merchant':

@@ -320,7 +320,9 @@ const INP = {padding:'5px 8px',border:'1px solid var(--border)',borderRadius:'va
   fontSize:12,background:'var(--surface)',color:'var(--text)',outline:'none',fontFamily:'var(--font-sans)'}
 
 // ── Conditions editor (shared by Add + Edit) ──────────────────
-function ConditionsEditor({ conds, onChange }) {
+// logic: 'and' (default, tutte le condizioni devono valere) oppure 'or' (basta una) —
+// un'unica combinazione condivisa da tutte le condizioni della regola (niente AND/OR misti).
+function ConditionsEditor({ conds, onChange, logic = 'and', onLogicChange }) {
   function addCond() {
     if (conds.length >= 4) return
     onChange([...conds, {field:'description',op:'contains',value:''}])
@@ -338,9 +340,20 @@ function ConditionsEditor({ conds, onChange }) {
     <div>
       {conds.map((c,i) => (
         <div key={i} style={{display:'flex',gap:6,alignItems:'center',marginBottom:6}}>
-          <span style={{fontSize:9,fontWeight:800,color:'var(--text3)',width:18,textAlign:'center',flexShrink:0}}>
-            {i>0?'E':''}
-          </span>
+          {i>0 ? (
+            <button
+              onClick={()=>onLogicChange?.(logic==='or'?'and':'or')}
+              title="Cambia tra E (tutte le condizioni) e O (almeno una)"
+              style={{fontSize:9,fontWeight:800,width:18,height:18,flexShrink:0,padding:0,
+                borderRadius:4,cursor:onLogicChange?'pointer':'default',
+                border:`1px solid ${logic==='or'?'var(--gold)':'var(--border)'}`,
+                background: logic==='or' ? 'var(--gold-l)' : 'var(--surface2)',
+                color: logic==='or' ? 'var(--gold)' : 'var(--text3)'}}>
+              {logic==='or'?'O':'E'}
+            </button>
+          ) : (
+            <span style={{width:18,flexShrink:0}}/>
+          )}
           <select value={c.field} onChange={e=>updateCond(i,{field:e.target.value})} style={SEL}>
             <option value="description">Descrizione</option>
             <option value="merchant">Merchant</option>
@@ -358,6 +371,12 @@ function ConditionsEditor({ conds, onChange }) {
           )}
         </div>
       ))}
+      {conds.length>1 && (
+        <div style={{fontSize:10,color:'var(--text3)',marginBottom:6,fontStyle:'italic'}}>
+          {logic==='or' ? 'O — basta che una condizione sia vera' : 'E — devono valere tutte le condizioni'}
+          {onLogicChange && <span> (clic sul pallino {logic==='or'?'O':'E'} per cambiare)</span>}
+        </div>
+      )}
       {conds.length<4 && (
         <button className="btn btn-ghost" style={{fontSize:11,marginTop:2}} onClick={addCond}>+ condizione</button>
       )}
@@ -393,16 +412,19 @@ function AddRuleForm({ onAdd }) {
   const customCats = useStore(s => s.customCats)
   const [open,   setOpen]   = useState(false)
   const [conds,  setConds]  = useState([{field:'description',op:'contains',value:''}])
+  const [logic,  setLogic]  = useState('and')
   const [cat1,   setCat1]   = useState(() => Object.keys(getMergedCats(useStore.getState().customCats||{}))[0]||'')
   const [cat2,   setCat2]   = useState('')
   const [descAI, setDescAI] = useState('')
+  const transactions = useStore(s => s.transactions)
 
   function save() {
     const valid = conds.filter(c=>c.value.trim())
     if (!valid.length||!cat1) return
-    onAdd({ conditions:valid, action:'categorize', cats:[{cat1,cat2:cat2||'',pct:100}],
-      descAI:descAI.trim()||null, name:`${cat1}${cat2?'/'+cat2:''} — ${valid.map(c=>condLabel(c)).join(' + ')}` })
-    setConds([{field:'description',op:'contains',value:''}])
+    onAdd({ conditions:valid, logic, action:'categorize', cats:[{cat1,cat2:cat2||'',pct:100}],
+      descAI:descAI.trim()||null,
+      name:`${cat1}${cat2?'/'+cat2:''} — ${valid.map(c=>condLabel(c)).join(logic==='or'?' O ':' E ')}` })
+    setConds([{field:'description',op:'contains',value:''}]); setLogic('and')
     setCat1(Object.keys(getMergedCats(useStore.getState().customCats||{}))[0]||''); setCat2(''); setDescAI(''); setOpen(false)
   }
 
@@ -415,12 +437,13 @@ function AddRuleForm({ onAdd }) {
   return (
     <div style={{marginBottom:16,padding:'14px 16px',background:'var(--surface)',border:'1.5px solid var(--accent)',borderRadius:'var(--radius)'}}>
       <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>+ Nuova regola multi-condizione</div>
-      <ConditionsEditor conds={conds} onChange={setConds}/>
+      <ConditionsEditor conds={conds} onChange={setConds} logic={logic} onLogicChange={setLogic}/>
       <div style={{marginTop:10,marginBottom:12}}>
         <CatDescEditor cat1={cat1} cat2={cat2} descAI={descAI}
           onChangeCat1={setCat1} onChangeCat2={setCat2} onChangeDescAI={setDescAI}/>
       </div>
-      <div style={{display:'flex',gap:8}}>
+      <LiveMatchCount conds={conds} transactions={transactions} logic={logic}/>
+      <div style={{display:'flex',gap:8,marginTop:10}}>
         <button className="btn btn-primary" style={{fontSize:12}} onClick={save}>✓ Salva</button>
         <button className="btn btn-ghost"   style={{fontSize:12}} onClick={()=>setOpen(false)}>Annulla</button>
       </div>
@@ -429,8 +452,8 @@ function AddRuleForm({ onAdd }) {
 }
 
 // ── Live match count badge ────────────────────────────────────
-function LiveMatchCount({ conds, transactions }) {
-  const count = useMemo(() => countMatchingTx(transactions, conds), [transactions, conds])
+function LiveMatchCount({ conds, transactions, logic = 'and' }) {
+  const count = useMemo(() => countMatchingTx(transactions, conds, logic), [transactions, conds, logic])
   if (count === null) return null
   const color = count === 0 ? 'var(--red)' : count > 50 ? '#b87000' : 'var(--accent)'
   const bg    = count === 0 ? 'rgba(220,50,50,.08)' : count > 50 ? 'rgba(255,160,50,.12)' : 'rgba(var(--accent-rgb,99,102,241),.08)'
@@ -444,12 +467,13 @@ function LiveMatchCount({ conds, transactions }) {
 }
 
 // ── Live match counter helper ─────────────────────────────────
-function countMatchingTx(transactions, conds) {
+function countMatchingTx(transactions, conds, logic = 'and') {
   const active = conds.filter(c => c.value.trim())
   if (!active.length) return null
+  const combine = logic === 'or' ? Array.prototype.some : Array.prototype.every
   return transactions.filter(tx => {
     if (tx.excluded) return false
-    return active.every(cond => {
+    return combine.call(active, cond => {
       const val = (cond.value || '').toLowerCase()
       switch (cond.field) {
         case 'anywhere':
@@ -504,6 +528,7 @@ function ZustandRulesSection() {
   // Expanded edit row state
   const [editingId, setEditingId] = useState(null)
   const [editConds, setEditConds] = useState([])
+  const [editLogic, setEditLogic] = useState('and')
   const [editCat1,  setEditCat1]  = useState('')
   const [editCat2,  setEditCat2]  = useState('')
   const [editDesc,  setEditDesc]  = useState('')
@@ -535,6 +560,7 @@ function ZustandRulesSection() {
   function startEdit(r) {
     setEditingId(r.id)
     setEditConds(r.conditions?.length ? [...r.conditions.map(c=>({...c}))] : [{field:'description',op:'contains',value:''}])
+    setEditLogic(r.logic === 'or' ? 'or' : 'and')
     setEditCat1(r.cats?.[0]?.cat1 || CAT_NAMES[0] || '')
     setEditCat2(r.cats?.[0]?.cat2 || '')
     setEditDesc(r.descAI || '')
@@ -546,6 +572,7 @@ function ZustandRulesSection() {
     updateAiRule(id, {
       action: 'categorize',
       conditions: valid,
+      logic: editLogic,
       cats: [{cat1: editCat1, cat2: editCat2||'', pct:100}],
       descAI: editDesc.trim()||null,
     })
@@ -575,7 +602,7 @@ function ZustandRulesSection() {
 
       const lines = aiRules.map((r, i) => {
         const code = ruleCode(i)
-        const conds = (r.conditions||[]).map(c => condLabel(c)).join(' E ')
+        const conds = (r.conditions||[]).map(c => condLabel(c)).join(r.logic==='or' ? ' O ' : ' E ')
         const cat = (r.cats||[]).map(c => c.cat1 + (c.cat2 ? '/' + c.cat2 : '')).join('+') || '?'
         const desc = r.descAI ? ' (descAI: ' + r.descAI + ')' : ''
         return code + ' [id:' + r.id + ']: ' + conds + ' -> ' + cat + desc
@@ -730,12 +757,19 @@ function ZustandRulesSection() {
                   </div>
 
                   {/* Conditions */}
-                  <div style={{display:'flex',gap:4,flexWrap:'wrap',paddingRight:8}}>
+                  <div style={{display:'flex',gap:4,flexWrap:'wrap',alignItems:'center',paddingRight:8}}>
                     {(r.conditions||[]).map((c,j)=>(
-                      <span key={j} style={{fontSize:10,padding:'1px 7px',borderRadius:8,
-                        background:'var(--surface2)',border:'1px solid var(--border)',
-                        color:'var(--text2)',whiteSpace:'nowrap'}}>
-                        {condLabel(c)}
+                      <span key={j} style={{display:'flex',alignItems:'center',gap:4}}>
+                        {j>0 && (
+                          <span style={{fontSize:9,fontWeight:800,color:r.logic==='or'?'var(--gold)':'var(--text3)'}}>
+                            {r.logic==='or'?'O':'E'}
+                          </span>
+                        )}
+                        <span style={{fontSize:10,padding:'1px 7px',borderRadius:8,
+                          background:'var(--surface2)',border:'1px solid var(--border)',
+                          color:'var(--text2)',whiteSpace:'nowrap'}}>
+                          {condLabel(c)}
+                        </span>
                       </span>
                     ))}
                   </div>
@@ -828,12 +862,12 @@ function ZustandRulesSection() {
                     <div style={{fontSize:12,fontWeight:700,color:'var(--accent)',marginBottom:10}}>
                       ✏️ Modifica {ruleCode(i)}
                     </div>
-                    <ConditionsEditor conds={editConds} onChange={setEditConds}/>
+                    <ConditionsEditor conds={editConds} onChange={setEditConds} logic={editLogic} onLogicChange={setEditLogic}/>
                     <div style={{marginTop:10,marginBottom:12}}>
                       <CatDescEditor cat1={editCat1} cat2={editCat2} descAI={editDesc}
                         onChangeCat1={setEditCat1} onChangeCat2={setEditCat2} onChangeDescAI={setEditDesc}/>
                     </div>
-                    <LiveMatchCount conds={editConds} transactions={transactions}/>
+                    <LiveMatchCount conds={editConds} transactions={transactions} logic={editLogic}/>
                     <div style={{display:'flex',gap:8,marginTop:10}}>
                       <button className="btn btn-primary" style={{fontSize:12}} onClick={()=>saveEdit(r.id)}>✓ Salva</button>
                       <button className="btn btn-ghost"   style={{fontSize:12}} onClick={()=>setEditingId(null)}>Annulla</button>
