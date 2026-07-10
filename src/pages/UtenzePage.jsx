@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { getYM, getLast6Months, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Plus, Settings2 } from 'lucide-react'
 import { fmtIT } from '../utils/format'
 import './EnergiePage.css'
@@ -14,6 +14,31 @@ const UTILITY_TYPES = [
   { id:'internet', label:'Internet/Tel',icon:'📡', color:'#2a5c8a', unit:''    },
   { id:'altro',    label:'Altro',       icon:'🏠', color:'#888888', unit:''    },
 ]
+
+// Colori FISSI per anno, uguali in TUTTI i grafici della pagina (non dipendono dal tipo
+// di utenza) — scelti ben distinguibili tra loro. L'ultimo (anno corrente) è tratteggiato.
+const YEAR_COLORS = ['#5b7fbd', '#a855f7', '#e0821f'] // anno-2 (blu), anno-1 (viola), corrente (arancio)
+
+function getUtilYears() {
+  const y = new Date().getFullYear()
+  return [y-2, y-1, y]
+}
+
+// ── Legenda anni condivisa (una sola volta per l'intera pagina) ──
+function YearLegend({ years }) {
+  return (
+    <div style={{display:'flex',gap:20,alignItems:'center',marginBottom:14,fontSize:12,color:'var(--text2)'}}>
+      <span style={{fontWeight:700,color:'var(--text3)',fontSize:11,textTransform:'uppercase',letterSpacing:'.05em'}}>Anni:</span>
+      {years.map((y,i) => (
+        <span key={y} style={{display:'flex',alignItems:'center',gap:6}}>
+          <svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke={YEAR_COLORS[i]} strokeWidth="2.5"
+            strokeDasharray={i===years.length-1?'5 3':undefined}/></svg>
+          <span style={{fontWeight:600}}>{y}{i===years.length-1?' (in corso)':''}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
 
 // ── Firestore helpers ─────────────────────────────────────
 function getUtilMerch() { return useStore.getState()?.appPrefs?.utilMerchants || {} }
@@ -113,18 +138,10 @@ function MerchantSettingsModal({ onClose }) {
 }
 
 // ── Utility Chart Card (da transazioni reali) ────────────
-// Grafico "dot line" multi-anno: una linea per ciascuno degli ultimi 3 anni,
-// Gen→Dic in ascissa, l'anno corrente tratteggiato (dati parziali).
-function UtilityChartCard({ type, transactions, merchants }) {
+// Grafico "dot line" multi-anno: una linea per ciascuno degli ultimi 3 anni (stessi
+// colori YEAR_COLORS in tutta la pagina), Gen→Dic in ascissa, anno corrente tratteggiato.
+function UtilityChartCard({ type, transactions, merchants, years }) {
   const MON = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
-  const YEAR_STYLES = [
-    { opacity: 0.4,  dashed: false }, // 2 anni fa
-    { opacity: 0.7,  dashed: false }, // anno scorso
-    { opacity: 1,    dashed: true  }, // anno corrente (tratteggiato, dati parziali)
-  ]
-
-  const currentYear = new Date().getFullYear()
-  const years = useMemo(() => [currentYear-2, currentYear-1, currentYear], [currentYear])
 
   const typeTxs = useMemo(() => {
     return transactions.filter(t => {
@@ -161,6 +178,13 @@ function UtilityChartCard({ type, transactions, merchants }) {
     })
   , [typeTxs, years])
 
+  // Righe per la mini-tabella sotto il grafico: solo i mesi in cui è arrivato almeno
+  // un addebito (in uno qualsiasi dei 3 anni), max 5, più recenti prima.
+  const monthRows = useMemo(() => {
+    const withData = chartData.filter(row => years.some(y => row[y] != null))
+    return withData.slice(-5).reverse()
+  }, [chartData, years])
+
   const allVals = useMemo(() =>
     typeTxs.map(t => Math.abs(t.amount)).filter(v => v > 0)
   , [typeTxs])
@@ -193,42 +217,56 @@ function UtilityChartCard({ type, transactions, merchants }) {
       )}
 
       {hasData ? (
-        <ResponsiveContainer width="100%" height={120}>
-          <LineChart data={chartData} margin={{top:4,right:6,bottom:0,left:2}}>
+        <ResponsiveContainer width="100%" height={190}>
+          <LineChart data={chartData} margin={{top:4,right:10,bottom:0,left:2}}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-            <XAxis dataKey="label" tick={{fontSize:8,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-            <Tooltip formatter={v=>v==null?['—','']:[`€ ${fmtIT(v,0)}`,'Importo']}
-              contentStyle={{fontSize:10,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px'}}/>
-            <Legend wrapperStyle={{fontSize:10}}/>
+            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={38}
+              tickFormatter={v => `€${fmtIT(v,0)}`}/>
+            <Tooltip formatter={(v,name)=>v==null?['—',name]:[`€ ${fmtIT(v,0)}`,name]}
+              contentStyle={{fontSize:11,border:'1px solid var(--border)',borderRadius:6,padding:'4px 9px'}}/>
             {years.map((y, i) => (
               <Line key={y} type="monotone" dataKey={y} name={String(y)}
-                stroke={type.color} strokeOpacity={YEAR_STYLES[i].opacity}
-                strokeWidth={2} strokeDasharray={YEAR_STYLES[i].dashed ? '5 4' : undefined}
-                dot={{ r: 3, fill: type.color, fillOpacity: YEAR_STYLES[i].opacity, strokeWidth: 0 }}
+                stroke={YEAR_COLORS[i]}
+                strokeWidth={2} strokeDasharray={i===years.length-1 ? '5 4' : undefined}
+                dot={{ r: 3, fill: YEAR_COLORS[i], strokeWidth: 0 }}
                 connectNulls activeDot={{ r: 4 }}/>
             ))}
           </LineChart>
         </ResponsiveContainer>
       ) : (
-        <div style={{height:120,display:'flex',alignItems:'center',justifyContent:'center',
+        <div style={{height:190,display:'flex',alignItems:'center',justifyContent:'center',
           color:'var(--text3)',fontSize:11,fontStyle:'italic'}}>
           Nessuna transazione
         </div>
       )}
 
-      {/* Last 3 txs — solo data + importo, la descrizione AI è sempre la stessa (es. "Bolletta Energia") */}
-      {typeTxs.length > 0 && (
-        <div style={{marginTop:8,borderTop:'1px solid var(--border)',paddingTop:6}}>
-          {[...typeTxs].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')).slice(0,3).map(t => (
-            <div key={t.txId} className="util-bill-row">
-              <span style={{color:'var(--text3)',fontFamily:'var(--font-mono)',minWidth:60,fontSize:11}}>
-                {(t._effDate||(t._effDate||t.date||'')).slice(0,7)}
-              </span>
-              <span style={{flex:1,fontFamily:'var(--font-mono)',fontWeight:700,fontSize:12,color:type.color,textAlign:'right'}}>
-                € {fmtIT(Math.abs(t.amount),2)}
-              </span>
-            </div>
-          ))}
+      {/* Mini-tabella: mesi con addebito (righe) × anni (colonne), max 5 righe */}
+      {monthRows.length > 0 && (
+        <div style={{marginTop:10,borderTop:'1px solid var(--border)',paddingTop:6}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:'left',padding:'3px 4px',color:'var(--text3)',fontWeight:700,fontSize:10,textTransform:'uppercase'}}>Mese</th>
+                {years.map((y,i) => (
+                  <th key={y} style={{textAlign:'right',padding:'3px 4px',color:YEAR_COLORS[i],fontWeight:700}}>{y}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {monthRows.map(row => (
+                <tr key={row.label} style={{borderTop:'1px solid var(--border)'}}>
+                  <td style={{padding:'4px 4px',color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{row.label}</td>
+                  {years.map((y,i) => (
+                    <td key={y} style={{padding:'4px 4px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:600,
+                      color: row[y]!=null ? 'var(--text)' : 'var(--text3)', opacity: row[y]!=null ? 1 : .4}}>
+                      {row[y]!=null ? `€ ${fmtIT(row[y],0)}` : '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -246,6 +284,9 @@ function UtilityTxTable() {
   const [sortDir, setSortDir] = useState('desc')
   const [popupTx, setPopupTx] = useState(null)
   const [hideSatispay, setHideSatispay] = useState(false)
+  const [search, setSearch] = useState('')
+  const [colFilters, setColFilters] = useState({}) // { fornitore: Set, tipo: Set } — set = valori inclusi
+  const [openFilterCol, setOpenFilterCol] = useState(null)
 
   const MON = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
   const fmtDate = d => {
@@ -276,7 +317,49 @@ function UtilityTxTable() {
   }, [transactions, merchants, sortKey, sortDir])
 
   const isSatispay = t => /satispay/i.test(`${t.account||''} ${t.description||''} ${t.merchant||''}`)
-  const displayTxs = hideSatispay ? utilTxs.filter(t => !isSatispay(t)) : utilTxs
+
+  // Metadati derivati per riga (fornitore/tipo) — usati sia per il rendering che per i filtri
+  const rowsMeta = useMemo(() => utilTxs.map(t => {
+    const detected = detectUtilType(t, merchants)
+    const isCat     = t.cat1==='Casa' && t.cat2==='Utenze'
+    const typeInfo  = detected || (isCat ? { label:'Utenze', color:'#888', icon:'🏠' } : null)
+    return { t, typeInfo, fornitoreVal: t.merchant || t.counterpart || '—', tipoVal: typeInfo?.label || '—' }
+  }), [utilTxs, merchants])
+
+  const uniqueFornitori = useMemo(() => [...new Set(rowsMeta.map(r=>r.fornitoreVal))].sort(), [rowsMeta])
+  const uniqueTipi      = useMemo(() => [...new Set(rowsMeta.map(r=>r.tipoVal))].sort(), [rowsMeta])
+
+  function openFilter(col, allValues) {
+    setColFilters(cf => ({ ...cf, [col]: cf[col] || new Set(allValues) }))
+    setOpenFilterCol(oc => oc === col ? null : col)
+  }
+  function toggleFilterVal(col, val) {
+    setColFilters(cf => {
+      const cur = new Set(cf[col])
+      cur.has(val) ? cur.delete(val) : cur.add(val)
+      return { ...cf, [col]: cur }
+    })
+  }
+  function resetFilter(col, allValues) {
+    setColFilters(cf => ({ ...cf, [col]: new Set(allValues) }))
+  }
+  const isColFiltered = (col, allValues) => colFilters[col] && colFilters[col].size < allValues.length
+
+  const searchedRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return rowsMeta.filter(({ t, fornitoreVal, tipoVal }) => {
+      if (colFilters.fornitore && !colFilters.fornitore.has(fornitoreVal)) return false
+      if (colFilters.tipo && !colFilters.tipo.has(tipoVal)) return false
+      if (q) {
+        const hay = `${t.descAI||''} ${t.description||''} ${t.merchant||''} ${t.counterpart||''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [rowsMeta, colFilters, search])
+
+  const displayRows = hideSatispay ? searchedRows.filter(r => !isSatispay(r.t)) : searchedRows
+  const displayTxs  = displayRows.map(r => r.t)
   const satispayCount = utilTxs.filter(isSatispay).length
 
   const total = Math.abs(displayTxs.reduce((s,t) => s + t.amount, 0))
@@ -295,13 +378,27 @@ function UtilityTxTable() {
   const COLS = [
     { k:'date',    l:'Data',        align:'left'  },
     { k:'descAI',  l:'Descrizione', align:'left'  },
-    { k:'merchant',l:'Fornitore',   align:'left'  },
-    { k:'utilType',l:'Tipo',        align:'left',  noSort:true },
+    { k:'merchant',l:'Fornitore',   align:'left',  filterCol:'fornitore', values:uniqueFornitori },
+    { k:'utilType',l:'Tipo',        align:'left',  noSort:true, filterCol:'tipo', values:uniqueTipi },
     { k:'amount',  l:'Importo',     align:'right' },
   ]
 
   return (
     <>
+    {/* Ricerca — come Excel: cerca in descrizione/fornitore/controparte */}
+    <div style={{marginBottom:10,position:'relative',maxWidth:320}}>
+      <input
+        value={search}
+        onChange={e=>setSearch(e.target.value)}
+        placeholder="🔎 Cerca transazione…"
+        style={{width:'100%',padding:'8px 12px',borderRadius:8,border:'1px solid var(--border)',
+          fontSize:13,background:'var(--surface)',color:'var(--text)',outline:'none',
+          fontFamily:'var(--font-sans)',boxSizing:'border-box'}}
+      />
+    </div>
+    {openFilterCol && (
+      <div onClick={() => setOpenFilterCol(null)} style={{position:'fixed',inset:0,zIndex:40}}/>
+    )}
     <div style={{overflowX:'auto',border:'1px solid var(--border)',borderRadius:'var(--radius)',
       background:'var(--surface)'}}>
       {/* Satispay filter bar */}
@@ -326,21 +423,54 @@ function UtilityTxTable() {
           <tr style={{background:'var(--surface2)'}}>
             {COLS.map(c => (
               <th key={c.k}
-                onClick={() => !c.noSort && toggleSort(c.k)}
                 style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
                   textTransform:'uppercase',color:'var(--text3)',borderBottom:'1px solid var(--border)',
-                  textAlign:c.align,cursor:c.noSort?'default':'pointer',whiteSpace:'nowrap',
-                  userSelect:'none'}}>
-                {c.l} {!c.noSort && <span style={{fontSize:9}}>{si(c.k)}</span>}
+                  textAlign:c.align,whiteSpace:'nowrap',userSelect:'none',position:'relative'}}>
+                <span onClick={() => !c.noSort && toggleSort(c.k)} style={{cursor:c.noSort?'default':'pointer'}}>
+                  {c.l} {!c.noSort && <span style={{fontSize:9}}>{si(c.k)}</span>}
+                </span>
+                {c.filterCol && (
+                  <>
+                    <button onClick={() => openFilter(c.filterCol, c.values)}
+                      title="Filtra"
+                      style={{marginLeft:5,background:'none',border:'none',cursor:'pointer',
+                        color:isColFiltered(c.filterCol,c.values)?'var(--accent)':'var(--text3)',
+                        fontSize:10,verticalAlign:'middle'}}>
+                      {isColFiltered(c.filterCol,c.values) ? '▼' : '▽'}
+                    </button>
+                    {openFilterCol === c.filterCol && (
+                      <div style={{position:'absolute',top:'100%',left:0,zIndex:50,
+                        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,
+                        boxShadow:'0 8px 24px rgba(0,0,0,.18)',padding:'8px 10px',minWidth:170,
+                        maxHeight:240,overflowY:'auto',marginTop:4,textTransform:'none',fontWeight:400}}
+                        onClick={e=>e.stopPropagation()}>
+                        <div style={{display:'flex',justifyContent:'space-between',marginBottom:6,gap:8}}>
+                          <button onClick={() => resetFilter(c.filterCol, c.values)}
+                            style={{fontSize:10,background:'none',border:'none',color:'var(--accent)',cursor:'pointer',fontWeight:700}}>
+                            Seleziona tutti
+                          </button>
+                          <button onClick={() => setOpenFilterCol(null)}
+                            style={{fontSize:11,background:'none',border:'none',color:'var(--text3)',cursor:'pointer'}}>✕</button>
+                        </div>
+                        {c.values.map(v => (
+                          <label key={v} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,
+                            padding:'3px 0',cursor:'pointer',color:'var(--text)'}}>
+                            <input type="checkbox"
+                              checked={colFilters[c.filterCol]?.has(v) ?? true}
+                              onChange={() => toggleFilterVal(c.filterCol, v)}/>
+                            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {displayTxs.map(t => {
-            const detected = detectUtilType(t, merchants)
-            const isCat    = t.cat1==='Casa' && t.cat2==='Utenze'
-            const typeInfo = detected || (isCat ? { label:'Utenze', color:'#888', icon:'🏠' } : null)
+          {displayRows.map(({ t, typeInfo }) => {
             return (
               <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',transition:'background .1s'}}
                 onMouseEnter={e=>e.currentTarget.style.background='var(--surface2)'}
@@ -461,6 +591,8 @@ export default function UtenzePage() {
     return nonZero.length > 0 ? nonZero.reduce((a,b) => a+b,0) / nonZero.length : 0
   }, [utilTxsAll])
 
+  const utilYears = useMemo(() => getUtilYears(), [])
+
   return (
     <div className="en2-page">
       {/* Header */}
@@ -496,12 +628,14 @@ export default function UtenzePage() {
 
       {/* Utility cards grid — i tipi con fornitore configurabile (tutti tranne "Altro")
           si mostrano solo se almeno un fornitore è stato indicato in Impostazioni;
-          "Altro" (leftover automatico Casa › Utenze) è sempre visibile. */}
+          "Altro" (leftover automatico Casa › Utenze) è sempre visibile. Legenda anni
+          UNA SOLA VOLTA per tutta la griglia (stessi colori in ogni grafico). */}
+      <YearLegend years={utilYears}/>
       <div className="util-grid" style={{marginBottom:28}}>
         {UTILITY_TYPES
           .filter(t => t.id === 'altro' || (merchants[t.id]||[]).some(m => m.trim()))
           .map(t => (
-            <UtilityChartCard key={t.id} type={t} transactions={transactions} merchants={merchants}/>
+            <UtilityChartCard key={t.id} type={t} transactions={transactions} merchants={merchants} years={utilYears}/>
           ))}
       </div>
 
