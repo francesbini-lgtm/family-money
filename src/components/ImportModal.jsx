@@ -1,127 +1,204 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
 import { categorizeBatch } from '../data/aiService'
-import { X, Upload, Sparkles, Clock } from 'lucide-react'
+import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
 // spin animation added via CSS
 
-// ── Card reconciliation modal ─────────────────────────────
-function CardReconcileModal({ data, onClose }) {
-  const updateTransaction = useStore(s => s.updateTransaction)
-  const { selectedAccount, reconciled } = data
-  const [rows, setRows] = useState(() => reconciled.map(r => ({ ...r, selected: r.status !== 'missing' })))
-  const [done, setDone] = useState(false)
+const MONTH_NAMES = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+function monthLabel(ym) {
+  const [y, m] = (ym || '').split('-')
+  const idx = parseInt(m, 10) - 1
+  return `${MONTH_NAMES[idx] || m} ${y}`
+}
 
-  function toggleRow(i) {
-    setRows(rs => rs.map((r, idx) => idx === i ? { ...r, selected: !r.selected } : r))
-  }
+// Raggruppa le transazioni appena lette dal CSV per mese (YYYY-MM) — usato per la
+// riconciliazione: ogni mese va abbinato a UN estratto conto reale prima di poter
+// essere importato (vedi CardImportReconcileModal)
+function buildMonthGroups(txs) {
+  const map = {}
+  txs.forEach(t => {
+    const ym = (t.date || '').slice(0, 7)
+    if (!ym) return
+    if (!map[ym]) map[ym] = { month: ym, label: monthLabel(ym), txs: [], total: 0 }
+    map[ym].txs.push(t)
+    map[ym].total += Math.abs(t.amount)
+  })
+  return Object.values(map)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map(g => ({ ...g, total: Math.round(g.total * 100) / 100 }))
+}
 
-  function handleConfirm() {
-    rows.filter(r => r.selected).forEach(r => {
-      updateTransaction(r.estratto.txId, { excluded: true, reconciled: true })
+// Transazioni del conto corrente che sembrano un "estratto conto" per questa carta
+// (stessa logica di riconoscimento già in uso: parole chiave + numero carta nella
+// descrizione), non ancora escluse/riconciliate — candidati per l'abbinamento automatico
+function findEstrattoCandidates(transactions, account) {
+  const card4 = account.card4
+  const panRegex = new RegExp(`[0-9X]{4,}${card4}\\b`, 'i')
+  return transactions
+    .filter(t =>
+      !t.excluded &&
+      t.account !== account.name &&
+      t.amount < 0 &&
+      /estratto|utilizzo carte|carta di credito/i.test(t.description || '') &&
+      (t.card === card4 || panRegex.test(t.description || ''))
+    )
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
+// ── Riconciliazione carta di credito — PRIMA di AI/salvataggio ────────────
+// Per ogni mese letto dal CSV, l'utente deve abbinare l'estratto conto reale già
+// presente sul conto corrente (trovato automaticamente per importo, o cercato a mano).
+// Solo i mesi abbinati vengono poi importati; gli altri (es. mese non ancora
+// addebitato sul conto) restano fuori — si reimporta lo stesso CSV più avanti.
+function CardImportReconcileModal({ account, monthGroups, candidates, transactions, onConfirm, onCancel }) {
+  const [choice, setChoice] = useState(() => {
+    const used = new Set()
+    const init = {}
+    monthGroups.forEach(g => {
+      const ok = candidates.find(c => !used.has(c.txId) && g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.02)
+      const partial = !ok && candidates.find(c => !used.has(c.txId) && g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.08)
+      const match = ok || partial
+      if (match) { init[g.month] = match.txId; used.add(match.txId) }
+      else init[g.month] = null
     })
-    setDone(true)
-    setTimeout(onClose, 1800)
+    return init
+  })
+  const [searchMonth, setSearchMonth] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  function statusFor(g) {
+    const txId = choice[g.month]
+    if (!txId) return 'missing'
+    const c = transactions.find(t => t.txId === txId)
+    if (!c || !g.total) return 'missing'
+    const diff = Math.abs(Math.abs(c.amount) - g.total) / g.total
+    return diff < 0.02 ? 'ok' : diff < 0.08 ? 'partial' : 'mismatch'
   }
 
-  const selectedCount = rows.filter(r => r.selected).length
+  const manualResults = useMemo(() => {
+    if (!searchMonth) return []
+    const chosenElsewhere = new Set(Object.entries(choice).filter(([m]) => m !== searchMonth).map(([, id]) => id).filter(Boolean))
+    let list = transactions.filter(t => !t.excluded && t.amount < 0 && !chosenElsewhere.has(t.txId))
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      list = list.filter(t => (t.description || '').toLowerCase().includes(q) || (t.descAI || '').toLowerCase().includes(q))
+    }
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 30)
+  }, [searchMonth, searchQuery, transactions, choice])
 
-  if (done) return (
-    <div className="modal-backdrop">
-      <div className="modal import-modal" style={{ textAlign: 'center', padding: '40px 32px' }}>
-        <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
-        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Riconciliazione completata</div>
-        <div style={{ fontSize: 13, color: 'var(--text3)' }}>
-          {selectedCount} estratt{selectedCount === 1 ? 'o escluso' : 'i esclusi'} dal conto corrente
-        </div>
-      </div>
-    </div>
-  )
+  const matchedMonths = monthGroups.filter(g => choice[g.month])
+  const matchedCount = matchedMonths.length
+  const totalToImport = matchedMonths.reduce((s, g) => s + g.txs.length, 0)
+
+  function confirm() {
+    const months = matchedMonths.map(g => ({ month: g.month, estrattoTxId: choice[g.month] }))
+    onConfirm({ matchedMonths: months, estrattoTxIdsToExclude: months.map(m => m.estrattoTxId) })
+  }
 
   return (
-    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
       <div className="modal import-modal" onClick={e => e.stopPropagation()}
-        style={{ maxWidth: 640, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        style={{ maxWidth: 720, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
 
-        {/* Header */}
         <div className="modal-header">
-          <h3>🔍 Riconciliazione estratti · *{selectedAccount.card4}</h3>
-          <button className="btn btn-ghost" onClick={onClose}><X size={16}/></button>
+          <h3>🔍 Riconcilia estratti · {account.name} *{account.card4}</h3>
+          <button className="btn btn-ghost" onClick={onCancel}><X size={16}/></button>
         </div>
 
         <div style={{ fontSize: 12, color: 'var(--text3)', padding: '0 4px 14px', lineHeight: 1.5 }}>
-          Il sistema ha trovato <strong>{rows.length}</strong> estratt{rows.length === 1 ? 'o' : 'i'} non riconciliat{rows.length === 1 ? 'o' : 'i'} per la carta <strong>*{selectedAccount.card4}</strong>.
-          Seleziona quelli da escludere dal conto corrente (le singole spese della carta rimangono visibili).
+          Il CSV contiene {monthGroups.reduce((s, g) => s + g.txs.length, 0)} transazioni su {monthGroups.length} mes{monthGroups.length === 1 ? 'e' : 'i'}.
+          Ogni mese va abbinato all'estratto conto già presente sul conto corrente prima di poter importare le sue spese —
+          solo i mesi abbinati verranno importati. Se un mese non ha ancora un estratto (es. carta non ancora addebitata),
+          lascialo così: potrai reimportare lo stesso CSV più avanti quando l'estratto sarà arrivato.
         </div>
 
-        {/* Table */}
         <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700, width: 32 }}></th>
-                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700 }}>Data estratto</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}>Importo</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}>Spese carta</th>
+                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700 }}>Mese</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}>Totale CSV</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}>Tx</th>
+                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700 }}>Estratto abbinato</th>
                 <th style={{ padding: '6px 8px', textAlign: 'center', color: 'var(--text3)', fontWeight: 700 }}>Stato</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => {
-                const { estratto, cardSum, diff, status, selected, periodTxs } = row
-                const estrattoAmt = Math.abs(estratto.amount)
-                const statusIcon = status === 'ok' ? '✅' : status === 'partial' ? '⚠️' : '❌'
-                const statusColor = status === 'ok' ? 'var(--green)' : status === 'partial' ? 'var(--gold)' : 'var(--red)'
-                const statusLabel = status === 'ok'
-                  ? 'Corrispondenza esatta'
-                  : status === 'partial'
-                  ? `Differenza €${diff.toFixed(2)}`
-                  : cardSum === 0 ? 'Nessuna tx trovata' : `Differenza €${diff.toFixed(2)}`
-
+              {monthGroups.map(g => {
+                const txId = choice[g.month]
+                const chosenTx = txId ? transactions.find(t => t.txId === txId) : null
+                const status = statusFor(g)
+                const statusIcon = status === 'ok' ? '✅' : status === 'partial' ? '⚠️' : status === 'mismatch' ? '❌' : '🔍'
+                const statusColor = status === 'ok' ? 'var(--green)' : status === 'partial' ? 'var(--gold)' : status === 'mismatch' ? 'var(--red)' : 'var(--text3)'
                 return (
-                  <tr key={estratto.txId}
-                    style={{ borderBottom: '1px solid var(--border)', background: selected ? 'var(--surface2)' : 'transparent', cursor: 'pointer' }}
-                    onClick={() => toggleRow(i)}>
-                    <td style={{ padding: '8px 8px' }}>
-                      <input type="checkbox" checked={selected} onChange={() => toggleRow(i)}
-                        style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
-                        onClick={e => e.stopPropagation()}/>
-                    </td>
-                    <td style={{ padding: '8px 8px', color: 'var(--text2)' }}>
-                      <div style={{ fontWeight: 600 }}>{estratto.date}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>
-                        {row.periodLabel}
-                      </div>
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--red)' }}>
-                      €{estrattoAmt.toFixed(2)}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600,
-                      color: cardSum > 0 ? 'var(--text)' : 'var(--text3)' }}>
-                      {cardSum > 0 ? `€${cardSum.toFixed(2)}` : '—'}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--text3)' }}>
-                      {periodTxs?.length ?? 0}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'center' }}>
-                      <span title={statusLabel} style={{ fontSize: 16 }}>{statusIcon}</span>
-                      <div style={{ fontSize: 10, color: statusColor, marginTop: 2 }}>{statusLabel}</div>
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={g.month} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px 8px', fontWeight: 600 }}>{g.label}</td>
+                      <td style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>€{g.total.toFixed(2)}</td>
+                      <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--text3)' }}>{g.txs.length}</td>
+                      <td style={{ padding: '8px 8px', color: 'var(--text2)' }}>
+                        {chosenTx
+                          ? <><div style={{ fontWeight: 600 }}>{chosenTx.date} · €{Math.abs(chosenTx.amount).toFixed(2)}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text3)' }}>{chosenTx.descAI || chosenTx.description?.slice(0, 50)}</div></>
+                          : <span style={{ color: 'var(--text3)' }}>— non trovato —</span>}
+                      </td>
+                      <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                        <span style={{ fontSize: 15 }}>{statusIcon}</span>
+                        <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div>
+                      </td>
+                      <td style={{ padding: '8px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}
+                          onClick={() => { setSearchMonth(searchMonth === g.month ? null : g.month); setSearchQuery('') }}>
+                          <Search size={11}/> Cerca
+                        </button>
+                        {chosenTx && (
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}
+                            onClick={() => setChoice(c => ({ ...c, [g.month]: null }))}>✕</button>
+                        )}
+                      </td>
+                    </tr>
+                    {searchMonth === g.month && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '8px 8px 14px', background: 'var(--surface2)' }}>
+                          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} autoFocus
+                            placeholder="Cerca per descrizione (es. 'estratto', 'carta', nome banca)…"
+                            className="form-select" style={{ width: '100%', marginBottom: 8 }}/>
+                          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {manualResults.length === 0 && (
+                              <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>Nessun risultato — prova un'altra ricerca</div>
+                            )}
+                            {manualResults.map(t => (
+                              <div key={t.txId} onClick={() => { setChoice(c => ({ ...c, [g.month]: t.txId })); setSearchMonth(null) }}
+                                style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 10px',
+                                  borderRadius: 6, cursor: 'pointer', background: 'var(--surface)', fontSize: 12 }}>
+                                <span>{t.date} · {t.descAI || t.description?.slice(0, 60)}</span>
+                                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>€{Math.abs(t.amount).toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 )
               })}
             </tbody>
           </table>
         </div>
 
-        {/* Footer */}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-          <button className="btn btn-ghost" onClick={onClose}>Salta</button>
-          <button className="btn btn-primary" disabled={selectedCount === 0} onClick={handleConfirm}>
-            ✅ Escludi {selectedCount} estratt{selectedCount === 1 ? 'o' : 'i'}
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+          <div style={{ fontSize: 12, color: 'var(--text3)' }}>
+            <strong style={{ color: 'var(--text)' }}>{matchedCount}/{monthGroups.length}</strong> mesi abbinati · <strong style={{ color: 'var(--text)' }}>{totalToImport}</strong> transazioni verranno importate
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={onCancel}>Annulla</button>
+            <button className="btn btn-primary" disabled={matchedCount === 0} onClick={confirm}>
+              ✅ Conferma e importa {totalToImport} tx
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -131,7 +208,7 @@ function CardReconcileModal({ data, onClose }) {
 const BATCH_SIZE = 20
 
 export default function ImportModal({ onClose }) {
-  const { userAccounts, addTransactions, transactions, aiRules } = useStore()
+  const { userAccounts, addTransactions, updateTransaction, transactions, aiRules } = useStore()
   const appPrefs = useStore(s => s.appPrefs)
   const [account, setAccount] = useState(userAccounts[0]?.name || 'Conto Corrente')
 
@@ -155,8 +232,8 @@ export default function ImportModal({ onClose }) {
   const [status,             setStatus]             = useState(null)
   const [done,               setDone]               = useState(null)
   const [error,              setError]              = useState(null)
-  const [reconcileData,      setReconcileData]      = useState(null)
-  const [showReconcileModal, setShowReconcileModal] = useState(false)
+  // In attesa di riconciliazione mensile per un conto "carta" — { account, monthGroups, candidates, allParsed }
+  const [cardReconcile,      setCardReconcile]      = useState(null)
 
   const startTimeRef   = useRef(null)
   const abortRef       = useRef(false)        // true = user cancelled
@@ -185,6 +262,69 @@ export default function ImportModal({ onClose }) {
     setDone(null)
     snapshotTxsRef.current = null
     abortRef.current = false
+  }
+
+  // ── Fase AI + salvataggio, condivisa fra il flusso normale e quello carta ──
+  // dedupAgainst: se passato, i doppioni vengono controllati SOLO contro questo
+  // sottoinsieme di transazioni (richiesto per le carte: solo import precedenti
+  // della stessa carta, non l'intero DB) — vedi addTransactions in useStore.js
+  async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths } = {}) {
+    let finalTxs = txsToImport
+    if (useAI) {
+      startTimeRef.current = Date.now()
+      const batches = []
+      for (let i = 0; i < txsToImport.length; i += BATCH_SIZE)
+        batches.push(txsToImport.slice(i, i + BATCH_SIZE))
+
+      finalTxs = []
+      for (let b = 0; b < batches.length; b++) {
+        if (abortRef.current) { handleCancel(); return }
+
+        const categorized = await categorizeBatch(batches[b])
+
+        if (abortRef.current) { handleCancel(); return }
+
+        finalTxs.push(...categorized)
+        const current = Math.min((b+1)*BATCH_SIZE, txsToImport.length)
+        const pct     = Math.round(current / txsToImport.length * 100)
+
+        setStatus({
+          phase:'ai', pct, current, total:txsToImport.length,
+          eta: calcETA(current, txsToImport.length),
+          message:`Gemini AI: categorizzate ${current} di ${txsToImport.length}`,
+        })
+      }
+    }
+
+    if (abortRef.current) { handleCancel(); return }
+
+    // ── Phase 3: Save ────────────────────────────────
+    // Point of no return: data is about to be persisted on Firestore.
+    // Null the snapshot NOW so a late cancel can't roll back saved data.
+    snapshotTxsRef.current = null
+    setStatus({ phase:'save', pct:10, current:0,
+      total:finalTxs.length, eta:null, message:'Preparazione salvataggio…' })
+    await new Promise(r => setTimeout(r, 100)) // let UI render
+
+    setStatus({ phase:'save', pct:40, current:Math.floor(finalTxs.length*0.4),
+      total:finalTxs.length, eta:null, message:`Salvataggio ${finalTxs.length} transazioni su Firestore…` })
+    await new Promise(r => setTimeout(r, 80))
+
+    const added = addTransactions(finalTxs, dedupAgainst ? { dedupAgainst } : undefined)
+
+    setStatus({ phase:'save', pct:85, current:Math.floor(finalTxs.length*0.85),
+      total:finalTxs.length, eta:null, message:'Sincronizzazione database…' })
+    await new Promise(r => setTimeout(r, 200))
+
+    setStatus({ phase:'save', pct:100, current:finalTxs.length,
+      total:finalTxs.length, eta:null, message:'✓ Ci siamo quasi…' })
+    await new Promise(r => setTimeout(r, 300))
+    const aiCount = 0 // AI enrichment is now a separate step
+    const dupes   = Math.max(0, finalTxs.length - (typeof added==='number' ? added : finalTxs.length))
+
+    setStatus(null)
+    setDone({ total:finalTxs.length, aiCount, dupes, skippedMonths: skippedMonths || [] })
+    setTimeout(onClose, 2500)
   }
 
   // ── Import ────────────────────────────────────────────────
@@ -220,130 +360,72 @@ export default function ImportModal({ onClose }) {
       total:allParsed.length, eta:null,
       message:`✓ Lette ${allParsed.length} transazioni dal CSV` })
 
-    // ── Phase 2: AI ─────────────────────────────────
-    let finalTxs = allParsed
-    if (useAI) {
-      startTimeRef.current = Date.now()
-      const batches = []
-      for (let i = 0; i < allParsed.length; i += BATCH_SIZE)
-        batches.push(allParsed.slice(i, i + BATCH_SIZE))
-
-      finalTxs = []
-      for (let b = 0; b < batches.length; b++) {
-        if (abortRef.current) { handleCancel(); return }
-
-        const categorized = await categorizeBatch(batches[b])
-
-        if (abortRef.current) { handleCancel(); return }
-
-        finalTxs.push(...categorized)
-        const current = Math.min((b+1)*BATCH_SIZE, allParsed.length)
-        const pct     = Math.round(current / allParsed.length * 100)
-
-        setStatus({
-          phase:'ai', pct, current, total:allParsed.length,
-          eta: calcETA(current, allParsed.length),
-          message:`Gemini AI: categorizzate ${current} di ${allParsed.length}`,
-        })
-      }
-    }
-
-    if (abortRef.current) { handleCancel(); return }
-
-    // ── Phase 3: Save ────────────────────────────────
-    // Point of no return: data is about to be persisted on Firestore.
-    // Null the snapshot NOW so a late cancel can't roll back saved data.
-    snapshotTxsRef.current = null
-    setStatus({ phase:'save', pct:10, current:0,
-      total:finalTxs.length, eta:null, message:'Preparazione salvataggio…' })
-    await new Promise(r => setTimeout(r, 100)) // let UI render
-
-    setStatus({ phase:'save', pct:40, current:Math.floor(finalTxs.length*0.4),
-      total:finalTxs.length, eta:null, message:`Salvataggio ${finalTxs.length} transazioni su Firestore…` })
-    await new Promise(r => setTimeout(r, 80))
-
-    const added   = addTransactions(finalTxs)
-
-    setStatus({ phase:'save', pct:85, current:Math.floor(finalTxs.length*0.85),
-      total:finalTxs.length, eta:null, message:'Sincronizzazione database…' })
-    await new Promise(r => setTimeout(r, 200))
-
-    setStatus({ phase:'save', pct:100, current:finalTxs.length,
-      total:finalTxs.length, eta:null, message:'✓ Ci siamo quasi…' })
-    await new Promise(r => setTimeout(r, 300))
-    const aiCount = 0 // AI enrichment is now a separate step
-    const dupes   = Math.max(0, finalTxs.length - (typeof added==='number' ? added : finalTxs.length))
-
-    setStatus(null)
-
-    // ── Card reconciliation ──────────────────────────────────
+    // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──
     const selectedAccountObj = userAccounts.find(a => a.name === account)
     if (selectedAccountObj?.type === 'carta' && selectedAccountObj?.card4) {
-      const card4   = selectedAccountObj.card4
-      const allTxs  = useStore.getState().transactions
-      const panRegex = new RegExp(`[0-9X]{4,}${card4}\\b`, 'i')
-
-      // Find unreconciled ESTRATTO transactions for this card in other accounts
-      const estrattos = allTxs
-        .filter(t =>
-          !t.excluded &&
-          t.account !== selectedAccountObj.name &&
-          t.amount < 0 &&
-          /estratto|utilizzo carte|carta di credito/i.test(t.description || '') &&
-          (t.card === card4 || panRegex.test(t.description || ''))
-        )
-        .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-
-      if (estrattos.length > 0) {
-        // All card transactions for this card account
-        const cardTxs = allTxs
-          .filter(t => t.account === selectedAccountObj.name && !t.excluded)
-          .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-
-        // Match each ESTRATTO with card transactions in its period
-        let prevDate = null
-        const reconciled = estrattos.map(estratto => {
-          const periodTxs = cardTxs.filter(t =>
-            t.date <= estratto.date && (!prevDate || t.date > prevDate)
-          )
-          const cardSum    = periodTxs.reduce((s, t) => s + Math.abs(t.amount), 0)
-          const estrattoAmt = Math.abs(estratto.amount)
-          const diff       = Math.abs(cardSum - estrattoAmt)
-          const pct        = estrattoAmt > 0 ? diff / estrattoAmt : 1
-          const status     = cardSum === 0 ? 'missing' : pct < 0.02 ? 'ok' : pct < 0.08 ? 'partial' : 'mismatch'
-          const periodLabel = prevDate
-            ? `${prevDate} → ${estratto.date}`
-            : `fino al ${estratto.date}`
-          prevDate = estratto.date
-          return { estratto, periodTxs, cardSum, diff, status, periodLabel }
-        })
-
-        setReconcileData({ selectedAccount: selectedAccountObj, reconciled })
-        setShowReconcileModal(true)
-        setDone({ total: finalTxs.length, aiCount: 0, dupes })
-        return  // don't auto-close — reconcile modal will handle it
-      }
+      const monthGroups = buildMonthGroups(allParsed)
+      const candidates  = findEstrattoCandidates(useStore.getState().transactions, selectedAccountObj)
+      snapshotTxsRef.current = null   // niente ancora salvato, nessun rollback necessario
+      setStatus(null)
+      setCardReconcile({ account: selectedAccountObj, monthGroups, candidates, allParsed })
+      return  // in attesa della conferma dell'utente in CardImportReconcileModal
     }
 
-    setDone({ total:finalTxs.length, aiCount, dupes })
-    setTimeout(onClose, 2500)
+    // ── Phase 2 + 3: AI + salvataggio (flusso non-carta, invariato) ──
+    await runAIAndSave(allParsed)
+  }
+
+  // ── Conferma riconciliazione carta ──────────────────────────
+  async function handleCardReconcileConfirm({ matchedMonths, estrattoTxIdsToExclude }) {
+    const { account: acc, monthGroups, allParsed } = cardReconcile
+    const card4 = acc.card4
+
+    // 1. Escludi gli estratti abbinati dal conto corrente
+    estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, { excluded: true, reconciled: true }))
+
+    // 2. Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
+    const matchedMonthSet = new Map(matchedMonths.map(m => [m.month, m.estrattoTxId]))
+    const txsToImport = allParsed
+      .filter(t => matchedMonthSet.has((t.date || '').slice(0, 7)))
+      .map(t => ({
+        ...t,
+        cardImportCard4: card4,
+        cardImportEstrattoTxId: matchedMonthSet.get((t.date || '').slice(0, 7)),
+      }))
+
+    // 3. Doppioni controllati solo contro precedenti import della STESSA carta
+    const dedupAgainst = useStore.getState().transactions.filter(t => t.cardImportCard4 === card4)
+
+    // 4. Mesi non abbinati (es. estratto non ancora arrivato) restano fuori — si reimporta più avanti
+    const skippedMonths = monthGroups.filter(g => !matchedMonthSet.has(g.month)).map(g => g.label)
+
+    setCardReconcile(null)
+    startTimeRef.current = Date.now()
+    setStatus({ phase:'ai', pct:0, current:0, total:txsToImport.length, eta:null, message:'Preparazione…' })
+    await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths })
+  }
+
+  function handleCardReconcileCancel() {
+    setCardReconcile(null)
+    setStatus(null)
+    setError(null)
   }
 
   const isRunning = status !== null
 
   return (
     <>
-    <div className="modal-backdrop" onClick={!isRunning ? onClose : undefined}>
+    <div className="modal-backdrop" onClick={(!isRunning && !cardReconcile) ? onClose : undefined}>
       <div className="modal import-modal" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="modal-header">
           <h3><Upload size={16}/> Importa CSV</h3>
-          {!isRunning && <button className="btn btn-ghost" onClick={onClose}><X size={16}/></button>}
+          {!isRunning && !cardReconcile && <button className="btn btn-ghost" onClick={onClose}><X size={16}/></button>}
         </div>
 
-        {/* Setup form — hidden while running */}
-        {!isRunning && !done && (
+        {/* Setup form — hidden while running or waiting on card reconciliation */}
+        {!isRunning && !done && !cardReconcile && (
           <>
             <div className="info-box">
               Supportato: <strong>UniCredit, Fineco, BNL, Banco BPM, BPER, Credem, Widiba</strong> e altri
@@ -477,18 +559,17 @@ export default function ImportModal({ onClose }) {
               {done.aiCount>0 && <div><Sparkles size={12} color="var(--gold)"/> {done.aiCount} categorizzate con Gemini AI</div>}
               {done.dupes>0  && <div style={{color:'var(--text3)'}}>🔄 {done.dupes} duplicate scartate</div>}
               <div style={{color:'var(--text3)'}}>💾 Salvate su Firestore</div>
+              {done.skippedMonths?.length > 0 && (
+                <div style={{color:'var(--gold)',marginTop:6}}>
+                  ⏳ Mes{done.skippedMonths.length===1?'e':'i'} non abbinat{done.skippedMonths.length===1?'o':'i'} (estratto non ancora presente sul conto): {done.skippedMonths.join(', ')} — reimporta il CSV più avanti.
+                </div>
+              )}
             </div>
-            {reconcileData && (
-              <button className="btn btn-primary" style={{marginTop:16,width:'100%'}}
-                onClick={()=>setShowReconcileModal(true)}>
-                🔍 Riconcilia {reconcileData.reconciled.length} estratt{reconcileData.reconciled.length===1?'o':'i'} →
-              </button>
-            )}
           </div>
         )}
 
         {/* Footer */}
-        {!isRunning && !done && (
+        {!isRunning && !done && !cardReconcile && (
           <div className="modal-footer">
             <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
               <Upload size={14}/> Importa
@@ -504,11 +585,15 @@ export default function ImportModal({ onClose }) {
       </div>
     </div>
 
-    {/* Card reconciliation modal — rendered on top */}
-    {showReconcileModal && reconcileData && (
-      <CardReconcileModal
-        data={reconcileData}
-        onClose={()=>{ setShowReconcileModal(false); onClose() }}
+    {/* Riconciliazione mensile carta di credito — PRIMA di AI/salvataggio */}
+    {cardReconcile && (
+      <CardImportReconcileModal
+        account={cardReconcile.account}
+        monthGroups={cardReconcile.monthGroups}
+        candidates={cardReconcile.candidates}
+        transactions={transactions}
+        onConfirm={handleCardReconcileConfirm}
+        onCancel={handleCardReconcileCancel}
       />
     )}
     </>

@@ -359,8 +359,12 @@ export const useStore = create((set, get) => ({
     return done
   },
 
-  addTransactions: (txs) => {
-    const existing = get().transactions
+  // opts.dedupAgainst: se passato, i doppioni vengono cercati SOLO in questo
+  // sottoinsieme invece che nell'intero elenco transazioni (usato dall'import
+  // carta di credito: doppioni controllati solo contro import precedenti della
+  // STESSA carta, non l'intero DB — vedi ImportModal.jsx)
+  addTransactions: (txs, opts = {}) => {
+    const existing = opts.dedupAgainst || get().transactions
     const rawNew = txs.filter(t =>
       !existing.some(e => e.date===t.date && Math.abs(e.amount-t.amount)<0.01 && (e.description||'').trim().slice(0,60)===(t.description||'').trim().slice(0,60))
     )
