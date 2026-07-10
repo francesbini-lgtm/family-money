@@ -3145,7 +3145,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
               📊 Spese non compensate e accrediti per mese
             </div>
             <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={bar24} margin={{top:8,right:8,bottom:0,left:0}} barSize={14} barCategoryGap="30%">
+              <BarChart data={bar24} margin={{top:20,right:8,bottom:0,left:0}} barSize={14} barCategoryGap="30%">
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                 <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
                 <YAxis hide/>
@@ -3153,8 +3153,14 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   wrapperStyle={{paddingBottom:6}}
                   formatter={v=><span style={{fontSize:10,color:'var(--text2)'}}>{v}</span>}/>
                 <Tooltip content={<SatiBarTooltip />} cursor={{fill:'var(--surface2)'}}/>
-                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti non compensati"/>
-                <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati"/>
+                <Bar dataKey="total" fill="var(--red)" opacity={0.75} radius={[4,4,0,0]} name="Addebiti non compensati">
+                  <LabelList dataKey="total" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                    style={{fontSize:9,fill:'var(--red)',fontWeight:700}}/>
+                </Bar>
+                <Bar dataKey="income" fill="var(--green)" opacity={0.7} radius={[4,4,0,0]} name="Accrediti non abbinati">
+                  <LabelList dataKey="income" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                    style={{fontSize:9,fill:'var(--green)',fontWeight:700}}/>
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -4201,6 +4207,18 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
 
   const total = filtered.reduce((s, t) => s + t.amount, 0)
 
+  // Breakdown per anno — utile per capire in quale periodo si concentrano gli accrediti non abbinati
+  const byYear = useMemo(() => {
+    const map = {}
+    filtered.forEach(t => {
+      const yr = (t._effDate || t.date || '').slice(0, 4) || '—'
+      if (!map[yr]) map[yr] = { count: 0, total: 0 }
+      map[yr].count += 1
+      map[yr].total += t.amount
+    })
+    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [filtered])
+
   const unmatchedExpenses = useMemo(() => {
     const allCatFilters = []
     satiPots.forEach(p => {
@@ -4262,10 +4280,24 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
 
         <div style={{display:'flex',gap:20,padding:'8px 14px',borderRadius:8,
           background:'rgba(200,160,0,.07)',border:'1px solid rgba(200,160,0,.25)',
-          marginBottom:12,fontSize:12}}>
+          marginBottom:8,fontSize:12}}>
           <span><strong style={{color:'var(--gold)'}}>{filtered.length}</strong> <span style={{color:'var(--text3)'}}>accrediti</span></span>
           <span><strong style={{color:'var(--green)'}}>+ € {fmtIT(total,2)}</strong> <span style={{color:'var(--text3)'}}>totale</span></span>
         </div>
+
+        {byYear.length > 0 && (
+          <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}}>
+            {byYear.map(([yr, d]) => (
+              <div key={yr} style={{display:'flex',alignItems:'center',gap:5,padding:'4px 10px',
+                borderRadius:8,border:'1px solid var(--border)',background:'var(--surface2)',fontSize:11,
+                whiteSpace:'nowrap'}}>
+                <strong style={{color:'var(--text)'}}>{yr}</strong>
+                <span style={{color:'var(--text3)'}}>{d.count} acc.</span>
+                <span style={{color:'var(--green)',fontWeight:700}}>+€ {fmtIT(d.total,0)}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:10,flexWrap:'wrap'}}>
           <button onClick={()=>setHideComm(v=>!v)}
