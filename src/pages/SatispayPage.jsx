@@ -2946,6 +2946,21 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
             .map(t => [`${t.cat1}|${t.cat2||''}`, { cat1: t.cat1, cat2: t.cat2||'' }])
         ).values()].sort((a,b) => `${a.cat1}${a.cat2}`.localeCompare(`${b.cat1}${b.cat2}`))
 
+        // Totale sopra la barra verde impilata (income+incomeExcl) — non si può usare
+        // <LabelList dataKey="incomeTotal"> attaccato al segmento "incomeExcl": quando
+        // incomeExcl=0 (frequente) quel segmento ha altezza 0 e Recharts non renderizza
+        // l'etichetta. Componente custom che legge x/y/width dalle props e il totale
+        // da barAnnual via index, stesso pattern già usato in WeekendVacanzeV2Page.
+        function IncomeTotalLabel({ x, y, width, index }) {
+          const total = (barAnnual[index]?.income || 0) + (barAnnual[index]?.incomeExcl || 0)
+          if (!total) return null
+          return (
+            <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10} fontWeight={700} fill="#15803d" style={{ pointerEvents: 'none' }}>
+              {`€${fmtIT(Math.round(total), 0)}`}
+            </text>
+          )
+        }
+
         return (
           <>
             <div className="card" style={{padding:'16px 20px',marginBottom:16}}>
@@ -2976,8 +2991,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                   </Bar>
                   <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati"/>
                   <Bar dataKey="incomeExcl" stackId="acc" fill="#15803d" opacity={0.85} radius={[4,4,0,0]} name="Accrediti abbinati">
-                    <LabelList dataKey="incomeTotal" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
-                      style={{fontSize:10,fill:'#15803d',fontWeight:700}}/>
+                    <LabelList content={<IncomeTotalLabel/>}/>
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
