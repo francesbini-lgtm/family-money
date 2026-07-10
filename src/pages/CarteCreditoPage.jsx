@@ -1,9 +1,16 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { fmtIT } from '../utils/format'
+import { getMergedCats } from '../data/categories'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
+
+const SEL_STYLE = {
+  width:'100%', padding:'4px 6px', borderRadius:5, border:'1px solid var(--border)',
+  fontSize:11, background:'var(--surface)', color:'var(--text)', outline:'none', cursor:'pointer',
+  fontFamily:'var(--font-sans)',
+}
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 function fmtDate(d) {
@@ -42,8 +49,71 @@ function CardChartTooltip({ active, payload, label }) {
   )
 }
 
+// ── Riga tabella con AI Descrizione + Categoria L1/L2 editabili ──────────
+function CardTxRow({ t, allCats, updateTransaction }) {
+  const [descVal, setDescVal] = useState(t.descAI || '')
+  useEffect(() => { setDescVal(t.descAI || '') }, [t.descAI])
+
+  function commitDesc() {
+    const v = descVal.trim()
+    if (v !== (t.descAI || '')) updateTransaction(t.txId, { descAI: v || null, aiEnriched: true })
+  }
+
+  const cat2Options = allCats[t.cat1]?.sub || []
+
+  return (
+    <tr style={{borderBottom:'1px solid var(--border)'}}>
+      <td style={{padding:'8px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+        {fmtDate(t._effDate||t.date)}
+      </td>
+      <td style={{padding:'6px 10px',maxWidth:160}}>
+        <input
+          value={descVal}
+          onChange={e=>setDescVal(e.target.value)}
+          onBlur={commitDesc}
+          onKeyDown={e=>{ if (e.key==='Enter') e.target.blur() }}
+          placeholder="—"
+          style={{width:'100%',padding:'4px 6px',borderRadius:5,border:'1px solid transparent',
+            background:'transparent',fontSize:13,fontWeight:600,color:'var(--text)',
+            outline:'none',fontFamily:'var(--font-sans)',boxSizing:'border-box'}}
+          onFocus={e=>{e.target.style.border='1px solid var(--accent)'; e.target.style.background='var(--surface)'}}
+          onBlurCapture={e=>{e.target.style.border='1px solid transparent'; e.target.style.background='transparent'}}
+        />
+      </td>
+      <td style={{padding:'8px 14px',fontSize:11,color:'var(--text3)',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+        {(t.description||'').slice(0,60)}
+      </td>
+      <td style={{padding:'6px 10px',minWidth:130}}>
+        <select value={t.cat1||''} onChange={e=>updateTransaction(t.txId,{cat1:e.target.value,cat2:''})} style={SEL_STYLE}>
+          <option value="">—</option>
+          {Object.keys(allCats).map(n=><option key={n} value={n}>{n}</option>)}
+        </select>
+      </td>
+      <td style={{padding:'6px 10px',minWidth:120}}>
+        <select value={t.cat2||''} onChange={e=>updateTransaction(t.txId,{cat2:e.target.value})}
+          disabled={!cat2Options.length} style={SEL_STYLE}>
+          <option value="">—</option>
+          {cat2Options.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
+      </td>
+      <td style={{padding:'8px 14px'}}>
+        <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',
+          borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',
+          color:'var(--text2)',fontWeight:700}}>*{t.cardImportCard4}</span>
+      </td>
+      <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',
+        fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)'}}>
+        {t.amount>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount),2)}
+      </td>
+    </tr>
+  )
+}
+
 export default function CarteCreditoPage() {
-  const transactions = useStore(s => s.transactions)
+  const transactions      = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const customCats        = useStore(s => s.customCats)
+  const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
 
   // Solo le transazioni ITEMIZZATE, importate via il breakdown CSV/XLS carta
   // (sostituiscono l'estratto aggregato, che viene escluso al momento della conferma)
@@ -169,7 +239,7 @@ export default function CarteCreditoPage() {
             <table style={{width:'100%',borderCollapse:'collapse',minWidth:600}}>
               <thead>
                 <tr>
-                  {['Data','AI Descrizione','Descrizione','Carta','Importo'].map(h=>(
+                  {['Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Importo'].map(h=>(
                     <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                       textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                       borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
@@ -178,26 +248,7 @@ export default function CarteCreditoPage() {
               </thead>
               <tbody>
                 {cardTxs.slice(0,200).map((t,i)=>(
-                  <tr key={t.txId||i} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'8px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                      {fmtDate(t._effDate||t.date)}
-                    </td>
-                    <td style={{padding:'8px 14px',fontSize:13,fontWeight:600,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      {t.descAI||'—'}
-                    </td>
-                    <td style={{padding:'8px 14px',fontSize:11,color:'var(--text3)',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                      {(t.description||'').slice(0,60)}
-                    </td>
-                    <td style={{padding:'8px 14px'}}>
-                      <span style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',
-                        borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',
-                        color:'var(--text2)',fontWeight:700}}>*{t.cardImportCard4}</span>
-                    </td>
-                    <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',
-                      fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)'}}>
-                      {t.amount>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount),2)}
-                    </td>
-                  </tr>
+                  <CardTxRow key={t.txId||i} t={t} allCats={allCats} updateTransaction={updateTransaction}/>
                 ))}
               </tbody>
             </table>
