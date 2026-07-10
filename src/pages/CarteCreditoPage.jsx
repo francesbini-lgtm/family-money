@@ -1,7 +1,8 @@
 import { useMemo, useState, useEffect } from 'react'
-import { useStore } from '../store/useStore'
+import { useStore, computeUser } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { getMergedCats } from '../data/categories'
+import { showToast } from '../services/notifications'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
@@ -50,7 +51,7 @@ function CardChartTooltip({ active, payload, label }) {
 }
 
 // ── Riga tabella con AI Descrizione + Categoria L1/L2 editabili ──────────
-function CardTxRow({ t, allCats, updateTransaction }) {
+function CardTxRow({ t, allCats, updateTransaction, userAccounts, appPrefs, selected, onToggleSelect, onRemoveComp }) {
   const [descVal, setDescVal] = useState(t.descAI || '')
   useEffect(() => { setDescVal(t.descAI || '') }, [t.descAI])
 
@@ -61,8 +62,19 @@ function CardTxRow({ t, allCats, updateTransaction }) {
 
   const cat2Options = allCats[t.cat1]?.sub || []
 
+  // Utente: ricalcolato usando cardImportCard4 come riferimento carta (più affidabile
+  // di t.card, spesso vuoto per righe di dettaglio importate da CSV/XLS carta),
+  // con fallback a t.user (già calcolato/salvato altrove) se il ricalcolo non risolve nulla.
+  const user = computeUser({...t, card: t.cardImportCard4 || t.card}, userAccounts, appPrefs) || t.user || null
+
+  const isComp = t._compensatedAmt > 0
+  const displayAmt = isComp ? Math.max(0, Math.abs(t.amount) - t._compensatedAmt) : Math.abs(t.amount)
+
   return (
-    <tr style={{borderBottom:'1px solid var(--border)'}}>
+    <tr style={{borderBottom:'1px solid var(--border)', opacity: selected ? 1 : undefined, background: selected ? 'var(--accent-l)' : undefined}}>
+      <td style={{padding:'8px 10px',textAlign:'center'}}>
+        <input type="checkbox" checked={selected} onChange={()=>onToggleSelect(t.txId)} style={{cursor:'pointer'}}/>
+      </td>
       <td style={{padding:'8px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
         {fmtDate(t._effDate||t.date)}
       </td>
@@ -101,9 +113,21 @@ function CardTxRow({ t, allCats, updateTransaction }) {
           borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',
           color:'var(--text2)',fontWeight:700}}>*{t.cardImportCard4}</span>
       </td>
+      <td style={{padding:'8px 14px'}}>
+        {user
+          ? <span style={{fontSize:12,fontWeight:700,color:'var(--accent)'}}>{user}</span>
+          : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>}
+      </td>
       <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',
         fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)'}}>
-        {t.amount>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount),2)}
+        {t.amount>=0?'+':'−'}€ {fmtIT(displayAmt,2)}{isComp && '*'}
+        {isComp && (
+          <button onClick={()=>onRemoveComp(t)} title="Rimuovi abbinamento/compensazione"
+            style={{marginLeft:6,background:'none',border:'none',cursor:'pointer',
+              color:'var(--gold)',fontSize:11,fontWeight:700,verticalAlign:'middle'}}>
+            🔗✕
+          </button>
+        )}
       </td>
     </tr>
   )
@@ -113,7 +137,10 @@ export default function CarteCreditoPage() {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
   const customCats        = useStore(s => s.customCats)
+  const userAccounts      = useStore(s => s.userAccounts)
+  const appPrefs          = useStore(s => s.appPrefs)
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
+  const [selectedIds, setSelectedIds] = useState(new Set())
 
   // Solo le transazioni ITEMIZZATE, importate via il breakdown CSV/XLS carta
   // (sostituiscono l'estratto aggregato, che viene escluso al momento della conferma)
@@ -125,6 +152,70 @@ export default function CarteCreditoPage() {
   const uniqueCards = useMemo(() => [...new Set(cardTxs.map(t=>t.cardImportCard4))], [cardTxs])
 
   const totalSpesa = cardTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0)
+
+  // Categoria L1 più usata (per spesa totale) tra le transazioni importate
+  const topCat = useMemo(() => {
+    const map = {}
+    cardTxs.filter(t=>t.amount<0 && t.cat1).forEach(t => { map[t.cat1] = (map[t.cat1]||0) + Math.abs(t.amount) })
+    const entries = Object.entries(map)
+    if (!entries.length) return null
+    return entries.sort((a,b)=>b[1]-a[1])[0] // [cat1, totale]
+  }, [cardTxs])
+  const topCatPct = topCat && totalSpesa > 0 ? (topCat[1] / totalSpesa * 100) : 0
+
+  // ── Selezione + abbina/compensa (come nello sheet PayPal) ──────────
+  // A differenza dei sistemi compLinks (PayPal/AltreEntrate, un'entrata : N spese),
+  // qui si selezionano N transazioni qualsiasi (tipicamente un rimborso/storno positivo
+  // + una o più spese negative) e si compensano tra loro proporzionalmente: l'importo
+  // che si annulla reciprocamente è min(totale positivi, totale negativi), distribuito
+  // in proporzione su ciascuna transazione coinvolta (_compensatedAmt/_compensatedBy,
+  // stessa convenzione di visualizzazione "zero*/residuo" usata in tutta l'app).
+  function toggleSelect(txId) {
+    setSelectedIds(s => {
+      const n = new Set(s)
+      n.has(txId) ? n.delete(txId) : n.add(txId)
+      return n
+    })
+  }
+
+  function handleAbbina() {
+    const sel = cardTxs.filter(t => selectedIds.has(t.txId))
+    if (sel.length < 2) return
+    const pos = sel.filter(t => t.amount > 0)
+    const neg = sel.filter(t => t.amount < 0)
+    if (!pos.length || !neg.length) {
+      showToast('Seleziona almeno una transazione positiva (rimborso/storno) e una negativa (spesa) da compensare', 'error')
+      return
+    }
+    const totalPos = pos.reduce((s,t)=>s+t.amount, 0)
+    const totalNegAbs = neg.reduce((s,t)=>s+Math.abs(t.amount), 0)
+    const compAmt = Math.min(totalPos, totalNegAbs)
+    const ids = sel.map(t=>t.txId)
+    // _compensatedBy: stringa (singolo txId) quando il gruppo è 1:1, come nella convenzione
+    // già usata altrove (Satispay) — così anche il popup "dettaglio compensazione" già
+    // esistente in TransactionsPage.jsx (che si aspetta un singolo txId) resta compatibile.
+    // Con più di 2 transazioni nel gruppo diventa un array (nessun singolo "altro lato").
+    const byFor = txId => {
+      const others = ids.filter(id=>id!==txId)
+      return others.length === 1 ? others[0] : others
+    }
+    pos.forEach(t => {
+      const amt = Math.round((t.amount / totalPos) * compAmt * 100) / 100
+      updateTransaction(t.txId, { _compensatedAmt: amt, _compensatedBy: byFor(t.txId) })
+    })
+    neg.forEach(t => {
+      const amt = Math.round((Math.abs(t.amount) / totalNegAbs) * compAmt * 100) / 100
+      updateTransaction(t.txId, { _compensatedAmt: amt, _compensatedBy: byFor(t.txId) })
+    })
+    setSelectedIds(new Set())
+    showToast(`✅ ${sel.length} transazioni abbinate e compensate`, 'success')
+  }
+
+  function handleRemoveComp(t) {
+    const group = [t.txId, ...(Array.isArray(t._compensatedBy) ? t._compensatedBy : (t._compensatedBy ? [t._compensatedBy] : []))]
+    group.forEach(txId => updateTransaction(txId, { _compensatedAmt: null, _compensatedBy: null }))
+    showToast('Abbinamento rimosso', 'info')
+  }
 
   // Righe di estratto conto carta ancora NON abbinate/riconciliate (non ancora escluse
   // perché non è ancora stato importato il dettaglio via CSV/XLS per quel mese/carta)
@@ -167,25 +258,13 @@ export default function CarteCreditoPage() {
         </div>
       </div>
 
-      {/* In costruzione banner */}
-      <div style={{padding:'12px 18px',background:'var(--gold-l)',border:'1px solid var(--gold)',
-        borderRadius:10,marginBottom:20,display:'flex',alignItems:'center',gap:10}}>
-        <span style={{fontSize:18}}>🚧</span>
-        <div>
-          <div style={{fontSize:13,fontWeight:700,color:'var(--gold)'}}>Sezione in costruzione</div>
-          <div style={{fontSize:12,color:'var(--text2)'}}>
-            Questa pagina mostrerà analisi avanzate sull'utilizzo delle carte. Per ora visualizza le transazioni importate col dettaglio carta.
-          </div>
-        </div>
-      </div>
-
       {/* KPIs */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12,marginBottom:24}}>
         {[
           ['Utilizzo medio/mese', avgMensile > 0 ? `€ ${fmtIT(avgMensile,0)}` : '—', 'var(--accent)'],
           ['Estratti da abbinare', lumpTxs.length > 0 ? `${lumpTxs.length} (€ ${fmtIT(lumpTotal,0)})` : '0', lumpTxs.length > 0 ? 'var(--gold)' : 'var(--text2)'],
           ['Carte rilevate', uniqueCards.length || '—', 'var(--text)'],
-          ['Spesa importata (dettaglio)', totalSpesa > 0 ? `€ ${fmtIT(totalSpesa,0)}` : '—', 'var(--red)'],
+          [topCat ? `% ${topCat[0]}` : '% categoria più usata', topCat ? `${fmtIT(topCatPct,1)}%` : '—', 'var(--red)'],
         ].map(([l,v,c])=>(
           <div key={l} className="card" style={{padding:'14px 18px',borderLeft:`3px solid ${c}`}}>
             <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--text3)',marginBottom:5}}>{l}</div>
@@ -231,16 +310,28 @@ export default function CarteCreditoPage() {
       ) : (
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',
-            display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
             <span style={{fontSize:14,fontWeight:700}}>Transazioni importate (dettaglio carta)</span>
-            <span style={{fontSize:12,color:'var(--text3)'}}>{cardTxs.length} transazioni · {uniqueCards.length} carte</span>
+            {selectedIds.size >= 2 ? (
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:12,color:'var(--text3)'}}>{selectedIds.size} selezionate</span>
+                <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}} onClick={handleAbbina}>
+                  🔗 Abbina e compensa
+                </button>
+                <button className="btn btn-ghost" style={{fontSize:12,padding:'5px 12px'}} onClick={()=>setSelectedIds(new Set())}>
+                  Annulla selezione
+                </button>
+              </div>
+            ) : (
+              <span style={{fontSize:12,color:'var(--text3)'}}>{cardTxs.length} transazioni · {uniqueCards.length} carte</span>
+            )}
           </div>
           <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',minWidth:600}}>
+            <table style={{width:'100%',borderCollapse:'collapse',minWidth:700}}>
               <thead>
                 <tr>
-                  {['Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Importo'].map(h=>(
-                    <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                  {['','Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Utente','Importo'].map((h,i)=>(
+                    <th key={i} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                       textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                       borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
                   ))}
@@ -248,7 +339,9 @@ export default function CarteCreditoPage() {
               </thead>
               <tbody>
                 {cardTxs.slice(0,200).map((t,i)=>(
-                  <CardTxRow key={t.txId||i} t={t} allCats={allCats} updateTransaction={updateTransaction}/>
+                  <CardTxRow key={t.txId||i} t={t} allCats={allCats} updateTransaction={updateTransaction}
+                    userAccounts={userAccounts} appPrefs={appPrefs}
+                    selected={selectedIds.has(t.txId)} onToggleSelect={toggleSelect} onRemoveComp={handleRemoveComp}/>
                 ))}
               </tbody>
             </table>
