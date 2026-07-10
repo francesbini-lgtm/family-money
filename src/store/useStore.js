@@ -1329,7 +1329,8 @@ export const useStore = create((set, get) => ({
       const desc = (tx.description || tx.descAI || '').toLowerCase()
       const amt  = Math.abs(tx.amount || 0)
 
-      const matches = (rule.conditions || []).every(cond => {
+      const combine = rule.logic === 'or' ? Array.prototype.some : Array.prototype.every
+      const matches = combine.call(rule.conditions || [], cond => {
         const val = (cond.value || '').toLowerCase()
         switch (cond.field) {
           case 'anywhere':
