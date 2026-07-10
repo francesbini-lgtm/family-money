@@ -6,6 +6,27 @@ import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
 // spin animation added via CSS
 
+// Legge un file CSV/TXT come testo normale, oppure — se è un Excel (.xls/.xlsx) —
+// lo converte in testo CSV prima di passarlo a parseCSV, così tutta la logica di
+// rilevamento banca/colonne/formato resta invariata e condivisa fra i due formati.
+// xlsx importato dinamicamente: libreria pesante, caricata solo se l'utente sceglie
+// davvero un file Excel (stesso pattern già usato in questo file per aiService).
+async function fileToCSVText(file) {
+  if (!/\.(xlsx|xls)$/i.test(file.name)) return file.text()
+  const XLSX  = await import('xlsx')
+  const buf   = await file.arrayBuffer()
+  const wb    = XLSX.read(buf, { type: 'array', cellDates: true })
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  // raw:false + dateNF forza date/numeri alla loro rappresentazione testuale
+  // (es. "15/03/2026"), che parseDate()/parseAmount() in csvParser.js già gestiscono
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: 'dd/mm/yyyy', defval: '' })
+  const escCell = v => {
+    const s = v == null ? '' : String(v)
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+  }
+  return rows.map(r => r.map(escCell).join(',')).join('\n')
+}
+
 const MONTH_NAMES = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 function monthLabel(ym) {
   const [y, m] = (ym || '').split('-')
@@ -342,10 +363,15 @@ export default function ImportModal({ onClose }) {
       message:'Lettura file CSV…' })
 
     let allParsed = []
-    for (const file of files) {
-      const text = await file.text()
-      const txs  = parseCSV(text, account, aiRules || [], useStore.getState().transactions)
-      allParsed.push(...txs)
+    try {
+      for (const file of files) {
+        const text = await fileToCSVText(file)
+        const txs  = parseCSV(text, account, aiRules || [], useStore.getState().transactions)
+        allParsed.push(...txs)
+      }
+    } catch (e) {
+      setError(`Errore leggendo il file: ${e.message || e}`)
+      setStatus(null); return
     }
     allParsed.sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
 
@@ -429,7 +455,8 @@ export default function ImportModal({ onClose }) {
           <>
             <div className="info-box">
               Supportato: <strong>UniCredit, Fineco, BNL, Banco BPM, BPER, Credem, Widiba</strong> e altri
-              formati CSV italiani — il parser rileva automaticamente il formato. Puoi selezionare più file.
+              formati CSV italiani — il parser rileva automaticamente il formato. Accetta anche file Excel
+              (.xls/.xlsx), convertiti automaticamente. Puoi selezionare più file.
             </div>
 
             <label className="form-label">Conto / Carta</label>
@@ -439,8 +466,8 @@ export default function ImportModal({ onClose }) {
               ))}
             </select>
 
-            <label className="form-label" style={{marginTop:14}}>File CSV</label>
-            <input type="file" accept=".csv,.txt" multiple className="form-file"
+            <label className="form-label" style={{marginTop:14}}>File CSV o Excel</label>
+            <input type="file" accept=".csv,.txt,.xls,.xlsx" multiple className="form-file"
               onChange={e=>setFiles(Array.from(e.target.files))}/>
             {files.length > 0 && (
               <div className="file-list">
