@@ -3,6 +3,7 @@ import { useStore, computeUser } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { getMergedCats } from '../data/categories'
 import { showToast } from '../services/notifications'
+import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
@@ -67,8 +68,8 @@ function CardTxRow({ t, allCats, updateTransaction, userAccounts, appPrefs, sele
   // con fallback a t.user (già calcolato/salvato altrove) se il ricalcolo non risolve nulla.
   const user = computeUser({...t, card: t.cardImportCard4 || t.card}, userAccounts, appPrefs) || t.user || null
 
-  const isComp = t._compensatedAmt > 0
-  const displayAmt = isComp ? Math.max(0, Math.abs(t.amount) - t._compensatedAmt) : Math.abs(t.amount)
+  const isComp = isCompensated(t)
+  const displayAmt = Math.abs(netAmt(t))
 
   return (
     <tr style={{borderBottom:'1px solid var(--border)', opacity: selected ? 1 : undefined, background: selected ? 'var(--accent-l)' : undefined}}>
@@ -151,12 +152,15 @@ export default function CarteCreditoPage() {
 
   const uniqueCards = useMemo(() => [...new Set(cardTxs.map(t=>t.cardImportCard4))], [cardTxs])
 
-  const totalSpesa = cardTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0)
+  // Math.abs(netAmt(t)) invece di Math.abs(t.amount): una spesa carta compensata
+  // (dalla selezione qui sotto, o da Altre Entrate/PayPal — stesso campo condiviso)
+  // deve contare solo la parte netta, non l'importo lordo pre-compensazione.
+  const totalSpesa = cardTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(netAmt(t)),0)
 
   // Categoria L1 più usata (per spesa totale) tra le transazioni importate
   const topCat = useMemo(() => {
     const map = {}
-    cardTxs.filter(t=>t.amount<0 && t.cat1).forEach(t => { map[t.cat1] = (map[t.cat1]||0) + Math.abs(t.amount) })
+    cardTxs.filter(t=>t.amount<0 && t.cat1).forEach(t => { map[t.cat1] = (map[t.cat1]||0) + Math.abs(netAmt(t)) })
     const entries = Object.entries(map)
     if (!entries.length) return null
     return entries.sort((a,b)=>b[1]-a[1])[0] // [cat1, totale]
@@ -164,12 +168,14 @@ export default function CarteCreditoPage() {
   const topCatPct = topCat && totalSpesa > 0 ? (topCat[1] / totalSpesa * 100) : 0
 
   // ── Selezione + abbina/compensa (come nello sheet PayPal) ──────────
-  // A differenza dei sistemi compLinks (PayPal/AltreEntrate, un'entrata : N spese),
-  // qui si selezionano N transazioni qualsiasi (tipicamente un rimborso/storno positivo
-  // + una o più spese negative) e si compensano tra loro proporzionalmente: l'importo
-  // che si annulla reciprocamente è min(totale positivi, totale negativi), distribuito
-  // in proporzione su ciascuna transazione coinvolta (_compensatedAmt/_compensatedBy,
-  // stessa convenzione di visualizzazione "zero*/residuo" usata in tutta l'app).
+  // Si selezionano N transazioni qualsiasi (tipicamente un rimborso/storno positivo
+  // + una o più spese negative) e si compensano tra loro tramite il motore condiviso
+  // compensateGroup() (src/data/compensation.js) — usato anche da PayPal — che:
+  // (1) scrive nel registro condiviso appPrefs.compLinks (così Altre Entrate/PayPal
+  // vedono la stessa compensazione fatta qui, prima non succedeva), (2) usa il
+  // residuo disponibile (non l'importo lordo) per ogni transazione selezionata,
+  // quindi una transazione già parzialmente compensata altrove non viene
+  // ricompensata da zero (anti-doppia-compensazione).
   function toggleSelect(txId) {
     setSelectedIds(s => {
       const n = new Set(s)
@@ -181,39 +187,22 @@ export default function CarteCreditoPage() {
   function handleAbbina() {
     const sel = cardTxs.filter(t => selectedIds.has(t.txId))
     if (sel.length < 2) return
-    const pos = sel.filter(t => t.amount > 0)
-    const neg = sel.filter(t => t.amount < 0)
-    if (!pos.length || !neg.length) {
-      showToast('Seleziona almeno una transazione positiva (rimborso/storno) e una negativa (spesa) da compensare', 'error')
+    const result = compensateGroup(sel, updateTransaction)
+    if (!result.ok) {
+      showToast(
+        result.reason === 'need-both-signs'
+          ? 'Seleziona almeno una transazione positiva (rimborso/storno) e una negativa (spesa) da compensare'
+          : 'Nessun residuo disponibile da compensare in queste transazioni (già compensate altrove?)',
+        'error'
+      )
       return
     }
-    const totalPos = pos.reduce((s,t)=>s+t.amount, 0)
-    const totalNegAbs = neg.reduce((s,t)=>s+Math.abs(t.amount), 0)
-    const compAmt = Math.min(totalPos, totalNegAbs)
-    const ids = sel.map(t=>t.txId)
-    // _compensatedBy: stringa (singolo txId) quando il gruppo è 1:1, come nella convenzione
-    // già usata altrove (Satispay) — così anche il popup "dettaglio compensazione" già
-    // esistente in TransactionsPage.jsx (che si aspetta un singolo txId) resta compatibile.
-    // Con più di 2 transazioni nel gruppo diventa un array (nessun singolo "altro lato").
-    const byFor = txId => {
-      const others = ids.filter(id=>id!==txId)
-      return others.length === 1 ? others[0] : others
-    }
-    pos.forEach(t => {
-      const amt = Math.round((t.amount / totalPos) * compAmt * 100) / 100
-      updateTransaction(t.txId, { _compensatedAmt: amt, _compensatedBy: byFor(t.txId) })
-    })
-    neg.forEach(t => {
-      const amt = Math.round((Math.abs(t.amount) / totalNegAbs) * compAmt * 100) / 100
-      updateTransaction(t.txId, { _compensatedAmt: amt, _compensatedBy: byFor(t.txId) })
-    })
     setSelectedIds(new Set())
     showToast(`✅ ${sel.length} transazioni abbinate e compensate`, 'success')
   }
 
   function handleRemoveComp(t) {
-    const group = [t.txId, ...(Array.isArray(t._compensatedBy) ? t._compensatedBy : (t._compensatedBy ? [t._compensatedBy] : []))]
-    group.forEach(txId => updateTransaction(txId, { _compensatedAmt: null, _compensatedBy: null }))
+    removeCompensationGroup(t, updateTransaction)
     showToast('Abbinamento rimosso', 'info')
   }
 
@@ -236,7 +225,7 @@ export default function CarteCreditoPage() {
       map[ym][key] += amt
     }
     lumpTxs.forEach(t => add((t._effDate||t.date||'').slice(0,7), 'daAbbinare', Math.abs(t.amount)))
-    cardTxs.filter(t=>t.amount<0).forEach(t => add((t._effDate||t.date||'').slice(0,7), 'importato', Math.abs(t.amount)))
+    cardTxs.filter(t=>t.amount<0).forEach(t => add((t._effDate||t.date||'').slice(0,7), 'importato', Math.abs(netAmt(t))))
     return Object.values(map)
       .sort((a,b)=>a.ym.localeCompare(b.ym))
       .map(m => ({ ...m, label: fmtMonthLabel(m.ym) }))

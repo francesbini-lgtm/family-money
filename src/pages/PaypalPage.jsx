@@ -8,6 +8,7 @@ import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
 import { showToast } from '../services/notifications'
+import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
@@ -75,14 +76,6 @@ function autoMatch(imports, transactions) {
 function daysDiff(d1, d2) {
   if (!d1 || !d2) return '?'
   return Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
-}
-
-// ── PayPal compensation helpers (uses same compLinks key as AltreEntrate) ──
-function getPpCompLinks() { return useStore.getState()?.appPrefs?.compLinks || {} }
-function savePpCompLinks(d) { useStore.getState()?.setAppPref?.('compLinks', d) }
-function getPpLinksArray(entry) {
-  if (!entry) return []
-  return Array.isArray(entry) ? entry : [entry]
 }
 
 // ── PayPal Abbinamento confirmation modal ─────────────────
@@ -1101,8 +1094,9 @@ export default function PaypalPage() {
     [paypalTxs, last6]
   )
 
-  // KPIs
-  const totalSpent   = useMemo(() => paypalExpenses.reduce((s,t) => s + Math.abs(t.amount), 0), [paypalExpenses])
+  // KPIs — netAmt(t) invece di t.amount: una spesa PayPal compensata (qui o da
+  // Altre Entrate/Carte, stesso campo condiviso) deve contare solo il netto.
+  const totalSpent   = useMemo(() => paypalExpenses.reduce((s,t) => s + Math.abs(netAmt(t)), 0), [paypalExpenses])
   const txCount              = paypalTxs.length
   const unmatchedCnt         = paypalImports.filter(i => i.status === 'unmatched').length
   const pendingApprovalCount = paypalImports.filter(i => i.status === 'pending_approval').length
@@ -1113,7 +1107,7 @@ export default function PaypalPage() {
     const map = {}
     paypalExpenses.forEach(t => {
       const k = t.cat1 || 'Non Categorizzato'
-      map[k] = (map[k] || 0) + Math.abs(t.amount)
+      map[k] = (map[k] || 0) + Math.abs(netAmt(t))
     })
     return Object.entries(map).map(([name, value]) => ({ name, value }))
   }, [paypalExpenses])
@@ -1134,7 +1128,7 @@ export default function PaypalPage() {
         .filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
         .forEach(t => {
           const c = t.cat1 || 'Altro'
-          row[c] = (row[c] || 0) + Math.abs(t.amount)
+          row[c] = (row[c] || 0) + Math.abs(netAmt(t))
         })
       return row
     })
@@ -1174,42 +1168,25 @@ export default function PaypalPage() {
   const ppCanAbbina = ppIncomes.length > 0 && ppExpenses.length > 0
 
   function handlePpAbbina() {
-    const incomes  = [...ppIncomes].sort((a,b) => b.amount - a.amount)
-    const expenses = [...ppExpenses].sort((a,b) => a.amount - b.amount)
-    const links    = { ...getPpCompLinks() }
-    const incRem   = new Map(incomes.map(t  => [t.txId, t.amount]))
-    const expRem   = new Map(expenses.map(t => [t.txId, Math.abs(t.amount)]))
-    const incUsed  = new Map(incomes.map(t  => [t.txId, 0]))
-    const expComp  = new Map()
-    const expBy    = new Map()
-
-    for (const exp of expenses) {
-      for (const inc of incomes) {
-        const avail = incRem.get(inc.txId)
-        const need  = expRem.get(exp.txId)
-        if (avail <= 0 || need <= 0) continue
-        const comp = Math.min(avail, need)
-        links[inc.txId] = [...getPpLinksArray(links[inc.txId]), { expTxId: exp.txId, compensatedAmt: comp }]
-        incRem.set(inc.txId, avail - comp)
-        incUsed.set(inc.txId, (incUsed.get(inc.txId)||0) + comp)
-        expRem.set(exp.txId, need - comp)
-        expComp.set(exp.txId, (expComp.get(exp.txId)||0) + comp)
-        if (!expBy.has(exp.txId)) expBy.set(exp.txId, inc.txId)
-      }
-    }
-
-    savePpCompLinks(links)
-    expenses.forEach(exp => {
-      const comp = expComp.get(exp.txId) || 0
-      if (comp > 0) updateTransaction(exp.txId, { _compensatedAmt: comp, _compensatedBy: expBy.get(exp.txId) || null })
-    })
-    incomes.forEach(inc => {
-      const used = incUsed.get(inc.txId) || 0
-      if (used > 0) updateTransaction(inc.txId, { _compensatedAmt: used })
-    })
+    // Motore condiviso con Carte di Credito (src/data/compensation.js): scrive
+    // sullo stesso registro compLinks e usa il residuo disponibile (non
+    // l'importo lordo) per ogni transazione selezionata, quindi una voce già
+    // parzialmente compensata da un'altra pagina non viene ricompensata da zero.
+    const result = compensateGroup(ppSelList, updateTransaction)
     setPpSelIds(new Set())
     setPpAbbinaModal(false)
+    if (!result.ok) {
+      showToast(result.reason === 'nothing-available'
+        ? 'Nessun residuo disponibile da compensare (già compensate altrove?)'
+        : 'Seleziona almeno un\'entrata e un\'uscita', 'error')
+      return
+    }
     showToast('✅ Abbinamento PayPal salvato!')
+  }
+
+  function handlePpRemoveComp(t) {
+    removeCompensationGroup(t, updateTransaction)
+    showToast('Abbinamento rimosso', 'info')
   }
 
   function handleImport(newItems) {
@@ -1719,7 +1696,19 @@ export default function PaypalPage() {
                       {t.descAI || <span style={{opacity:.4}}>—</span>}
                     </td>
                     <td className="pp-td" style={{ fontWeight:600, color: t.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a' }}>
-                      {t.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(t.amount), 2)}
+                      {t.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(netAmt(t)), 2)}
+                      {isCompensated(t) && (
+                        <>
+                          <span style={{fontSize:9,marginLeft:1}}>*</span>
+                          <button
+                            onClick={e => { e.stopPropagation(); handlePpRemoveComp(t) }}
+                            title="Rimuovi abbinamento/compensazione"
+                            style={{marginLeft:6,background:'none',border:'none',cursor:'pointer',
+                              color:'var(--gold,#b45309)',fontSize:11,fontWeight:700,verticalAlign:'middle'}}>
+                            🔗✕
+                          </button>
+                        </>
+                      )}
                     </td>
                     <td className="pp-td">
                       {t.cat1 && (

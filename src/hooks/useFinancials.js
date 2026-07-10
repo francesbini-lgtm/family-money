@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { CATS } from '../data/categories'
+import { netAmt } from '../data/compensation'
 
 // ── Date helpers ──────────────────────────────────────────
 export function getYM(date = new Date()) {
@@ -62,8 +63,11 @@ export function useFinancials() {
       return active.filter(t => (t.competenza || (t._effDate||t.date||'')).startsWith(ym))
     }
 
-    function income(txs)  { return txs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0) }
-    function expense(txs) { return Math.abs(txs.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0)) }
+    // netAmt(t) invece di t.amount: se una spesa/entrata è stata compensata
+    // (Carte/PayPal/AltreEntrate/Satispay condividono _compensatedAmt), qui deve
+    // contare solo la parte netta reale, non l'importo lordo pre-compensazione.
+    function income(txs)  { return txs.filter(t => t.amount > 0).reduce((s, t) => s + netAmt(t), 0) }
+    function expense(txs) { return Math.abs(txs.filter(t => t.amount < 0).reduce((s, t) => s + netAmt(t), 0)) }
 
     const thisTxs = txForMonth(thisYM)
     const lastTxs = txForMonth(lastYM)
@@ -95,7 +99,7 @@ export function useFinancials() {
     // Category breakdown for current month
     const catBreakdown = {}
     thisTxs.filter(t => t.amount < 0).forEach(t => {
-      catBreakdown[t.cat1] = (catBreakdown[t.cat1] || 0) + Math.abs(t.amount)
+      catBreakdown[t.cat1] = (catBreakdown[t.cat1] || 0) + Math.abs(netAmt(t))
     })
     const catList = Object.entries(catBreakdown)
       .map(([name, total]) => ({ name, total, color: CATS[name]?.color || '#aaa' }))
@@ -113,7 +117,7 @@ export function useFinancials() {
     // YTD per category
     const ytdCatBreakdown = {}
     active.filter(t => (t._effDate||(t._effDate||t.date||'')).startsWith(now.getFullYear().toString()) && t.amount < 0).forEach(t => {
-      ytdCatBreakdown[t.cat1] = (ytdCatBreakdown[t.cat1] || 0) + Math.abs(t.amount)
+      ytdCatBreakdown[t.cat1] = (ytdCatBreakdown[t.cat1] || 0) + Math.abs(netAmt(t))
     })
     const ytdCatList = Object.entries(ytdCatBreakdown)
       .map(([name, total]) => ({ name, total }))

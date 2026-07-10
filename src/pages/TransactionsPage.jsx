@@ -12,6 +12,7 @@ import { isVacationEligible, findVacationForDate } from '../data/vacationRules'
 // aiRules.js removed — AI naming rules now stored in Firestore via appPrefs
 import './TransactionsPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
+import { netAmt } from '../data/compensation'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
@@ -161,8 +162,13 @@ function KPIBar({ txs }) {
   const allTxs   = useStore(s => s.transactions)
   const nowYM    = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
   const monthTxs = allTxs.filter(t => !t.excluded && (t._effDate||t.date)?.startsWith(nowYM))
-  const income   = monthTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
-  const expense  = Math.abs(monthTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
+  // netAmt(t) per Entrate/Uscite: sono KPI di reportistica (quanto hai speso/guadagnato
+  // "davvero" al netto di rimborsi/compensazioni Carte/PayPal/AltreEntrate/Satispay),
+  // coerente con useFinancials.js e UscitePage.jsx. Il saldoConto invece resta sull'amount
+  // grezzo — è il denaro reale in banca, la compensazione è un concetto di reportistica,
+  // non deve mai toccare il calcolo del saldo.
+  const income   = monthTxs.filter(t=>t.amount>0).reduce((s,t)=>s+netAmt(t),0)
+  const expense  = Math.abs(monthTxs.filter(t=>t.amount<0).reduce((s,t)=>s+netAmt(t),0))
   // Coerente con PatrimonioPage/DashboardPage: le transazioni escluse non contano nel
   // saldo (tranne il "tappo" di saldo forzato, che va sempre incluso) — prima questo KPI
   // sommava TUTTO indistintamente, disallineandosi dal saldo mostrato altrove nell'app
@@ -2478,7 +2484,10 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const satiPots          = useStore(s=>s.satiPots)
   const allTxs            = useStore(s=>s.transactions)
   const customCats        = useStore(s=>s.customCats)
-  const compensatingTx    = tx._compensatedBy ? allTxs.find(t=>t.txId===tx._compensatedBy) : null
+  // _compensatedBy può essere un singolo txId (gruppo di 2) o un array (gruppo >2,
+  // es. selezione multipla da Carte/PayPal) — prendi il primo per l'etichetta.
+  const compensatingByFirst = Array.isArray(tx._compensatedBy) ? tx._compensatedBy[0] : tx._compensatedBy
+  const compensatingTx    = compensatingByFirst ? allTxs.find(t=>t.txId===compensatingByFirst) : null
   const compensatedLabel  = compensatingTx?.cat2?.toLowerCase()==='satispay' ? 'Compensato Satispay' : 'Compensato'
   const catOpen = openCatTxId === tx.txId
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)

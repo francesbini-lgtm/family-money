@@ -5,6 +5,7 @@ import { Plus, Trash2, Link, TrendingUp, RefreshCw } from 'lucide-react'
 import './AltreEntratePage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
+import { getCompLinks, saveCompLinks, getLinksArray, availableAmount, removeCompensationGroup } from '../data/compensation'
 
 const ENTRY_TYPES = ['Rimborso Costo','Prestito Ricevuto','Trasferimento','Entrata Generica']
 const TYPE_COLORS  = {
@@ -25,14 +26,9 @@ function getUserNicknames() {
   } catch { return ['Fra', 'Sofi'] }
 }
 
-// ── Compensation links (Firestore via appPrefs) ─────────────
-function getCompLinks() { return useStore.getState()?.appPrefs?.compLinks || {} }
-function saveCompLinks(data) { useStore.getState()?.setAppPref?.('compLinks', data) }
-// Normalise a compLinks entry to an array (handles both old single-object and new array format)
-function getAeLinksArray(linkEntry) {
-  if (!linkEntry) return []
-  return Array.isArray(linkEntry) ? linkEntry : [linkEntry]
-}
+// getCompLinks/saveCompLinks/getLinksArray ora condivisi da src/data/compensation.js
+// (stesso registro appPrefs.compLinks usato anche da PayPal e Carte di Credito).
+const getAeLinksArray = getLinksArray
 
 // ── Notes (Firestore via appPrefs) ──────────────────────────
 function getAeNotes() { return useStore.getState()?.appPrefs?.aeNotes || {} }
@@ -379,6 +375,10 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
       .filter(t => {
         if (t.txId === incomeEntry.txId || t.excluded) return false
         if (alreadyLinked.has(t.txId) || linkedToThis.has(t.txId)) return false
+        // Anti-doppia-compensazione: se la spesa ha già un residuo disponibile
+        // pari a zero (compensata altrove — Carte/PayPal/Satispay, stesso campo
+        // condiviso _compensatedAmt), non proporla come candidata.
+        if (availableAmount(t) <= 0.005) return false
         return t.amount < 0  // only expenses (negative transactions)
       })
       .map(t => ({ t, score: scoreMatch(t) }))
@@ -411,15 +411,25 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
 
   function confirm() {
     if (!selected || linkKey == null) return
-    const absExp = Math.abs(selected.amount)
+    // availableAmount(selected) invece di Math.abs(selected.amount): se la spesa
+    // ha già un residuo ridotto da un'altra compensazione (Carte/PayPal/Satispay),
+    // qui si usa/copre solo quello che resta davvero, mai l'importo lordo.
+    const absExp = availableAmount(selected)
     const compensateAmt = Math.min(absExp, availableForComp)
     const isFull = absExp <= availableForComp  // expense fully covered by remaining income
     const links = { ...getCompLinks() }
     const existingArr = getAeLinksArray(links[linkKey])
     links[linkKey] = [...existingArr, { expTxId: selected.txId, mode: isFull ? 'full' : 'partial', compensatedAmt: compensateAmt }]
     saveCompLinks(links)
-    // Expense: keep visible, show net cost (never exclude)
-    updateTransaction(selected.txId, { _compensatedAmt: compensateAmt, _compensatedBy: String(linkKey), excluded: false })
+    // Expense: keep visible, show net cost (never exclude). Cumulativo + merge di
+    // _compensatedBy nel caso la spesa avesse già un altro abbinamento altrove.
+    const existingBy = Array.isArray(selected._compensatedBy) ? selected._compensatedBy : (selected._compensatedBy ? [selected._compensatedBy] : [])
+    const mergedBy = [...new Set([...existingBy, String(linkKey)])]
+    updateTransaction(selected.txId, {
+      _compensatedAmt: Math.round(((selected._compensatedAmt||0) + compensateAmt) * 100) / 100,
+      _compensatedBy: mergedBy.length > 1 ? mergedBy : mergedBy[0],
+      excluded: false,
+    })
     // Income: show residual = income - totalCompensated as _compensatedAmt*
     if (incomeEntry.txId) {
       updateTransaction(incomeEntry.txId, { _compensatedAmt: alreadyUsed + compensateAmt })
@@ -429,7 +439,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
   }
 
   const preview = selected ? (() => {
-    const absExp = Math.abs(selected.amount)
+    const absExp = availableAmount(selected)
     if (absExp <= availableForComp) return { type:'full', msg:`✅ Spesa completamente coperta — verrà esclusa dalle statistiche` }
     return { type:'partial', msg:`⚠️ Compensazione parziale — userai € ${availableForComp.toLocaleString('it-IT',{minimumFractionDigits:2})} del residuo per coprire parzialmente la spesa di € ${absExp.toLocaleString('it-IT',{minimumFractionDigits:2})}` }
   })() : null
@@ -485,7 +495,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                 </thead>
                 <tbody>
                   {filtered.slice(0,80).map((t, idx) => {
-                    const absAmt = Math.abs(t.amount)
+                    const absAmt = availableAmount(t)
                     const isSel  = selected?.txId === t.txId
                     const isFull = absAmt <= availableForComp
                     const score  = t._matchScore || 0
@@ -822,11 +832,23 @@ export default function AltreEntratePage() {
 
   const allEntries = [...autoEntries, ...entries].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
 
-  // Entries abbinate non contano come entrate reali — escluse dai totali
-  const unlinkedEntries = allEntries.filter(e => !compLinks[e.txId || e.id])
-  const thisMonthTotal = unlinkedEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
-  const rimborsiTotal  = autoEntries.filter(e=>e.cat2==='Prestiti' && !compLinks[e.txId || e.id]).reduce((s,e)=>s+e.amount,0)
-  const ytdTotal       = unlinkedEntries.filter(e=>(e.date||'').startsWith(now.getFullYear().toString())).reduce((s,e)=>s+(e.amount||0),0)
+  // Residuo di un'entrata (bancaria o manuale) — quanto NON è ancora stato usato
+  // per compensare spese, secondo il registro compLinks. Un'entrata solo
+  // PARZIALMENTE abbinata deve contare il residuo nei KPI, non sparire del tutto
+  // come succedeva prima (bastava un solo link, anche minimo, per azzerarla).
+  function entryResidual(e) {
+    const compLink = compLinks[e.txId || e.id]
+    if (!compLink) return e.amount || 0
+    const totalUsed = getAeLinksArray(compLink).reduce((s, l) => {
+      const expTx = transactions.find(t => t.txId === l.expTxId)
+      const expAmt = expTx ? Math.abs(expTx.amount) : null
+      return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
+    }, 0)
+    return Math.max(0, (e.amount||0) - totalUsed)
+  }
+  const thisMonthTotal = allEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+entryResidual(e),0)
+  const rimborsiTotal  = autoEntries.filter(e=>e.cat2==='Prestiti').reduce((s,e)=>s+entryResidual(e),0)
+  const ytdTotal       = allEntries.filter(e=>(e.date||'').startsWith(now.getFullYear().toString())).reduce((s,e)=>s+entryResidual(e),0)
   const compCount      = Object.keys(compLinks).length
   const compTotal      = Object.values(compLinks).reduce((s,l) =>
     s + getAeLinksArray(l).reduce((ss,lnk) => ss + (lnk.compensatedAmt||0), 0), 0)
@@ -946,16 +968,10 @@ export default function AltreEntratePage() {
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
                           <span style={{fontSize:11,color:'var(--green)',fontWeight:600}}>✓ {getAeLinksArray(compLink).length > 1 ? `${getAeLinksArray(compLink).length} abbinate` : 'Abbinata'}</span>
                           <button onClick={()=>{
-                            const linkKey = e.txId || e.id
-                            const links = { ...getCompLinks() }
-                            // Clear all linked expense transactions
-                            getAeLinksArray(links[linkKey]).forEach(l => {
-                              if (l.expTxId) useStore.getState().updateTransaction(l.expTxId, { excluded: false, _compensatedAmt: null, _compensatedBy: null })
-                            })
-                            delete links[linkKey]
-                            saveCompLinks(links)
-                            // Clear income residual display
-                            if (e.txId) useStore.getState().updateTransaction(e.txId, { _compensatedAmt: null })
+                            // removeCompensationGroup ripulisce compLinks E i campi
+                            // _compensatedAmt/_compensatedBy su tutti i lati coinvolti,
+                            // indipendentemente da quale pagina ha creato il link.
+                            removeCompensationGroup(e, useStore.getState().updateTransaction)
                           }} style={{border:'none',background:'transparent',cursor:'pointer',color:'var(--red)',fontSize:11,padding:0}}>✕</button>
                         </div>
                       )}
@@ -965,15 +981,7 @@ export default function AltreEntratePage() {
                     </td>
                     <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                       {compLink ? (() => {
-                        // Use min(expTx.amount, compensatedAmt) for both formats
-                        // Old single-object links stored compensatedAmt = incomeEntry.amount (overestimate)
-                        const _linksArr = Array.isArray(compLink) ? compLink : [compLink]
-                        const totalUsed = _linksArr.reduce((s, l) => {
-                          const expTx = transactions.find(t => t.txId === l.expTxId)
-                          const expAmt = expTx ? Math.abs(expTx.amount) : null
-                          return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
-                        }, 0)
-                        const residuo = Math.max(0, (e.amount||0) - totalUsed)
+                        const residuo = entryResidual(e)
                         return residuo > 0.005
                           ? (
                             <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3}}>
