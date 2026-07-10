@@ -11,6 +11,7 @@ import { Plus, Trash2, LogOut, Download, Copy, UserPlus, Check, Pencil } from 'l
 import { fmtIT, fmtDate } from '../utils/format'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
 import { saveTotpSecret, deleteTotpSecret } from '../services/firestore'
+import { ForcedBalanceModal } from './TransactionsPage'
 
 function Tabs({ tabs, active, onChange }) {
   return (
@@ -1289,7 +1290,13 @@ function DangerZoneTab() {
   const [migrResult, setMigrResult] = useState(null)
   const [cacheStep,  setCacheStep]  = useState('idle') // idle | clearing | done
   const [cacheCount, setCacheCount] = useState(0)
+  const [showForceBalance, setShowForceBalance] = useState(false)
   const CONFIRM_PIN = '182218'
+
+  // Saldo attuale — stesso calcolo di PatrimonioPage/TransactionsPage (escluse non contano,
+  // tranne il tappo di saldo forzato stesso, che va sempre incluso)
+  const currentSaldo  = transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s,t)=>s+(t.amount||0),0)
+  const forcedEntries = transactions.filter(t => t._forcedBalance)
 
   async function handleDelete() {
     if (pin !== CONFIRM_PIN) { setError('Codice errato.'); return }
@@ -1399,6 +1406,50 @@ function DangerZoneTab() {
             🗑️ Svuota cache Places
           </button>
         )}
+      </div>
+
+      {/* ── Saldo forzato ── */}
+      <div style={{border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'20px 24px',marginBottom:24}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+          <span style={{fontSize:20}}>⚖️</span>
+          <div>
+            <div style={{fontSize:15,fontWeight:700}}>Saldo forzato</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>
+              Rettifica manuale del saldo conto (una singola transazione &quot;tappo&quot;, nascosta —
+              non compare mai nella lista transazioni né altrove nell'app). Gestiscila solo da qui,
+              protetta da PIN.
+            </div>
+          </div>
+        </div>
+
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>
+          Saldo conto attuale: <strong style={{color:'var(--text)'}}>€ {fmtIT(currentSaldo,2)}</strong>
+        </div>
+
+        {forcedEntries.length > 0 ? (
+          <div style={{marginBottom:14,display:'flex',flexDirection:'column',gap:6}}>
+            {forcedEntries.map(t => (
+              <div key={t.txId} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                padding:'10px 14px',background:'var(--gold-l)',borderRadius:'var(--radius-sm)',fontSize:13}}>
+                <div>
+                  <div style={{fontWeight:600}}>{t.description}</div>
+                  <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{fmtDate ? fmtDate(t.date) : t.date}</div>
+                </div>
+                <strong style={{color:t.amount>=0?'var(--green)':'var(--red)'}}>{t.amount>=0?'+':''}{fmtIT(t.amount,2)} €</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>Nessuna rettifica attiva — il saldo riflette esattamente le transazioni reali.</div>
+        )}
+
+        <button
+          onClick={()=>setShowForceBalance(true)}
+          style={{background:'var(--surface2)',color:'var(--text)',border:'1px solid var(--border)',padding:'8px 18px',borderRadius:'var(--radius-sm)',fontSize:13,fontWeight:600,cursor:'pointer'}}
+        >
+          ⚖️ {forcedEntries.length>0 ? 'Modifica / rimuovi rettifica' : 'Imposta saldo forzato'}
+        </button>
+        {showForceBalance && <ForcedBalanceModal currentSaldo={currentSaldo} onClose={()=>setShowForceBalance(false)}/>}
       </div>
 
       <div style={{

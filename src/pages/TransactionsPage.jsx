@@ -21,9 +21,12 @@ const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov
 const SALDO_PIN = '182218'
 
 // ── Forced balance modal ──────────────────────────────────
-function ForcedBalanceModal({ currentSaldo, onClose }) {
+// Esportato: riusato anche nella sezione dedicata "Saldo forzato" in
+// SettingsPage.jsx (Danger Zone), non solo dal KPI "Saldo Conto" qui in Transazioni.
+export function ForcedBalanceModal({ currentSaldo, onClose }) {
   const addTransactions   = useStore(s => s.addTransactions)
   const updateTransaction = useStore(s => s.updateTransaction)
+  const deleteTransaction = useStore(s => s.deleteTransaction)
   const allTxs            = useStore(s => s.transactions)
   const [step,   setStep]   = useState('pin')
   const [pin,    setPin]    = useState('')
@@ -31,6 +34,13 @@ function ForcedBalanceModal({ currentSaldo, onClose }) {
   const [target, setTarget] = useState('')
   const [saved,  setSaved]  = useState(false)
   const existingForced = allTxs.find(t => t._forcedBalance)
+
+  function remove() {
+    if (!existingForced) return
+    if (!window.confirm('Rimuovere la rettifica di saldo forzato? Il saldo tornerà a quello reale calcolato dalle transazioni.')) return
+    deleteTransaction(existingForced.txId)
+    onClose()
+  }
 
   function confirmPin() {
     if (pin !== SALDO_PIN) { setPinErr('Codice errato'); return }
@@ -135,6 +145,11 @@ function ForcedBalanceModal({ currentSaldo, onClose }) {
               </button>
               <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
             </div>
+            {existingForced && (
+              <button className="btn btn-ghost" style={{width:'100%',marginTop:8,color:'var(--red)'}} onClick={remove}>
+                🗑️ Rimuovi rettifica
+              </button>
+            )}
           </>
         )}
       </div>
@@ -148,7 +163,10 @@ function KPIBar({ txs }) {
   const monthTxs = allTxs.filter(t => !t.excluded && (t._effDate||t.date)?.startsWith(nowYM))
   const income   = monthTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
   const expense  = Math.abs(monthTxs.filter(t=>t.amount<0).reduce((s,t)=>s+t.amount,0))
-  const saldoConto = allTxs.reduce((s,t)=>s+t.amount,0)
+  // Coerente con PatrimonioPage/DashboardPage: le transazioni escluse non contano nel
+  // saldo (tranne il "tappo" di saldo forzato, che va sempre incluso) — prima questo KPI
+  // sommava TUTTO indistintamente, disallineandosi dal saldo mostrato altrove nell'app
+  const saldoConto = allTxs.filter(t => !t.excluded || t._forcedBalance).reduce((s,t)=>s+t.amount,0)
   const fmt = n => '€ ' + fmtIT(Math.abs(Math.round(n)), 0)
   const [showForce, setShowForce] = useState(false)
   const hasForced = allTxs.some(t => t._forcedBalance)
