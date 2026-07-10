@@ -257,6 +257,7 @@ export default function UscitePage() {
 
   const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey } | { _nonRecurring: true, monthKey }
   const [showNonRecurring, setShowNonRecurring] = useState(false) // toggle riga non ricorrenti
+  const [adjVacanze, setAdjVacanze] = useState(true) // toggle: netto carburante/autostrada imputati manualmente nelle vacanze — sempre attivo di default
   const [openTx, setOpenTx] = useState(null)
 
   // ── Build expense list ────────────────────────────────────────────────────
@@ -295,7 +296,7 @@ export default function UscitePage() {
   }, [transactions, months])
 
   // ── Build data map: cat1 → monthKey → { total, l2Map, txs } ──────────────
-  const dataMap = useMemo(() => {
+  const rawDataMap = useMemo(() => {
     const map = {}
     expenses.forEach(t => {
       const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
@@ -314,6 +315,60 @@ export default function UscitePage() {
     })
     return map
   }, [expenses, months])
+
+  // ── Adj vacanze: sposta il carburante/autostrada imputato manualmente nel
+  // drill-down di una vacanza (Weekend e Vacanze v2) da Veicoli a Weekend e
+  // Vacanze, così il totale "Weekend e Vacanze" qui coincide col costo vacanza
+  // mostrato in quella pagina (vacationTotalCost) — riallocazione a somma zero,
+  // quindi il "Totale uscite" non cambia. Attribuita al mese di inizio vacanza
+  // (semplificazione per vacanze a cavallo di due mesi).
+  // NB: i vani "txs" delle celle rettificate (Veicoli/Carburante-Autostrade e
+  // Weekend e Vacanze) non sommeranno esattamente al totale mostrato, perché
+  // l'aggiustamento manuale non è una transazione reale — è un effetto atteso,
+  // non un bug, del riportare un importo dichiarato a mano.
+  const vacationsForAdj = appPrefs?.calendarVacations || []
+  const dataMap = useMemo(() => {
+    if (!adjVacanze) return rawDataMap
+    const map = { ...rawDataMap }
+    const monthKeys = new Set(months.map(m => m.key))
+
+    function cloneCat1Month(cat1, ym) {
+      map[cat1] = { ...(map[cat1] || {}) }
+      const cur = map[cat1][ym] || { total: 0, l2: {}, txs: [] }
+      map[cat1][ym] = { total: cur.total, l2: { ...cur.l2 }, txs: cur.txs }
+      return map[cat1][ym]
+    }
+
+    vacationsForAdj.forEach(v => {
+      const manualFuel = Number(v.manualCarburante) || 0
+      const manualHwy  = Number(v.manualAutostrada) || 0
+      if (!manualFuel && !manualHwy) return
+      const ym = (v.from || '').slice(0, 7)
+      if (!monthKeys.has(ym)) return // vacanza fuori dal periodo mostrato
+
+      if (manualFuel > 0) {
+        const veicoli = cloneCat1Month('Veicoli', ym)
+        veicoli.total = Math.max(0, veicoli.total - manualFuel)
+        const carb = veicoli.l2['Carburante']
+        if (carb) veicoli.l2['Carburante'] = { ...carb, total: Math.max(0, carb.total - manualFuel) }
+      }
+      if (manualHwy > 0) {
+        const veicoli = cloneCat1Month('Veicoli', ym)
+        veicoli.total = Math.max(0, veicoli.total - manualHwy)
+        const aut = veicoli.l2['Autostrade']
+        if (aut) veicoli.l2['Autostrade'] = { ...aut, total: Math.max(0, aut.total - manualHwy) }
+      }
+
+      const extra = manualFuel + manualHwy
+      if (extra > 0) {
+        const wv = cloneCat1Month('Weekend e Vacanze', ym)
+        wv.total += extra
+        const key = 'Carburante/Autostrada'
+        wv.l2[key] = { total: (wv.l2[key]?.total || 0) + extra, txs: wv.l2[key]?.txs || [] }
+      }
+    })
+    return map
+  }, [rawDataMap, adjVacanze, vacationsForAdj, months])
 
   // ── Stable category order (from ALL transactions, ignoring withSati toggle) ─
   const stableOrder = useMemo(() => {
@@ -692,6 +747,14 @@ export default function UscitePage() {
           <span className="uscite-sati-dot" style={{background: showNonRecurring ? '#6366f1' : undefined}}/>
           {showNonRecurring ? 'Non ricorrenti visibili' : 'Separa non ricorrenti'}
         </button>
+        <button
+          className={'uscite-sati-toggle' + (adjVacanze ? ' active' : '')}
+          onClick={() => setAdjVacanze(v => !v)}
+          title="Sposta carburante/autostrada imputati manualmente nelle vacanze da Veicoli a Weekend e Vacanze"
+        >
+          <span className="uscite-sati-dot" style={{background: adjVacanze ? '#6366f1' : undefined}}/>
+          Adj vacanze
+        </button>
       </div>
 
       {/* Table + Detail */}
@@ -751,7 +814,9 @@ export default function UscitePage() {
                     ...(expanded ? l2List.map(cat2 => (
                       <tr key={`${cat1}/${cat2}`} className="uscite-tr-l2">
                         <td className="uscite-td-cat l2">
-                          <span className="uscite-l2-label">{cat2}</span>
+                          <span className="uscite-l2-label">
+                            {cat2}{adjVacanze && cat1 === 'Veicoli' && (cat2 === 'Carburante' || cat2 === 'Autostrade') ? ' (**)' : ''}
+                          </span>
                         </td>
                         {months.map(m => {
                           const rawVal = dataMap[cat1]?.[m.key]?.l2[cat2]?.total || 0
@@ -865,6 +930,7 @@ export default function UscitePage() {
           </table>
           <div style={{padding:'6px 14px 10px',fontSize:11,color:'var(--text3)',borderTop:'1px solid var(--border)'}}>
             * Media/mese = totale periodo ÷ 6
+            {adjVacanze && <><br/>Nota (**): Carburante e Autostrada sono al netto delle vacanze</>}
           </div>
         </div>
 

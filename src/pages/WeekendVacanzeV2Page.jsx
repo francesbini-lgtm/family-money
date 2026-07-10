@@ -1,11 +1,12 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, Fragment } from 'react'
 import { useStore } from '../store/useStore'
-import { Plus, Trash2, Search, Check, X as XIcon } from 'lucide-react'
+import { Plus, Trash2, Search, Check, X as XIcon, ChevronDown, ChevronRight } from 'lucide-react'
 import { fmtIT } from '../utils/format'
 import Modal from '../components/Modal'
+import { getMergedCats } from '../data/categories'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
 import {
-  vacationSpendInRange, allDatesBetween, dominantVacationType,
+  vacationTotalCost, allDatesBetween, dominantVacationType,
   destCategoryEmoji, destCategoryLabel, computeCandidateVacations,
   DEST_TYPES, labelToEmoji,
 } from '../data/vacationRules'
@@ -78,28 +79,105 @@ function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '�
   )
 }
 
-// ── Selettore Mare / Montagna / Città / Altro — mostra solo l'emoji, click per cambiare ──
+// ── Selettore Mare / Montagna / Città / Altro — solo emoji, niente testo, niente header ──
 function DestTypeSelect({ value, onSave }) {
   return (
     <select
       value={value}
+      onClick={e => e.stopPropagation()}
       onChange={e => onSave(e.target.value)}
       title={`Destinazione: ${value} — clicca per cambiare`}
       style={{
         border: 'none', background: 'transparent', cursor: 'pointer',
         fontSize: 14, appearance: 'none', WebkitAppearance: 'none',
-        padding: 0, marginRight: 4, color: 'inherit'
+        padding: 0, marginRight: 2, color: 'inherit'
       }}
     >
       {DEST_TYPES.map(t => (
-        <option key={t} value={t}>{labelToEmoji(t)} {t}</option>
+        <option key={t} value={t} title={t}>{labelToEmoji(t)}</option>
       ))}
     </select>
   )
 }
 
+// ── Riga spesa nel drill-down di una vacanza ──────────────
+function VacationTxRow({ t, onDeleteRequest }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12, borderBottom: '1px solid var(--border)' }}>
+      <span style={{ color: 'var(--text3)', width: 60, flexShrink: 0 }}>{fmtDate(t._effDate || t.date)}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.descAI || t.description}</span>
+      <span style={{ fontWeight: 600, color: 'var(--text1)', flexShrink: 0 }}>€ {fmtIT(Math.abs(t.amount), 2)}</span>
+      <button onClick={() => onDeleteRequest(t)} title="Togli dalla vacanza (richiede una nuova categoria)"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        <Trash2 size={11} />
+      </button>
+    </div>
+  )
+}
+
+// ── Riga costo manuale (Carburante / Autostrada) — sempre presente, editabile ──
+function ManualCostRow({ icon, label, value, onSave }) {
+  const [val, setVal] = useState(String(value || ''))
+  useEffect(() => { setVal(String(value || '')) }, [value])
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12 }}>
+      <span style={{ width: 110, flexShrink: 0 }}>{icon} {label}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ fontSize: 11, color: 'var(--text3)' }}>€</span>
+      <input
+        type="number" value={val} placeholder="0"
+        onChange={e => setVal(e.target.value)}
+        onBlur={() => onSave(parseFloat(val) || 0)}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        style={{ width: 80, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 12, textAlign: 'right', fontFamily: 'var(--font-sans)' }}
+      />
+    </div>
+  )
+}
+
+// ── Modale: chiede la nuova categoria prima di togliere una spesa dalla vacanza ──
+function RecategorizeModal({ tx, onConfirm, onClose }) {
+  const customCats = useStore(s => s.customCats)
+  const allCats = useMemo(() => getMergedCats(customCats), [customCats])
+  const [cat1, setCat1] = useState('')
+  const [cat2, setCat2] = useState('')
+  const cat2Options = cat1 && allCats[cat1]?.sub ? allCats[cat1].sub : []
+  const selStyle = { width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text1)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box' }
+  return (
+    <Modal title="Ricategorizza spesa" onClose={onClose} width={380}>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14 }}>
+        Prima di togliere &quot;{tx.descAI || tx.description || 'questa spesa'}&quot; dalla vacanza, scegli la nuova categoria — non può restare senza categoria.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.05em' }}>Categoria L1</div>
+          <select value={cat1} onChange={e => { setCat1(e.target.value); setCat2('') }} style={selStyle}>
+            <option value="">—</option>
+            {Object.keys(allCats).filter(n => n !== 'Weekend e Vacanze').map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.05em' }}>Categoria L2</div>
+          <select value={cat2} onChange={e => setCat2(e.target.value)} disabled={!cat2Options.length} style={{ ...selStyle, opacity: cat2Options.length ? 1 : 0.4 }}>
+            <option value="">—</option>
+            {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <button onClick={onClose} style={{ padding: '7px 12px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>Annulla</button>
+        <button onClick={() => onConfirm(cat1, cat2)} disabled={!cat1}
+          style={{ padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13, opacity: cat1 ? 1 : 0.5 }}>
+          Conferma
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function WeekendVacanzeV2Page() {
   const transactions = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
   const { vacations, add, update, remove } = useVacations()
   const { notVacationDates, mark, unmark } = useNotVacationDates()
 
@@ -110,7 +188,18 @@ export default function WeekendVacanzeV2Page() {
   const [selectedCand, setSelectedCand] = useState(new Set())
   const [mergeName, setMergeName] = useState('')
   const [undo, setUndo] = useState(null) // { label, onUndo }
+  const [expandedId, setExpandedId] = useState(null) // id vacanza espansa (drill-down spese)
+  const [recatTx, setRecatTx] = useState(null) // { tx } — spesa in attesa di nuova categoria prima di essere tolta dalla vacanza
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
+
+  // Conferma la ricategorizzazione: la spesa esce da "Weekend e Vacanze" verso la
+  // nuova categoria scelta dall'utente, marcata userEditedCat perché non venga
+  // ri-agganciata automaticamente dalle regole di categorizzazione
+  function confirmRecategorize(cat1, cat2) {
+    if (!recatTx || !cat1) return
+    updateTransaction(recatTx.txId, { cat1, cat2: cat2 || null, userEditedCat: true })
+    setRecatTx(null)
+  }
 
   // Snackbar "Annulla" — resta visibile 8s dopo un'eliminazione/ignora, poi scompare
   useEffect(() => {
@@ -250,7 +339,7 @@ export default function WeekendVacanzeV2Page() {
     last5.forEach(v => {
       const yr = String(getYear(v))
       const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
-      byY[yr][type] += vacationSpendInRange(transactions, v.from, v.to)
+      byY[yr][type] += vacationTotalCost(transactions, v)
     })
     return years5.map(y => byY[y])
   }, [last5, transactions, years5])
@@ -278,7 +367,7 @@ export default function WeekendVacanzeV2Page() {
 
   const avgCost = useMemo(() => {
     if (!last5.length) return 0
-    const tot = last5.reduce((s, v) => s + vacationSpendInRange(transactions, v.from, v.to), 0)
+    const tot = last5.reduce((s, v) => s + vacationTotalCost(transactions, v), 0)
     return tot / last5.length
   }, [last5, transactions])
 
@@ -341,6 +430,22 @@ export default function WeekendVacanzeV2Page() {
       {/* Statistiche ultimi 5 anni */}
       {confirmed.length > 0 && (
         <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center', padding: 16, marginBottom: 20 }}>
+          {/* Legenda colori — Tipo (Weekend/Vacanze) + Mare/Montagna/Città/Altro */}
+          <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 11, color: 'var(--text3)', paddingBottom: 4, borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
+            {Object.entries(TYPE_COLORS).map(([label, color]) => (
+              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: color, display: 'inline-block' }} />
+                {label}
+              </span>
+            ))}
+            <span style={{ width: 1, background: 'var(--border)', margin: '0 2px' }} />
+            {Object.entries(PIE_COLORS).map(([label, color]) => (
+              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, display: 'inline-block' }} />
+                {label}
+              </span>
+            ))}
+          </div>
           <div style={{ minWidth: 180 }}>
             <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Spesa Weekend vs Vacanze ({years5[0]}–{years5[4]})</div>
             <ResponsiveContainer width="100%" height={160}>
@@ -430,7 +535,7 @@ export default function WeekendVacanzeV2Page() {
         </div>
       ) : (
         byYear.map(([year, vacs]) => {
-          const yearSpend = vacs.reduce((s, v) => s + vacationSpendInRange(transactions, v.from, v.to), 0)
+          const yearSpend = vacs.reduce((s, v) => s + vacationTotalCost(transactions, v), 0)
 
           return (
             <div key={year} style={{ marginBottom: 28 }}>
@@ -444,61 +549,106 @@ export default function WeekendVacanzeV2Page() {
                   <thead>
                     <tr>
                       <th style={thStyle}>Tipo</th>
-                      <th style={thStyle}>Dove</th>
+                      <th style={thStyle}></th>
+                      <th style={thStyle}>DOVE</th>
                       <th style={thStyle}>Da</th>
                       <th style={thStyle}>A</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Giorni</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Notti</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Spese TX</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>Costo/notte</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Costo/giorno</th>
                       <th style={thStyle}></th>
                     </tr>
                   </thead>
                   <tbody>
                     {vacs.map(v => {
                       const nights = nightsBetween(v.from, v.to)
+                      const giorni = nights + 1
                       const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
-                      const spend = vacationSpendInRange(transactions, v.from, v.to)
+                      const spend = vacationTotalCost(transactions, v)
                       const destType = v.destType || destCategoryLabel(v.city)
-                      const costPerNight = spend > 0 ? spend / Math.max(nights, 1) : 0
+                      const costPerGiorno = spend > 0 ? spend / Math.max(giorni, 1) : 0
+                      const isOpen = expandedId === v.id
+
+                      // Spese "Weekend e Vacanze" nel periodo di questa vacanza — drill-down,
+                      // calcolato come plain filter (no useMemo, siamo dentro una .map())
+                      const vacTxs = isOpen
+                        ? (transactions || [])
+                            .filter(t => !t.excluded && t.cat1 === 'Weekend e Vacanze' && t.amount < 0)
+                            .filter(t => { const d = t._effDate || t.date; return d && d >= v.from && d <= v.to })
+                            .sort((a, b) => (a._effDate || a.date || '').localeCompare(b._effDate || b.date || ''))
+                        : []
 
                       return (
-                        <tr key={v.id} style={{ transition: 'background .1s' }} onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'} onMouseLeave={e => e.currentTarget.style.background = ''}>
-                          {/* Tipo (derivato dal cat2 dominante delle transazioni, non editabile) */}
-                          <td style={tdStyle}>
-                            <span style={{
-                              fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700,
-                              background: type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
-                              color: type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
-                            }}>{type}</span>
-                          </td>
-                          {/* Dove */}
-                          <td style={{ ...tdStyle, fontWeight: 700 }}>
-                            <DestTypeSelect value={destType} onSave={val => upd(v, 'destType', val)} />
-                            <EditCell value={v.city} onSave={val => upd(v, 'city', val)} width={110} />
-                          </td>
-                          {/* Date */}
-                          <td style={tdStyle}>
-                            <EditCell value={v.from || ''} type="date" onSave={val => upd(v, 'from', val)} width={110} />
-                          </td>
-                          <td style={tdStyle}>
-                            <EditCell value={v.to || ''} type="date" onSave={val => upd(v, 'to', val)} width={110} />
-                          </td>
-                          {/* Notti */}
-                          <td style={numTd}>{nights}</td>
-                          {/* Spese TX */}
-                          <td style={{ ...numTd, color: spend > 0 ? 'var(--text1)' : 'var(--text3)' }}>
-                            {spend > 0 ? `€ ${fmtIT(spend, 0)}` : '—'}
-                          </td>
-                          {/* Costo/notte */}
-                          <td style={{ ...numTd, color: costPerNight > 0 ? 'var(--text1)' : 'var(--text3)' }}>
-                            {costPerNight > 0 ? `€ ${fmtIT(costPerNight, 0)}` : '—'}
-                          </td>
-                          <td style={{ ...tdStyle, textAlign: 'center' }}>
-                            <button onClick={() => removeRow(v)} title="Elimina / segna come non vacanza" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center' }}>
-                              <Trash2 size={12} />
-                            </button>
-                          </td>
-                        </tr>
+                        <Fragment key={v.id}>
+                          <tr onClick={() => setExpandedId(isOpen ? null : v.id)}
+                            style={{ transition: 'background .1s', cursor: 'pointer', background: isOpen ? 'var(--surface2)' : undefined }}
+                            onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = 'var(--surface2)' }}
+                            onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = '' }}>
+                            {/* Tipo (derivato dal cat2 dominante delle transazioni, non editabile) */}
+                            <td style={tdStyle}>
+                              <span style={{
+                                fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700,
+                                background: type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
+                                color: type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
+                              }}>{type}</span>
+                            </td>
+                            {/* Emoji destinazione — senza header, solo icona */}
+                            <td style={{ ...tdStyle, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                              <DestTypeSelect value={destType} onSave={val => upd(v, 'destType', val)} />
+                            </td>
+                            {/* DOVE */}
+                            <td style={{ ...tdStyle, fontWeight: 700 }} onClick={e => e.stopPropagation()}>
+                              <EditCell value={v.city} onSave={val => upd(v, 'city', val)} width={110} />
+                            </td>
+                            {/* Date */}
+                            <td style={tdStyle} onClick={e => e.stopPropagation()}>
+                              <EditCell value={v.from || ''} type="date" onSave={val => upd(v, 'from', val)} width={110} />
+                            </td>
+                            <td style={tdStyle} onClick={e => e.stopPropagation()}>
+                              <EditCell value={v.to || ''} type="date" onSave={val => upd(v, 'to', val)} width={110} />
+                            </td>
+                            {/* Giorni */}
+                            <td style={numTd}>{giorni}</td>
+                            {/* Notti */}
+                            <td style={numTd}>{nights}</td>
+                            {/* Spese TX */}
+                            <td style={{ ...numTd, color: spend > 0 ? 'var(--text1)' : 'var(--text3)' }}>
+                              {spend > 0 ? `€ ${fmtIT(spend, 0)}` : '—'}
+                            </td>
+                            {/* Costo/giorno */}
+                            <td style={{ ...numTd, color: costPerGiorno > 0 ? 'var(--text1)' : 'var(--text3)' }}>
+                              {costPerGiorno > 0 ? `€ ${fmtIT(costPerGiorno, 0)}` : '—'}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                              <button onClick={() => removeRow(v)} title="Elimina / segna come non vacanza" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center' }}>
+                                <Trash2 size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr key={`${v.id}-detail`}>
+                              <td colSpan={10} style={{ padding: 0, background: 'var(--bg2, #f7f5f2)', borderBottom: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+                                <div style={{ padding: '8px 16px 12px' }}>
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '4px 0 2px' }}>
+                                    Spese "Weekend e Vacanze" in questo periodo
+                                  </div>
+                                  {vacTxs.length === 0 && (
+                                    <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 8px' }}>Nessuna spesa categorizzata in questo periodo.</div>
+                                  )}
+                                  {vacTxs.map(t => (
+                                    <VacationTxRow key={t.txId} t={t} onDeleteRequest={tx => setRecatTx(tx)} />
+                                  ))}
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 2px' }}>
+                                    Costi manuali (aggiunti al totale vacanza)
+                                  </div>
+                                  <ManualCostRow icon="⛽" label="Carburante" value={v.manualCarburante} onSave={val => upd(v, 'manualCarburante', val)} />
+                                  <ManualCostRow icon="🛣️" label="Autostrada" value={v.manualAutostrada} onSave={val => upd(v, 'manualAutostrada', val)} />
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -507,6 +657,11 @@ export default function WeekendVacanzeV2Page() {
             </div>
           )
         })
+      )}
+
+      {/* Modale ricategorizzazione: richiesta prima di togliere una spesa dalla vacanza */}
+      {recatTx && (
+        <RecategorizeModal tx={recatTx} onConfirm={confirmRecategorize} onClose={() => setRecatTx(null)} />
       )}
 
       {/* Pannello "Vacanze da confermare" */}

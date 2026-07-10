@@ -133,6 +133,18 @@ export function vacationSpendInRange(transactions, from, to) {
     }, 0)
 }
 
+// Costo totale di una vacanza dichiarata: spesa transazioni "Weekend e Vacanze" nel
+// periodo + eventuali importi manuali di carburante/autostrada imputati dall'utente
+// (v.manualCarburante / v.manualAutostrada, compilati a mano nel drill-down della riga
+// perché quelle spese sono categorizzate "Veicoli" e non risulterebbero altrimenti nel
+// costo della vacanza — vedi anche la riconciliazione in UscitePage "Adj vacanze")
+export function vacationManualExtra(v) {
+  return (Number(v?.manualCarburante) || 0) + (Number(v?.manualAutostrada) || 0)
+}
+export function vacationTotalCost(transactions, v) {
+  return vacationSpendInRange(transactions, v.from, v.to) + vacationManualExtra(v)
+}
+
 // Tipo dominante (Weekend / Vacanze) nell'intervallo, in base al cat2 più frequente
 // tra le transazioni "Weekend e Vacanze" (non più su base "numero di notti")
 export function dominantVacationType(transactions, from, to) {
@@ -157,7 +169,7 @@ const DEST_CITY_KEYWORDS = ['roma','milano','madrid','parigi','paris','londra','
 export const DEST_TYPES = ['Mare', 'Montagna', 'Città', 'Altro']
 
 export function labelToEmoji(label) {
-  return label === 'Mare' ? '🏖️' : label === 'Montagna' ? '⛷️' : label === 'Città' ? '🏙️' : '✈️'
+  return label === 'Mare' ? '🏖️' : label === 'Montagna' ? '🏔️' : label === 'Città' ? '🏙️' : '✈️'
 }
 
 export function destCategoryLabel(city = '') {
