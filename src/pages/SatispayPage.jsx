@@ -3007,8 +3007,13 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                     <LabelList dataKey="total" position="top" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
                       style={{fontSize:10,fill:'var(--red)',fontWeight:700}}/>
                   </Bar>
-                  <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati"/>
+                  <Bar dataKey="income" stackId="acc" fill="#4ade80" opacity={0.75} radius={[0,0,0,0]} name="Accrediti non abbinati">
+                    <LabelList dataKey="income" position="center" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:9,fill:'#14532d',fontWeight:700}}/>
+                  </Bar>
                   <Bar dataKey="incomeExcl" stackId="acc" fill="#15803d" opacity={0.85} radius={[4,4,0,0]} name="Accrediti abbinati">
+                    <LabelList dataKey="incomeExcl" position="center" formatter={v => v>0 ? `€${fmtIT(Math.round(v),0)}` : ''}
+                      style={{fontSize:9,fill:'#fff',fontWeight:700}}/>
                     <LabelList content={<IncomeTotalLabel/>}/>
                   </Bar>
                 </BarChart>
