@@ -1095,9 +1095,12 @@ function CategoriesTab() {
               <button
                 onClick={()=>{
                   if(confirm(`Rimuovere la subcategoria "${cat2}" da tutte le ${count} transazioni ${cat1}?`)) {
+                    // Una sola voce Undo per l'operazione di massa (fix 2026-07-12)
+                    useStore.getState().beginTxUndoBatch?.()
                     transactions
                       .filter(t=>t.cat1===cat1&&t.cat2===cat2)
                       .forEach(t=>updateTransaction(t.txId,{cat2:''}))
+                    useStore.getState().commitTxUndoBatch?.(`Rimozione L2 "${cat2}" da ${count} tx`)
                   }
                 }}
                 style={{fontSize:11,padding:'2px 10px',borderRadius:6,border:'1px solid var(--red)',

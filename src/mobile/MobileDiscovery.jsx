@@ -583,12 +583,15 @@ export default function MobileDiscovery() {
       if (mode === 'future') return (t.date || '') >= now
       return true
     })
+    // Una sola voce Undo per l'applicazione di massa della regola (fix 2026-07-12)
+    useStore.getState().beginTxUndoBatch?.()
     targets.forEach(t => {
       const patch = {}
       if (updateDescAI) { patch.descAI = newDesc; patch.userEditedDesc = true }
       if (cat1) { patch.cat1 = cat1; if (cat2) patch.cat2 = cat2 }
       if (Object.keys(patch).length) updateTransaction(t.txId, patch)
     })
+    useStore.getState().commitTxUndoBatch?.(`Regola "${newDesc}" su ${targets.length} tx`)
     setDescRulePopup(null)
   }
 
@@ -626,7 +629,10 @@ export default function MobileDiscovery() {
       if (mode === 'future') return (t.date || '') >= now
       return true
     })
+    // Una sola voce Undo per l'applicazione di massa della regola (fix 2026-07-12)
+    useStore.getState().beginTxUndoBatch?.()
     targets.forEach(t => updateTransaction(t.txId, { cat1, cat2: cat2 || null }))
+    useStore.getState().commitTxUndoBatch?.(`Regola categoria su ${targets.length} tx`)
     setCatRulePopup(null)
   }
 

@@ -153,6 +153,11 @@ export function removeCompensationGroup(tx, updateTransaction) {
   byGroup.forEach(id => touched.add(id))
 
   saveCompLinks(links)
-  touched.forEach(id => updateTransaction(id, { _compensatedAmt: null, _compensatedBy: null }))
+  // Guard (fix 2026-07-12): per le entrate MANUALI di Altre Entrate la chiave è
+  // tx.id e tx.txId è undefined — updateTransaction(undefined) era un no-op
+  // innocuo ma sporco. Le entrate manuali non vivono nella collection
+  // transactions: il loro stato di compensazione è interamente in compLinks
+  // (già ripulito sopra), quindi si saltano gli id non validi.
+  touched.forEach(id => { if (id) updateTransaction(id, { _compensatedAmt: null, _compensatedBy: null }) })
   return [...touched]
 }

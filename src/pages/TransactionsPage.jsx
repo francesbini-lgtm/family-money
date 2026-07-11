@@ -353,6 +353,11 @@ function BulkEditModal({ txIds, onClose }) {
     if (sel1)             { patch.cat1 = sel1; patch.cat2 = sel2; patch.conf = 100 }
     if (Object.keys(patch).length === 0) { onClose(); return }
 
+    // Un solo blocco Undo per l'intera modifica multipla (selezione + eventuale
+    // applicazione della regola a tutte le corrispondenti) — prima ogni riga era
+    // una voce separata e un Annulla ne ripristinava UNA sola (fix 2026-07-12)
+    useStore.getState().beginTxUndoBatch?.()
+
     txList.forEach(t => updateTransaction(t.txId, patch))
 
     if (rulesOpen && ruleActive && sel1) {
@@ -377,6 +382,7 @@ function BulkEditModal({ txIds, onClose }) {
         updateTransaction(t.txId, patch)
       })
     }
+    useStore.getState().commitTxUndoBatch?.(`Modifica multipla ${txList.length} tx`)
     setApplied(true)
     setTimeout(onClose, 600)
   }
@@ -3406,11 +3412,11 @@ export default function TransactionsPage() {
             💬 Feedback
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--red)',border:'1px solid var(--red)',borderRadius:6,padding:'4px 10px'}}
-            onClick={()=>{selected.forEach(id=>store.updateTransaction(id,{excluded:true,excludedType:'manual',excludedReason:'Esclusione manuale (selezione multipla)'}));setSelected(new Set())}}>
+            onClick={()=>{store.beginTxUndoBatch?.();selected.forEach(id=>store.updateTransaction(id,{excluded:true,excludedType:'manual',excludedReason:'Esclusione manuale (selezione multipla)'}));store.commitTxUndoBatch?.(`Escludi ${selected.size} tx`);setSelected(new Set())}}>
             🚫 Escludi
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--green)',border:'1px solid var(--green)',borderRadius:6,padding:'4px 10px'}}
-            onClick={()=>{selected.forEach(id=>{const t=store.transactions.find(x=>x.txId===id);if(t?.excluded)store.updateTransaction(id,{excluded:false})});setSelected(new Set())}}>
+            onClick={()=>{store.beginTxUndoBatch?.();selected.forEach(id=>{const t=store.transactions.find(x=>x.txId===id);if(t?.excluded)store.updateTransaction(id,{excluded:false})});store.commitTxUndoBatch?.(`Ripristina ${selected.size} tx`);setSelected(new Set())}}>
             ↩ Ripristina
           </button>
           {selected.size === 1 && (
@@ -3428,13 +3434,15 @@ export default function TransactionsPage() {
           <button className="btn btn-ghost" style={{fontSize:12,color:'#d97706',border:'1px solid #d97706',borderRadius:6,padding:'4px 10px'}}
             onClick={()=>{
               const anyFlagged = store.transactions.filter(t=>selected.has(t.txId)).some(t=>t._flagged)
+              store.beginTxUndoBatch?.()
               selected.forEach(id=>store.updateTransaction(id,{_flagged: !anyFlagged}))
+              store.commitTxUndoBatch?.(`Flag ${selected.size} tx`)
               setSelected(new Set())
             }}>
             🚩 To review
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--red)'}}
-            onClick={()=>{if(confirm(`Eliminare ${selected.size} transazioni?`)){selected.forEach(id=>store.deleteTransaction(id));setSelected(new Set())}}}>
+            onClick={()=>{if(confirm(`Eliminare ${selected.size} transazioni?`)){store.beginTxUndoBatch?.();selected.forEach(id=>store.deleteTransaction(id));store.commitTxUndoBatch?.(`Elimina ${selected.size} tx`);setSelected(new Set())}}}>
             🗑 Elimina
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,marginLeft:'auto'}} onClick={()=>setSelected(new Set())}>✕ Deseleziona</button>

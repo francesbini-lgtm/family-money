@@ -61,6 +61,13 @@ function ymToLabel(ym) {
 
 // ── Mortgage amortization ────────────────────────────────
 function calcMortgage(capital, rateAnnual, durationYears) {
+  // Guard su input degeneri (fix 2026-07-12): capitale/durata nulli o non validi
+  // producevano Infinity/NaN nel grafico (es. capital/n con n=0)
+  if (!Number.isFinite(capital) || capital <= 0 ||
+      !Number.isFinite(durationYears) || durationYears <= 0 ||
+      !Number.isFinite(rateAnnual)) {
+    return { rata: 0, residuals: [] }
+  }
   const r = rateAnnual / 100 / 12
   const n = durationYears * 12
   const rata = r === 0

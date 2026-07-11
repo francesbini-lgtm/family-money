@@ -471,11 +471,19 @@ export const useStore = create((set, get) => ({
   deleteTransaction: (txId) => {
     const prevTx = get().transactions.find(t => t.txId === txId)
     if (prevTx) {
-      const stack = get().txUndoStack
-      set({ txUndoStack: [...stack.slice(-19), {
-        entries: [{ type: 'delete', tx: prevTx }],
-        label: `Elimina ${prevTx.descAI || prevTx.description || txId}`,
-      }]})
+      // Batch-aware (fix 2026-07-12): dentro beginTxUndoBatch/commitTxUndoBatch
+      // l'eliminazione confluisce nel batch (una sola voce Undo per l'operazione
+      // di massa); standalone si comporta come prima (voce singola etichettata).
+      const batch = get()._txUndoBatch
+      if (batch !== null) {
+        set({ _txUndoBatch: [...batch, { type: 'delete', tx: prevTx }] })
+      } else {
+        const stack = get().txUndoStack
+        set({ txUndoStack: [...stack.slice(-19), {
+          entries: [{ type: 'delete', tx: prevTx }],
+          label: `Elimina ${prevTx.descAI || prevTx.description || txId}`,
+        }]})
+      }
     }
     set(s=>({ transactions: s.transactions.filter(t=>t.txId!==txId) }))
     deleteDocument('transactions', txId)
