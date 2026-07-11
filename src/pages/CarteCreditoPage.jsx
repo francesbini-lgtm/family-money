@@ -15,9 +15,12 @@ const SEL_STYLE = {
 }
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+// Formato DD MMM AA (es. "05 Mag 24") — prima mancava l'anno (bug segnalato
+// dall'utente: senza anno non si distingue una spesa di aprile 2024 da una di
+// aprile 2025 scorrendo la tabella)
 function fmtDate(d) {
-  const m = (d||'').match(/\d{4}-(\d{2})-(\d{2})/)
-  return m ? `${parseInt(m[2])} ${MONTHS[parseInt(m[1])-1]}` : (d||'—')
+  const m = (d||'').match(/(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${String(m[3]).padStart(2,'0')} ${MONTHS[parseInt(m[2])-1]} ${m[1].slice(2)}` : (d||'—')
 }
 function fmtMonthLabel(ym) {
   const mm = (ym||'').match(/^(\d{4})-(\d{2})$/)
@@ -236,7 +239,7 @@ export default function CarteCreditoPage() {
     : 0
 
   return (
-    <div style={{padding:'28px 32px',maxWidth:980}}>
+    <div style={{padding:'28px 32px',maxWidth:1280}}>
       {/* Header */}
       <div style={{marginBottom:20}}>
         <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,margin:0}}>
@@ -316,14 +319,14 @@ export default function CarteCreditoPage() {
             )}
           </div>
           <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',minWidth:700}}>
+            <table style={{width:'100%',borderCollapse:'collapse',minWidth:1050}}>
               <thead>
                 <tr>
                   {['','Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Utente','Importo'].map((h,i)=>(
                     <th key={i} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                       textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
                       borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',
-                      whiteSpace:'nowrap',...(h==='Importo'?{minWidth:130}:{})}}>{h}</th>
+                      whiteSpace:'nowrap',...(h==='Importo'?{minWidth:150}:{})}}>{h}</th>
                   ))}
                 </tr>
               </thead>
