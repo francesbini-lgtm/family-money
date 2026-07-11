@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore'
 import { useAuth } from '../auth/AuthContext'
 import { CATS, CAT_NAMES, getMergedCats, getMergedCatNames } from '../data/categories'
 import { Upload, Search, X, TrendingUp, TrendingDown, Banknote, Tag, ChevronDown, Filter, Plus } from 'lucide-react'
-import ImportModal from '../components/ImportModal'
+import ImportWizard from '../components/ImportWizard'
 import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { exportTransactionsCSV } from '../services/export'
@@ -3354,7 +3354,8 @@ export default function TransactionsPage() {
             </button>
           )}
           <button className="btn btn-secondary" onClick={()=>setAddManualOpen(true)}><Plus size={14}/> Aggiungi</button>
-          <button className="btn btn-primary" onClick={()=>setImportOpen(true)}><Upload size={14}/> Importa CSV</button>
+          {/* "Importa CSV" → "Importa": apre il wizard unificato (conto+carte+PayPal) */}
+          <button className="btn btn-primary" onClick={()=>setImportOpen(true)}><Upload size={14}/> Importa</button>
         </div>
       </div>
 
@@ -3545,7 +3546,7 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      {importOpen      && <ImportModal onClose={()=>setImportOpen(false)}/>}
+      {importOpen      && <ImportWizard onClose={()=>setImportOpen(false)}/>}
       {addManualOpen   && <AddManualTxModal onClose={()=>setAddManualOpen(false)}/>}
       {feedbackTx      && <AiFeedbackModal tx={feedbackTx} onClose={()=>setFeedbackTx(null)}/>}
       {colsOpen        && <EditColonneModal visibleCols={visibleCols} colOrder={colOrder} onApply={(cols,order)=>{setVisibleCols(cols);setColOrder(order)}} onClose={()=>setColsOpen(false)}/>}

@@ -323,9 +323,21 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
   )
 }
 
-export default function ImportModal({ onClose }) {
-  const { userAccounts, addTransactions, updateTransaction, transactions, aiRules } = useStore()
+// Props opzionali per l'uso DENTRO il wizard di importazione unificata (ImportWizard.jsx):
+// - accountFilter: 'conto' (tutto tranne carte di credito) | 'carta' (solo carta_credito)
+//   — limita la tendina dei conti alla sorgente scelta nel wizard
+// - onFlowDone(result): se presente, al termine dell'import viene chiamata con
+//   { savedTxIds, ruleAppliedIds, total, dupes, aiCount, rulesAppliedCount } INVECE di
+//   chiudere da soli il modale — il wizard usa questi dati per gli step di rifinitura.
+// Standalone (senza props) il comportamento resta identico a prima.
+export default function ImportModal({ onClose, accountFilter = null, onFlowDone = null }) {
+  const { userAccounts: allAccounts, addTransactions, updateTransaction, transactions, aiRules } = useStore()
   const appPrefs = useStore(s => s.appPrefs)
+  const userAccounts = useMemo(() => {
+    if (accountFilter === 'carta') return allAccounts.filter(a => a.type === 'carta_credito')
+    if (accountFilter === 'conto') return allAccounts.filter(a => a.type !== 'carta_credito')
+    return allAccounts
+  }, [allAccounts, accountFilter])
   const [account, setAccount] = useState(userAccounts[0]?.name || 'Conto Corrente')
 
   // Build display label for each account: name · *card4 · owner nickname
@@ -537,7 +549,8 @@ export default function ImportModal({ onClose }) {
   // da CSV non applicava mai (a parte le aiRules, già passate a parseCSV in fase di lettura).
   // Rispetta sempre le categorie protette manualmente/dai "re King" (isKingProtected).
   async function runRulesStep(savedTxIds) {
-    if (!savedTxIds.length) return { rulesAppliedCount: 0 }
+    if (!savedTxIds.length) return { rulesAppliedCount: 0, ruleAppliedIds: [] }
+    const ruleAppliedIds = []
     setStatus({ phase:'rules', pct:30, current:0, total:savedTxIds.length, eta:null,
       message:'Applicazione delle regole di sistema salvate…' })
     await new Promise(r => setTimeout(r, 150))
@@ -583,13 +596,16 @@ export default function ImportModal({ onClose }) {
       if (changed) {
         updateTransaction(txId, { cat1, cat2, descAI, excluded, flagCompetenza })
         rulesAppliedCount++
+        ruleAppliedIds.push(txId)
       }
     })
 
     setStatus({ phase:'rules', pct:100, current:savedTxIds.length, total:savedTxIds.length, eta:null,
       message:'✓ Regole di sistema applicate' })
     await new Promise(r => setTimeout(r, 150))
-    return { rulesAppliedCount }
+    // ruleAppliedIds serve al wizard di importazione (ImportWizard.jsx) per distinguere
+    // le transazioni categorizzate da una regola da quelle categorizzate solo dall'AI
+    return { rulesAppliedCount, ruleAppliedIds }
   }
 
   // ── Import ────────────────────────────────────────────────
@@ -680,7 +696,17 @@ export default function ImportModal({ onClose }) {
       aiSkippedNoKey: enrichResult.skippedNoKey,
       rulesAppliedCount: rulesResult.rulesAppliedCount,
     })
-    setTimeout(onClose, 2500)
+    if (onFlowDone) {
+      setTimeout(() => onFlowDone({
+        savedTxIds: saveResult.savedTxs.map(t => t.txId),
+        ruleAppliedIds: rulesResult.ruleAppliedIds || [],
+        total: saveResult.total, dupes: saveResult.dupes,
+        aiCount: enrichResult.enrichedCount,
+        rulesAppliedCount: rulesResult.rulesAppliedCount,
+      }), 1500)
+    } else {
+      setTimeout(onClose, 2500)
+    }
   }
 
   // ── Conferma riconciliazione carta ──────────────────────────
@@ -847,7 +873,18 @@ export default function ImportModal({ onClose }) {
       rulesAppliedCount: rulesResult.rulesAppliedCount,
       skippedMonths,
     })
-    setTimeout(onClose, 2500)
+    if (onFlowDone) {
+      setTimeout(() => onFlowDone({
+        savedTxIds: saveResult.savedTxs.map(t => t.txId),
+        ruleAppliedIds: rulesResult.ruleAppliedIds || [],
+        total: saveResult.total, dupes: saveResult.dupes,
+        aiCount: enrichResult.enrichedCount,
+        rulesAppliedCount: rulesResult.rulesAppliedCount,
+        skippedMonths,
+      }), 1500)
+    } else {
+      setTimeout(onClose, 2500)
+    }
   }
 
   function handleCardReconcileCancel() {

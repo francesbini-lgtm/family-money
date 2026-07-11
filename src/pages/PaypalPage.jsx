@@ -17,7 +17,8 @@ import {
 import './PaypalPage.css'
 
 // ── Helpers ───────────────────────────────────────────────
-const isPayPal = t => {
+// export: riusato dal wizard di importazione unificata (ImportWizard.jsx)
+export const isPayPal = t => {
   const haystack = `${t.merchant||''} ${t.description||''} ${t.descAI||''}`.toLowerCase()
   return haystack.includes('paypal') || haystack.includes('pay pal')
 }
@@ -77,6 +78,71 @@ function autoMatch(imports, transactions) {
 function daysDiff(d1, d2) {
   if (!d1 || !d2) return '?'
   return Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
+}
+
+// ── Applica un import PayPal (estratto da handleImport per riuso nel wizard di
+// importazione unificata, ImportWizard.jsx) ─────────────────────────────────────
+// Dedup, assegnazione id, auto-match con le transazioni bancarie (autoMatch: importo
+// al centesimo, ≤1 giorno → matched, ≤6 giorni → pending_approval), applicazione dei
+// match automatici alle transazioni (merchant/descAI/categorie suggerite, con backup
+// _paypalOrig per il dis-abbina) e salvataggio del registro in appPrefs.paypalImports.
+// Ritorna i conteggi che servono alla schermata di riepilogo del wizard.
+export function applyPaypalImport(newItems, { paypalImports, transactions, updateTransaction, setAppPref }) {
+  const deduped = newItems.filter(item => !isAlreadyImported(item, paypalImports))
+  if (deduped.length === 0) return { added: 0, matchedNew: 0, pendingNew: 0, unmatchedNew: 0, afterMatch: paypalImports }
+  const withId = deduped.map(item => ({
+    id: `pp-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+    merchant: item.merchant,
+    date: item.date,
+    amount: item.amount,
+    type: item.type || '',
+    cat1_suggestion: item.cat1_suggestion || '',
+    cat2_suggestion: item.cat2_suggestion || '',
+    source: 'screenshot',
+    status: 'unmatched',
+    matchedTxId: null,
+    importedAt: new Date().toISOString(),
+  }))
+
+  const afterMatch = autoMatch([...paypalImports, ...withId], transactions)
+
+  const origPatch = (txId) => {
+    const tx = transactions.find(t => t.txId === txId)
+    if (!tx || tx._paypalOrig) return {}
+    return { _paypalOrig: {
+      merchant: tx.merchant ?? null, descAI: tx.descAI ?? null,
+      cat1: tx.cat1 ?? null, cat2: tx.cat2 ?? null, conf: tx.conf ?? null,
+    } }
+  }
+
+  afterMatch.forEach(imp => {
+    if (imp.status === 'matched' && imp.matchedTxId) {
+      const alreadyDone = paypalImports.find(p => p.id === imp.id && p.status === 'matched')
+      if (!alreadyDone) {
+        const patch = {
+          ...origPatch(imp.matchedTxId),
+          merchant: imp.merchant,
+          descAI: imp.merchant,
+          _paypalOverride: true,
+          conf: 100,
+        }
+        if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
+        if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
+        updateTransaction(imp.matchedTxId, patch)
+      }
+    }
+  })
+
+  setAppPref('paypalImports', afterMatch)
+
+  const isNew = (imp) => withId.some(w => w.id === imp.id)
+  return {
+    added:        withId.length,
+    matchedNew:   afterMatch.filter(i => isNew(i) && i.status === 'matched').length,
+    pendingNew:   afterMatch.filter(i => isNew(i) && i.status === 'pending_approval').length,
+    unmatchedNew: afterMatch.filter(i => isNew(i) && i.status === 'unmatched').length,
+    afterMatch,
+  }
 }
 
 // ── PayPal Abbinamento confirmation modal ─────────────────
@@ -471,7 +537,8 @@ function getMerchantCatSuggestion(merchant, transactions) {
 }
 
 // ── Import Modal ──────────────────────────────────────────
-function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImports }) {
+// export: riusato anche dal wizard di importazione unificata (ImportWizard.jsx)
+export function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImports }) {
   const [files, setFiles]       = useState([])
   const [processing, setProc]   = useState(false)
   const [results, setResults]   = useState(null)
@@ -1191,61 +1258,19 @@ export default function PaypalPage() {
   }
 
   function handleImport(newItems) {
-    // Safety dedup: never store an item already in paypalImports
-    const deduped = newItems.filter(item => !isAlreadyImported(item, paypalImports))
-    if (deduped.length === 0) return
-    const withId = deduped.map(item => ({
-      id: `pp-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
-      merchant: item.merchant,
-      date: item.date,
-      amount: item.amount,
-      type: item.type || '',
-      cat1_suggestion: item.cat1_suggestion || '',
-      cat2_suggestion: item.cat2_suggestion || '',
-      source: 'screenshot',
-      status: 'unmatched',
-      matchedTxId: null,
-      importedAt: new Date().toISOString(),
-    }))
-
-    const afterMatch = autoMatch([...paypalImports, ...withId], transactions)
-
-    // Apply auto-matched imports (both new imports and previously-unmatched old ones)
-    afterMatch.forEach(imp => {
-      if (imp.status === 'matched' && imp.matchedTxId) {
-        const alreadyDone = paypalImports.find(p => p.id === imp.id && p.status === 'matched')
-        if (!alreadyDone) {
-          const patch = {
-            ...paypalOrigPatch(imp.matchedTxId),
-            merchant: imp.merchant,
-            descAI: imp.merchant,
-            _paypalOverride: true,
-            conf: 100,
-          }
-          if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
-          if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
-          updateTransaction(imp.matchedTxId, patch)
-        }
-      }
-    })
-
-    // Notify about new pending approvals
-    const newPending = afterMatch.filter(imp =>
-      imp.status === 'pending_approval' &&
-      withId.some(w => w.id === imp.id)
-    )
-    if (newPending.length > 0) {
-      showToast(`${newPending.length} abbinamento PayPal da approvare`, 'warning', 6000)
+    // Logica estratta in applyPaypalImport (module-level, riusata dal wizard di
+    // importazione unificata) — qui restano solo le notifiche.
+    const res = applyPaypalImport(newItems, { paypalImports, transactions, updateTransaction, setAppPref })
+    if (res.pendingNew > 0) {
+      showToast(`${res.pendingNew} abbinamento PayPal da approvare`, 'warning', 6000)
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         new Notification('💙 PayPal — Abbinamenti da approvare', {
-          body: `${newPending.length} transazioni trovate con date simili, conferma l'abbinamento`,
+          body: `${res.pendingNew} transazioni trovate con date simili, conferma l'abbinamento`,
           icon: '/icon.svg',
           tag: 'paypal-pending',
         })
       }
     }
-
-    setAppPref('paypalImports', afterMatch)
   }
 
   // Save the tx's original fields before a PayPal match overwrites them,
