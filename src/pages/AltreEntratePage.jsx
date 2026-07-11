@@ -902,8 +902,8 @@ export default function AltreEntratePage() {
         ))}
       </div>
 
-      {/* Shared costs section */}
-      <SharedCostsSection/>
+      {/* Sezione costi condivisi rimossa su richiesta utente (2026-07-12) —
+          il componente SharedCostsSection resta nel file ma non è più renderizzato */}
 
       {/* Entries table */}
       <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>📋 Entrate Registrate</div>
@@ -921,8 +921,8 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','💬','Note',''].map(h=>(
-                <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
+              {['Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','💬','Note',''].map(h=>(
+                <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -932,6 +932,24 @@ export default function AltreEntratePage() {
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</td>
+                    <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
+                      {(() => {
+                        // Fonte (richiesta utente 2026-07-12): da dove arriva l'entrata —
+                        // dettaglio carta (cardImportCard4), PayPal (stesso criterio isPayPal
+                        // di PaypalPage), inserimento manuale, altrimenti conto corrente.
+                        const hay = `${e.merchant||''} ${e.description||''} ${e.descAI||''}`.toLowerCase()
+                        const fonte = e.manuale ? ['✍️','Manuale','var(--text3)']
+                          : e.cardImportCard4 ? ['💳','Carte','var(--accent)']
+                          : (hay.includes('paypal') || hay.includes('pay pal')) ? ['🅿️','PayPal','#0070ba']
+                          : ['🏦','Conto','var(--text2)']
+                        return (
+                          <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:8,
+                            background:'var(--surface2)',border:'1px solid var(--border)',color:fonte[2]}}>
+                            {fonte[0]} {fonte[1]}
+                          </span>
+                        )
+                      })()}
+                    </td>
                     <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
                       <div style={{fontSize:13,fontWeight:500,display:'flex',alignItems:'center'}}>
                         {e.descAI||e.desc||e.description?.slice(0,40)}

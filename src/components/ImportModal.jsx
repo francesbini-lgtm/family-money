@@ -750,6 +750,10 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       .filter(t => matchedMonthSet.has(cardMonthKey(t)))
       .map(t => ({
         ...t,
+        // Anche nella colonna standard `card` del DB (richiesta utente 2026-07-12):
+        // le righe di dettaglio carta devono portare il codice della carta come
+        // qualsiasi altra transazione, non solo nel campo tecnico cardImportCard4
+        card: t.card || card4,
         cardImportCard4: card4,
         cardImportEstrattoTxId: matchedMonthSet.get(cardMonthKey(t)),
       }))

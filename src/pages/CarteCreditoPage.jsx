@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useStore, computeUser } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { getMergedCats } from '../data/categories'
@@ -150,6 +150,22 @@ export default function CarteCreditoPage() {
   const appPrefs          = useStore(s => s.appPrefs)
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const [selectedIds, setSelectedIds] = useState(new Set())
+
+  // ── Migrazione one-time (2026-07-12, richiesta utente): le righe di dettaglio
+  // carta importate PRIMA di oggi hanno cardImportCard4 ma il campo standard
+  // `card` vuoto — lo allineiamo al primo accesso alla pagina. Idempotente
+  // (aggiorna solo le righe scoperte), un'unica voce nello stack Undo.
+  const cardMigrationRan = useRef(false)
+  useEffect(() => {
+    if (cardMigrationRan.current) return
+    cardMigrationRan.current = true
+    const toFix = useStore.getState().transactions.filter(t => t.cardImportCard4 && !t.card)
+    if (!toFix.length) return
+    useStore.getState().beginTxUndoBatch?.()
+    toFix.forEach(t => updateTransaction(t.txId, { card: t.cardImportCard4 }))
+    useStore.getState().commitTxUndoBatch?.(`Migrazione card su ${toFix.length} tx carta`)
+    console.log(`[carte] migrazione: campo card valorizzato su ${toFix.length} transazioni di dettaglio carta`)
+  }, [])
 
   // Solo le transazioni ITEMIZZATE, importate via il breakdown CSV/XLS carta
   // (sostituiscono l'estratto aggregato, che viene escluso al momento della conferma)
