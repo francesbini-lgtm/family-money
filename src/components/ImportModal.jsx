@@ -194,7 +194,7 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
       <div className="modal import-modal" onClick={e => e.stopPropagation()}
-        style={{ maxWidth: 720, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        style={{ maxWidth: 920, width: '94vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
 
         <div className="modal-header">
           <h3>🔍 Riconcilia estratti · {account.name} *{account.card4}</h3>
@@ -218,12 +218,12 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700 }}>Mese</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}>Totale CSV</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}>Tx</th>
-                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700 }}>Estratto abbinato</th>
-                <th style={{ padding: '6px 8px', textAlign: 'center', color: 'var(--text3)', fontWeight: 700 }}>Stato</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700 }}></th>
+                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700, whiteSpace: 'nowrap' }}>Mese</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700, whiteSpace: 'nowrap' }}>Totale CSV</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700, whiteSpace: 'nowrap' }}>Tx</th>
+                <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700, minWidth: 200, whiteSpace: 'nowrap' }}>Estratto abbinato</th>
+                <th style={{ padding: '6px 8px', textAlign: 'center', color: 'var(--text3)', fontWeight: 700, minWidth: 110, whiteSpace: 'nowrap' }}>Stato</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700, minWidth: 110, whiteSpace: 'nowrap' }}></th>
               </tr>
             </thead>
             <tbody>
@@ -236,16 +236,16 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                 return (
                   <>
                     <tr key={g.month} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '8px 8px', fontWeight: 600 }}>{g.label}</td>
-                      <td style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>€{g.total.toFixed(2)}</td>
+                      <td style={{ padding: '8px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{g.label}</td>
+                      <td style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, whiteSpace: 'nowrap' }}>€{g.total.toFixed(2)}</td>
                       <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--text3)' }}>{g.txs.length}</td>
                       <td style={{ padding: '8px 8px', color: 'var(--text2)' }}>
                         {chosenTx
-                          ? <><div style={{ fontWeight: 600 }}>{chosenTx.date} · €{Math.abs(chosenTx.amount).toFixed(2)}</div>
+                          ? <><div style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{chosenTx.date} · €{Math.abs(chosenTx.amount).toFixed(2)}</div>
                               <div style={{ fontSize: 10, color: 'var(--text3)' }}>{chosenTx.descAI || chosenTx.description?.slice(0, 50)}</div></>
                           : <span style={{ color: 'var(--text3)' }}>— non trovato —</span>}
                       </td>
-                      <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                      <td style={{ padding: '8px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <span style={{ fontSize: 15 }}>{statusIcon}</span>
                         <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'card-mismatch' ? 'carta diversa' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div>
                       </td>
