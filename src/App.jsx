@@ -218,6 +218,9 @@ function AppShell() {
         syncKeyRef.current = key
         loadAllData(user.uid).then(() => {
           checkOnboarding()
+          // Prompt AI: se i default nel codice sono più nuovi di quelli salvati,
+          // li ricopia in appPrefs.aiPrompts (lo store è la fonte, sempre aggiornata)
+          import('./data/aiPrompts').then(m => m.syncAIPromptsToStore?.())
           // Conservative: only show the wizard for users with no data at all
           const s = useStore.getState()
           if (!s.onboardingDone && s.transactions.length === 0) {

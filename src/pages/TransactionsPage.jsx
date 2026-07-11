@@ -3219,7 +3219,10 @@ export default function TransactionsPage() {
       return true
     })
     if (hideSmall) txs = txs.filter(t => {
-      if (Math.abs(t.amount) < 1) return false
+      // Importo NETTO post-compensazione, non quello lordo: una spesa compensata
+      // a "zero*" (netAmt 0) deve sparire col filtro <1€ attivo (fix 2026-07-11,
+      // segnalazione utente: vedeva ancora le righe a zero con l'asterisco)
+      if (Math.abs(netAmt(t)) < 1) return false
       return true
     })
     if (filterNoCat2) txs = txs.filter(t => t.cat1 && t.cat1 !== 'Non Categorizzato' && !t.cat2)

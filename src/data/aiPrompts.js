@@ -12,6 +12,25 @@ export const DEFAULT_AI_PROMPTS = {
   "category": "Assign the most appropriate category and subcategory.\n\nRules:\n- Choose ONLY from the provided category list (will be given at runtime)\n- If unsure at 80%+, use null — NEVER invent categories\n- EXCEPTION — foreign card payments (trailing \"(amount CURRENCY)\" like USD/GBP): make your BEST GUESS from the merchant type using your knowledge (e.g. CHERRY CREEK in Denver is a shopping district → shopping; a diner/grill/cafe name → restaurant) — for these, a reasonable guess at 60%+ confidence is better than null, the location rule will handle the vacation reassignment\n- cat2 must be a real subcategory of the chosen cat1\n- Common mappings:\n  - Supermarket/grocery → \"Spesa e Alimentari > Spesa\"\n  - Restaurant/bar/cafe → \"Tempo Libero > Cene / Pranzi\"\n  - Fuel/petrol → \"Veicoli > Carburante\"\n  - Clothing → \"Shopping > Abbigliamento\"\n  - ATM withdrawal → \"Contanti\"\n  - Rent payment → \"Casa > Affitto\"\n  - Utilities → \"Casa > Utenze\"\n  - Salary/income → \"Entrate > Stipendio\""
 }
 
+// ── Versione dei prompt di default ─────────────────────────────────────────
+// BUMPARE questo numero AD OGNI modifica di DEFAULT_AI_PROMPTS: al primo load
+// successivo, syncAIPromptsToStore() ricopia i default aggiornati dentro
+// appPrefs.aiPrompts (Firestore). Decisione esplicita dell'utente (2026-07-11):
+// lo store è l'UNICA fonte e deve contenere sempre l'ultima versione — chi scrive
+// per ultimo (miglioramento dei default o modifica manuale in Impostazioni → AI
+// Prompt) vince; una personalizzazione manuale sopravvive quindi solo fino al
+// successivo bump di versione dei default.
+export const AI_PROMPTS_VERSION = 2
+
+export function syncAIPromptsToStore() {
+  const st = useStore.getState()
+  if (!st?.appPrefs || typeof st.setAppPref !== 'function') return
+  if (st.appPrefs.aiPromptsVersion === AI_PROMPTS_VERSION) return
+  st.setAppPref('aiPrompts', { ...DEFAULT_AI_PROMPTS })
+  st.setAppPref('aiPromptsVersion', AI_PROMPTS_VERSION)
+  console.log(`[aiPrompts] default v${AI_PROMPTS_VERSION} sincronizzati in appPrefs.aiPrompts`)
+}
+
 export function getAIPrompts() {
   const stored = useStore.getState()?.appPrefs?.aiPrompts
   if (stored && Object.keys(stored).length) {
