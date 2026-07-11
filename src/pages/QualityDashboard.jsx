@@ -200,6 +200,14 @@ export default function QualityDashboard() {
     const altroAltroList = txs.filter(t => t.cat1 === 'Altro' && t.cat2 === 'Altro')
     const altroAltroVal  = altroAltroList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
 
+    // Senza nome: descAI vuota o letteralmente "-"/"—" (richiesta utente 2026-07-11;
+    // il KPI gemello "senza categoria L2" è la card "Non cat. L2" già esistente)
+    const noNameList = txs.filter(t => {
+      const d = (t.descAI || '').trim()
+      return !d || d === '-' || d === '—'
+    })
+    const noNameVal = noNameList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
+
     // Carta di credito
     const cardList = txs.filter(t => t.card && t.card !== 'null' && t.card !== 'undefined')
     const cardVal  = cardList.reduce((s, t) => s + Math.abs(t.amount || 0), 0)
@@ -275,6 +283,7 @@ export default function QualityDashboard() {
     return {
       total, totalValue,
       noCat2Count: noCat2List.length, noCat2Val,
+      noNameCount: noNameList.length, noNameVal,
       altroAltroCount: altroAltroList.length, altroAltroVal,
       cardCount: cardList.length, cardVal,
       satiAddebitiCount, satiAddebitiVal,
@@ -346,6 +355,9 @@ export default function QualityDashboard() {
 
         <KpiCard icon="🏷️" label="Non cat. L2"
           count={stats.noCat2Count} euros={stats.noCat2Val} warn />
+
+        <KpiCard icon="✍️" label="Senza nome (AI descr. vuota o «-»)"
+          count={stats.noNameCount} euros={stats.noNameVal} warn />
 
         <KpiCard icon="🔄" label="ALTRO › ALTRO"
           count={stats.altroAltroCount} euros={stats.altroAltroVal} warn />

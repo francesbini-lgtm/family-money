@@ -4,6 +4,7 @@ import { fmtIT } from '../utils/format'
 import { getMergedCats } from '../data/categories'
 import { showToast } from '../services/notifications'
 import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
+import CompDaConfermare from '../components/CompDaConfermare'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
@@ -73,9 +74,13 @@ function CardTxRow({ t, allCats, updateTransaction, userAccounts, appPrefs, sele
 
   const isComp = isCompensated(t)
   const displayAmt = Math.abs(netAmt(t))
+  // Rimborso (positivo) non ancora abbinato → riga evidenziata in verde chiaro
+  // (richiesta utente 2026-07-11); la selezione ha comunque la precedenza visiva
+  const isUnmatchedRefund = t.amount > 0 && !isComp
 
   return (
-    <tr style={{borderBottom:'1px solid var(--border)', opacity: selected ? 1 : undefined, background: selected ? 'var(--accent-l)' : undefined}}>
+    <tr style={{borderBottom:'1px solid var(--border)', opacity: selected ? 1 : undefined,
+      background: selected ? 'var(--accent-l)' : (isUnmatchedRefund ? 'rgba(22,163,74,0.09)' : undefined)}}>
       <td style={{padding:'8px 10px',textAlign:'center'}}>
         <input type="checkbox" checked={selected} onChange={()=>onToggleSelect(t.txId)} style={{cursor:'pointer'}}/>
       </td>
@@ -154,6 +159,17 @@ export default function CarteCreditoPage() {
   , [transactions])
 
   const uniqueCards = useMemo(() => [...new Set(cardTxs.map(t=>t.cardImportCard4))], [cardTxs])
+
+  // Rimborsi non accoppiati: transazioni positive della tabella (storni/resi carta)
+  // non ancora abbinate/compensate — KPI dedicato + filtro rapido "Da abbinare"
+  const refundTxs = useMemo(() =>
+    cardTxs.filter(t => t.amount > 0 && !isCompensated(t))
+  , [cardTxs])
+  const refundTotal = refundTxs.reduce((s,t)=>s+t.amount,0)
+
+  // Filtro rapido "Da abbinare" (solo rimborsi non accoppiati)
+  const [onlyDaAbbinare, setOnlyDaAbbinare] = useState(false)
+  const visibleTxs = onlyDaAbbinare ? refundTxs : cardTxs
 
   // Math.abs(netAmt(t)) invece di Math.abs(t.amount): una spesa carta compensata
   // (dalla selezione qui sotto, o da Altre Entrate/PayPal — stesso campo condiviso)
@@ -255,7 +271,9 @@ export default function CarteCreditoPage() {
         {[
           ['Utilizzo medio/mese', avgMensile > 0 ? `€ ${fmtIT(avgMensile,0)}` : '—', 'var(--accent)'],
           ['Estratti da abbinare', lumpTxs.length > 0 ? `${lumpTxs.length} (€ ${fmtIT(lumpTotal,0)})` : '0', lumpTxs.length > 0 ? 'var(--gold)' : 'var(--text2)'],
-          ['Carte rilevate', uniqueCards.length || '—', 'var(--text)'],
+          // "Carte rilevate" sostituito su richiesta utente (2026-07-11) con i rimborsi
+          // (transazioni positive della tabella) non ancora abbinati/compensati
+          ['Rimborsi non accoppiati', refundTxs.length > 0 ? `${refundTxs.length} (€ ${fmtIT(refundTotal,2)})` : '0', refundTxs.length > 0 ? 'var(--green)' : 'var(--text2)'],
           [topCat ? `% ${topCat[0]}` : '% categoria più usata', topCat ? `${fmtIT(topCatPct,1)}%` : '—', 'var(--red)'],
         ].map(([l,v,c])=>(
           <div key={l} className="card" style={{padding:'14px 18px',borderLeft:`3px solid ${c}`}}>
@@ -300,45 +318,61 @@ export default function CarteCreditoPage() {
           </div>
         </div>
       ) : (
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
+        /* overflow:'clip' (non 'hidden') + niente wrapper overflowX:'auto': entrambi
+           creerebbero uno scroll container intermedio che romperebbe il position:sticky
+           dell'header rispetto allo scroll di pagina (.main-content) — richiesta utente:
+           header tabella freeze in alto mentre scorre solo il contenuto. */
+        <div className="card" style={{padding:0,overflow:'clip'}}>
           <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',
             display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
             <span style={{fontSize:14,fontWeight:700}}>Transazioni importate (dettaglio carta)</span>
-            {selectedIds.size >= 2 ? (
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <span style={{fontSize:12,color:'var(--text3)'}}>{selectedIds.size} selezionate</span>
-                <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}} onClick={handleAbbina}>
-                  🔗 Abbina e compensa
-                </button>
-                <button className="btn btn-ghost" style={{fontSize:12,padding:'5px 12px'}} onClick={()=>setSelectedIds(new Set())}>
-                  Annulla selezione
-                </button>
-              </div>
-            ) : (
-              <span style={{fontSize:12,color:'var(--text3)'}}>{cardTxs.length} transazioni · {uniqueCards.length} carte</span>
-            )}
+            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+              {/* Sezione "Da confermare" (come Satispay): coppie spesa/rimborso stesso importo */}
+              <CompDaConfermare txs={cardTxs} scope="carte" incomeLabel="📥 Rimborso carta"/>
+              {/* Filtro rapido "Da abbinare": solo rimborsi (amount>0) non ancora compensati */}
+              <button className="btn btn-ghost"
+                onClick={()=>setOnlyDaAbbinare(v=>!v)}
+                style={{fontSize:12,padding:'4px 12px',borderRadius:7,fontWeight:700,
+                  border:`1px solid ${onlyDaAbbinare?'var(--green)':'var(--border)'}`,
+                  color:onlyDaAbbinare?'var(--green)':'var(--text3)',
+                  background:onlyDaAbbinare?'rgba(22,163,74,0.08)':'transparent'}}>
+                💶 Da abbinare {refundTxs.length > 0 ? `(${refundTxs.length})` : ''}
+              </button>
+              {selectedIds.size >= 2 ? (
+                <>
+                  <span style={{fontSize:12,color:'var(--text3)'}}>{selectedIds.size} selezionate</span>
+                  <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}} onClick={handleAbbina}>
+                    🔗 Abbina e compensa
+                  </button>
+                  <button className="btn btn-ghost" style={{fontSize:12,padding:'5px 12px'}} onClick={()=>setSelectedIds(new Set())}>
+                    Annulla selezione
+                  </button>
+                </>
+              ) : (
+                <span style={{fontSize:12,color:'var(--text3)'}}>{visibleTxs.length} transazioni · {uniqueCards.length} carte</span>
+              )}
+            </div>
           </div>
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',minWidth:1050}}>
-              <thead>
-                <tr>
-                  {['','Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Utente','Importo'].map((h,i)=>(
-                    <th key={i} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
-                      textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
-                      borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',
-                      whiteSpace:'nowrap',...(h==='Importo'?{minWidth:150}:{})}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {cardTxs.slice(0,200).map((t,i)=>(
-                  <CardTxRow key={t.txId||i} t={t} allCats={allCats} updateTransaction={updateTransaction}
-                    userAccounts={userAccounts} appPrefs={appPrefs}
-                    selected={selectedIds.has(t.txId)} onToggleSelect={toggleSelect} onRemoveComp={handleRemoveComp}/>
+          <table style={{width:'100%',borderCollapse:'collapse',minWidth:1050}}>
+            <thead>
+              <tr>
+                {['','Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Utente','Importo'].map((h,i)=>(
+                  <th key={i} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
+                    textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                    borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',
+                    whiteSpace:'nowrap',...(h==='Importo'?{minWidth:150}:{}),
+                    position:'sticky',top:0,zIndex:2}}>{h}</th>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleTxs.slice(0,200).map((t,i)=>(
+                <CardTxRow key={t.txId||i} t={t} allCats={allCats} updateTransaction={updateTransaction}
+                  userAccounts={userAccounts} appPrefs={appPrefs}
+                  selected={selectedIds.has(t.txId)} onToggleSelect={toggleSelect} onRemoveComp={handleRemoveComp}/>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

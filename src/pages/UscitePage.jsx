@@ -592,12 +592,18 @@ export default function UscitePage() {
   }
 
   // ── LabelList content for segment values inside bars ─────────────────────
-  function SegmentLabel({ x, y, width, height, value }) {
-    if (!value || value <= 1000 || height <= 18) return null
+  // NON usare la prop `value` di Recharts: per le barre in stack è il valore
+  // CUMULATIVO (fine del range dello stack), non quello del singolo segmento —
+  // bug reale segnalato (feb26: totale 5.989 ma label 1889/4336/5324, i progressivi).
+  // Il valore vero del segmento si legge direttamente da chartData con la chiave
+  // della categoria (catKey), passata da chi renderizza la LabelList.
+  function SegmentLabel({ x, y, width, height, index, catKey }) {
+    const v = (index != null && chartData[index]) ? (chartData[index][catKey] || 0) : 0
+    if (!v || v <= 1000 || height <= 18) return null
     return (
       <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle"
         fontSize={9} fill="rgba(255,255,255,0.85)" style={{ pointerEvents: 'none' }}>
-        {fmtIT(Math.round(value))}
+        {fmtIT(Math.round(v))}
       </text>
     )
   }
@@ -715,7 +721,7 @@ export default function UscitePage() {
                     radius={isLast ? [4,4,0,0] : [0,0,0,0]}
                     isAnimationActive={false}
                   >
-                    <LabelList content={<SegmentLabel />} />
+                    <LabelList content={<SegmentLabel catKey={cat1} />} />
                     {isLast && <LabelList content={<BarTotalLabel />} />}
                   </Bar>
                 )

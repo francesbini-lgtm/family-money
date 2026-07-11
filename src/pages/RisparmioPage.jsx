@@ -197,11 +197,22 @@ function SavingsInsights({ transactions, excludedCats }) {
       return {cat, thisAmt, prevAmt, delta, avg6m}
     }).filter(c=>c.thisAmt>0||c.prevAmt>0)
 
-    // Categories most saved vs last month (biggest negative delta)
-    const savedMost = [...catStats]
+    // Categories most saved — richiesta utente 2026-07-11: il confronto va fatto
+    // ESCLUSIVAMENTE tra mesi CHIUSI (ultimo mese chiuso vs mese chiuso precedente),
+    // mai col mese corrente che è ancora incompleto e produrrebbe "risparmi" fittizi.
+    const lastClosedYM = ymOf(new Date(now.getFullYear(), now.getMonth()-1, 1))
+    const prevClosedYM = ymOf(new Date(now.getFullYear(), now.getMonth()-2, 1))
+    const closedStats = cats.map(cat=>{
+      const thisAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(lastClosedYM)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
+      const prevAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevClosedYM)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
+      const delta   = prevAmt>0 ? Math.round((thisAmt-prevAmt)/prevAmt*100) : null
+      return {cat, thisAmt, prevAmt, delta}
+    })
+    const savedMost = closedStats
       .filter(c=>c.delta!==null&&c.delta<0&&c.prevAmt>10)
       .sort((a,b)=>a.delta-b.delta)
       .slice(0,3)
+    const savedMostMonths = { last: lastClosedYM, prev: prevClosedYM }
 
     // Categories where could save more (spending > avg6m significantly)
     const couldSave = [...catStats]
@@ -217,7 +228,7 @@ function SavingsInsights({ transactions, excludedCats }) {
     const thisSavRate = thisInc>0 ? Math.round((thisInc-thisExp)/thisInc*100) : null
     const prevSavRate = prevInc>0 ? Math.round((prevInc-prevExp)/prevInc*100) : null
 
-    setInsights({ savedMost, couldSave, thisSavRate, prevSavRate })
+    setInsights({ savedMost, savedMostMonths, couldSave, thisSavRate, prevSavRate })
   }, [transactions, excludedCats])
 
   if (!insights) return null
@@ -228,10 +239,13 @@ function SavingsInsights({ transactions, excludedCats }) {
       <div className="card" style={{padding:'18px 20px'}}>
         <div style={{fontSize:14,fontWeight:700,marginBottom:12,display:'flex',alignItems:'center',gap:7}}>
           <span>🎯</span> Categorie dove hai risparmiato di più
-          <span style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>vs mese scorso</span>
+          <span style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>
+            {/* Solo mesi CHIUSI: il mese corrente è incompleto e falserebbe il confronto */}
+            {insights.savedMostMonths ? `${insights.savedMostMonths.last} vs ${insights.savedMostMonths.prev} (mesi chiusi)` : 'vs mese scorso'}
+          </span>
         </div>
         {insights.savedMost.length===0
-          ? <div style={{fontSize:12,color:'var(--text3)'}}>Nessun risparmio significativo questo mese.</div>
+          ? <div style={{fontSize:12,color:'var(--text3)'}}>Nessun risparmio significativo nell'ultimo mese chiuso.</div>
           : insights.savedMost.map(c=>(
             <div key={c.cat} style={{display:'flex',alignItems:'center',justifyContent:'space-between',
               padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
@@ -241,7 +255,7 @@ function SavingsInsights({ transactions, excludedCats }) {
                   {c.delta}% — € {fmtIT(c.prevAmt-c.thisAmt,0)} risparmiato
                 </div>
                 <div style={{fontSize:11,color:'var(--text3)'}}>
-                  € {fmtIT(c.thisAmt,0)} vs € {fmtIT(c.prevAmt,0)} scorso
+                  € {fmtIT(c.thisAmt,0)} vs € {fmtIT(c.prevAmt,0)} del mese chiuso precedente
                 </div>
               </div>
             </div>

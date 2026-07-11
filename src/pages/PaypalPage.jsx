@@ -9,6 +9,7 @@ import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
 import { showToast } from '../services/notifications'
 import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
+import CompDaConfermare from '../components/CompDaConfermare'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
@@ -1545,7 +1546,25 @@ export default function PaypalPage() {
                 <XAxis dataKey="month" tick={{ fontSize:11 }} axisLine />
                 <YAxis tick={{ fontSize:11 }} axisLine tickFormatter={v => `€${fmtIT(v)}`} />
                 {barCats.map((c) => (
-                  <Bar key={c} dataKey={c} stackId="a" fill={CATS[c]?.color||'#aaa'} isAnimationActive={false} />
+                  <Bar key={c} dataKey={c} stackId="a" fill={CATS[c]?.color||'#aaa'} isAnimationActive={false}>
+                    {/* Label interna solo per i segmenti abbastanza alti da essere leggibili.
+                        NB: si legge il valore da barData[index][c], MAI dalla prop `value` di
+                        Recharts (per gli stack è il cumulativo, non il segmento — stesso bug
+                        corretto in UscitePage SegmentLabel). */}
+                    <LabelList
+                      content={({ x, y, width, height, index }) => {
+                        const v = barData[index]?.[c] || 0
+                        if (!v || height < 16) return null
+                        return (
+                          <text x={x + width / 2} y={y + height / 2 + 3} textAnchor="middle"
+                            fontSize={9} fontWeight={600} fill="rgba(255,255,255,0.9)"
+                            style={{ pointerEvents: 'none' }}>
+                            €{fmtIT(Math.round(v))}
+                          </text>
+                        )
+                      }}
+                    />
+                  </Bar>
                 ))}
                 {/* Transparent sentinel bar — sits at top of every stack, fires LabelList for all months */}
                 <Bar key="_zero" dataKey="_zero" stackId="a" fill="transparent" stroke="none" isAnimationActive={false}>
@@ -1592,6 +1611,8 @@ export default function PaypalPage() {
         <div className="pp-table-header">
           <div className="pp-table-title">Transazioni PayPal ({filteredTxs.length}{(search || hideComm) ? `/${paypalTxs.length}` : ''})</div>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {/* Sezione "Da confermare" (come Satispay): coppie spesa/rimborso PayPal stesso importo */}
+            <CompDaConfermare txs={paypalTxs} scope="paypal" incomeLabel="📥 Rimborso PayPal"/>
             <button
               className={`pp-comm-toggle${hideComm ? ' active' : ''}`}
               onClick={() => setHideComm(v => !v)}
@@ -1634,38 +1655,7 @@ export default function PaypalPage() {
                 <th className="pp-th">L2</th>
                 <th className="pp-th">Stato</th>
               </tr>
-              {(() => {
-                const totalExp = filteredTxs.filter(t => t.amount < 0).reduce((s,t) => s + t.amount, 0)
-                const totalInc = filteredTxs.filter(t => t.amount > 0).reduce((s,t) => s + t.amount, 0)
-                return (
-                  <tr style={{ background:'var(--surface2)', borderTop:'2px solid var(--border)' }}>
-                    <th className="pp-th"/>
-                    <th className="pp-th" style={{ color:'var(--text3)', fontWeight:500, fontSize:11, letterSpacing:'.03em' }}>
-                      {filteredTxs.length} righe
-                    </th>
-                    <th className="pp-th"/>
-                    <th className="pp-th"/>
-                    <th className="pp-th" style={{ textAlign:'right', paddingRight:8 }}>
-                      <div style={{ display:'flex', flexDirection:'column', gap:1, alignItems:'flex-end' }}>
-                        {totalExp < 0 && (
-                          <span style={{ color:'var(--red,#d64e4e)', fontWeight:700, fontSize:12 }}>
-                            −€{fmtIT(Math.abs(totalExp), 2)}
-                          </span>
-                        )}
-                        {totalInc > 0 && (
-                          <span style={{ color:'#16a34a', fontWeight:700, fontSize:12 }}>
-                            +€{fmtIT(totalInc, 2)}
-                          </span>
-                        )}
-                      </div>
-                    </th>
-                    <th className="pp-th"/>
-                    <th className="pp-th"/>
-                    <th className="pp-th"/>
-                    <th className="pp-th"/>
-                  </tr>
-                )
-              })()}
+              {/* Riga riepilogativa (N righe / totali +/-) rimossa su richiesta utente 2026-07-11 */}
             </thead>
             <tbody>
               {filteredTxs.map(t => {

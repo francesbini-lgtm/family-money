@@ -3175,6 +3175,14 @@ export default function TransactionsPage() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  // Richiesta utente (2026-07-11): ogni apertura dello sheet Transazioni deve partire
+  // con i filtri azzerati. L'azzeramento avviene all'USCITA dalla pagina (cleanup),
+  // non al mount: i drill-down da altre pagine (es. Notifiche → "Non Categorizzato")
+  // impostano il filtro nello store PRIMA di navigare qui, e un reset al mount lo
+  // cancellerebbe. I filtri locali (colonna, commissioni, ecc.) sono state React e
+  // si azzerano già da soli con lo smontaggio del componente.
+  useEffect(() => () => { useStore.getState().resetFilters?.() }, [])
+
   const filters = store.filters || {}
   const customCats = store.customCats || {}
   const userAccounts = useStore(s => s.userAccounts)
