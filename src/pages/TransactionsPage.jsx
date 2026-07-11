@@ -3080,7 +3080,18 @@ export default function TransactionsPage() {
   const store = useStore()
   const { updateTransaction, deleteTransaction } = store
   const txUndoStack  = useStore(s => s.txUndoStack)
-  const undoLastTx   = useStore(s => s.undoLastTx)
+  const undoLastTxRaw = useStore(s => s.undoLastTx)
+  const [undoing, setUndoing] = useState(false)
+  // Attende il completamento reale (Promise.allSettled su tutte le scritture Firestore,
+  // vedi fix in useStore.js) prima di riabilitare il bottone — evita che l'utente navighi
+  // via o ricarichi la pagina mentre alcune scritture di ripristino sono ancora in volo,
+  // che le lasciava perse in silenzio (bug segnalato: estratto carta escluso rimasto tale
+  // per sempre dopo un Undo, saldo gonfiato dell'importo mancante)
+  async function undoLastTx() {
+    if (undoing) return
+    setUndoing(true)
+    try { await undoLastTxRaw() } finally { setUndoing(false) }
+  }
   const { user, householdId } = useAuth()
   // Admin = chi ha creato l'household (householdId = 'hh_<uid>')
   const isAdmin = householdId === `hh_${user?.uid}`
@@ -3280,19 +3291,23 @@ export default function TransactionsPage() {
           {txUndoStack.length > 0 && (
             <button
               onClick={undoLastTx}
+              disabled={undoing}
               title={`Annulla: ${txUndoStack[txUndoStack.length-1]?.label || 'ultima operazione'}`}
               style={{display:'inline-flex',alignItems:'center',gap:5,
                 padding:'5px 11px',borderRadius:6,border:'1px solid var(--border)',
-                background:'var(--surface)',color:'var(--text2)',cursor:'pointer',
+                background:'var(--surface)',color:'var(--text2)',cursor:undoing?'wait':'pointer',
                 fontSize:12,fontWeight:600,fontFamily:'var(--font-sans)',
+                opacity:undoing?0.6:1,
                 transition:'background .15s'}}
-              onMouseEnter={e=>e.currentTarget.style.background='var(--surface2)'}
+              onMouseEnter={e=>{if(!undoing) e.currentTarget.style.background='var(--surface2)'}}
               onMouseLeave={e=>e.currentTarget.style.background='var(--surface)'}>
-              ↩ Annulla
-              <span style={{fontSize:10,opacity:.6,maxWidth:120,overflow:'hidden',
-                textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {txUndoStack[txUndoStack.length-1]?.label || ''}
-              </span>
+              {undoing ? '⏳ Annullamento…' : '↩ Annulla'}
+              {!undoing && (
+                <span style={{fontSize:10,opacity:.6,maxWidth:120,overflow:'hidden',
+                  textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {txUndoStack[txUndoStack.length-1]?.label || ''}
+                </span>
+              )}
             </button>
           )}
           <button className="btn btn-secondary" onClick={()=>setAddManualOpen(true)}><Plus size={14}/> Aggiungi</button>

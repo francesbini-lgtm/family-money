@@ -280,27 +280,44 @@ export const useStore = create((set, get) => ({
     const stack = get().txUndoStack
     set({ txUndoStack: [...stack.slice(-19), { entries: batch, label }] })
   },
+  // BUG REALE TROVATO (2026-07-11, segnalato dall'utente: dopo un Undo su una
+  // riconciliazione carta, gli estratti risultavano esclusi per sempre, mai
+  // ripristinati — saldo gonfiato dell'importo mancante): questa funzione è
+  // dichiarata async ma non aspettava MAI il completamento dei saveDocument()/
+  // deleteDocument() verso Firestore — erano tutte fire-and-forget. Per una
+  // riconciliazione carta, un Undo genera decine di scritture individuali
+  // (13 saveDocument per gli estratti + una deleteDocument per ognuna delle
+  // centinaia di righe di dettaglio importate). Se l'utente navigava altrove o
+  // chiudeva/ricaricava la scheda subito dopo aver cliccato "Annulla" (comportamento
+  // naturale, il click sembrava istantaneo), alcune di quelle scritture potevano non
+  // arrivare mai al server — lasciando l'estratto escluso in Firestore per sempre,
+  // pur avendo il dettaglio importato già rimosso: un "buco" di spesa non contata
+  // da nessuna parte, che gonfia il saldo esattamente dell'importo mancante.
+  // Fix: raccoglie tutte le Promise e le aspetta (Promise.allSettled) prima di
+  // ritornare, così chi chiama undoLastTx() può a sua volta attendere il completamento.
   undoLastTx: async () => {
     const stack = get().txUndoStack
     if (!stack.length) return
     const last = stack[stack.length - 1]
     set({ txUndoStack: stack.slice(0, -1) })
+    const writes = []
     // Revert all entries in reverse order
     for (const entry of [...last.entries].reverse()) {
       if (entry.type === 'update') {
         set(s => ({ transactions: s.transactions.map(t => t.txId === entry.txId ? { ...t, ...entry.prev } : t) }))
         const t = get().transactions.find(t => t.txId === entry.txId)
-        if (t) saveDocument('transactions', entry.txId, t)
+        if (t) writes.push(saveDocument('transactions', entry.txId, t))
       } else if (entry.type === 'delete') {
         const tx = entry.tx
         set(s => ({ transactions: [...s.transactions, tx].sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')) }))
-        saveDocument('transactions', tx.txId, tx)
+        writes.push(saveDocument('transactions', tx.txId, tx))
       } else if (entry.type === 'add') {
         set(s => ({ transactions: s.transactions.filter(t => !entry.txIds.includes(t.txId)) }))
-        for (const txId of entry.txIds) deleteDocument('transactions', txId)
+        for (const txId of entry.txIds) writes.push(deleteDocument('transactions', txId))
       }
     }
     get()._recomputeFiltered()
+    await Promise.allSettled(writes)
   },
 
   // ── Migrazione codici TX ─────────────────────────────────
@@ -1578,6 +1595,31 @@ if (typeof window !== 'undefined') {
         .map(t => ({ txId: t.txId, amount: t.amount, date: t.date, account: t.account, description: t.description, cardImportCard4: t.cardImportCard4, reconciled: t.reconciled })),
     }
     console.log('[FMT DEBUG SALDO]', report)
+    return report
+  }
+
+  // Riparazione mirata (2026-07-11): trova estratti carta esclusi durante una
+  // riconciliazione (excluded:true + reconciled:true, marcati SOLO da
+  // handleCardReconcileConfirm in ImportModal.jsx) il cui dettaglio sostitutivo
+  // NON esiste più tra le transazioni attuali — segno che un Undo incompleto (vedi
+  // fix su undoLastTx, bug: scritture Firestore fire-and-forget non attese) ha
+  // rimosso il dettaglio ma NON è riuscito a ripristinare l'esclusione dell'estratto,
+  // lasciando un "buco" di spesa che gonfia il saldo. Con dryRun:true (default)
+  // stampa solo cosa farebbe; richiamare con dryRun:false per applicare davvero.
+  // Uso da console: window.__fmtFixOrphanedCardExclusions()            // anteprima
+  //                 window.__fmtFixOrphanedCardExclusions({dryRun:false}) // applica
+  window.__fmtFixOrphanedCardExclusions = ({ dryRun = true } = {}) => {
+    const txs = useStore.getState().transactions
+    const replacedIds = new Set(txs.filter(t => t.cardImportEstrattoTxId).map(t => t.cardImportEstrattoTxId))
+    const orphaned = txs.filter(t => t.excluded && t.reconciled && !replacedIds.has(t.txId))
+    const report = orphaned.map(t => ({ txId: t.txId, amount: t.amount, date: t.date, account: t.account, description: t.description }))
+    console.log(`[FMT FIX] ${orphaned.length} estratti orfani trovati (esclusi ma senza dettaglio sostitutivo)`, report)
+    if (!dryRun) {
+      orphaned.forEach(t => useStore.getState().updateTransaction(t.txId, { excluded: false, reconciled: false }))
+      console.log(`[FMT FIX] Ripristinati ${orphaned.length} estratti — ricarica la pagina per vedere il saldo aggiornato`)
+    } else if (orphaned.length) {
+      console.log('[FMT FIX] Anteprima soltanto — richiama window.__fmtFixOrphanedCardExclusions({dryRun:false}) per applicare davvero')
+    }
     return report
   }
 }
