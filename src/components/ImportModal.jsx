@@ -86,6 +86,15 @@ function buildMonthGroups(txs) {
     })
 }
 
+// Stesso calcolo del KPI "Saldo Conto" in TransactionsPage.jsx — usato dal check di
+// sicurezza post-riconciliazione carta (vedi handleCardReconcileConfirm): un'operazione
+// di riconciliazione (esclude un estratto, importa il dettaglio equivalente) non deve
+// MAI cambiare il saldo totale, nemmeno di un centesimo. Bug reale segnalato dall'utente:
+// il saldo era salito di migliaia di euro senza che l'app se ne accorgesse.
+function computeSaldoConto(transactions) {
+  return transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s, t) => s + t.amount, 0)
+}
+
 // Regola precisa (confermata dall'utente): l'estratto di un mese di spesa "ym" (es.
 // "2026-04") gira SEMPRE e SOLO nel mese immediatamente successivo (es. i primi giorni
 // di maggio) — mai nello stesso mese, mai due mesi dopo. Usato per NON abbinare in
@@ -378,10 +387,13 @@ export default function ImportModal({ onClose }) {
   // della stessa carta, non l'intero DB) — vedi addTransactions in useStore.js
   // extraTxs: eventuali righe di "rettifica" (vedi handleCardReconcileConfirm) —
   // salvate direttamente, SENZA passare da AI (sono già complete/categorizzate)
-  // Ritorna true se il salvataggio è andato a buon fine, false se annullato a metà
-  // (abortRef) — il chiamante (handleCardReconcileConfirm) usa questo esito per
-  // decidere se è sicuro procedere con l'esclusione degli estratti (vedi nota lì).
-  async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs } = {}) {
+  // Ritorna false se annullato a metà (abortRef), altrimenti un oggetto risultato
+  // { total, aiCount, dupes, correctionsCount } — il chiamante (handleCardReconcileConfirm)
+  // usa questo esito per decidere se è sicuro procedere con l'esclusione degli estratti.
+  // skipDoneUI: true per il flusso carta — non mostra qui il messaggio di successo né
+  // programma la chiusura del modale, perché handleCardReconcileConfirm deve prima fare
+  // il check di sicurezza sul saldo (vedi lì) ed eventualmente mostrare un errore invece.
+  async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs, skipDoneUI } = {}) {
     let finalTxs = txsToImport
     if (useAI) {
       startTimeRef.current = Date.now()
@@ -440,11 +452,13 @@ export default function ImportModal({ onClose }) {
     await new Promise(r => setTimeout(r, 300))
     const aiCount = 0 // AI enrichment is now a separate step
     const dupes   = Math.max(0, finalTxs.length - (typeof added==='number' ? added : finalTxs.length))
+    const result  = { total: finalTxs.length, aiCount, dupes, correctionsCount }
 
     setStatus(null)
-    setDone({ total:finalTxs.length, aiCount, dupes, skippedMonths: skippedMonths || [], correctionsCount })
+    if (skipDoneUI) return result
+    setDone({ ...result, skippedMonths: skippedMonths || [] })
     setTimeout(onClose, 2500)
-    return true
+    return result
   }
 
   // ── Import ────────────────────────────────────────────────
@@ -548,6 +562,11 @@ export default function ImportModal({ onClose }) {
     const card4 = acc.card4
     const allTxsNow = useStore.getState().transactions
 
+    // Saldo PRIMA di qualunque modifica — usato dal check di sicurezza finale (vedi sotto,
+    // dopo il commit del batch): richiesto esplicitamente dall'utente dopo un incidente in
+    // cui il saldo era salito di migliaia di euro senza che l'app se ne accorgesse.
+    const saldoBefore = computeSaldoConto(allTxsNow)
+
     // Tutta l'operazione (import dettaglio + eventuale rettifica + esclusione estratti) deve
     // essere UN'UNICA voce nello stack Undo dell'app: un solo "Annulla" deve disfare tutto
     // insieme, altrimenti l'estratto resta escluso anche dopo che il dettaglio importato è
@@ -604,13 +623,16 @@ export default function ImportModal({ onClose }) {
     setCardReconcile(null)
     startTimeRef.current = Date.now()
     setStatus({ phase:'ai', pct:0, current:0, total:txsToImport.length, eta:null, message:'Preparazione…' })
+    let saveResult = false
     try {
-      // 2. Salva PRIMA il dettaglio + le rettifiche (vedi ORDINE DI SICUREZZA sopra)
-      const saved = await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs })
+      // 2. Salva PRIMA il dettaglio + le rettifiche (vedi ORDINE DI SICUREZZA sopra).
+      // skipDoneUI: il messaggio di successo non va mostrato qui — prima va fatto il
+      // check di sicurezza sul saldo qui sotto, che potrebbe dover mostrare un errore
+      saveResult = await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs, skipDoneUI: true })
       // 3. Escludi gli estratti abbinati SOLO se il salvataggio è andato a buon fine —
       // se l'utente ha annullato a metà (runAIAndSave torna false), non tocchiamo il
       // conto: niente di nuovo è stato salvato, quindi niente estratto va escluso
-      if (saved) {
+      if (saveResult) {
         estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, {
           excluded: true, reconciled: true,
           excludedType: 'automatic',
@@ -618,12 +640,42 @@ export default function ImportModal({ onClose }) {
         }))
       }
     } finally {
-      // Commesso SEMPRE: se saved è true, l'intera operazione (import + esclusione) è
-      // un solo blocco disfabile con un Annulla; se saved è false (annullato a metà),
+      // Commesso SEMPRE: se saveResult è troncato, l'intera operazione (import + esclusione) è
+      // un solo blocco disfabile con un Annulla; se saveResult è false (annullato a metà),
       // il batch è vuoto e commitTxUndoBatch non aggiunge nulla allo stack (vedi la sua
       // implementazione in useStore.js: batch.length===0 → return senza effetti)
       useStore.getState().commitTxUndoBatch(`Riconciliazione carta *${card4} (${matchedMonths.length} mes${matchedMonths.length===1?'e':'i'})`)
     }
+
+    if (!saveResult) return   // annullato a metà — handleCancel ha già ripulito lo stato UI
+
+    // ── CHECK DI SICUREZZA FINALE (richiesta esplicita dell'utente) ──────────────
+    // L'intera garanzia "il saldo non cambia mai" si basa su calcoli (residuo, match
+    // esatto al centesimo) che potrebbero avere un bug non ancora scoperto — invece di
+    // fidarsi ciecamente, ricalcoliamo il saldo vero DOPO tutte le modifiche e lo
+    // confrontiamo con quello di PRIMA. Anche un solo centesimo di differenza annulla
+    // AUTOMATICAMENTE tutto quanto appena fatto (riusa undoLastTx, ora reso affidabile:
+    // aspetta davvero il completamento di tutte le scritture Firestore prima di tornare)
+    // e mostra un errore descrittivo invece del messaggio di successo — niente viene
+    // lasciato a metà in silenzio.
+    const saldoAfter = computeSaldoConto(useStore.getState().transactions)
+    const delta = Math.round((saldoAfter - saldoBefore) * 100) / 100
+    if (Math.abs(delta) > 0.01) {
+      await useStore.getState().undoLastTx()
+      setStatus(null)
+      setDone(null)
+      setError(
+        `⚠️ Operazione annullata automaticamente: il saldo del conto doveva restare invariato ma sarebbe cambiato di ` +
+        `${delta >= 0 ? '+' : ''}€${delta.toFixed(2)} (da €${saldoBefore.toFixed(2)} a €${saldoAfter.toFixed(2)}). ` +
+        `Nessuna modifica è stata mantenuta. Riprova — se il problema si ripresenta, serve un controllo più approfondito ` +
+        `del CSV o della riconciliazione (mesi coinvolti: ${matchedMonths.map(m => monthLabel(m.month)).join(', ')}).`
+      )
+      return
+    }
+
+    // Saldo confermato invariato: ora sì, mostra il messaggio di successo
+    setDone({ ...saveResult, skippedMonths })
+    setTimeout(onClose, 2500)
   }
 
   function handleCardReconcileCancel() {
