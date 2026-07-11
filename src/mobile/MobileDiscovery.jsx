@@ -729,10 +729,32 @@ export default function MobileDiscovery() {
     setAiResult(null)
     setAiError(null)
     try {
-      // Full enrichment (same logic as TransactionsPage desktop)
-      const enriched = await enrichBatch([current], { force: true, throwOnError: true })
+      // Full enrichment (same logic as TransactionsPage desktop).
+      // overrideUserEdits: l'AI lookup è una richiesta esplicita dell'utente su QUESTA
+      // transazione — i risultati non vanno mai scartati in silenzio per flag di
+      // modifica manuale (stesso principio del ✨ su selezione in Transazioni).
+      const enriched = await enrichBatch([current], { force: true, throwOnError: true, overrideUserEdits: true })
       if (!enriched.length) throw new Error('Nessun risultato')
       const tx = enriched[0]
+
+      // ── Check regole di sistema dopo l'enrichment (richiesta esplicita dell'utente:
+      // "dopo ogni AI enrichment deve esserci un check delle regole a sistema") —
+      // stesse regole del flusso desktop: catRules semplici, regole AI multi-condizione
+      // (nota: logica di matching già duplicata in più punti — vedi
+      // fmt-airules-matching-duplicated in memoria), importo positivo → Entrate.
+      const { applyAiRules, appPrefs: prefs } = useStore.getState()
+      for (const r of (prefs?.catRules || []).filter(r => r.enabled !== false)) {
+        const val = (r.matchValue || '').toLowerCase()
+        if (!val) continue
+        const src = ((tx[r.matchField] || tx.description || tx.descAI || '')).toLowerCase()
+        if (src.includes(val)) { tx.cat1 = r.cat1 || tx.cat1; tx.cat2 = r.cat2 !== undefined ? r.cat2 : tx.cat2; break }
+      }
+      if (typeof applyAiRules === 'function') {
+        const zr = applyAiRules(tx.description, tx.amount, tx.date)
+        if (zr?.cats?.[0]) { tx.cat1 = zr.cats[0].cat1; tx.cat2 = zr.cats[0].cat2 || '' } // le regole AI vincono sempre
+        if (zr?.descAI) tx.descAI = zr.descAI
+      }
+      if (tx.amount > 0 && tx.cat1 && tx.cat1 !== 'Entrate') { tx.cat1 = 'Entrate'; tx.cat2 = '' }
 
       // Save enriched fields to DB
       const patch = {}

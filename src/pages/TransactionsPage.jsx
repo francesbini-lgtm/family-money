@@ -1950,7 +1950,14 @@ function applyCatRules(tx) {
   return null
 }
 
-function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
+// overrideUserEdits: true SOLO per l'enrichment esplicito di transazioni selezionate
+// dall'utente (✨ AI Enrichment (n) su selezione) — in quel caso i risultati AI
+// sovrascrivono anche i campi protetti da userEditedDesc/userEditedCat/cityUserEdited
+// e i flag vengono azzerati (l'AI torna "proprietaria" della riga, come se fosse nuova).
+// Il Re-enrich globale e l'✨ AI di massa restano a false e rispettano i flag.
+// Bug reale (2026-07-11): l'AI restituiva descAI/cat corrette ma su una tx con flag
+// di modifica manuale tutto veniva scartato in silenzio — la riga restava "-".
+function AiEnrichmentOverlay({ transactions, onDone, forceAll=false, overrideUserEdits=false }) {
   const { updateTransaction, applyAiRules } = useStore()
   const [pct,     setPct]     = useState(0)
   const [current, setCurrent] = useState(0)
@@ -2058,7 +2065,7 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
       let enriched = null
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          enriched = await enrichBatch(batch, { force: forceAll })
+          enriched = await enrichBatch(batch, { force: forceAll, overrideUserEdits })
           break  // success
         } catch(e) {
           const is429 = e.message?.includes('429') || e.message?.includes('PROXY_ERROR')
@@ -2082,9 +2089,16 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
         enriched.forEach(t => {
           if (!t) return
           // Only apply rule-based descAI if AI didn't produce one (fallback only)
-          if (!t.descAI && !t.userEditedDesc) {
+          if (!t.descAI && (overrideUserEdits || !t.userEditedDesc)) {
             const rd = ruleDesc(t)
             if (rd) t.descAI = rd
+          }
+          // Fallback finale (stesso del flusso import in ImportModal): se né AI né
+          // regole producono una descAI utilizzabile (vuota o letteralmente "-"),
+          // meglio la descrizione originale della banca per intero che un trattino.
+          if ((overrideUserEdits || !t.userEditedDesc) &&
+              (!t.descAI || t.descAI.trim() === '' || t.descAI.trim() === '-')) {
+            t.descAI = t.description || t.descAI || null
           }
 
           // ── Step 2: apply user-defined rules (highest priority) ──
@@ -2119,19 +2133,28 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
 
           // Fetch current tx to check manual overrides
           const curTx = useStore.getState().transactions.find(s => s.txId === t.txId)
-          // Never overwrite categories the user set manually, or king-protected txs
+          // Never overwrite categories the user set manually, or king-protected txs.
+          // Con overrideUserEdits (re-enrich esplicito su selezione) il flag
+          // userEditedCat NON protegge più — la protezione King resta sempre.
           const _isKingProtected = useStore.getState().isKingProtected
-          const catProtected = !!curTx?.userEditedCat ||
+          const catProtected = (!overrideUserEdits && !!curTx?.userEditedCat) ||
             (typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount))
+          if (curTx?.userEditedCat || curTx?.userEditedDesc || curTx?.cityUserEdited) {
+            console.log(`[enrich] ${t.txId}: protezioni`, {
+              userEditedCat: !!curTx?.userEditedCat, userEditedDesc: !!curTx?.userEditedDesc,
+              cityUserEdited: !!curTx?.cityUserEdited,
+              king: typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount),
+            }, overrideUserEdits ? '→ scavalcate e azzerate (re-enrich esplicito)' : '→ rispettate')
+          }
           const finalCat1 = catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null)
           // Flag "da rivedere competenza": categoria (finale) Weekend e Vacanze ma il giorno
           // è stato esplicitamente marcato "non vacanza" — indipendente da catProtected,
           // è un segnale di qualità dati, non una modifica di categoria
           const flagCompetenza = finalCat1 === 'Weekend e Vacanze' &&
             notVacationDates.includes(curTx?._effDate || effDateForVac)
-          updateTransaction(t.txId, {
+          const writePatch = {
             descAI:        t.descAI,
-            city:          curTx?.cityUserEdited ? curTx.city : t.city,  // respect manual edits
+            city:          (!overrideUserEdits && curTx?.cityUserEdited) ? curTx.city : t.city,  // respect manual edits
             time:          t.time,
             card:          t.card,
             merchant:      t.merchant      ?? null,
@@ -2143,8 +2166,13 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false }) {
             aiEnriched:    true,
             aiEnrichedAt:  t.aiEnrichedAt,
             aiCategorized: true,
+            // Re-enrich esplicito: azzera i flag di modifica manuale — l'AI torna
+            // "proprietaria" della riga (i flag si ri-attivano alla prossima modifica manuale)
+            ...(overrideUserEdits ? { userEditedDesc: false, userEditedCat: false, cityUserEdited: false } : {}),
             ...(t.excluded ? { excluded: true } : {}),
-          })
+          }
+          console.log(`[enrich] ${t.txId}: scrivo`, { descAI: writePatch.descAI, cat1: writePatch.cat1, cat2: writePatch.cat2, city: writePatch.city, merchant: writePatch.merchant })
+          updateTransaction(t.txId, writePatch)
           if (t.city)                    stats.cities++
           if (t.merchant||t.counterpart) stats.counterparts++
           if (t.descAI)                  stats.descs++
@@ -3515,7 +3543,7 @@ export default function TransactionsPage() {
       {colsOpen        && <EditColonneModal visibleCols={visibleCols} colOrder={colOrder} onApply={(cols,order)=>{setVisibleCols(cols);setColOrder(order)}} onClose={()=>setColsOpen(false)}/>}
       {enriching       && <AiEnrichmentOverlay transactions={store.transactions} onDone={()=>setEnriching(false)}/>}
       {reenriching     && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions} onDone={()=>setReenriching(false)}/>}
-      {enrichingSelected && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions.filter(t=>selected.has(t.txId))} onDone={()=>{setEnrichingSelected(false);setSelected(new Set())}}/>}
+      {enrichingSelected && <AiEnrichmentOverlay forceAll={true} overrideUserEdits={true} transactions={store.transactions.filter(t=>selected.has(t.txId))} onDone={()=>{setEnrichingSelected(false);setSelected(new Set())}}/>}
 
       {/* ── AI Code Prompt ── */}
       {aiCodePrompt && (
@@ -3563,7 +3591,7 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
-      {enrichSingleTx  && <AiEnrichmentOverlay forceAll={true} transactions={[enrichSingleTx]} onDone={()=>setEnrichSingleTx(null)}/>}
+      {enrichSingleTx  && <AiEnrichmentOverlay forceAll={true} overrideUserEdits={true} transactions={[enrichSingleTx]} onDone={()=>setEnrichSingleTx(null)}/>}
       {filterPopup && (
         <>
           <div style={{position:'fixed',inset:0,zIndex:9998}} onClick={()=>setFilterPopup(null)}/>

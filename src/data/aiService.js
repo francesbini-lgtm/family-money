@@ -338,7 +338,15 @@ const CAT_LIST = CAT_NAMES
   .join('\n')
 
 // ── Batch enrichment — MAIN FUNCTION ─────────────────────
-export async function enrichBatch(transactions, { force = false, throwOnError = false } = {}) {
+// overrideUserEdits: quando l'utente ri-arricchisce ESPLICITAMENTE una selezione di
+// transazioni (✨ AI Enrichment su selezione in Transazioni, AI lookup in Discovery),
+// i risultati AI devono sovrascrivere anche i campi protetti dai flag
+// userEditedDesc/userEditedCat/cityUserEdited — l'intento esplicito dell'utente
+// ("rifai questa transazione") vince sulla protezione. Bug reale segnalato (2026-07-11):
+// l'AI restituiva descAI/cat corrette per una tx del 2024 con flag di modifica manuale,
+// ma tutto veniva scartato in silenzio e la riga restava con descAI "-" e senza categoria.
+// Default false: il Re-enrich globale e l'✨ AI di massa continuano a rispettare i flag.
+export async function enrichBatch(transactions, { force = false, throwOnError = false, overrideUserEdits = false } = {}) {
   if (!transactions.length) return []
 
   // Step 1 — Regex pre-enrichment (instant, no API)
@@ -355,7 +363,7 @@ export async function enrichBatch(transactions, { force = false, throwOnError = 
       // City is always determined by AI — regex city is unreliable
       // force=true: clear existing city so AI re-evaluates (unless user-edited)
       // force=false: keep existing AI-set city (don't re-evaluate unless missing)
-      city:        (force && !t.cityUserEdited) ? null : (t.city || null),
+      city:        (force && (overrideUserEdits || !t.cityUserEdited)) ? null : (t.city || null),
       counterpart: r.counterpart || t.counterpart || null,
       // force=true: always use regex merchant (ignores stale old value)
       merchant:    force ? (regexMerchant || null) : (regexMerchant || t.merchant || null),
@@ -493,14 +501,26 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
         const ai = aiMap.get(t.txId)
         if (!ai) return { ...t, aiEnriched: true, aiEnrichedAt: new Date().toISOString() }
         const pick = (aiVal, existing) => (aiVal && aiVal.trim()) ? aiVal.trim() : (existing || null)
+        // Con overrideUserEdits i flag di modifica manuale NON bloccano i valori AI
+        // (richiesta esplicita dell'utente di rifare questa transazione — vedi nota
+        // sopra la firma della funzione). Log diagnostico quando una protezione scatta
+        // o viene scavalcata, così un risultato AI "sparito" non è mai più silenzioso.
+        const editedDesc = !overrideUserEdits && t.userEditedDesc
+        const editedCity = !overrideUserEdits && t.cityUserEdited
+        const editedCat  = !overrideUserEdits && t.userEditedCat
+        if (t.userEditedDesc || t.cityUserEdited || t.userEditedCat) {
+          console.log(`[enrichBatch] ${t.txId}: flag modifiche manuali`,
+            { userEditedDesc: !!t.userEditedDesc, cityUserEdited: !!t.cityUserEdited, userEditedCat: !!t.userEditedCat },
+            overrideUserEdits ? '→ SCAVALCATI (re-enrich esplicito)' : '→ risultati AI su questi campi SCARTATI')
+        }
         return {
           ...t,
           merchant:      pick(ai.merchant,    t.merchant),
           counterpart:   pick(ai.counterpart, t.counterpart),
-          descAI:        t.userEditedDesc ? t.descAI : pick(ai.descAI, t.descAI),
-          city:          t.cityUserEdited ? t.city : pick(ai.city, t.city),
-          cat1:          t.userEditedCat ? (t.cat1 || null) : (ai.cat1 || t.cat1 || null),
-          cat2:          t.userEditedCat ? (t.cat2 || '') : (ai.cat2 !== undefined ? ai.cat2 : (t.cat2||'')),
+          descAI:        editedDesc ? t.descAI : pick(ai.descAI, t.descAI),
+          city:          editedCity ? t.city : pick(ai.city, t.city),
+          cat1:          editedCat ? (t.cat1 || null) : (ai.cat1 || t.cat1 || null),
+          cat2:          editedCat ? (t.cat2 || '') : (ai.cat2 !== undefined ? ai.cat2 : (t.cat2||'')),
           conf:          ai.conf        || t.conf  || 70,
           aiEnriched:    true,
           aiEnrichedAt:  new Date().toISOString(),
