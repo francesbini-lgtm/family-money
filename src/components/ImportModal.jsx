@@ -102,21 +102,32 @@ function isPlausibleEstrattoDate(estrattoDate, ym) {
   return estrattoDate >= `${nextMonth}-01` && estrattoDate < `${monthKeyAdd(ym, 2)}-01`
 }
 
-// Transazioni del conto corrente che sembrano un "estratto conto" per questa carta
-// (stessa logica di riconoscimento già in uso: parole chiave + numero carta nella
-// descrizione), non ancora escluse/riconciliate — candidati per l'abbinamento automatico
+// Regola di abbinamento automatico (richiesta esplicita dell'utente, 2026-07-11): conta
+// SOLO l'importo, esatto al centesimo, di una transazione nel mese SUCCESSIVO (vedi
+// isPlausibleEstrattoDate) — niente più parole chiave in descrizione. Il filtro per
+// "estratto|utilizzo carte|carta di credito" causava 0 abbinamenti automatici ogni volta
+// che la banca scriveva la riga con una dicitura non prevista (bug reale segnalato
+// dall'utente: 14/14 mesi "da cercare" pur con importi corretti). Il numero di carta nella
+// descrizione (se presente) resta solo un controllo INFORMATIVO — vedi extractCardDigits
+// e statusFor: se diverso da account.card4 l'abbinamento resta valido (l'importo esatto +
+// il mese giusto bastano) ma viene segnalato con "carta diversa", utile es. quando la banca
+// ha cambiato il PAN della carta nel tempo pur restando la stessa carta fisica/contratto.
 function findEstrattoCandidates(transactions, account) {
-  const card4 = account.card4
-  const panRegex = new RegExp(`[0-9X]{4,}${card4}\\b`, 'i')
   return transactions
-    .filter(t =>
-      !t.excluded &&
-      t.account !== account.name &&
-      t.amount < 0 &&
-      /estratto|utilizzo carte|carta di credito/i.test(t.description || '') &&
-      (t.card === card4 || panRegex.test(t.description || ''))
-    )
+    .filter(t => !t.excluded && t.account !== account.name && t.amount < 0)
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
+// Estrae, se presente, un riferimento esplicito alle ultime 4 cifre della carta dalla
+// descrizione — sia in forma mascherata lunga (es. "4XXXXXXXXXXX7299") sia corta preceduta
+// da "carta" (es. "CARTA 0256"). Solo per il segnalino "carta diversa" (vedi sopra), non
+// filtra più i candidati.
+function extractCardDigits(desc) {
+  if (!desc) return null
+  let m = desc.match(/[0-9X]{6,}(\d{4})\b/i)
+  if (m) return m[1]
+  m = desc.match(/carta(?:\s+di\s+credito)?\s*[:n°#]?\s*\*{0,4}(\d{4})\b/i)
+  return m ? m[1] : null
 }
 
 // ── Riconciliazione carta di credito — PRIMA di AI/salvataggio ────────────
@@ -131,10 +142,10 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
     monthGroups.forEach(g => {
       // Solo candidati con una data plausibile per QUESTO mese (non prima, non troppo dopo)
       const plausible = candidates.filter(c => !used.has(c.txId) && isPlausibleEstrattoDate(c.date, g.month))
-      const ok      = plausible.find(c => g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.02)
-      const partial = !ok && plausible.find(c => g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) / g.total < 0.08)
-      const match = ok || partial
-      if (match) { init[g.month] = match.txId; used.add(match.txId) }
+      // Abbinamento automatico: SOLO importo esatto al centesimo (vedi nota su findEstrattoCandidates) —
+      // nessuna tolleranza percentuale qui, per essere sicuri al 100% prima di proporlo come già trovato
+      const exact = plausible.find(c => g.total > 0 && Math.abs(Math.abs(c.amount) - g.total) < 0.005)
+      if (exact) { init[g.month] = exact.txId; used.add(exact.txId) }
       else init[g.month] = null
     })
     return init
@@ -147,8 +158,17 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
     if (!txId) return 'missing'
     const c = transactions.find(t => t.txId === txId)
     if (!c || !g.total) return 'missing'
-    const diff = Math.abs(Math.abs(c.amount) - g.total) / g.total
-    return diff < 0.02 ? 'ok' : diff < 0.08 ? 'partial' : 'mismatch'
+    const diff = Math.abs(Math.abs(c.amount) - g.total)
+    if (diff < 0.005) {
+      // Importo esatto: unico controllo restante è informativo — la descrizione riporta
+      // ESPLICITAMENTE un numero carta diverso da quello configurato per questo conto?
+      const foundCard = extractCardDigits(c.description || c.descAI || '')
+      return (foundCard && foundCard !== account.card4) ? 'card-mismatch' : 'ok'
+    }
+    // Solo per abbinamenti scelti a mano dall'utente via "Cerca" (l'automatico sopra
+    // propone solo importi esatti): qui manteniamo un segnale su quanto ci si discosta
+    const relDiff = g.total > 0 ? diff / g.total : 1
+    return relDiff < 0.08 ? 'partial' : 'mismatch'
   }
 
   const manualResults = useMemo(() => {
@@ -189,6 +209,9 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
           <strong style={{ color: 'var(--text2)' }}> Il saldo del conto corrente non cambia mai</strong>: l'estratto viene tolto dal
           totale (per non contarlo due volte) solo nella stessa misura in cui il dettaglio importato lo rimpiazza — un'eventuale
           differenza viene aggiunta come rettifica automatica, così i soldi realmente usciti dal conto restano sempre gli stessi.
+          L'abbinamento automatico cerca nel mese successivo un importo esatto al centesimo; se trova un numero di carta diverso
+          scritto in descrizione lo segnala con <span style={{ color: 'var(--gold)' }}>⚠️ carta diversa</span> ma lo propone comunque
+          (capita se la banca ha cambiato il numero della carta nel tempo).
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
@@ -208,8 +231,8 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                 const txId = choice[g.month]
                 const chosenTx = txId ? transactions.find(t => t.txId === txId) : null
                 const status = statusFor(g)
-                const statusIcon = status === 'ok' ? '✅' : status === 'partial' ? '⚠️' : status === 'mismatch' ? '❌' : '🔍'
-                const statusColor = status === 'ok' ? 'var(--green)' : status === 'partial' ? 'var(--gold)' : status === 'mismatch' ? 'var(--red)' : 'var(--text3)'
+                const statusIcon = status === 'ok' ? '✅' : status === 'card-mismatch' ? '⚠️' : status === 'partial' ? '⚠️' : status === 'mismatch' ? '❌' : '🔍'
+                const statusColor = status === 'ok' ? 'var(--green)' : status === 'card-mismatch' ? 'var(--gold)' : status === 'partial' ? 'var(--gold)' : status === 'mismatch' ? 'var(--red)' : 'var(--text3)'
                 return (
                   <>
                     <tr key={g.month} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -224,7 +247,7 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                       </td>
                       <td style={{ padding: '8px 8px', textAlign: 'center' }}>
                         <span style={{ fontSize: 15 }}>{statusIcon}</span>
-                        <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div>
+                        <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'card-mismatch' ? 'carta diversa' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div>
                       </td>
                       <td style={{ padding: '8px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}
