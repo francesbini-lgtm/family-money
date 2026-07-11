@@ -2,6 +2,7 @@ import { useState, useRef, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
 import { enrichBatch, hasGeminiKey } from '../data/aiService'
+import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
 // spin animation added via CSS
@@ -446,6 +447,17 @@ export default function ImportModal({ onClose }) {
   // Un eventuale errore/interruzione qui NON tocca mai le transazioni già salvate/validate
   // — a differenza del salvataggio, questa fase non ha un rollback: nel peggiore dei casi
   // alcune transazioni restano semplicemente non arricchite.
+  //
+  // force:true (richiesta esplicita dell'utente, "le categorie non le tocca e non
+  // improvvisa una categorizzazione"): enrichBatch normalmente salta l'AI per le
+  // transazioni che hanno GIÀ merchant/controparte/descAI/città/categoria valorizzati
+  // (pensato per il bottone "✨ AI Enrichment" di Transazioni, che deve solo colmare i
+  // buchi su dati già visti). Ma per un import appena fatto, quei campi sono spesso già
+  // valorizzati "alla bell'e meglio" dalle regole regex di parseCSV (es. categoria
+  // 'Non Categorizzato' con bassa confidenza, o una descAI grezza non ripulita) — con
+  // force:true l'AI viene invocata SEMPRE su ogni riga appena importata, decidendo lei
+  // la categoria migliore tra gli L1/L2 esistenti invece di lasciare il primo tentativo
+  // regex senza rivederlo.
   async function runEnrichmentStep(savedTxs) {
     if (!savedTxs.length) return { enrichedCount: 0, total: 0 }
     if (!hasGeminiKey()) {
@@ -469,7 +481,7 @@ export default function ImportModal({ onClose }) {
 
       let enriched
       try {
-        enriched = await enrichBatch(batch)
+        enriched = await enrichBatch(batch, { force: true })
       } catch (e) {
         // Errori bloccanti (chiave mancante/proxy giù/timeout) — inutile continuare,
         // le transazioni già enrichite restano tali, il resto resta semplicemente non arricchito
@@ -478,9 +490,16 @@ export default function ImportModal({ onClose }) {
       }
       enriched.forEach(t => {
         if (!t) return
+        // Fallback descrizione (richiesta esplicita dell'utente): se l'AI+regex non
+        // producono nessuna descAI utilizzabile (vuota, o letteralmente "-"), meglio
+        // mostrare la descrizione originale della banca per intero piuttosto che un
+        // trattino o niente — un dato grezzo ma completo è sempre meglio di un vuoto.
+        const cleanDescAI = (t.descAI && t.descAI.trim() && t.descAI.trim() !== '-')
+          ? t.descAI.trim()
+          : (t.description || null)
         updateTransaction(t.txId, {
           merchant:      t.merchant, counterpart: t.counterpart,
-          descAI:        t.descAI,   city:        t.city,
+          descAI:        cleanDescAI, city:        t.city,
           cat1:          t.cat1,     cat2:        t.cat2,
           conf:          t.conf,
           aiEnriched:    true,
@@ -491,6 +510,86 @@ export default function ImportModal({ onClose }) {
       })
     }
     return { enrichedCount, total: savedTxs.length }
+  }
+
+  // ── Regole per le semplici "catRules" (field-contains) salvate in appPrefs.catRules —
+  // stessa logica di applyCatRules() in TransactionsPage.jsx/AiEnrichmentOverlay, duplicata
+  // qui volutamente per non toccare quel flusso già funzionante (nota: stesso pattern di
+  // duplicazione già presente altrove nel codice, es. matching regole AI — vedi
+  // fmt-airules-matching-duplicated in memoria — da consolidare in futuro in un modulo condiviso).
+  function applyCatRulesLocal(tx, rules) {
+    for (const r of (rules || []).filter(r => r.enabled !== false)) {
+      const val = (r.matchValue || '').toLowerCase()
+      if (!val) continue
+      const src = ((tx[r.matchField] || tx.description || tx.descAI || '')).toLowerCase()
+      if (src.includes(val)) return { cat1: r.cat1 || tx.cat1, cat2: r.cat2 !== undefined ? r.cat2 : tx.cat2 }
+    }
+    return null
+  }
+
+  // ── Fase "rules" (richiesta esplicita dell'utente, ultimo step della pipeline): applica
+  // alle transazioni appena importate/categorizzate le regole di sistema SALVATE — catRules
+  // semplici (Impostazioni → Regole categorie), regole AI multi-condizione (Regole AI in
+  // Transazioni, incluso l'eventuale flag "escludi"), la regola fissa "importo positivo →
+  // Entrate", e la riassegnazione automatica a "Weekend e Vacanze" per le spese che cadono
+  // in un periodo di vacanza dichiarato in Calendario — esattamente le stesse regole che
+  // "✨ AI Enrichment" in Transazioni applica dopo la sua chiamata Gemini, ma che l'import
+  // da CSV non applicava mai (a parte le aiRules, già passate a parseCSV in fase di lettura).
+  // Rispetta sempre le categorie protette manualmente/dai "re King" (isKingProtected).
+  async function runRulesStep(savedTxIds) {
+    if (!savedTxIds.length) return { rulesAppliedCount: 0 }
+    setStatus({ phase:'rules', pct:30, current:0, total:savedTxIds.length, eta:null,
+      message:'Applicazione delle regole di sistema salvate…' })
+    await new Promise(r => setTimeout(r, 150))
+
+    const { applyAiRules, isKingProtected, appPrefs } = useStore.getState()
+    const catRules          = appPrefs?.catRules || []
+    const declaredVacations = appPrefs?.calendarVacations || []
+    const notVacationDates  = appPrefs?.calendarNotVacationDates || []
+    let rulesAppliedCount = 0
+
+    savedTxIds.forEach(txId => {
+      const curTx = useStore.getState().transactions.find(s => s.txId === txId)
+      if (!curTx) return
+
+      let cat1 = curTx.cat1, cat2 = curTx.cat2, descAI = curTx.descAI, excluded = curTx.excluded
+      let changed = false
+
+      const catOverride = applyCatRulesLocal(curTx, catRules)
+      if (catOverride) { cat1 = catOverride.cat1; cat2 = catOverride.cat2; changed = true }
+
+      if (typeof applyAiRules === 'function') {
+        const zr = applyAiRules(curTx.description, curTx.amount, curTx.date)
+        if (zr?.cats?.[0]) { cat1 = zr.cats[0].cat1; cat2 = zr.cats[0].cat2 || ''; changed = true }
+        if (zr?.descAI) { descAI = zr.descAI; changed = true }
+        if (zr?.exclude) { excluded = true; changed = true }
+      }
+
+      if (curTx.amount > 0 && cat1 && cat1 !== 'Entrate') { cat1 = 'Entrate'; cat2 = ''; changed = true }
+
+      const effDateForVac = curTx._effDate || curTx.competenza || curTx.date
+      const vacHit = curTx.amount < 0 && cat1 !== 'Weekend e Vacanze' && !notVacationDates.includes(effDateForVac)
+        ? findVacationForDate(effDateForVac, declaredVacations)
+        : null
+      if (vacHit && isVacationEligible(curTx)) { cat1 = 'Weekend e Vacanze'; cat2 = 'Vacanze'; changed = true }
+
+      const catProtected = !!curTx.userEditedCat ||
+        (typeof isKingProtected === 'function' && isKingProtected(curTx.description, curTx.amount))
+      if (catProtected) { cat1 = curTx.cat1; cat2 = curTx.cat2 }
+
+      const flagCompetenza = cat1 === 'Weekend e Vacanze' && notVacationDates.includes(effDateForVac)
+      if (flagCompetenza !== !!curTx.flagCompetenza) changed = true
+
+      if (changed) {
+        updateTransaction(txId, { cat1, cat2, descAI, excluded, flagCompetenza })
+        rulesAppliedCount++
+      }
+    })
+
+    setStatus({ phase:'rules', pct:100, current:savedTxIds.length, total:savedTxIds.length, eta:null,
+      message:'✓ Regole di sistema applicate' })
+    await new Promise(r => setTimeout(r, 150))
+    return { rulesAppliedCount }
   }
 
   // ── Import ────────────────────────────────────────────────
@@ -566,8 +665,11 @@ export default function ImportModal({ onClose }) {
     const saveResult = await saveTxs(allParsed)
     if (!saveResult) return   // annullato a metà
 
-    // ── Phase 3: Categorizzazione AI — ultimo step, sulle transazioni già salvate ──
+    // ── Phase 3: Categorizzazione AI — sulle transazioni già salvate ──
     const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
+
+    // ── Phase 4: Regole di sistema (catRules, regole AI, vacanze) — ultimo step ──
+    const rulesResult = await runRulesStep(saveResult.savedTxs.map(t => t.txId))
 
     setStatus(null)
     setDone({
@@ -576,6 +678,7 @@ export default function ImportModal({ onClose }) {
       dupes: saveResult.dupes,
       correctionsCount: saveResult.correctionsCount,
       aiSkippedNoKey: enrichResult.skippedNoKey,
+      rulesAppliedCount: rulesResult.rulesAppliedCount,
     })
     setTimeout(onClose, 2500)
   }
@@ -728,8 +831,11 @@ export default function ImportModal({ onClose }) {
     setStatus({ phase:'verify', pct:100, current:0, total:0, eta:null, message:'✓ Saldo confermato invariato' })
     await new Promise(r => setTimeout(r, 150))
 
-    // ── Saldo validato: SOLO ORA gira l'AI (ultimo step) ──────────────────────────
+    // ── Saldo validato: SOLO ORA gira l'AI ──────────────────────────
     const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
+
+    // ── Ultimo step: regole di sistema (catRules, regole AI, vacanze) ──────────────
+    const rulesResult = await runRulesStep(saveResult.savedTxs.map(t => t.txId))
 
     setStatus(null)
     setDone({
@@ -738,6 +844,7 @@ export default function ImportModal({ onClose }) {
       dupes: saveResult.dupes,
       correctionsCount: saveResult.correctionsCount,
       aiSkippedNoKey: enrichResult.skippedNoKey,
+      rulesAppliedCount: rulesResult.rulesAppliedCount,
       skippedMonths,
     })
     setTimeout(onClose, 2500)
@@ -813,11 +920,13 @@ export default function ImportModal({ onClose }) {
                     {id:'exclude', label:'Esclusione', icon:'🔖'},
                     {id:'verify',  label:'Verifica',   icon:'⚖️'},
                     {id:'ai',      label:'AI Gemini',  icon:'✨'},
+                    {id:'rules',   label:'Regole',     icon:'🧩'},
                   ]
                 : [
                     {id:'parse', label:'CSV',        icon:'📄'},
                     {id:'save',  label:'Salvataggio',icon:'💾'},
                     {id:'ai',    label:'AI Gemini',  icon:'✨'},
+                    {id:'rules', label:'Regole',     icon:'🧩'},
                   ]
               ).map((ph, idx, order) => {
                 const orderIds = order.map(o => o.id)
@@ -889,20 +998,20 @@ export default function ImportModal({ onClose }) {
             )}
 
             {/* ── Cancel button — visibile SOLO nelle fasi non distruttive: durante 'parse'
-                niente è ancora stato scritto su Firestore, durante 'ai' i dati sono già
-                salvati/validati e annullare significa solo fermare la categorizzazione (le
-                transazioni restano comunque importate, semplicemente non arricchite). Nelle
+                niente è ancora stato scritto su Firestore, durante 'ai'/'rules' i dati sono
+                già salvati/validati e annullare significa solo fermare la
+                categorizzazione/le regole (le transazioni restano comunque importate). Nelle
                 fasi 'save'/'exclude'/'verify' i dati sono in corso di scrittura sul database
                 reale — annullare a metà lascerebbe uno stato incoerente, quindi il bottone
                 è nascosto (il check di sicurezza sul saldo gestisce comunque eventuali problemi) ── */}
-            {['parse','ai'].includes(status.phase) && (
+            {['parse','ai','rules'].includes(status.phase) && (
               <>
                 <button className="import-cancel-btn" onClick={handleCancel}>
                   <X size={13}/> Annulla importazione
                 </button>
                 <div className="import-cancel-hint">
-                  {status.phase==='ai'
-                    ? 'Le transazioni sono già salvate e validate — annullare ferma solo la categorizzazione AI (potrai rilanciarla da Transazioni).'
+                  {status.phase==='ai' || status.phase==='rules'
+                    ? 'Le transazioni sono già salvate e validate — annullare ferma solo la categorizzazione/le regole (potrai rilanciarle da Transazioni).'
                     : 'Annullare riporterà le transazioni allo stato precedente — nessun dato verrà salvato.'}
                 </div>
               </>
@@ -931,6 +1040,9 @@ export default function ImportModal({ onClose }) {
               {done.aiCount>0 && <div><Sparkles size={12} color="var(--gold)"/> {done.aiCount} categorizzate con Gemini AI</div>}
               {done.aiSkippedNoKey && (
                 <div style={{color:'var(--gold)'}}>⚠️ Chiave AI mancante — categorizzazione saltata (usa ✨ AI Enrichment in Transazioni)</div>
+              )}
+              {done.rulesAppliedCount>0 && (
+                <div style={{color:'var(--text3)'}}>🧩 {done.rulesAppliedCount} corrette dalle regole di sistema (categorie, vacanze, esclusioni)</div>
               )}
               {done.dupes>0  && <div style={{color:'var(--text3)'}}>🔄 {done.dupes} duplicate scartate</div>}
               <div style={{color:'var(--text3)'}}>💾 Salvate su Firestore</div>
