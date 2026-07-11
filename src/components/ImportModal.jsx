@@ -370,6 +370,9 @@ export default function ImportModal({ onClose }) {
   // della stessa carta, non l'intero DB) — vedi addTransactions in useStore.js
   // extraTxs: eventuali righe di "rettifica" (vedi handleCardReconcileConfirm) —
   // salvate direttamente, SENZA passare da AI (sono già complete/categorizzate)
+  // Ritorna true se il salvataggio è andato a buon fine, false se annullato a metà
+  // (abortRef) — il chiamante (handleCardReconcileConfirm) usa questo esito per
+  // decidere se è sicuro procedere con l'esclusione degli estratti (vedi nota lì).
   async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs } = {}) {
     let finalTxs = txsToImport
     if (useAI) {
@@ -380,11 +383,11 @@ export default function ImportModal({ onClose }) {
 
       finalTxs = []
       for (let b = 0; b < batches.length; b++) {
-        if (abortRef.current) { handleCancel(); return }
+        if (abortRef.current) { handleCancel(); return false }
 
         const categorized = await categorizeBatch(batches[b])
 
-        if (abortRef.current) { handleCancel(); return }
+        if (abortRef.current) { handleCancel(); return false }
 
         finalTxs.push(...categorized)
         const current = Math.min((b+1)*BATCH_SIZE, txsToImport.length)
@@ -398,7 +401,7 @@ export default function ImportModal({ onClose }) {
       }
     }
 
-    if (abortRef.current) { handleCancel(); return }
+    if (abortRef.current) { handleCancel(); return false }
 
     // ── Phase 3: Save ────────────────────────────────
     // Point of no return: data is about to be persisted on Firestore.
@@ -433,6 +436,7 @@ export default function ImportModal({ onClose }) {
     setStatus(null)
     setDone({ total:finalTxs.length, aiCount, dupes, skippedMonths: skippedMonths || [], correctionsCount })
     setTimeout(onClose, 2500)
+    return true
   }
 
   // ── Import ────────────────────────────────────────────────
@@ -521,21 +525,28 @@ export default function ImportModal({ onClose }) {
   // "differenza lieve"/"mismatch" confermato comunque), viene aggiunta automaticamente una
   // riga di rettifica per l'esatta differenza — così il saldo del conto NON cambia mai,
   // indipendentemente dalla qualità dell'abbinamento.
+  //
+  // ORDINE DI SICUREZZA (bug reale segnalato dall'utente: saldo crollato da 255.328€ a 0€
+  // dopo la conferma di un import da 128 tx, richiesto un Undo manuale): l'esclusione degli
+  // estratti veniva eseguita SUBITO, PRIMA di salvare il dettaglio sostitutivo — che per
+  // centinaia di righe richiede secondi/minuti di categorizzazione AI. Per tutta quella
+  // finestra il saldo restava PRIVO dell'importo escluso senza ancora avere il rimpiazzo.
+  // Ora l'ordine è invertito: dettaglio + rettifiche vengono salvati PRIMA (runAIAndSave),
+  // e solo a salvataggio riuscito (return true, non annullato a metà) si escludono gli
+  // estratti — nella peggiore delle ipotesi il saldo risulta temporaneamente GONFIATO
+  // (doppio conteggio: vecchio estratto + nuovo dettaglio insieme), mai crollato.
   async function handleCardReconcileConfirm({ matchedMonths, estrattoTxIdsToExclude }) {
     const { account: acc, monthGroups, allParsed } = cardReconcile
     const card4 = acc.card4
     const allTxsNow = useStore.getState().transactions
 
-    // Tutta l'operazione (esclusione estratti + import dettaglio + eventuale rettifica) deve
+    // Tutta l'operazione (import dettaglio + eventuale rettifica + esclusione estratti) deve
     // essere UN'UNICA voce nello stack Undo dell'app: un solo "Annulla" deve disfare tutto
     // insieme, altrimenti l'estratto resta escluso anche dopo che il dettaglio importato è
     // stato rimosso con Undo (bug segnalato dall'utente — richiedeva un ripristino manuale).
     useStore.getState().beginTxUndoBatch()
 
-    // 1. Escludi gli estratti abbinati dal conto corrente — SOLO ora, ad avvenuta conferma
-    estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, { excluded: true, reconciled: true }))
-
-    // 2. Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
+    // 1. Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
     const matchedMonthSet = new Map(matchedMonths.map(m => [m.month, m.estrattoTxId]))
     const txsToImport = allParsed
       .filter(t => matchedMonthSet.has(cardMonthKey(t)))
@@ -545,7 +556,7 @@ export default function ImportModal({ onClose }) {
         cardImportEstrattoTxId: matchedMonthSet.get(cardMonthKey(t)),
       }))
 
-    // 2b. Rettifica automatica per garantire saldo invariato (vedi nota sopra)
+    // 1b. Rettifica automatica per garantire saldo invariato (vedi nota sopra)
     const yr2 = String(new Date().getFullYear()).slice(2)
     const correctionTxs = []
     matchedMonths.forEach(({ month, estrattoTxId }) => {
@@ -586,11 +597,19 @@ export default function ImportModal({ onClose }) {
     startTimeRef.current = Date.now()
     setStatus({ phase:'ai', pct:0, current:0, total:txsToImport.length, eta:null, message:'Preparazione…' })
     try {
-      await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs })
+      // 2. Salva PRIMA il dettaglio + le rettifiche (vedi ORDINE DI SICUREZZA sopra)
+      const saved = await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs })
+      // 3. Escludi gli estratti abbinati SOLO se il salvataggio è andato a buon fine —
+      // se l'utente ha annullato a metà (runAIAndSave torna false), non tocchiamo il
+      // conto: niente di nuovo è stato salvato, quindi niente estratto va escluso
+      if (saved) {
+        estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, { excluded: true, reconciled: true }))
+      }
     } finally {
-      // Commesso SEMPRE (anche se l'utente annulla a metà durante l'AI): così l'esclusione
-      // dell'estratto — già avvenuta e già salvata su Firestore a questo punto — resta
-      // comunque disfabile con un Annulla, invece di restare "orfana" e non recuperabile
+      // Commesso SEMPRE: se saved è true, l'intera operazione (import + esclusione) è
+      // un solo blocco disfabile con un Annulla; se saved è false (annullato a metà),
+      // il batch è vuoto e commitTxUndoBatch non aggiunge nulla allo stack (vedi la sua
+      // implementazione in useStore.js: batch.length===0 → return senza effetti)
       useStore.getState().commitTxUndoBatch(`Riconciliazione carta *${card4} (${matchedMonths.length} mes${matchedMonths.length===1?'e':'i'})`)
     }
   }

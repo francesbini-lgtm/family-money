@@ -120,7 +120,7 @@ function CardTxRow({ t, allCats, updateTransaction, userAccounts, appPrefs, sele
           : <span style={{color:'var(--text3)',opacity:.4,fontSize:11}}>—</span>}
       </td>
       <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',
-        fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)'}}>
+        fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
         {t.amount>=0?'+':'−'}€ {fmtIT(displayAmt,2)}{isComp && '*'}
         {isComp && (
           <button onClick={()=>onRemoveComp(t)} title="Rimuovi abbinamento/compensazione"
@@ -322,7 +322,8 @@ export default function CarteCreditoPage() {
                   {['','Data','AI Descrizione','Descrizione','Categoria','Sottocategoria','Carta','Utente','Importo'].map((h,i)=>(
                     <th key={i} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',
                       textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
-                      borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
+                      borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',
+                      whiteSpace:'nowrap',...(h==='Importo'?{minWidth:130}:{})}}>{h}</th>
                   ))}
                 </tr>
               </thead>
