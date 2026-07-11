@@ -1550,3 +1550,34 @@ export const useStore = create((set, get) => ({
     return result
   },
 }))
+
+// Hook di debug per la console del browser (nessun effetto sul comportamento dell'app):
+// espone lo store così da poter ispezionare rapidamente lo stato reale — es. quali
+// transazioni sono escluse e perché — invece di dover ipotizzare la causa di
+// un'anomalia sul saldo senza vedere i dati veri (vedi bug "saldo crollato" 2026-07-11).
+// Uso da console: window.__fmtDebugSaldo()
+if (typeof window !== 'undefined') {
+  window.__fmtStore = useStore
+  window.__fmtDebugSaldo = () => {
+    const txs = useStore.getState().transactions
+    const forced = txs.filter(t => t._forcedBalance)
+    const excluded = txs.filter(t => t.excluded && !t._forcedBalance)
+    const counted = txs.filter(t => !t.excluded || t._forcedBalance)
+    const saldo = counted.reduce((s, t) => s + t.amount, 0)
+    const report = {
+      totaleTransazioni: txs.length,
+      contateNelSaldo: counted.length,
+      escluseNormali: excluded.length,
+      escluseSommaImporti: Math.round(excluded.reduce((s, t) => s + t.amount, 0) * 100) / 100,
+      saldoCalcolato: Math.round(saldo * 100) / 100,
+      forcedBalanceTx: forced.map(t => ({ txId: t.txId, amount: t.amount, date: t.date, description: t.description })),
+      top10EscluseAssolute: excluded
+        .slice()
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+        .slice(0, 10)
+        .map(t => ({ txId: t.txId, amount: t.amount, date: t.date, account: t.account, description: t.description, cardImportCard4: t.cardImportCard4, reconciled: t.reconciled })),
+    }
+    console.log('[FMT DEBUG SALDO]', report)
+    return report
+  }
+}
