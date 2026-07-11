@@ -1144,10 +1144,10 @@ function ExcludedTab() {
         </div>
       ) : (
         <div className="card" style={{padding:0,overflow:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse',minWidth:900}}>
+          <table style={{width:'100%',borderCollapse:'collapse',minWidth:1180}}>
             <thead><tr>
               {['Data','Descrizione','Importo','Categoria','Escluso il','Da chi','Tipo',''].map(h=>(
-                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
+                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',minWidth:h===''?120:undefined}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -1166,7 +1166,7 @@ function ExcludedTab() {
                         ? <span style={{padding:'2px 7px',borderRadius:4,background:'var(--gold-l)',color:'var(--gold)',fontWeight:700}}>⚙️ {t.excludedReason || 'Automatica'}</span>
                         : <span style={{color:'var(--text3)'}}>—</span>}
                   </td>
-                  <td style={{padding:'6px 10px'}}>
+                  <td style={{padding:'6px 14px',whiteSpace:'nowrap',minWidth:120}}>
                     <button className="btn btn-ghost" style={{fontSize:12,whiteSpace:'nowrap'}} title="Ripristina"
                       onClick={()=>updateTransaction(t.txId,{excluded:false})}>↩ Ripristina</button>
                   </td>
@@ -2336,7 +2336,7 @@ export default function SettingsPage() {
     {id:"discovery-skip",icon:"🚫", label:"Discovery"},
   ]
   return (
-    <div style={{padding:"28px 32px",maxWidth:900}}>
+    <div style={{padding:"28px 32px",maxWidth:tab==="excluded"?1300:900}}>
       <h1 style={{fontFamily:"var(--font-serif)",fontSize:26,fontWeight:600,marginBottom:24}}>⚙️ Impostazioni</h1>
       <Tabs tabs={TABS} active={tab} onChange={setTab}/>
       {tab==="security"       && <SecurityTab/>}
