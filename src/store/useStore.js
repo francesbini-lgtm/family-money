@@ -419,7 +419,12 @@ export const useStore = create((set, get) => ({
         }]})
       }
     }
-    return newTxs.length
+    // Ritorna l'array delle transazioni EFFETTIVAMENTE salvate (non solo il conteggio) —
+    // serve al flusso di import (ImportModal.jsx) per sapere ESATTAMENTE quali txId sono
+    // finiti a database (i doppioni scartati da questa funzione non ci sono), così l'AI
+    // Enrichment finale (ultimo step della pipeline, dopo la verifica saldo) può girare
+    // solo su quelle, mai su righe scartate o mai salvate.
+    return newTxs
   },
   updateTransaction: (txId, patch) => {
     const prevTx = get().transactions.find(t => t.txId === txId)

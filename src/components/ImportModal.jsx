@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
-import { categorizeBatch, hasGeminiKey } from '../data/aiService'
+import { enrichBatch, hasGeminiKey } from '../data/aiService'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
 // spin animation added via CSS
@@ -322,8 +322,6 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
   )
 }
 
-const BATCH_SIZE = 20
-
 export default function ImportModal({ onClose }) {
   const { userAccounts, addTransactions, updateTransaction, transactions, aiRules } = useStore()
   const appPrefs = useStore(s => s.appPrefs)
@@ -345,12 +343,14 @@ export default function ImportModal({ onClose }) {
     return `${icon} ${a.name}${card}${owner ? '  ·  ' + owner : ''}`
   }
   const [files,              setFiles]              = useState([])
-  const [useAI,              setUseAI]              = useState(true)
   const [status,             setStatus]             = useState(null)
   const [done,               setDone]               = useState(null)
   const [error,              setError]              = useState(null)
   // In attesa di riconciliazione mensile per un conto "carta" — { account, monthGroups, candidates, allParsed }
   const [cardReconcile,      setCardReconcile]      = useState(null)
+  // 'normal' | 'card' — quale sequenza di step mostrare nella schermata di progresso
+  // (richiesta utente: vedere tutti gli step reali, non solo un generico "AI Gemini")
+  const [flowKind,           setFlowKind]           = useState('normal')
 
   const startTimeRef   = useRef(null)
   const abortRef       = useRef(false)        // true = user cancelled
@@ -381,105 +381,131 @@ export default function ImportModal({ onClose }) {
     abortRef.current = false
   }
 
-  // ── Fase AI + salvataggio, condivisa fra il flusso normale e quello carta ──
+  // ── Fase di SOLO salvataggio (nessuna AI qui) — condivisa fra flusso normale e carta ──
+  // IMPORTANTE (richiesta esplicita dell'utente dopo un caso reale: import andato a buon
+  // fine, arricchito con l'AI — token spesi — e poi annullato automaticamente dal check di
+  // sicurezza sul saldo, sprecando tutto quel lavoro): l'arricchimento AI (Gemini) è stato
+  // spostato in una fase SEPARATA (runEnrichmentStep, sotto) che viene invocata SOLO alla
+  // fine, dopo che il salvataggio — e, per le carte, l'esclusione estratti + la verifica
+  // saldo — sono confermati OK. Se qualcosa va storto PRIMA di quel punto (rollback
+  // automatico), l'AI non viene mai chiamata: zero token sprecati. In precedenza questa
+  // funzione (allora chiamata runAIAndSave) chiamava categorizeBatch (versione debole, solo
+  // categoria) PRIMA del salvataggio — doppio problema: token spesi anche in caso di
+  // rollback, e un motore di categorizzazione più povero di quello vero (enrichBatch,
+  // usato da ✨ AI Enrichment in Transazioni: merchant, controparte, descrizione, città).
   // dedupAgainst: se passato, i doppioni vengono controllati SOLO contro questo
   // sottoinsieme di transazioni (richiesto per le carte: solo import precedenti
   // della stessa carta, non l'intero DB) — vedi addTransactions in useStore.js
   // extraTxs: eventuali righe di "rettifica" (vedi handleCardReconcileConfirm) —
-  // salvate direttamente, SENZA passare da AI (sono già complete/categorizzate)
-  // Ritorna false se annullato a metà (abortRef), altrimenti un oggetto risultato
-  // { total, aiCount, dupes, correctionsCount } — il chiamante (handleCardReconcileConfirm)
-  // usa questo esito per decidere se è sicuro procedere con l'esclusione degli estratti.
-  // skipDoneUI: true per il flusso carta — non mostra qui il messaggio di successo né
-  // programma la chiusura del modale, perché handleCardReconcileConfirm deve prima fare
-  // il check di sicurezza sul saldo (vedi lì) ed eventualmente mostrare un errore invece.
-  async function runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs, skipDoneUI } = {}) {
-    let finalTxs = txsToImport
-    if (useAI) {
-      startTimeRef.current = Date.now()
-      const batches = []
-      for (let i = 0; i < txsToImport.length; i += BATCH_SIZE)
-        batches.push(txsToImport.slice(i, i + BATCH_SIZE))
-
-      finalTxs = []
-      for (let b = 0; b < batches.length; b++) {
-        if (abortRef.current) { handleCancel(); return false }
-
-        const categorized = await categorizeBatch(batches[b])
-
-        if (abortRef.current) { handleCancel(); return false }
-
-        finalTxs.push(...categorized)
-        const current = Math.min((b+1)*BATCH_SIZE, txsToImport.length)
-        const pct     = Math.round(current / txsToImport.length * 100)
-
-        setStatus({
-          phase:'ai', pct, current, total:txsToImport.length,
-          eta: calcETA(current, txsToImport.length),
-          message:`Gemini AI: categorizzate ${current} di ${txsToImport.length}`,
-        })
-      }
-    }
-
+  // salvate direttamente (sono già complete/categorizzate, non hanno bisogno di AI)
+  // Ritorna false se annullato a metà (abortRef), altrimenti { savedTxs, total, dupes,
+  // correctionsCount } — savedTxs sono le transazioni REALMENTE salvate (doppioni esclusi),
+  // da passare a runEnrichmentStep.
+  async function saveTxs(txsToImport, { dedupAgainst, extraTxs } = {}) {
     if (abortRef.current) { handleCancel(); return false }
 
-    // ── Phase 3: Save ────────────────────────────────
-    // Point of no return: data is about to be persisted on Firestore.
-    // Null the snapshot NOW so a late cancel can't roll back saved data.
+    // Point of no return: i dati stanno per essere persistiti su Firestore.
+    // Azzeriamo ORA lo snapshot così un cancel tardivo non può cancellare dati già salvati.
     snapshotTxsRef.current = null
     setStatus({ phase:'save', pct:10, current:0,
-      total:finalTxs.length, eta:null, message:'Preparazione salvataggio…' })
+      total:txsToImport.length, eta:null, message:'Preparazione salvataggio…' })
     await new Promise(r => setTimeout(r, 100)) // let UI render
 
-    setStatus({ phase:'save', pct:40, current:Math.floor(finalTxs.length*0.4),
-      total:finalTxs.length, eta:null, message:`Salvataggio ${finalTxs.length} transazioni su Firestore…` })
+    setStatus({ phase:'save', pct:40, current:Math.floor(txsToImport.length*0.4),
+      total:txsToImport.length, eta:null, message:`Salvataggio ${txsToImport.length} transazioni su Firestore…` })
     await new Promise(r => setTimeout(r, 80))
 
-    const added = addTransactions(finalTxs, dedupAgainst ? { dedupAgainst } : undefined)
+    const savedTxs = addTransactions(txsToImport, dedupAgainst ? { dedupAgainst } : undefined)
 
     // Righe di rettifica (garanzia saldo invariato) — salvate a parte, non hanno bisogno di dedup speciale
     let correctionsCount = 0
     if (extraTxs?.length) {
-      correctionsCount = addTransactions(extraTxs)
+      correctionsCount = addTransactions(extraTxs).length
     }
 
-    setStatus({ phase:'save', pct:85, current:Math.floor(finalTxs.length*0.85),
-      total:finalTxs.length, eta:null, message:'Sincronizzazione database…' })
+    setStatus({ phase:'save', pct:85, current:Math.floor(txsToImport.length*0.85),
+      total:txsToImport.length, eta:null, message:'Sincronizzazione database…' })
     await new Promise(r => setTimeout(r, 200))
 
-    setStatus({ phase:'save', pct:100, current:finalTxs.length,
-      total:finalTxs.length, eta:null, message:'✓ Ci siamo quasi…' })
-    await new Promise(r => setTimeout(r, 300))
-    const aiCount = 0 // AI enrichment is now a separate step
-    const dupes   = Math.max(0, finalTxs.length - (typeof added==='number' ? added : finalTxs.length))
-    const result  = { total: finalTxs.length, aiCount, dupes, correctionsCount }
+    setStatus({ phase:'save', pct:100, current:txsToImport.length,
+      total:txsToImport.length, eta:null, message:'✓ Salvataggio completato' })
+    await new Promise(r => setTimeout(r, 250))
 
-    setStatus(null)
-    if (skipDoneUI) return result
-    setDone({ ...result, skippedMonths: skippedMonths || [] })
-    setTimeout(onClose, 2500)
-    return result
+    const dupes = Math.max(0, txsToImport.length - savedTxs.length)
+    return { savedTxs, total: txsToImport.length, dupes, correctionsCount }
+  }
+
+  const IMPORT_ENRICH_BATCH = 15  // stesso batch size di AI Enrichment in Transazioni
+
+  // ── Fase FINALE: categorizzazione AI (Gemini) — SOLO su transazioni già salvate e
+  // validate. Usa enrichBatch, lo stesso motore di "✨ AI Enrichment" in Transazioni
+  // (regex + Gemini per merchant/controparte/descrizione/città/categoria) — non più il
+  // vecchio categorizeBatch (solo categoria, risultati più poveri) usato qui prima.
+  // Se manca la chiave AI, salta senza bloccare: le transazioni restano salvate ma non
+  // arricchite (si può sempre rilanciare ✨ AI Enrichment da Transazioni più avanti).
+  // Un eventuale errore/interruzione qui NON tocca mai le transazioni già salvate/validate
+  // — a differenza del salvataggio, questa fase non ha un rollback: nel peggiore dei casi
+  // alcune transazioni restano semplicemente non arricchite.
+  async function runEnrichmentStep(savedTxs) {
+    if (!savedTxs.length) return { enrichedCount: 0, total: 0 }
+    if (!hasGeminiKey()) {
+      setStatus({ phase:'ai', pct:100, current:0, total:savedTxs.length, eta:null,
+        message:'⚠️ Chiave AI (Gemini) mancante in Impostazioni — categorizzazione saltata. Le transazioni restano salvate ma non arricchite (usa ✨ AI Enrichment in Transazioni quando vuoi).' })
+      await new Promise(r => setTimeout(r, 1200))
+      return { enrichedCount: 0, total: savedTxs.length, skippedNoKey: true }
+    }
+
+    startTimeRef.current = Date.now()
+    let enrichedCount = 0
+    for (let i = 0; i < savedTxs.length; i += IMPORT_ENRICH_BATCH) {
+      if (abortRef.current) break
+      const batch   = savedTxs.slice(i, i + IMPORT_ENRICH_BATCH)
+      const current = Math.min(i + IMPORT_ENRICH_BATCH, savedTxs.length)
+      setStatus({
+        phase:'ai', pct: Math.round(current / savedTxs.length * 100), current, total: savedTxs.length,
+        eta: calcETA(current, savedTxs.length),
+        message:`Gemini AI: categorizzate ${current} di ${savedTxs.length}`,
+      })
+
+      let enriched
+      try {
+        enriched = await enrichBatch(batch)
+      } catch (e) {
+        // Errori bloccanti (chiave mancante/proxy giù/timeout) — inutile continuare,
+        // le transazioni già enrichite restano tali, il resto resta semplicemente non arricchito
+        console.warn('[import] runEnrichmentStep: enrichBatch interrotto:', e.message)
+        break
+      }
+      enriched.forEach(t => {
+        if (!t) return
+        updateTransaction(t.txId, {
+          merchant:      t.merchant, counterpart: t.counterpart,
+          descAI:        t.descAI,   city:        t.city,
+          cat1:          t.cat1,     cat2:        t.cat2,
+          conf:          t.conf,
+          aiEnriched:    true,
+          aiEnrichedAt:  t.aiEnrichedAt || new Date().toISOString(),
+          aiCategorized: true,
+        })
+        enrichedCount++
+      })
+    }
+    return { enrichedCount, total: savedTxs.length }
   }
 
   // ── Import ────────────────────────────────────────────────
+  // NOTA: non c'è più un check-chiave-AI bloccante qui prima di importare — la
+  // categorizzazione AI è ora un passo separato e ultimo (runEnrichmentStep), che se manca
+  // la chiave si limita a saltarsi da solo mostrando un avviso, senza mai bloccare
+  // l'importazione né richiedere conferme upfront (le transazioni hanno comunque già una
+  // categoria di base dalle regole di parseCSV).
   async function handleImport() {
     if (!files.length) return
-
-    // ── Check chiave AI PRIMA di qualsiasi altra cosa (parse/riconciliazione/salvataggio) ──
-    // categorizeBatch() già gestisce la chiave mancante con un fallback silenzioso (transazioni
-    // salvate ma NON categorizzate/arricchite, vedi console.warn interno) — l'utente deve saperlo
-    // PRIMA di importare, non scoprirlo dopo controllando i dati importati.
-    if (useAI && !hasGeminiKey()) {
-      const proceed = window.confirm(
-        'Manca la chiave AI (Gemini) nelle Impostazioni.\n\n' +
-        'Vuoi continuare comunque? Le tue transazioni verranno importate ma NON verranno categorizzate/arricchite dall\'AI.'
-      )
-      if (!proceed) return
-    }
 
     setError(null); setDone(null)
     abortRef.current = false
     startTimeRef.current = Date.now()
+    setFlowKind('normal')
 
     // Save snapshot for rollback
     snapshotTxsRef.current = [...useStore.getState().transactions]
@@ -531,12 +557,27 @@ export default function ImportModal({ onClose }) {
       const candidates  = findEstrattoCandidates(useStore.getState().transactions, selectedAccountObj)
       snapshotTxsRef.current = null   // niente ancora salvato, nessun rollback necessario
       setStatus(null)
+      setFlowKind('card')
       setCardReconcile({ account: selectedAccountObj, monthGroups, candidates, allParsed })
       return  // in attesa della conferma dell'utente in CardImportReconcileModal
     }
 
-    // ── Phase 2 + 3: AI + salvataggio (flusso non-carta, invariato) ──
-    await runAIAndSave(allParsed)
+    // ── Phase 2: Salvataggio (nessuna AI ancora) ──
+    const saveResult = await saveTxs(allParsed)
+    if (!saveResult) return   // annullato a metà
+
+    // ── Phase 3: Categorizzazione AI — ultimo step, sulle transazioni già salvate ──
+    const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
+
+    setStatus(null)
+    setDone({
+      total: saveResult.total,
+      aiCount: enrichResult.enrichedCount,
+      dupes: saveResult.dupes,
+      correctionsCount: saveResult.correctionsCount,
+      aiSkippedNoKey: enrichResult.skippedNoKey,
+    })
+    setTimeout(onClose, 2500)
   }
 
   // ── Conferma riconciliazione carta ──────────────────────────
@@ -550,13 +591,14 @@ export default function ImportModal({ onClose }) {
   //
   // ORDINE DI SICUREZZA (bug reale segnalato dall'utente: saldo crollato da 255.328€ a 0€
   // dopo la conferma di un import da 128 tx, richiesto un Undo manuale): l'esclusione degli
-  // estratti veniva eseguita SUBITO, PRIMA di salvare il dettaglio sostitutivo — che per
-  // centinaia di righe richiede secondi/minuti di categorizzazione AI. Per tutta quella
-  // finestra il saldo restava PRIVO dell'importo escluso senza ancora avere il rimpiazzo.
-  // Ora l'ordine è invertito: dettaglio + rettifiche vengono salvati PRIMA (runAIAndSave),
-  // e solo a salvataggio riuscito (return true, non annullato a metà) si escludono gli
-  // estratti — nella peggiore delle ipotesi il saldo risulta temporaneamente GONFIATO
-  // (doppio conteggio: vecchio estratto + nuovo dettaglio insieme), mai crollato.
+  // estratti veniva eseguita SUBITO, PRIMA di salvare il dettaglio sostitutivo. Ora l'ordine
+  // completo è: 1) salva dettaglio+rettifiche (SENZA AI), 2) esclude gli estratti abbinati,
+  // 3) verifica che il saldo sia rimasto invariato — se anche un centesimo di differenza,
+  // rollback automatico e STOP, 4) SOLO ORA, a tutto validato, gira l'AI (Gemini) come
+  // ultimo step. Questo garantisce sia che il saldo non risulti mai crollato/gonfiato a
+  // metà operazione, sia — richiesta esplicita dell'utente dopo un caso reale di token
+  // sprecati — che l'AI non venga MAI invocata se poi tutto viene annullato: la spesa di
+  // token Gemini avviene solo quando siamo già certi che l'operazione è valida e resterà.
   async function handleCardReconcileConfirm({ matchedMonths, estrattoTxIdsToExclude }) {
     const { account: acc, monthGroups, allParsed } = cardReconcile
     const card4 = acc.card4
@@ -621,23 +663,27 @@ export default function ImportModal({ onClose }) {
     const skippedMonths = monthGroups.filter(g => !matchedMonthSet.has(g.month)).map(g => g.label)
 
     setCardReconcile(null)
+    setFlowKind('card')
     startTimeRef.current = Date.now()
-    setStatus({ phase:'ai', pct:0, current:0, total:txsToImport.length, eta:null, message:'Preparazione…' })
     let saveResult = false
     try {
-      // 2. Salva PRIMA il dettaglio + le rettifiche (vedi ORDINE DI SICUREZZA sopra).
-      // skipDoneUI: il messaggio di successo non va mostrato qui — prima va fatto il
-      // check di sicurezza sul saldo qui sotto, che potrebbe dover mostrare un errore
-      saveResult = await runAIAndSave(txsToImport, { dedupAgainst, skippedMonths, extraTxs: correctionTxs, skipDoneUI: true })
-      // 3. Escludi gli estratti abbinati SOLO se il salvataggio è andato a buon fine —
-      // se l'utente ha annullato a metà (runAIAndSave torna false), non tocchiamo il
+      // 1. Salva PRIMA il dettaglio + le rettifiche — SENZA AI (vedi ORDINE DI SICUREZZA sopra).
+      saveResult = await saveTxs(txsToImport, { dedupAgainst, extraTxs: correctionTxs })
+      // 2. Escludi gli estratti abbinati SOLO se il salvataggio è andato a buon fine —
+      // se l'utente ha annullato a metà (saveTxs torna false), non tocchiamo il
       // conto: niente di nuovo è stato salvato, quindi niente estratto va escluso
       if (saveResult) {
+        setStatus({ phase:'exclude', pct:20, current:0, total:estrattoTxIdsToExclude.length, eta:null,
+          message:`Esclusione di ${estrattoTxIdsToExclude.length} estratt${estrattoTxIdsToExclude.length===1?'o':'i'} conto già riconciliat${estrattoTxIdsToExclude.length===1?'o':'i'}…` })
+        await new Promise(r => setTimeout(r, 150))
         estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, {
           excluded: true, reconciled: true,
           excludedType: 'automatic',
           excludedReason: `Riconciliazione import carta *${card4}`,
         }))
+        setStatus({ phase:'exclude', pct:100, current:estrattoTxIdsToExclude.length, total:estrattoTxIdsToExclude.length,
+          eta:null, message:'✓ Estratti esclusi' })
+        await new Promise(r => setTimeout(r, 150))
       }
     } finally {
       // Commesso SEMPRE: se saveResult è troncato, l'intera operazione (import + esclusione) è
@@ -649,7 +695,7 @@ export default function ImportModal({ onClose }) {
 
     if (!saveResult) return   // annullato a metà — handleCancel ha già ripulito lo stato UI
 
-    // ── CHECK DI SICUREZZA FINALE (richiesta esplicita dell'utente) ──────────────
+    // ── CHECK DI SICUREZZA (richiesta esplicita dell'utente) ─────────────────────
     // L'intera garanzia "il saldo non cambia mai" si basa su calcoli (residuo, match
     // esatto al centesimo) che potrebbero avere un bug non ancora scoperto — invece di
     // fidarsi ciecamente, ricalcoliamo il saldo vero DOPO tutte le modifiche e lo
@@ -657,24 +703,43 @@ export default function ImportModal({ onClose }) {
     // AUTOMATICAMENTE tutto quanto appena fatto (riusa undoLastTx, ora reso affidabile:
     // aspetta davvero il completamento di tutte le scritture Firestore prima di tornare)
     // e mostra un errore descrittivo invece del messaggio di successo — niente viene
-    // lasciato a metà in silenzio.
+    // lasciato a metà in silenzio. Questo controllo avviene SEMPRE PRIMA dell'AI — vedi
+    // nota IMPORTANTE in saveTxs: se scatta un rollback qui, l'AI non è mai stata invocata.
+    setStatus({ phase:'verify', pct:50, current:0, total:0, eta:null,
+      message:'Verifica che il saldo del conto sia rimasto invariato…' })
+    await new Promise(r => setTimeout(r, 300))
     const saldoAfter = computeSaldoConto(useStore.getState().transactions)
     const delta = Math.round((saldoAfter - saldoBefore) * 100) / 100
     if (Math.abs(delta) > 0.01) {
+      setStatus({ phase:'verify', pct:100, current:0, total:0, eta:null,
+        message:'⚠️ Saldo alterato — annullamento automatico in corso…' })
       await useStore.getState().undoLastTx()
       setStatus(null)
       setDone(null)
       setError(
         `⚠️ Operazione annullata automaticamente: il saldo del conto doveva restare invariato ma sarebbe cambiato di ` +
         `${delta >= 0 ? '+' : ''}€${delta.toFixed(2)} (da €${saldoBefore.toFixed(2)} a €${saldoAfter.toFixed(2)}). ` +
-        `Nessuna modifica è stata mantenuta. Riprova — se il problema si ripresenta, serve un controllo più approfondito ` +
-        `del CSV o della riconciliazione (mesi coinvolti: ${matchedMonths.map(m => monthLabel(m.month)).join(', ')}).`
+        `Nessuna modifica è stata mantenuta (nessuna chiamata AI è stata effettuata — il controllo avviene sempre prima). ` +
+        `Riprova — se il problema si ripresenta, serve un controllo più approfondito del CSV o della riconciliazione ` +
+        `(mesi coinvolti: ${matchedMonths.map(m => monthLabel(m.month)).join(', ')}).`
       )
       return
     }
+    setStatus({ phase:'verify', pct:100, current:0, total:0, eta:null, message:'✓ Saldo confermato invariato' })
+    await new Promise(r => setTimeout(r, 150))
 
-    // Saldo confermato invariato: ora sì, mostra il messaggio di successo
-    setDone({ ...saveResult, skippedMonths })
+    // ── Saldo validato: SOLO ORA gira l'AI (ultimo step) ──────────────────────────
+    const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
+
+    setStatus(null)
+    setDone({
+      total: saveResult.total,
+      aiCount: enrichResult.enrichedCount,
+      dupes: saveResult.dupes,
+      correctionsCount: saveResult.correctionsCount,
+      aiSkippedNoKey: enrichResult.skippedNoKey,
+      skippedMonths,
+    })
     setTimeout(onClose, 2500)
   }
 
@@ -697,8 +762,11 @@ export default function ImportModal({ onClose }) {
           {!isRunning && !cardReconcile && <button className="btn btn-ghost" onClick={onClose}><X size={16}/></button>}
         </div>
 
-        {/* Setup form — hidden while running or waiting on card reconciliation */}
-        {!isRunning && !done && !cardReconcile && (
+        {/* Setup form — nascosto mentre in corso, a operazione conclusa (done), durante la
+            riconciliazione carta, E quando c'è un errore/rollback da mostrare (prima il form
+            riappariva comunque sopra l'errore, dando l'impressione che l'app fosse "tornata
+            indietro da sola" invece di mostrare chiaramente cosa non ha funzionato) */}
+        {!isRunning && !done && !error && !cardReconcile && (
           <>
             <div className="info-box">
               Supportato: <strong>UniCredit, Fineco, BNL, Banco BPM, BPER, Credem, Widiba</strong> e altri
@@ -723,26 +791,39 @@ export default function ImportModal({ onClose }) {
             )}
 
             <div style={{padding:'10px 14px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:12,color:'var(--blue)'}}>
-              ℹ️ Le transazioni vengono salvate senza AI. Usa il bottone <strong>✨ AI Enrichment</strong> nella sezione Transazioni per arricchirle.
+              ℹ️ Le transazioni vengono prima salvate e verificate, poi categorizzate con l'AI (Gemini) come ultimo passaggio — così, se qualcosa va corretto, nessun token viene sprecato. Puoi comunque rilanciare <strong>✨ AI Enrichment</strong> da Transazioni in qualsiasi momento.
             </div>
           </>
         )}
 
         {/* ── Progress UI ── */}
+        {/* Sequenza di step REALI mostrata all'utente (richiesta esplicita: vedere dove si
+            trova esattamente il sistema in ogni momento, non solo un generico "AI Gemini"
+            visibile solo all'inizio). Diversa per il flusso normale e per quello carta —
+            quest'ultimo ha 2 step in più (esclusione estratti abbinati, verifica saldo) che
+            prima non comparivano affatto nella UI pur avvenendo silenziosamente. */}
         {isRunning && status && (
           <div className="import-progress-full">
             {/* Phase steps */}
             <div className="import-phases">
-              {[
-                {id:'parse', label:'Lettura CSV', icon:'📄'},
-                {id:'ai',    label:'AI Gemini',   icon:'✨'},
-                {id:'save',  label:'Salvataggio', icon:'💾'},
-              ].map(ph => {
-                const order   = ['parse','ai','save']
-                const curIdx  = order.indexOf(status.phase)
-                const thisIdx = order.indexOf(ph.id)
-                const isDone  = thisIdx < curIdx
-                const isActive= thisIdx === curIdx
+              {(flowKind === 'card'
+                ? [
+                    {id:'parse',   label:'CSV',       icon:'📄'},
+                    {id:'save',    label:'Salvataggio',icon:'💾'},
+                    {id:'exclude', label:'Esclusione', icon:'🔖'},
+                    {id:'verify',  label:'Verifica',   icon:'⚖️'},
+                    {id:'ai',      label:'AI Gemini',  icon:'✨'},
+                  ]
+                : [
+                    {id:'parse', label:'CSV',        icon:'📄'},
+                    {id:'save',  label:'Salvataggio',icon:'💾'},
+                    {id:'ai',    label:'AI Gemini',  icon:'✨'},
+                  ]
+              ).map((ph, idx, order) => {
+                const orderIds = order.map(o => o.id)
+                const curIdx   = orderIds.indexOf(status.phase)
+                const isDone   = idx < curIdx
+                const isActive = idx === curIdx
                 return (
                   <div key={ph.id} className={'import-phase'+(isActive?' active':isDone?' done':'')}>
                     <div className="import-phase-dot">{isDone?'✓':ph.icon}</div>
@@ -789,7 +870,7 @@ export default function ImportModal({ onClose }) {
                 <div className="import-stat">
                   <span className="import-stat-label">Batch</span>
                   <span className="import-stat-val">
-                    {Math.ceil((status.current||0)/BATCH_SIZE)} / {Math.ceil(status.total/BATCH_SIZE)}
+                    {Math.ceil((status.current||0)/IMPORT_ENRICH_BATCH)} / {Math.ceil(status.total/IMPORT_ENRICH_BATCH)}
                   </span>
                 </div>
               )}
@@ -807,22 +888,39 @@ export default function ImportModal({ onClose }) {
               </div>
             )}
 
-            {/* ── Cancel button — hidden during save: data is being persisted ── */}
-            {status.phase !== 'save' && (
+            {/* ── Cancel button — visibile SOLO nelle fasi non distruttive: durante 'parse'
+                niente è ancora stato scritto su Firestore, durante 'ai' i dati sono già
+                salvati/validati e annullare significa solo fermare la categorizzazione (le
+                transazioni restano comunque importate, semplicemente non arricchite). Nelle
+                fasi 'save'/'exclude'/'verify' i dati sono in corso di scrittura sul database
+                reale — annullare a metà lascerebbe uno stato incoerente, quindi il bottone
+                è nascosto (il check di sicurezza sul saldo gestisce comunque eventuali problemi) ── */}
+            {['parse','ai'].includes(status.phase) && (
               <>
                 <button className="import-cancel-btn" onClick={handleCancel}>
                   <X size={13}/> Annulla importazione
                 </button>
                 <div className="import-cancel-hint">
-                  Annullare riporterà le transazioni allo stato precedente — nessun dato verrà salvato.
+                  {status.phase==='ai'
+                    ? 'Le transazioni sono già salvate e validate — annullare ferma solo la categorizzazione AI (potrai rilanciarla da Transazioni).'
+                    : 'Annullare riporterà le transazioni allo stato precedente — nessun dato verrà salvato.'}
                 </div>
               </>
             )}
           </div>
         )}
 
-        {/* Error */}
-        {error && <div className="error-box">{error}</div>}
+        {/* Errore / rollback — schermata dedicata e ben visibile (richiesta esplicita
+            dell'utente: prima l'app tornava silenziosamente al form iniziale con solo un
+            piccolo testo rosso sotto, dando l'impressione di essere "tornata indietro da
+            sola senza dire niente" — ora resta qui finché non si clicca Riprova) */}
+        {error && (
+          <div className="import-error">
+            <div className="import-error-icon">⚠️</div>
+            <div className="import-error-title">Operazione interrotta</div>
+            <div className="error-box" style={{textAlign:'left'}}>{error}</div>
+          </div>
+        )}
 
         {/* Success */}
         {done && (
@@ -831,6 +929,9 @@ export default function ImportModal({ onClose }) {
             <div className="import-success-title">{done.total} transazioni importate!</div>
             <div className="import-success-details">
               {done.aiCount>0 && <div><Sparkles size={12} color="var(--gold)"/> {done.aiCount} categorizzate con Gemini AI</div>}
+              {done.aiSkippedNoKey && (
+                <div style={{color:'var(--gold)'}}>⚠️ Chiave AI mancante — categorizzazione saltata (usa ✨ AI Enrichment in Transazioni)</div>
+              )}
               {done.dupes>0  && <div style={{color:'var(--text3)'}}>🔄 {done.dupes} duplicate scartate</div>}
               <div style={{color:'var(--text3)'}}>💾 Salvate su Firestore</div>
               {done.correctionsCount>0 && (
@@ -846,7 +947,7 @@ export default function ImportModal({ onClose }) {
         )}
 
         {/* Footer */}
-        {!isRunning && !done && !cardReconcile && (
+        {!isRunning && !done && !error && !cardReconcile && (
           <div className="modal-footer">
             <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
               <Upload size={14}/> Importa
