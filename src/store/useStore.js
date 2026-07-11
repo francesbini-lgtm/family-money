@@ -84,6 +84,13 @@ let _nextId = Date.now()
 const uid = () => String(_nextId++)
 
 export const useStore = create((set, get) => ({
+  // Utente Google attualmente loggato (sincronizzato da AuthContext.jsx a ogni
+  // cambio di stato auth) — usato SOLO per audit trail (es. chi ha escluso una
+  // transazione), non per la logica di business "proprietario spesa" (quello è
+  // il campo tx.user calcolato da computeUser())
+  currentUser: null,
+  setCurrentUser: (u) => set({ currentUser: u }),
+
   // ── Data ────────────────────────────────────────────────
   transactions:  [],
   txUndoStack:   [],   // undo history (max 20 entries, in-memory only)
@@ -415,8 +422,30 @@ export const useStore = create((set, get) => ({
     return newTxs.length
   },
   updateTransaction: (txId, patch) => {
-    // Record previous values for undo
     const prevTx = get().transactions.find(t => t.txId === txId)
+    // Audit trail esclusioni (richiesto dall'utente 2026-07-11, sezione Escluse in
+    // Impostazioni): quando patch marca excluded:true, registriamo automaticamente
+    // quando (excludedAt), chi (excludedBy: utente Google loggato via currentUser,
+    // o 'Sistema' se non determinabile — es. operazioni innescate da un batch senza
+    // sessione utente attiva) e se manuale o automatica (excludedType). Solo sulla
+    // transizione VERA non-escluso→escluso (mai se era già escluso e il patch lo
+    // riafferma soltanto, es. l'AI Enrichment che ripropone excluded:true su righe
+    // già escluse per un motivo precedente — altrimenti sovrascriveremmo un audit
+    // trail più vecchio e valido con dati odierni fuorvianti). I chiamanti che
+    // conoscono già il contesto (bottone "Escludi" esplicito, riconciliazione carta,
+    // abbinamento Satispay, ecc.) possono passare questi campi già valorizzati nel
+    // patch — qui si riempiono solo quelli mancanti, mai si sovrascrivono.
+    if (patch.excluded === true && !prevTx?.excluded) {
+      const cu = get().currentUser
+      patch = {
+        ...patch,
+        excludedAt:     patch.excludedAt     || new Date().toISOString(),
+        excludedBy:     patch.excludedBy     || cu?.displayName || cu?.email || 'Sistema',
+        excludedType:   patch.excludedType   || 'automatic',
+        excludedReason: patch.excludedReason ?? null,
+      }
+    }
+    // Record previous values for undo
     if (prevTx) {
       const prev = {}
       Object.keys(patch).forEach(k => { prev[k] = prevTx[k] })
@@ -1279,6 +1308,14 @@ export const useStore = create((set, get) => ({
         if (result) {
           if (result.exclude && !tx.excluded) {
             patch.excluded = true
+            // Questo percorso (recompute di massa su tutte le regole) NON passa da
+            // updateTransaction (usa batchSaveDocuments+enrichTx più sotto), quindi il
+            // metadata di audit va iniettato qui esplicitamente — vedi stessa logica in
+            // updateTransaction (useStore.js) per il campo excludedBy
+            patch.excludedAt     = patch.excludedAt     || new Date().toISOString()
+            patch.excludedBy     = patch.excludedBy     || get().currentUser?.displayName || get().currentUser?.email || 'Sistema'
+            patch.excludedType   = 'automatic'
+            patch.excludedReason = 'Regola AI (esclusione automatica)'
           } else if (result.cats?.length >= 1) {
             const { cat1, cat2 } = result.cats[0]
             if (cat1) patch.cat1 = cat1  // always overwrite — aiRules beat catRules
@@ -1392,7 +1429,15 @@ export const useStore = create((set, get) => ({
 
       if (matches) {
         if (rule.action === 'exclude') {
-          if (!tx.excluded) patch.excluded = true
+          if (!tx.excluded) {
+            patch.excluded = true
+            // Non passa da updateTransaction (batchSaveDocuments+enrichTx più sotto) —
+            // stesso motivo/nota del blocco analogo in applyAiRules/recompute di massa
+            patch.excludedAt     = patch.excludedAt     || new Date().toISOString()
+            patch.excludedBy     = patch.excludedBy     || get().currentUser?.displayName || get().currentUser?.email || 'Sistema'
+            patch.excludedType   = 'automatic'
+            patch.excludedReason = `Regola AI: ${rule.label || rule.id}`
+          }
         } else if ((!rule.action || rule.action === 'categorize') && rule.cats?.length >= 1) {
           const { cat1, cat2 } = rule.cats[0]
           if (cat1) patch.cat1 = cat1

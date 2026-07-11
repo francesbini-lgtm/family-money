@@ -29,6 +29,7 @@ export function ForcedBalanceModal({ currentSaldo, onClose }) {
   const updateTransaction = useStore(s => s.updateTransaction)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const allTxs            = useStore(s => s.transactions)
+  const { user: authUser } = useAuth()
   const [step,   setStep]   = useState('pin')
   const [pin,    setPin]    = useState('')
   const [pinErr, setPinErr] = useState('')
@@ -74,6 +75,8 @@ export function ForcedBalanceModal({ currentSaldo, onClose }) {
         descAI: 'Saldo forzato',
         date: tappoDate,
         excluded: true,
+        excludedType: 'manual',
+        excludedReason: 'Saldo forzato (rettifica manuale protetta da PIN)',
         _forcedBalance: true,
       })
     } else {
@@ -85,6 +88,10 @@ export function ForcedBalanceModal({ currentSaldo, onClose }) {
         cat1: 'Altro', cat2: 'Altro',
         account: 'Rettifica', conf: 100, aiEnriched: true,
         excluded: true,
+        excludedAt: new Date().toISOString(),
+        excludedBy: authUser?.displayName || authUser?.email || 'Sistema',
+        excludedType: 'manual',
+        excludedReason: 'Saldo forzato (rettifica manuale protetta da PIN)',
         _forcedBalance: true,
       }])
     }
@@ -3358,7 +3365,7 @@ export default function TransactionsPage() {
             💬 Feedback
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--red)',border:'1px solid var(--red)',borderRadius:6,padding:'4px 10px'}}
-            onClick={()=>{selected.forEach(id=>store.updateTransaction(id,{excluded:true}));setSelected(new Set())}}>
+            onClick={()=>{selected.forEach(id=>store.updateTransaction(id,{excluded:true,excludedType:'manual',excludedReason:'Esclusione manuale (selezione multipla)'}));setSelected(new Set())}}>
             🚫 Escludi
           </button>
           <button className="btn btn-ghost" style={{fontSize:12,color:'var(--green)',border:'1px solid var(--green)',borderRadius:6,padding:'4px 10px'}}

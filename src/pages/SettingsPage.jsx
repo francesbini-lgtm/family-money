@@ -1116,6 +1116,18 @@ function CategoriesTab() {
 
 
 // ── ExcludedTab ───────────────────────────────────────────
+// Formatta il timestamp ISO di esclusione (excludedAt) in "DD MMM AA, HH:MM" —
+// dato mancante (esclusioni fatte prima di questo fix, 2026-07-11) mostra "—"
+const _EXCL_MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+function fmtExcludedAt(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  const hh = String(d.getHours()).padStart(2,'0')
+  const mm = String(d.getMinutes()).padStart(2,'0')
+  return `${String(d.getDate()).padStart(2,'0')} ${_EXCL_MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}, ${hh}:${mm}`
+}
+
 function ExcludedTab() {
   const { transactions, updateTransaction } = useStore()
   const excluded = transactions.filter(t => t.excluded)
@@ -1123,6 +1135,7 @@ function ExcludedTab() {
     <div>
       <div style={{fontSize:13,color:'var(--text3)',marginBottom:16,lineHeight:1.5}}>
         Transazioni escluse dai report e dalle spese. Clicca ↩ per ripristinare.
+        {' '}<span style={{color:'var(--text3)',opacity:.7}}>Le colonne Escluso il/Da chi/Tipo sono disponibili solo per le esclusioni fatte dopo l'11 luglio 2026 — quelle precedenti mostrano "—".</span>
       </div>
       {excluded.length === 0 ? (
         <div style={{textAlign:'center',padding:'40px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',color:'var(--text3)'}}>
@@ -1130,22 +1143,31 @@ function ExcludedTab() {
           <div style={{fontWeight:700,marginBottom:6}}>Nessuna transazione esclusa</div>
         </div>
       ) : (
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <table style={{width:'100%',borderCollapse:'collapse'}}>
+        <div className="card" style={{padding:0,overflow:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',minWidth:900}}>
             <thead><tr>
-              {['Data','Descrizione','Importo','Categoria',''].map(h=>(
-                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
+              {['Data','Descrizione','Importo','Categoria','Escluso il','Da chi','Tipo',''].map(h=>(
+                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {excluded.map(t=>(
                 <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',opacity:.7}}>
-                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{fmtDate(t._effDate||t.date)}</td>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                   <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,45)}</td>
-                  <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',color:'var(--text3)'}}>€ {fmtIT(Math.abs(t.amount), 2)}</td>
+                  <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',color:'var(--text3)',whiteSpace:'nowrap'}}>€ {fmtIT(Math.abs(t.amount), 2)}</td>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{t.cat1||'—'}</td>
+                  <td style={{padding:'9px 14px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtExcludedAt(t.excludedAt)}</td>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',whiteSpace:'nowrap'}}>{t.excludedBy || '—'}</td>
+                  <td style={{padding:'9px 14px',fontSize:11,whiteSpace:'nowrap'}} title={t.excludedReason || ''}>
+                    {t.excludedType === 'manual'
+                      ? <span style={{padding:'2px 7px',borderRadius:4,background:'var(--accent-l)',color:'var(--accent)',fontWeight:700}}>👤 Manuale</span>
+                      : t.excludedType === 'automatic'
+                        ? <span style={{padding:'2px 7px',borderRadius:4,background:'var(--gold-l)',color:'var(--gold)',fontWeight:700}}>⚙️ {t.excludedReason || 'Automatica'}</span>
+                        : <span style={{color:'var(--text3)'}}>—</span>}
+                  </td>
                   <td style={{padding:'6px 10px'}}>
-                    <button className="btn btn-ghost" style={{fontSize:12}} title="Ripristina"
+                    <button className="btn btn-ghost" style={{fontSize:12,whiteSpace:'nowrap'}} title="Ripristina"
                       onClick={()=>updateTransaction(t.txId,{excluded:false})}>↩ Ripristina</button>
                   </td>
                 </tr>

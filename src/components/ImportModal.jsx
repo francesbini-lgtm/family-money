@@ -603,7 +603,11 @@ export default function ImportModal({ onClose }) {
       // se l'utente ha annullato a metà (runAIAndSave torna false), non tocchiamo il
       // conto: niente di nuovo è stato salvato, quindi niente estratto va escluso
       if (saved) {
-        estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, { excluded: true, reconciled: true }))
+        estrattoTxIdsToExclude.forEach(txId => updateTransaction(txId, {
+          excluded: true, reconciled: true,
+          excludedType: 'automatic',
+          excludedReason: `Riconciliazione import carta *${card4}`,
+        }))
       }
     } finally {
       // Commesso SEMPRE: se saved è true, l'intera operazione (import + esclusione) è

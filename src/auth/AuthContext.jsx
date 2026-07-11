@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 import { auth, gProvider } from '../firebase'
+import { useStore } from '../store/useStore'
 import { getOrCreateHousehold, loadTotpSecret } from '../services/firestore'
 import { getInviteTokenFromUrl, acceptInvite } from '../services/invite'
 import { validateToken } from '../services/totp'
@@ -32,6 +33,16 @@ export function AuthProvider({ children }) {
 
   const isMobile = () => window.location.pathname.startsWith('/mobile')
 
+  // Sincronizza l'utente Google loggato nello store Zustand (useStore.currentUser)
+  // — usato SOLO per audit trail (es. "chi" ha escluso una transazione, vedi
+  // updateTransaction), lo store non ha accesso diretto al contesto React di
+  // AuthContext quindi va spinto esplicitamente ad ogni cambio di stato auth
+  function syncCurrentUser(fbUser) {
+    useStore.getState().setCurrentUser(fbUser
+      ? { uid: fbUser.uid, email: fbUser.email, displayName: fbUser.displayName || fbUser.email }
+      : null)
+  }
+
   // ── Detect returning user ─────────────────────────────────────────────────
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
@@ -40,16 +51,19 @@ export function AuthProvider({ children }) {
           await signOut(auth)
           setAuthError(`Accesso negato: ${fbUser.email} non è autorizzato.`)
           setUser(null)
+          syncCurrentUser(null)
           setAuthStep('google')
         } else {
           setAuthError(null)
           setUser(fbUser)
+          syncCurrentUser(fbUser)
           const secret = await loadTotpSecret(fbUser.uid)
           setTotpSecret(secret)
           _nextStep(fbUser, secret)
         }
       } else {
         setUser(null)
+        syncCurrentUser(null)
         setTotpSecret(null)
         setAuthStep('google')
       }
@@ -78,6 +92,7 @@ export function AuthProvider({ children }) {
       return null
     }
     setUser(fbUser)
+    syncCurrentUser(fbUser)
     const secret = await loadTotpSecret(fbUser.uid)
     setTotpSecret(secret)
     _nextStep(fbUser, secret)
@@ -159,6 +174,7 @@ export function AuthProvider({ children }) {
   async function logOut() {
     await signOut(auth)
     setUser(null)
+    syncCurrentUser(null)
     setTotpSecret(null)
     setHouseholdId(null)
     setAuthStep('google')

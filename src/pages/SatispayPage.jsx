@@ -4371,7 +4371,7 @@ function AccreditiNonAbbinatiModal({ satiIncome, satiMatches, onClose }) {
     // Apply the same side-effects as SatiIncomeSection's link path (applyMatch)
     const compensatedAmt = inc?.amount || 0
     if (inc) {
-      updateTransaction(incomeTxId, { excluded: true, descAI: 'Accredito Satispay' })
+      updateTransaction(incomeTxId, { excluded: true, descAI: 'Accredito Satispay', excludedReason: 'Abbinamento Satispay (accredito compensato da una spesa)' })
     }
     if (!expTxId.startsWith('veh-')) {
       const exp = transactions.find(t => t.txId === expTxId)
