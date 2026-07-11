@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
-import { enrichBatch, hasGeminiKey } from '../data/aiService'
+import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiService'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
@@ -508,7 +508,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         // trattino o niente — un dato grezzo ma completo è sempre meglio di un vuoto.
         const cleanDescAI = (t.descAI && t.descAI.trim() && t.descAI.trim() !== '-')
           ? t.descAI.trim()
-          : (t.description || null)
+          : (cleanRawDescFallback(t.description) || null)  // senza "Pagamento Contactless"/codici
         updateTransaction(t.txId, {
           merchant:      t.merchant, counterpart: t.counterpart,
           descAI:        cleanDescAI, city:        t.city,

@@ -49,6 +49,23 @@ export function computeDescAI(t) {
   return null // let AI handle it
 }
 
+// ── Fallback descAI: pulizia della descrizione bancaria grezza ────────────
+// Quando né AI né regole producono una descAI e si ricade sulla descrizione
+// originale della banca (fallback introdotto il 2026-07-11), la ripuliamo dal
+// rumore che "non ha senso e allunga solo" (richiesta utente): prefissi tecnici
+// tipo "Pagamento Contactless/POS/Apple Pay…" e codici numerici lunghi.
+// L'importo estero finale "(35,00 USD)" viene mantenuto: è informazione utile.
+export function cleanRawDescFallback(desc) {
+  if (!desc) return desc
+  let s = String(desc)
+  s = s.replace(/\b\d{8,}\b/g, ' ')  // codici riferimento/transazione lunghi
+  s = s.replace(/^\s*pagamento\s+(contactless|c-?less|pos|apple\s*pay|google\s*pay|maestro|mastercard|visa|nfc)\b\s*(c-?less\b)?\s*/i, '')
+  s = s.replace(/^\s*pagamento\s+/i, '')
+  s = s.replace(/^\s*carta\s+\*?\d{3,4}\s*(di\s+[a-z]{3}\s+[\d.,]+)?\s*/i, '')  // "CARTA *2476 DI EUR 40,20"
+  s = s.replace(/\s{2,}/g, ' ').trim()
+  return s || desc
+}
+
 // ── API keys — Firestore (appPrefs) con fallback localStorage ──
 function getApiKey() {
   const k = useStore.getState().appPrefs?.geminiKey || ''

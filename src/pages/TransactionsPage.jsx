@@ -2085,7 +2085,7 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false, overrideUse
       if (!enriched) { done += batch.length; continue }
 
       try {
-        const ruleDesc = await import('../data/aiService').then(m => m.computeDescAI)
+        const { computeDescAI: ruleDesc, cleanRawDescFallback: cleanFallback } = await import('../data/aiService')
         enriched.forEach(t => {
           if (!t) return
           // Only apply rule-based descAI if AI didn't produce one (fallback only)
@@ -2098,7 +2098,8 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false, overrideUse
           // meglio la descrizione originale della banca per intero che un trattino.
           if ((overrideUserEdits || !t.userEditedDesc) &&
               (!t.descAI || t.descAI.trim() === '' || t.descAI.trim() === '-')) {
-            t.descAI = t.description || t.descAI || null
+            // ripulita dai prefissi tecnici ("Pagamento Contactless"…) e codici lunghi
+            t.descAI = cleanFallback(t.description) || t.descAI || null
           }
 
           // ── Step 2: apply user-defined rules (highest priority) ──
