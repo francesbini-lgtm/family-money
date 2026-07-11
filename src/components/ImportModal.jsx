@@ -222,6 +222,7 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                 <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700, whiteSpace: 'nowrap' }}>Totale CSV</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700, whiteSpace: 'nowrap' }}>Tx</th>
                 <th style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--text3)', fontWeight: 700, minWidth: 200, whiteSpace: 'nowrap' }}>Estratto abbinato</th>
+                <th style={{ padding: '6px 8px', textAlign: 'center', color: 'var(--text3)', fontWeight: 700, minWidth: 90, whiteSpace: 'nowrap' }}>Check Saldo</th>
                 <th style={{ padding: '6px 8px', textAlign: 'center', color: 'var(--text3)', fontWeight: 700, minWidth: 110, whiteSpace: 'nowrap' }}>Stato</th>
                 <th style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text3)', fontWeight: 700, minWidth: 110, whiteSpace: 'nowrap' }}></th>
               </tr>
@@ -246,6 +247,13 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                           : <span style={{ color: 'var(--text3)' }}>— non trovato —</span>}
                       </td>
                       <td style={{ padding: '8px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        {!chosenTx
+                          ? <span style={{ color: 'var(--text3)' }}>—</span>
+                          : (status === 'ok' || status === 'card-mismatch')
+                            ? <span style={{ fontSize: 15, color: 'var(--green)' }} title="Importo esatto al centesimo">✅</span>
+                            : <span style={{ fontSize: 15, color: 'var(--red)' }} title="Importo NON esatto al centesimo">❌</span>}
+                      </td>
+                      <td style={{ padding: '8px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <span style={{ fontSize: 15 }}>{statusIcon}</span>
                         <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'card-mismatch' ? 'carta diversa' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div>
                       </td>
@@ -262,7 +270,7 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                     </tr>
                     {searchMonth === g.month && (
                       <tr>
-                        <td colSpan={6} style={{ padding: '8px 8px 14px', background: 'var(--surface2)' }}>
+                        <td colSpan={7} style={{ padding: '8px 8px 14px', background: 'var(--surface2)' }}>
                           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} autoFocus
                             placeholder="Cerca per descrizione (es. 'estratto', 'carta', nome banca)…"
                             className="form-select" style={{ width: '100%', marginBottom: 8 }}/>
