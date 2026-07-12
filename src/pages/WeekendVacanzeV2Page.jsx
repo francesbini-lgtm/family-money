@@ -29,11 +29,18 @@ function fmtDate(d) {
   return d ? d.split('-').reverse().join('/') : '—'
 }
 
+// Data di competenza "fresca": sempre ricalcolata da competenza/date, mai dalla
+// cache _effDate (che updateTransaction NON ricalcola — vedi useStore.js) — è la
+// chiave corretta per capire se una spesa cade dentro/fuori un periodo vacanza.
+function effDate(t) {
+  return t.competenza || t.date
+}
+
 const PIE_COLORS = { Mare: '#0ea5e9', Montagna: '#16a34a', Città: '#b45309', Altro: '#94a3b8' }
 const TYPE_COLORS = { Vacanze: '#2563eb', Weekend: '#b45309' }
 
 // ── Editable cell: text/date — click to edit ──────────────
-function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '—', align = 'left' }) {
+function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '—', align = 'left', title = 'Clicca per modificare' }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState(String(value ?? ''))
 
@@ -68,7 +75,7 @@ function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '�
   return (
     <span
       onClick={e => { e.stopPropagation(); setEditing(true); setVal(String(value ?? '')) }}
-      title="Clicca per modificare"
+      title={title}
       style={{
         cursor: 'pointer', display: 'inline-block',
         borderBottom: '1px dashed var(--border)',
@@ -195,8 +202,10 @@ function OrigDot({ description }) {
 }
 
 // ── Riga transazione editabile per gli overlay (Fuori periodo / To review) ──
-// Colonne: Data contabile, Data valuta, AI descrizione, • descr. originale,
+// Colonne: Data contabile, Data valuta, Competenza, AI descrizione, • descr. originale,
 // Location, L1, L2, Importo — tutti i campi modificabili (l'importo no: tocca il saldo).
+// La Competenza è la data usata per stabilire se la spesa cade dentro/fuori un periodo
+// vacanza (vedi effDate() sopra) — editabile qui come in Transazioni.
 function TxEditRow({ t, allCats, updateTransaction, children }) {
   const cat2Options = allCats[t.cat1]?.sub || []
   const selStyle = { padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
@@ -211,6 +220,11 @@ function TxEditRow({ t, allCats, updateTransaction, children }) {
       <td style={td}>
         <EditCell type="date" value={t.date} width={105}
           onSave={v => v && updateTransaction(t.txId, { date: v, _effDate: t.competenza || v })} />
+      </td>
+      <td style={{ ...td, background: t.competenza ? 'var(--gold-l,#fef9e7)' : undefined }}>
+        <EditCell type="date" value={t.competenza || t.date} width={105}
+          title="Data competenza — usata per capire se la spesa cade dentro o fuori il periodo vacanza"
+          onSave={v => v && updateTransaction(t.txId, { competenza: v === t.date ? null : v, _effDate: v })} />
       </td>
       <td style={{ ...td, fontWeight: 600, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
         <EditCell value={t.descAI || ''} width={130}
@@ -257,7 +271,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
 
   function assignTo(t, vacId) {
-    const d = t._effDate || t.date
+    const d = effDate(t)
     if (vacId === '__new__') {
       setNewVacFor(t.txId)
       setNv({ name: '', from: d, to: d })
@@ -279,7 +293,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
   }
 
   return (
-    <Modal title={`📆 Spese Weekend e Vacanze fuori periodo (${txs.length})`} onClose={onClose} width={1060}>
+    <Modal title={`📆 Spese Weekend e Vacanze fuori periodo (${txs.length})`} onClose={onClose} width={1170}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese categorizzate "Weekend e Vacanze" la cui data non cade in nessuna vacanza/weekend dichiarata.
         Modifica i campi direttamente, oppure assegna la spesa a una vacanza (le date della vacanza si
@@ -289,9 +303,9 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Tutto coperto</div>
       ) : (
         <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1010 }}>
             <thead><tr>
-              {['Data cont.', 'Data valuta', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Assegna a vacanza'].map((h, i) => (
+              {['Data cont.', 'Data valuta', 'Competenza', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Assegna a vacanza'].map((h, i) => (
                 <th key={i} style={{ ...OVERLAY_TH, textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
               ))}
             </tr></thead>
@@ -313,7 +327,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
                   </TxEditRow>
                   {newVacFor === t.txId && (
                     <tr>
-                      <td colSpan={9} style={{ padding: '8px 10px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+                      <td colSpan={10} style={{ padding: '8px 10px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
                           <strong>➕ Nuova vacanza:</strong>
                           <input value={nv.name} onChange={e => setNv(f => ({ ...f, name: e.target.value }))} placeholder="Nome / località"
@@ -347,7 +361,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
 // spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo) ──
 function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose }) {
   return (
-    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1120}>
+    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1230}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
         Con ✅ la spesa passa in Weekend e Vacanze (L2 in base al tipo di periodo); con ✕ non verrà più proposta.
@@ -356,9 +370,9 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose })
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Niente da rivedere</div>
       ) : (
         <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1090 }}>
             <thead><tr>
-              {['Data cont.', 'Data valuta', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Vacanza attiva', ''].map((h, i) => (
+              {['Data cont.', 'Data valuta', 'Competenza', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Vacanza attiva', ''].map((h, i) => (
                 <th key={i} style={{ ...OVERLAY_TH, textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
               ))}
             </tr></thead>
@@ -460,8 +474,8 @@ export default function WeekendVacanzeV2Page() {
   const fuoriTxs = useMemo(() =>
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 === 'Weekend e Vacanze' &&
-        !findVacationForDate(t._effDate || t.date, vacations))
-      .sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
+        !findVacationForDate(effDate(t), vacations))
+      .sort((a, b) => (effDate(b) || '').localeCompare(effDate(a) || ''))
   , [transactions, vacations])
 
   // "To review": spese avvenute DENTRO una vacanza dichiarata ma NON in Weekend e Vacanze
@@ -471,14 +485,14 @@ export default function WeekendVacanzeV2Page() {
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' && !reviewDismissed[t.txId])
       .map(t => {
-        const vac = findVacationForDate(t._effDate || t.date, vacations)
+        const vac = findVacationForDate(effDate(t), vacations)
         if (!vac) return null
         const vacType = dominantVacationType(transactions, vac.from, vac.to)
           || (nightsBetween(vac.from, vac.to) >= 3 ? 'Vacanze' : 'Weekend')
         return { t, vac, vacType }
       })
       .filter(Boolean)
-      .sort((a, b) => (b.t._effDate || b.t.date || '').localeCompare(a.t._effDate || a.t.date || ''))
+      .sort((a, b) => (effDate(b.t) || '').localeCompare(effDate(a.t) || ''))
   , [transactions, vacations, reviewDismissed])
 
   function dismissReview(txId) {
