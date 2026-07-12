@@ -486,7 +486,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
 // ── Overlay "To review": spese avvenute DURANTE una vacanza dichiarata ma NON
 // categorizzate Weekend e Vacanze — mostra quale vacanza era attiva; con ✅ la
 // spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo) ──
-function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose }) {
+function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, setUndo, onClose }) {
   return (
     <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1480}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
@@ -516,7 +516,19 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose })
                   </td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                     <button title={`È una spesa della vacanza → Weekend e Vacanze › ${vacType}`}
-                      onClick={() => updateTransaction(t.txId, { cat1: 'Weekend e Vacanze', cat2: vacType, userEditedCat: true })}
+                      onClick={() => {
+                        const prevCat1 = t.cat1 ?? null
+                        const prevCat2 = t.cat2 ?? null
+                        const prevUserEditedCat = t.userEditedCat ?? false
+                        updateTransaction(t.txId, { cat1: 'Weekend e Vacanze', cat2: vacType, userEditedCat: true })
+                        setUndo?.({
+                          label: `Spesa spostata in Weekend e Vacanze › ${vacType}`,
+                          onUndo: () => {
+                            updateTransaction(t.txId, { cat1: prevCat1, cat2: prevCat2, userEditedCat: prevUserEditedCat })
+                            setUndo?.(null)
+                          },
+                        })
+                      }}
                       style={{ padding: '3px 9px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', marginRight: 4 }}>
                       ✅
                     </button>
@@ -626,8 +638,21 @@ export default function WeekendVacanzeV2Page() {
       .sort((a, b) => (effDate(b.t) || '').localeCompare(effDate(a.t) || ''))
   , [transactions, vacations, reviewDismissed, homeCity])
 
+  // Escludi una riga da "Spese non allocate" (✕) — reversibile per 8s con la
+  // snackbar Annulla; l'undo rilegge appPrefs fresco da useStore.getState()
+  // invece di fidarsi della chiusura di reviewDismissed, per non rischiare di
+  // annullare anche eventuali altri dismiss avvenuti nel frattempo.
   function dismissReview(txId) {
     setAppPref('wv2ReviewDismissed', { ...reviewDismissed, [txId]: true })
+    setUndo({
+      label: 'Spesa esclusa da "Spese non allocate"',
+      onUndo: () => {
+        const cur = useStore.getState().appPrefs?.wv2ReviewDismissed || {}
+        const { [txId]: _drop, ...rest } = cur
+        setAppPref('wv2ReviewDismissed', rest)
+        setUndo(null)
+      },
+    })
   }
   const [selectedCand, setSelectedCand] = useState(new Set())
   const [mergeName, setMergeName] = useState('')
@@ -1180,7 +1205,7 @@ export default function WeekendVacanzeV2Page() {
       {showReview && (
         <ToReviewModal rows={reviewRows} allCats={allCats}
           updateTransaction={updateTransaction} onDismiss={dismissReview}
-          onClose={() => setShowReview(false)} />
+          setUndo={setUndo} onClose={() => setShowReview(false)} />
       )}
 
       {/* Impostazioni merchant vacanze (Booking, Airbnb, …) */}
