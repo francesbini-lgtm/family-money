@@ -36,6 +36,19 @@ function effDate(t) {
   return t.competenza || t.date
 }
 
+// Una spesa con location = città di riferimento (Impostazioni → 📍 Zona di Casa,
+// appPrefs.homeCity) non è una spesa di vacanza anche se avvenuta durante un
+// periodo dichiarato — è semplicemente successa "a casa" nel frattempo (es.
+// idraulico, bollette...). Confronto case-insensitive e "contains" in entrambe
+// le direzioni per tollerare varianti tipo "Como" vs "Como, Italia" (Places).
+function isHomeCityTx(t, homeCity) {
+  if (!t.city || !homeCity) return false
+  const a = t.city.trim().toLowerCase()
+  const b = homeCity.trim().toLowerCase()
+  if (!a || !b) return false
+  return a === b || a.includes(b) || b.includes(a)
+}
+
 const PIE_COLORS = { Mare: '#0ea5e9', Montagna: '#16a34a', Città: '#b45309', Altro: '#94a3b8' }
 const TYPE_COLORS = { Vacanze: '#2563eb', Weekend: '#b45309' }
 
@@ -593,11 +606,15 @@ export default function WeekendVacanzeV2Page() {
   , [transactions, vacations])
 
   // "To review": spese avvenute DENTRO una vacanza dichiarata ma NON in Weekend e Vacanze
-  // (esclusi i txId già liquidati con ✕ — persistiti in appPrefs.wv2ReviewDismissed)
+  // (esclusi i txId già liquidati con ✕ — persistiti in appPrefs.wv2ReviewDismissed, e
+  // le spese fatte nella città di riferimento di casa — vedi isHomeCityTx sopra: sono
+  // successe "a casa" durante il periodo, non sono spese della vacanza stessa)
   const reviewDismissed = appPrefs?.wv2ReviewDismissed || {}
+  const homeCity = appPrefs?.homeCity
   const reviewRows = useMemo(() =>
     transactions
-      .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' && !reviewDismissed[t.txId])
+      .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' &&
+        !reviewDismissed[t.txId] && !isHomeCityTx(t, homeCity))
       .map(t => {
         const vac = findVacationForDate(effDate(t), vacations)
         if (!vac) return null
@@ -607,7 +624,7 @@ export default function WeekendVacanzeV2Page() {
       })
       .filter(Boolean)
       .sort((a, b) => (effDate(b.t) || '').localeCompare(effDate(a.t) || ''))
-  , [transactions, vacations, reviewDismissed])
+  , [transactions, vacations, reviewDismissed, homeCity])
 
   function dismissReview(txId) {
     setAppPref('wv2ReviewDismissed', { ...reviewDismissed, [txId]: true })
