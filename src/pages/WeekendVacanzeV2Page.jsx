@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
-import { Plus, Trash2, Search, Check, X as XIcon, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Search, Check, X as XIcon, ChevronDown, ChevronRight, Settings } from 'lucide-react'
 import { fmtIT } from '../utils/format'
 import Modal from '../components/Modal'
 import { getMergedCats } from '../data/categories'
@@ -47,6 +47,12 @@ function isHomeCityTx(t, homeCity) {
   const b = homeCity.trim().toLowerCase()
   if (!a || !b) return false
   return a === b || a.includes(b) || b.includes(a)
+}
+
+// Normalizza una descrizione AI per il confronto nella lista "escludi sempre"
+// (appPrefs.wv2NeverAiDescs) — case-insensitive, spazi ai bordi ignorati.
+function normDesc(s) {
+  return (s || '').trim().toLowerCase()
 }
 
 const PIE_COLORS = { Mare: '#0ea5e9', Montagna: '#16a34a', Città: '#b45309', Altro: '#94a3b8' }
@@ -493,8 +499,10 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
 // dover cliccare riga per riga (richiesta utente 2026-07-13: "possibilità di
 // selezionare sulla sinistra multipla e cliccare su accetta, ignora una sola
 // volta e semplificare") — le azioni riga-per-riga restano comunque disponibili ──
-function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDismiss, setUndo, onClose }) {
+function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDismiss, setUndo,
+  neverAiDescs, onAddNever, onRemoveNever, onClose }) {
   const [selected, setSelected] = useState(new Set())
+  const [showNeverPanel, setShowNeverPanel] = useState(false)
   const allSelected = rows.length > 0 && selected.size === rows.length
 
   function toggleOne(txId) {
@@ -536,10 +544,18 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
 
   return (
     <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1480}>
-      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
-        Seleziona una o più righe a sinistra e usa i bottoni per accettarle o ignorarle tutte insieme,
-        oppure agisci su una singola riga con ✅/✕.
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--text3)', flex: 1 }}>
+          Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
+          Seleziona una o più righe a sinistra e usa i bottoni per accettarle o ignorarle tutte insieme,
+          oppure agisci su una singola riga con ✅/✕. Con &quot;MAI&quot; una spesa non verrà mai più
+          proposta qui in futuro, indipendentemente dalla transazione — in base alla sua descrizione AI.
+        </div>
+        <button onClick={() => setShowNeverPanel(true)} title='Descrizioni AI da escludere sempre da questa tabella'
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', background: 'var(--surface2)',
+            border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: 'var(--text2)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          <Settings size={13} /> Escluse sempre{neverAiDescs?.length > 0 ? ` (${neverAiDescs.length})` : ''}
+        </button>
       </div>
       {selected.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '7px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}>
@@ -603,8 +619,13 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
                     </button>
                     <button title="Non fa parte della vacanza — non riproporre"
                       onClick={() => onDismiss(t.txId)}
-                      style={{ padding: '3px 9px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                      style={{ padding: '3px 9px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11, cursor: 'pointer', marginRight: 4 }}>
                       ✕
+                    </button>
+                    <button title={`Escludi SEMPRE le spese con descrizione AI "${t.descAI || t.description || ''}" — non verranno mai più proposte qui`}
+                      onClick={() => onAddNever?.(t.descAI || t.description)}
+                      style={{ padding: '3px 8px', background: 'var(--surface2)', color: 'var(--red,#dc2626)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+                      MAI
                     </button>
                   </td>
                 </TxEditRow>
@@ -613,6 +634,55 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
           </table>
         </div>
       )}
+      {showNeverPanel && (
+        <NeverAiDescsModal list={neverAiDescs || []} onAdd={onAddNever} onRemove={onRemoveNever}
+          onClose={() => setShowNeverPanel(false)} />
+      )}
+    </Modal>
+  )
+}
+
+// ── Pannello "Escluse sempre": descrizioni AI (appPrefs.wv2NeverAiDescs) che non
+// devono mai comparire in "Spese non allocate", indipendentemente dalla singola
+// transazione — richiesta utente 2026-07-13: pannello di controllo con rotella
+// impostazioni + tasto "MAI" su ogni riga per popolarlo in un click ──
+function NeverAiDescsModal({ list, onAdd, onRemove, onClose }) {
+  const [draft, setDraft] = useState('')
+  function addDraft() {
+    if (draft.trim()) { onAdd?.(draft.trim()); setDraft('') }
+  }
+  return (
+    <Modal title="⚙️ Escludi sempre da Spese non allocate" onClose={onClose} width={440}>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Le spese la cui descrizione AI corrisponde a una di queste voci non compariranno mai in
+        &quot;Spese in giorni di vacanza non allocate&quot;, qualunque transazione le generi (es. Amazon,
+        Affitto mese, ricariche Satispay…).
+      </div>
+      {list.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--text3)', fontStyle: 'italic', marginBottom: 12 }}>
+          Nessuna esclusione permanente — usa il tasto &quot;MAI&quot; su una riga della tabella, oppure aggiungila qui.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+          {list.map(m => (
+            <span key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px',
+              borderRadius: 14, fontSize: 12, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+              {m}
+              <button onClick={() => onRemove?.(m)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 12, padding: 0 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="es. Amazon"
+          onKeyDown={e => { if (e.key === 'Enter') addDraft() }}
+          style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, fontFamily: 'var(--font-sans)' }} />
+        <button onClick={addDraft}
+          style={{ padding: '6px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          Aggiungi
+        </button>
+      </div>
     </Modal>
   )
 }
@@ -692,10 +762,17 @@ export default function WeekendVacanzeV2Page() {
   // successe "a casa" durante il periodo, non sono spese della vacanza stessa)
   const reviewDismissed = appPrefs?.wv2ReviewDismissed || {}
   const homeCity = appPrefs?.homeCity
+  // Descrizioni AI da escludere SEMPRE da questa tabella (pannello ⚙️ "Escluse
+  // sempre" / tasto "MAI" su una riga) — a differenza di reviewDismissed (per
+  // singolo txId), questa è una regola permanente su tutte le transazioni
+  // future/passate con quella descAI, richiesta utente 2026-07-13.
+  const neverAiDescs = appPrefs?.wv2NeverAiDescs || []
+  const neverAiDescsSet = useMemo(() => new Set(neverAiDescs.map(normDesc)), [neverAiDescs])
   const reviewRows = useMemo(() =>
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' &&
-        !reviewDismissed[t.txId] && !isHomeCityTx(t, homeCity))
+        !reviewDismissed[t.txId] && !isHomeCityTx(t, homeCity) &&
+        !neverAiDescsSet.has(normDesc(t.descAI || t.description)))
       .map(t => {
         const vac = findVacationForDate(effDate(t), vacations)
         if (!vac) return null
@@ -705,7 +782,7 @@ export default function WeekendVacanzeV2Page() {
       })
       .filter(Boolean)
       .sort((a, b) => (effDate(b.t) || '').localeCompare(effDate(a.t) || ''))
-  , [transactions, vacations, reviewDismissed, homeCity])
+  , [transactions, vacations, reviewDismissed, homeCity, neverAiDescsSet])
 
   // Escludi una riga da "Spese non allocate" (✕) — reversibile per 8s con la
   // snackbar Annulla; l'undo rilegge appPrefs fresco da useStore.getState()
@@ -743,6 +820,30 @@ export default function WeekendVacanzeV2Page() {
         setUndo(null)
       },
     })
+  }
+
+  // Pannello "Escluse sempre" (⚙️) + tasto "MAI" su una riga di "Spese non
+  // allocate": aggiunge/rimuove una descrizione AI dalla lista permanente
+  // appPrefs.wv2NeverAiDescs. Confronto/duplicati verificati con normDesc
+  // (case-insensitive) per non accumulare varianti identiche della stessa voce.
+  function addNeverAiDesc(desc) {
+    const d = (desc || '').trim()
+    if (!d) return
+    const key = normDesc(d)
+    if (neverAiDescsSet.has(key)) return // già presente, nulla da fare
+    setAppPref('wv2NeverAiDescs', [...neverAiDescs, d])
+    setUndo({
+      label: `"${d}" esclusa sempre da "Spese non allocate"`,
+      onUndo: () => {
+        const cur = useStore.getState().appPrefs?.wv2NeverAiDescs || []
+        setAppPref('wv2NeverAiDescs', cur.filter(x => normDesc(x) !== key))
+        setUndo(null)
+      },
+    })
+  }
+  function removeNeverAiDesc(desc) {
+    const key = normDesc(desc)
+    setAppPref('wv2NeverAiDescs', neverAiDescs.filter(x => normDesc(x) !== key))
   }
   const [selectedCand, setSelectedCand] = useState(new Set())
   const [mergeName, setMergeName] = useState('')
@@ -1295,6 +1396,7 @@ export default function WeekendVacanzeV2Page() {
       {showReview && (
         <ToReviewModal rows={reviewRows} allCats={allCats}
           updateTransaction={updateTransaction} onDismiss={dismissReview} onBulkDismiss={dismissReviewBulk}
+          neverAiDescs={neverAiDescs} onAddNever={addNeverAiDesc} onRemoveNever={removeNeverAiDesc}
           setUndo={setUndo} onClose={() => setShowReview(false)} />
       )}
 
