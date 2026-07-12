@@ -17,10 +17,10 @@ import UtenzePage from './UtenzePage'
 import AltroPage from './AltroPage'
 
 // ── Net amount after compensation ──────────────────────────
-function netAmt(t) {
-  if (!t._compensatedAmt || t._compensatedAmt <= 0) return t.amount
-  return t.amount < 0 ? t.amount + t._compensatedAmt : t.amount
-}
+// Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
+// la copia locale divergeva per gli importi POSITIVI (non sottraeva
+// _compensatedAmt), mostrando residui fantasma sulle entrate compensate.
+import { netAmt } from '../data/compensation'
 
 
 function TabPill({ label, active, onClick }) {

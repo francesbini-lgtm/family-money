@@ -9,10 +9,10 @@ import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations
 import { groupConsecutiveDates } from '../data/vacationRules'
 
 // ── Net amount after compensation ──────────────────────────
-function netAmt(t) {
-  if (!t._compensatedAmt || t._compensatedAmt <= 0) return t.amount
-  return t.amount < 0 ? t.amount + t._compensatedAmt : t.amount
-}
+// Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
+// la copia locale divergeva per gli importi POSITIVI (non sottraeva
+// _compensatedAmt), mostrando residui fantasma sulle entrate compensate.
+import { netAmt } from '../data/compensation'
 
 const MONTHS = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
 const MONTHS_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']

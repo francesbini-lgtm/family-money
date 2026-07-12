@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
+import { netAmt } from '../data/compensation'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import './MappaSpesePage.css'
 import { fmtIT } from '../utils/format'
@@ -148,7 +149,7 @@ export default function MappaSpesePage() {
       if (!coords) return
       if (!g[loc]) g[loc] = { loc, coords, txs: [], total: 0, count: 0 }
       g[loc].txs.push(t)
-      g[loc].total += Math.abs(t.amount)
+      g[loc].total += Math.abs(netAmt(t))  // netto post-compensazione (2026-07-12)
       g[loc].count++
     })
     return Object.values(g).sort((a,b) => b.total - a.total)

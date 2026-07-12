@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
+// Importi NETTI post-compensazione (consolidamento 2026-07-12)
+import { netAmt } from '../data/compensation'
 import { useFinancials } from '../hooks/useFinancials'
 import { SavingsChart } from '../components/Charts'
 import { getMergedCats, getMergedCatNames } from '../data/categories'
@@ -18,7 +20,7 @@ function expTotal(transactions, ym) {
     if (t._satiLinked && t.splits?.length > 0) {
       t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
     } else {
-      total += Math.abs(t.amount)
+      total += Math.abs(netAmt(t))  // netto post-compensazione (2026-07-12)
     }
   })
   return total
@@ -181,15 +183,15 @@ function SavingsInsights({ transactions, excludedCats }) {
     // Per-category spending this vs last month
     const cats = [...new Set(transactions.filter(t=>t.cat1).map(t=>t.cat1))]
     const catStats = cats.map(cat=>{
-      const thisAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
-      const prevAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
+      const thisAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)&&t.cat1===cat).reduce((s,t)=>s+netAmt(t),0))
+      const prevAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevYM)&&t.cat1===cat).reduce((s,t)=>s+netAmt(t),0))
       const delta   = prevAmt>0 ? Math.round((thisAmt-prevAmt)/prevAmt*100) : null
       const avg6m   = (() => {
         let total=0,count=0
         for(let i=1;i<=6;i++){
           const d=new Date(now.getFullYear(),now.getMonth()-i,1)
           const ym=ymOf(d)
-          const a=Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
+          const a=Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)&&t.cat1===cat).reduce((s,t)=>s+netAmt(t),0))
           if(a>0){total+=a;count++}
         }
         return count>0?Math.round(total/count):null
@@ -203,8 +205,8 @@ function SavingsInsights({ transactions, excludedCats }) {
     const lastClosedYM = ymOf(new Date(now.getFullYear(), now.getMonth()-1, 1))
     const prevClosedYM = ymOf(new Date(now.getFullYear(), now.getMonth()-2, 1))
     const closedStats = cats.map(cat=>{
-      const thisAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(lastClosedYM)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
-      const prevAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevClosedYM)&&t.cat1===cat).reduce((s,t)=>s+t.amount,0))
+      const thisAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(lastClosedYM)&&t.cat1===cat).reduce((s,t)=>s+netAmt(t),0))
+      const prevAmt = Math.abs(transactions.filter(t=>!t.excluded&&t.amount<0&&(t._effDate||(t._effDate||t.date||'')).startsWith(prevClosedYM)&&t.cat1===cat).reduce((s,t)=>s+netAmt(t),0))
       const delta   = prevAmt>0 ? Math.round((thisAmt-prevAmt)/prevAmt*100) : null
       return {cat, thisAmt, prevAmt, delta}
     })
@@ -221,10 +223,10 @@ function SavingsInsights({ transactions, excludedCats }) {
       .slice(0,3)
 
     // Savings rate this vs prev
-    const thisInc = monthInc(thisYM).reduce((s,t)=>s+t.amount,0)
-    const thisExp = Math.abs(monthExp(thisYM).reduce((s,t)=>s+t.amount,0))
-    const prevInc = monthInc(prevYM).reduce((s,t)=>s+t.amount,0)
-    const prevExp = Math.abs(monthExp(prevYM).reduce((s,t)=>s+t.amount,0))
+    const thisInc = monthInc(thisYM).reduce((s,t)=>s+netAmt(t),0)
+    const thisExp = Math.abs(monthExp(thisYM).reduce((s,t)=>s+netAmt(t),0))
+    const prevInc = monthInc(prevYM).reduce((s,t)=>s+netAmt(t),0)
+    const prevExp = Math.abs(monthExp(prevYM).reduce((s,t)=>s+netAmt(t),0))
     const thisSavRate = thisInc>0 ? Math.round((thisInc-thisExp)/thisInc*100) : null
     const prevSavRate = prevInc>0 ? Math.round((prevInc-prevExp)/prevInc*100) : null
 
@@ -317,7 +319,7 @@ export default function RisparmioPage() {
   , [transactions, excludedCats])
 
   // Month income/expense helpers on activeTxs
-  function mInc(ym)  { return activeTxs.filter(t=>t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0) }
+  function mInc(ym)  { return activeTxs.filter(t=>t.amount>0&&(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+netAmt(t),0) }
   function mExp(ym)  { return expTotal(activeTxs, ym) }
   function mSav(ym)  { return mInc(ym) - mExp(ym) }
   function mRate(ym) { const i=mInc(ym); return i>0 ? Math.round(mSav(ym)/i*100) : null }

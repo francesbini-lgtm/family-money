@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
+// Importi NETTI post-compensazione (consolidamento 2026-07-12)
+import { netAmt } from '../data/compensation'
 import { useFinancials, getYM, ymLabel } from '../hooks/useFinancials'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -687,15 +689,15 @@ export default function EntratePage() {
   // ── KPIs — always YTD ─────────────────────────────────
   const yearStr = now.getFullYear().toString()
   const ytdTxs  = useMemo(() => incomeTxs.filter(t => (t._effDate||t.date).startsWith(yearStr)), [incomeTxs])
-  const ytdTotal = ytdTxs.reduce((s, t) => s + t.amount, 0)
-  const ytdFra   = ytdTxs.filter(t => t.cat2 === 'Fra').reduce((s, t) => s + t.amount, 0)
-  const ytdSofi  = ytdTxs.filter(t => t.cat2 === 'Sofi').reduce((s, t) => s + t.amount, 0)
+  const ytdTotal = ytdTxs.reduce((s, t) => s + netAmt(t), 0)
+  const ytdFra   = ytdTxs.filter(t => t.cat2 === 'Fra').reduce((s, t) => s + netAmt(t), 0)
+  const ytdSofi  = ytdTxs.filter(t => t.cat2 === 'Sofi').reduce((s, t) => s + netAmt(t), 0)
 
   // Average monthly (last 6 months)
   const last6months = useMemo(() => getLastNMonths(6, now), [])
   const avgMonthly  = useMemo(() => {
     const total = last6months.reduce((s, ym) =>
-      s + incomeTxs.filter(t => (t._effDate||t.date).startsWith(ym)).reduce((ss, t) => ss + t.amount, 0)
+      s + incomeTxs.filter(t => (t._effDate||t.date).startsWith(ym)).reduce((ss, t) => ss + netAmt(t), 0)
     , 0)
     return total / 6
   }, [incomeTxs, last6months])
@@ -706,8 +708,8 @@ export default function EntratePage() {
       const yStr = String(year)
       const yTxs = incomeTxs.filter(t => (t._effDate||t.date).startsWith(yStr))
       // fra/sofi = intero importo delle transazioni (bonus incluso, senza scorporo in tabella)
-      const fra   = yTxs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + t.amount, 0)
-      const sofi  = yTxs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + t.amount, 0)
+      const fra   = yTxs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + netAmt(t), 0)
+      const sofi  = yTxs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + netAmt(t), 0)
       const total = fra + sofi
       const months   = new Set(yTxs.map(t => (t._effDate||t.date).slice(0,7))).size
       const avgMonth = months > 0 ? total / months : 0

@@ -1,5 +1,8 @@
 import { useMemo, useState, useRef, useCallback } from 'react'
 import { useStore } from '../store/useStore'
+// Importi NETTI post-compensazione nei KPI/grafici (consolidamento 2026-07-12):
+// una spesa rimborsata non deve più pesare per il lordo solo in questa pagina
+import { netAmt } from '../data/compensation'
 import { CATS, getMergedCats } from '../data/categories'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
@@ -20,7 +23,7 @@ function SpendingHeatmap({ transactions }) {
     const map = {}
     transactions
       .filter(t => !t.excluded && t.amount < 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(year.toString()))
-      .forEach(t => { map[t._effDate||t.date] = (map[t._effDate||t.date] || 0) + Math.abs(t.amount) })
+      .forEach(t => { map[t._effDate||t.date] = (map[t._effDate||t.date] || 0) + Math.abs(netAmt(t)) })
     return map
   }, [transactions, year])
 
@@ -95,8 +98,8 @@ function YearComparison({ transactions }) {
     const txLast = transactions.filter(t => !t.excluded && t.amount < 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(lastYMStr))
     return {
       label,
-      [thisYear]: Math.abs(txThis.reduce((s,t)=>s+t.amount,0)),
-      [lastYear]: Math.abs(txLast.reduce((s,t)=>s+t.amount,0)),
+      [thisYear]: Math.abs(txThis.reduce((s,t)=>s+netAmt(t),0)),
+      [lastYear]: Math.abs(txLast.reduce((s,t)=>s+netAmt(t),0)),
     }
   }), [transactions, thisYear, lastYear])
 
@@ -131,7 +134,7 @@ function CategoryScatter({ transactions }) {
       .filter(t => !t.excluded && t.amount < 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(ym.slice(0,4)))
       .forEach(t => {
         if (!cats[t.cat1]) cats[t.cat1] = { total: 0, count: 0 }
-        cats[t.cat1].total += Math.abs(t.amount)
+        cats[t.cat1].total += Math.abs(netAmt(t))
         cats[t.cat1].count++
       })
 
@@ -199,7 +202,7 @@ function CategoryRanking({ transactions }) {
       const cats = {}
       transactions
         .filter(t => !t.excluded && t.amount < 0 && (t._effDate||(t._effDate||t.date||'')).startsWith(ym))
-        .forEach(t => { cats[t.cat1] = (cats[t.cat1]||0) + Math.abs(t.amount) })
+        .forEach(t => { cats[t.cat1] = (cats[t.cat1]||0) + Math.abs(netAmt(t)) })
       const top3 = Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,3)
       months.push({ ym: ym.slice(2), top3 })
     }
@@ -278,7 +281,7 @@ function SaldoChart({ transactions }) {
       else if (view === 'Q') key = `${yr}-Q${q}`
       else                   key = yr
       if (!buckets[key]) buckets[key] = { net: 0 }
-      buckets[key].net += tx.amount
+      buckets[key].net += netAmt(tx)
     })
 
     // Build full running total across ALL buckets (sorted chronologically)
@@ -379,13 +382,13 @@ function CategoryReport({ transactions }) {
         const txs = transactions.filter(t => !t.excluded && t.amount < 0 && t.cat1 === name)
         const byMonth = months.map(ym => ({
           label: MONTHS[parseInt(ym.slice(5))-1],
-          v: Math.abs(txs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0))
+          v: Math.abs(txs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+netAmt(t),0))
         }))
         const mult = period==='M'?1:period==='Q'?3:6
         const periodTxs = period==='M'
           ? txs.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(months[5]))
           : txs.filter(t=>(t._effDate||(t._effDate||t.date||''))>=(period==='Q'?months[months.length-3]:months[0]))
-        const total = Math.abs(periodTxs.reduce((s,t)=>s+t.amount,0))
+        const total = Math.abs(periodTxs.reduce((s,t)=>s+netAmt(t),0))
         const avg   = mult > 0 ? Math.round(total/mult) : 0
         return { name, color: info.color, sub: info.sub||[], total, avg, byMonth }
       })
@@ -502,7 +505,7 @@ function TopMerchants({ transactions }) {
       .forEach(t => {
         const key = t.merchant || t.descAI || '—'
         if (!map[key]) map[key] = { name:key, total:0, count:0, cat1:t.cat1, city:t.city }
-        map[key].total += Math.abs(t.amount)
+        map[key].total += Math.abs(netAmt(t))
         map[key].count++
       })
     return Object.values(map).sort((a,b)=>b.total-a.total).slice(0, n)
@@ -597,7 +600,7 @@ function LocationTab({ transactions }) {
       const city = resolveCity(t)
       if (!city) return
       if (!map[city]) map[city] = { city, total: 0, count: 0, txIds: new Set() }
-      map[city].total += Math.abs(t.amount)
+      map[city].total += Math.abs(netAmt(t))
       map[city].count++
     })
 
@@ -618,7 +621,7 @@ function LocationTab({ transactions }) {
     filtered.forEach(t => {
       const key = t.merchant || t.descAI || t.description || '—'
       if (!map[key]) map[key] = { name:key, total:0, count:0, cat1:t.cat1, txs:[] }
-      map[key].total += Math.abs(t.amount)
+      map[key].total += Math.abs(netAmt(t))
       map[key].count++
       map[key].txs.push(t)
     })
@@ -638,7 +641,7 @@ function LocationTab({ transactions }) {
     filtered.forEach(t => {
       const key = t.merchant || t.descAI || '—'
       if (!map[key]) map[key] = { name:key, total:0, count:0, cat1:t.cat1, cityFromTx: t.city }
-      map[key].total += Math.abs(t.amount)
+      map[key].total += Math.abs(netAmt(t))
       map[key].count++
     })
     return Object.values(map).sort((a,b) => b.total - a.total)
@@ -1095,7 +1098,7 @@ function LocationTab({ transactions }) {
                 🧾 {selectedMerchant}
               </div>
               <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
-                {merchantTxs.length} transazioni · € {fmtIT(merchantTxs.reduce((s,t)=>s+Math.abs(t.amount),0),0)}
+                {merchantTxs.length} transazioni · € {fmtIT(merchantTxs.reduce((s,t)=>s+Math.abs(netAmt(t)),0),0)}
               </div>
             </div>
             <button onClick={()=>setSelectedMerchant(null)} style={{

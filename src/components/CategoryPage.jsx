@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
+import { netAmt } from '../data/compensation'
 import { useFinancials, ymLabel, getLast6Months, getYM } from '../hooks/useFinancials'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { CATS } from '../data/categories'
@@ -247,7 +248,8 @@ export default function CategoryPage({ cat1, icon, title, description }) {
         .filter(sp => sp.cat1 === cat1)
         .reduce((s,sp) => s + (parseFloat(sp.amount)||0), 0) * (tx.amount < 0 ? -1 : 1)
     }
-    return tx.amount
+    // Importo NETTO post-compensazione (consolidamento 2026-07-12)
+    return netAmt(tx)
   }
 
   // Period filter
