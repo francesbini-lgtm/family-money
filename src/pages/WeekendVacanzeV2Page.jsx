@@ -257,7 +257,7 @@ function OrigDot({ description }) {
 // Location, L1, L2, Importo — tutti i campi modificabili (l'importo no: tocca il saldo).
 // La Competenza è la data usata per stabilire se la spesa cade dentro/fuori un periodo
 // vacanza (vedi effDate() sopra) — editabile qui come in Transazioni.
-function TxEditRow({ t, allCats, updateTransaction, children }) {
+function TxEditRow({ t, allCats, updateTransaction, children, leading }) {
   // Cambio categoria L1/L2: se la nuova L1 ha sottocategorie, NON si scrive subito
   // nello store — altrimenti la riga sparisce IMMEDIATAMENTE da questa tabella
   // (filtrata su cat1 === / !== 'Weekend e Vacanze') prima che l'utente possa
@@ -300,6 +300,9 @@ function TxEditRow({ t, allCats, updateTransaction, children }) {
   const td = { padding: '6px 8px', fontSize: 12, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
   return (
     <tr style={pending ? { background: 'var(--gold-l,#fef9e7)' } : undefined}>
+      {leading !== undefined && (
+        <td style={{ ...td, textAlign: 'center' }}>{leading}</td>
+      )}
       <td style={td}>
         <EditCell type="date" value={t.date_reg || t.date} width={105}
           onSave={v => v && updateTransaction(t.txId, { date_reg: v })} />
@@ -485,27 +488,93 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
 
 // ── Overlay "To review": spese avvenute DURANTE una vacanza dichiarata ma NON
 // categorizzate Weekend e Vacanze — mostra quale vacanza era attiva; con ✅ la
-// spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo) ──
-function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, setUndo, onClose }) {
+// spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo). Selezione
+// multipla (checkbox a sinistra) per accettare/ignorare in blocco invece di
+// dover cliccare riga per riga (richiesta utente 2026-07-13: "possibilità di
+// selezionare sulla sinistra multipla e cliccare su accetta, ignora una sola
+// volta e semplificare") — le azioni riga-per-riga restano comunque disponibili ──
+function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDismiss, setUndo, onClose }) {
+  const [selected, setSelected] = useState(new Set())
+  const allSelected = rows.length > 0 && selected.size === rows.length
+
+  function toggleOne(txId) {
+    setSelected(s => {
+      const next = new Set(s)
+      if (next.has(txId)) next.delete(txId); else next.add(txId)
+      return next
+    })
+  }
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(rows.map(r => r.t.txId)))
+  }
+
+  function acceptSelected() {
+    const targets = rows.filter(r => selected.has(r.t.txId))
+    if (!targets.length) return
+    const prevById = {}
+    targets.forEach(({ t }) => {
+      prevById[t.txId] = { cat1: t.cat1 ?? null, cat2: t.cat2 ?? null, userEditedCat: t.userEditedCat ?? false }
+    })
+    targets.forEach(({ t, vacType }) =>
+      updateTransaction(t.txId, { cat1: 'Weekend e Vacanze', cat2: vacType, userEditedCat: true }))
+    setUndo?.({
+      label: `${targets.length} sp${targets.length === 1 ? 'esa spostata' : 'ese spostate'} in Weekend e Vacanze`,
+      onUndo: () => {
+        Object.entries(prevById).forEach(([txId, prev]) => updateTransaction(txId, prev))
+        setUndo?.(null)
+      },
+    })
+    setSelected(new Set())
+  }
+
+  function ignoreSelected() {
+    const ids = [...selected]
+    if (!ids.length) return
+    onBulkDismiss?.(ids)
+    setSelected(new Set())
+  }
+
   return (
     <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1480}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
-        Con ✅ la spesa passa in Weekend e Vacanze (L2 in base al tipo di periodo); con ✕ non verrà più proposta.
+        Seleziona una o più righe a sinistra e usa i bottoni per accettarle o ignorarle tutte insieme,
+        oppure agisci su una singola riga con ✅/✕.
       </div>
+      {selected.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '7px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}>
+          <strong>{selected.size} selezionate</strong>
+          <button onClick={acceptSelected}
+            style={{ padding: '5px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            ✅ Accetta selezionate
+          </button>
+          <button onClick={ignoreSelected}
+            style={{ padding: '5px 12px', background: 'var(--surface)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+            ✕ Ignora selezionate
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}>
+            Deseleziona
+          </button>
+        </div>
+      )}
       {rows.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Niente da rivedere</div>
       ) : (
         <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1380 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1410 }}>
             <thead><tr>
+              <th style={{ ...OVERLAY_TH, textAlign: 'center', width: 30 }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} />
+              </th>
               {['Data cont.', 'Data valuta', 'Competenza', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Vacanza attiva', ''].map((h, i) => (
                 <th key={i} style={{ ...OVERLAY_TH, textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {rows.map(({ t, vac, vacType }) => (
-                <TxEditRow key={t.txId} t={t} allCats={allCats} updateTransaction={updateTransaction}>
+                <TxEditRow key={t.txId} t={t} allCats={allCats} updateTransaction={updateTransaction}
+                  leading={<input type="checkbox" checked={selected.has(t.txId)} onChange={() => toggleOne(t.txId)} style={{ cursor: 'pointer' }} />}>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', fontSize: 11 }}>
                     <span style={{ padding: '2px 8px', borderRadius: 10, fontWeight: 700,
                       background: vacType === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
@@ -649,6 +718,27 @@ export default function WeekendVacanzeV2Page() {
       onUndo: () => {
         const cur = useStore.getState().appPrefs?.wv2ReviewDismissed || {}
         const { [txId]: _drop, ...rest } = cur
+        setAppPref('wv2ReviewDismissed', rest)
+        setUndo(null)
+      },
+    })
+  }
+
+  // Ignora in blocco (selezione multipla in "Spese non allocate") — un'unica
+  // scrittura su appPrefs invece di N chiamate dismissReview() in sequenza (che
+  // sovrascriverebbero ognuna lo stesso setUndo, lasciando visibile solo l'ultima
+  // e rendendo l'Annulla inutile per le altre righe).
+  function dismissReviewBulk(txIds) {
+    if (!txIds.length) return
+    const next = { ...reviewDismissed }
+    txIds.forEach(id => { next[id] = true })
+    setAppPref('wv2ReviewDismissed', next)
+    setUndo({
+      label: `${txIds.length} sp${txIds.length === 1 ? 'esa esclusa' : 'ese escluse'} da "Spese non allocate"`,
+      onUndo: () => {
+        const cur = useStore.getState().appPrefs?.wv2ReviewDismissed || {}
+        const rest = { ...cur }
+        txIds.forEach(id => { delete rest[id] })
         setAppPref('wv2ReviewDismissed', rest)
         setUndo(null)
       },
@@ -1204,7 +1294,7 @@ export default function WeekendVacanzeV2Page() {
       {/* Overlay spese in giorni di vacanza non allocate in Weekend e Vacanze */}
       {showReview && (
         <ToReviewModal rows={reviewRows} allCats={allCats}
-          updateTransaction={updateTransaction} onDismiss={dismissReview}
+          updateTransaction={updateTransaction} onDismiss={dismissReview} onBulkDismiss={dismissReviewBulk}
           setUndo={setUndo} onClose={() => setShowReview(false)} />
       )}
 
