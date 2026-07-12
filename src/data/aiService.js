@@ -381,10 +381,23 @@ export async function enrichBatch(transactions, { force = false, throwOnError = 
       // force=true: clear existing city so AI re-evaluates (unless user-edited)
       // force=false: keep existing AI-set city (don't re-evaluate unless missing)
       city:        (force && (overrideUserEdits || !t.cityUserEdited)) ? null : (t.city || null),
-      counterpart: r.counterpart || t.counterpart || null,
+      // force=true: always use regex counterpart (ignores stale old value) — stessa
+      // logica di merchant, per lo stesso motivo (vedi descAI sotto)
+      counterpart: force ? (r.counterpart || null) : (r.counterpart || t.counterpart || null),
       // force=true: always use regex merchant (ignores stale old value)
       merchant:    force ? (regexMerchant || null) : (regexMerchant || t.merchant || null),
-      // descAI: let AI + computeDescAI handle this
+      // force=true: dimentica la descAI esistente prima di richiamare l'AI. BUG TROVATO
+      // 2026-07-13 (segnalato dall'utente, si ripresentava dopo 2 fix precedenti): se la
+      // AI risponde null/senza confidenza per una transazione (conf:0 — capita quando il
+      // testo bancario originale è troppo povero per essere interpretato), il codice più
+      // sotto usa pick(aiVal, existing) e ricade sul valore ESISTENTE — che però, se questa
+      // stessa transazione era già stata contaminata da un run precedente (vedi guardrail
+      // anti-contaminazione qualche riga sotto), è proprio il valore SBAGLIATO da correggere.
+      // Risultato: un re-enrichment esplicito non riusciva MAI ad autocorreggersi, restituiva
+      // sempre lo stesso descAI errato all'infinito. Senza questo azzeramento, il fallback
+      // "descAI vuoto → pulisci la descrizione originale" (TransactionsPage.jsx/ImportModal.jsx,
+      // cleanRawDescFallback) non scattava mai perché descAI non risultava mai vuoto.
+      descAI:      force ? null : (t.descAI || null),
     }
   })
 
@@ -546,10 +559,17 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
         for (const w of GENERIC_BIZ_WORDS) out = out.replace(new RegExp(`\\b${w}\\b`, 'g'), ' ')
         return out
       }
+      // Ritorna null quando needle è vuoto — "non verificabile", non "trovato". Distinzione
+      // importante: BUG TROVATO 2026-07-13 nella prima versione di questo guardrail, questa
+      // funzione ritornava `true` per needle vuoto, e siccome veniva combinata con `||` tra
+      // merchant e descAI, un merchant:null (comunissimo — molte tx enrichate hanno merchant
+      // null "isBonifico" o semplicemente non estratto) faceva risultare l'INTERO controllo
+      // "trovato" a prescindere da cosa dicesse descAI — il guardrail non scattava MAI per
+      // queste transazioni, motivo per cui il fix del push precedente non ha funzionato.
       const textContains = (haystackRaw, needleRaw) => {
-        if (!needleRaw) return true
+        if (!needleRaw) return null // non verificabile — non conta né a favore né contro
         const h = normAlnum(stripGeneric(haystackRaw)), n = normAlnum(stripGeneric(needleRaw))
-        if (!n) return true // il merchant AI era fatto solo di parole generiche — non verificabile, si assume ok
+        if (!n) return null // idem: il valore era fatto solo di parole generiche
         if (h.includes(n)) return true
         const head = n.slice(0, Math.max(3, Math.floor(n.length * 0.6)))
         return h.includes(head)
@@ -564,7 +584,12 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
         if (!v) return false
         const key = `${v.merchant || ''}|${v.descAI || ''}`
         const isDuplicateValue = (valueCounts.get(key) || 0) > 1
-        const foundInSource = textContains(t.description, v.merchant) || textContains(t.description, v.descAI)
+        // Considera solo i campi effettivamente verificabili (non null): se ALMENO UNO dei
+        // campi verificabili combacia col testo originale, va bene; se nessun campo è
+        // verificabile, non si può dire nulla → non sospetta (non abbiamo prove del contrario)
+        const checks = [textContains(t.description, v.merchant), textContains(t.description, v.descAI)]
+          .filter(r => r !== null)
+        const foundInSource = checks.length === 0 ? true : checks.some(Boolean)
         return isDuplicateValue && !foundInSource
       })
       if (suspicious.length > 0) {
