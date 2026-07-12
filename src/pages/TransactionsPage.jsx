@@ -8,7 +8,7 @@ import VehicleQuickPicker from '../components/VehicleQuickPicker'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
-import { isVacationEligible, findVacationForDate } from '../data/vacationRules'
+import { isVacationEligible, findVacationForDate, dominantVacationType } from '../data/vacationRules'
 import { useVacations } from '../hooks/useCalendarVacations'
 // aiRules.js removed — AI naming rules now stored in Firestore via appPrefs
 import './TransactionsPage.css'
@@ -17,6 +17,16 @@ import { netAmt } from '../data/compensation'
 import { txMatchesConditions, applyCatRulesTo } from '../data/ruleMatching'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+// Tipo Weekend/Vacanze di un periodo dichiarato — stessa logica di
+// WeekendVacanzeV2Page.jsx (dominantVacationType sulle transazioni già assegnate
+// al periodo, altrimenti fallback sui giorni: 3+ notti = Vacanze). Duplicato qui
+// (piccola funzione pura) per non dover importare l'intera pagina Weekend e
+// Vacanze solo per una funzione di 2 righe.
+function vacTypeOf(v, transactions) {
+  const nights = v.from && v.to ? Math.max(0, Math.round((new Date(v.to) - new Date(v.from)) / 86400000)) : 0
+  return dominantVacationType(transactions, v.from, v.to) || (nights >= 3 ? 'Vacanze' : 'Weekend')
+}
 
 // fmtDate imported from utils/format
 
@@ -571,11 +581,20 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
   // solo un modo per collegarsi da qui invece che dover andare in quella pagina.
   const { vacations, add: addVacationRecord } = useVacations()
   const showVacPanel = sel1 === 'Weekend e Vacanze' && (sel2 === 'Vacanze' || sel2 === 'Weekend')
+  // Solo i periodi del tipo scelto (Vacanze o Weekend, come definito nello sheet
+  // "Weekend e Vacanze" — vedi vacTypeOf) — richiesta utente 2026-07-13: lista
+  // più corta invece di mostrare indistintamente tutti i periodi dichiarati.
+  const vacationsOfType = useMemo(
+    () => vacations.filter(v => vacTypeOf(v, allTxs) === sel2),
+    [vacations, allTxs, sel2]
+  )
   const [selVac, setSelVac] = useState(() => {
     const d = tx?.competenza || tx?.date
     if (!d) return ''
     const hit = findVacationForDate(d, vacations)
-    return hit ? String(hit.id) : ''
+    // Preseleziona solo se il periodo rilevato è dello stesso tipo scelto in L2 —
+    // altrimenti non comparirebbe nella lista filtrata qui sotto
+    return (hit && vacTypeOf(hit, allTxs) === sel2) ? String(hit.id) : ''
   })
   const [addingVac, setAddingVac] = useState(false)
   const [newVac, setNewVac] = useState({ name: '', from: '', to: '' })
@@ -782,11 +801,13 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
               <div style={{fontSize:10,fontWeight:800,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)'}}>
                 🏖️ {sel2 === 'Vacanze' ? 'Vacanza' : 'Weekend'} collegato
               </div>
-              {vacations.length === 0 && !addingVac && (
-                <div style={{fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>Nessuna vacanza/weekend dichiarato ancora.</div>
+              {vacationsOfType.length === 0 && !addingVac && (
+                <div style={{fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>
+                  Nessun{sel2 === 'Vacanze' ? 'a vacanza' : ' weekend'} di questo tipo dichiarat{sel2 === 'Vacanze' ? 'a' : 'o'} ancora.
+                </div>
               )}
               <div style={{display:'flex',flexDirection:'column',gap:4}}>
-                {vacations.slice().sort((a,b)=>(b.from||'').localeCompare(a.from||'')).map(v=>{
+                {vacationsOfType.slice().sort((a,b)=>(b.from||'').localeCompare(a.from||'')).map(v=>{
                   const vId = String(v.id)
                   const active = selVac === vId
                   return (
