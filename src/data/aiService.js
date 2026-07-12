@@ -523,6 +523,68 @@ EXAMPLE FORMAT (do NOT copy these values — analyze the real transactions above
         })
       })
 
+      // ── Guardrail anti-contaminazione batch ────────────────────────────
+      // L'istruzione nel prompt ("CRITICAL — TRANSACTIONS ARE INDEPENDENT") non basta
+      // sempre a evitare che l'AI "appiattisca" una transazione minoritaria sul merchant
+      // dominante del batch (confermato più volte dall'utente: stessa tx, sbagliata in
+      // batch, corretta se rifatta da sola). Verifica deterministica: se il merchant/
+      // descAI restituito NON compare nel testo originale di QUELLA transazione, E lo
+      // stesso identico valore è stato assegnato anche ad altre transazioni del batch
+      // (segnale di "copia-incolla" dal pattern dominante), ri-arricchiamo quella singola
+      // transazione da sola — i batch da 1 sono affidabili (confermato dall'utente).
+      // Parole generiche di categoria (ristorante/hotel/bar/...) vanno escluse dal
+      // confronto: compaiono spesso in TUTTE le descrizioni di un batch di spese simili
+      // (es. "Hotel Ristorante Aurora" vs "Ristorante Kum" condividono "ristorante"),
+      // quindi da sole farebbero risultare qualunque coppia come "trovata nel testo"
+      // anche quando il nome proprio del merchant è completamente diverso.
+      const GENERIC_BIZ_WORDS = ['ristorante','ristorantepizzeria','pizzeria','trattoria','osteria',
+        'locanda','agriturismo','hotel','albergo','resort','hostel','residence','bar','pub',
+        'caffe','cafe','gelateria','pasticceria','market','supermercato','negozio','spa']
+      const normAlnum = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const stripGeneric = s => {
+        let out = String(s || '').toLowerCase()
+        for (const w of GENERIC_BIZ_WORDS) out = out.replace(new RegExp(`\\b${w}\\b`, 'g'), ' ')
+        return out
+      }
+      const textContains = (haystackRaw, needleRaw) => {
+        if (!needleRaw) return true
+        const h = normAlnum(stripGeneric(haystackRaw)), n = normAlnum(stripGeneric(needleRaw))
+        if (!n) return true // il merchant AI era fatto solo di parole generiche — non verificabile, si assume ok
+        if (h.includes(n)) return true
+        const head = n.slice(0, Math.max(3, Math.floor(n.length * 0.6)))
+        return h.includes(head)
+      }
+      const valueCounts = new Map()
+      for (const v of aiMap.values()) {
+        const key = `${v.merchant || ''}|${v.descAI || ''}`
+        valueCounts.set(key, (valueCounts.get(key) || 0) + 1)
+      }
+      const suspicious = needsAI.filter(t => {
+        const v = aiMap.get(t.txId)
+        if (!v) return false
+        const key = `${v.merchant || ''}|${v.descAI || ''}`
+        const isDuplicateValue = (valueCounts.get(key) || 0) > 1
+        const foundInSource = textContains(t.description, v.merchant) || textContains(t.description, v.descAI)
+        return isDuplicateValue && !foundInSource
+      })
+      if (suspicious.length > 0) {
+        console.log(`[enrichBatch] ${suspicious.length} tx sospette (valore duplicato nel batch, assente nel testo originale) — ri-arricchisco singolarmente:`, suspicious.map(t => t.txId))
+        for (const t of suspicious) {
+          try {
+            const [fixed] = await enrichBatch([t], { force: true, overrideUserEdits: true, throwOnError: true })
+            if (fixed) {
+              aiMap.set(t.txId, {
+                merchant: fixed.merchant, counterpart: fixed.counterpart, descAI: fixed.descAI,
+                city: fixed.city, cat1: fixed.cat1, cat2: fixed.cat2, conf: fixed.conf,
+              })
+              console.log(`[enrichBatch] ${t.txId}: corretto individualmente →`, fixed.descAI)
+            }
+          } catch (e) {
+            console.warn(`[enrichBatch] ${t.txId}: re-verifica individuale fallita, mantengo il risultato del batch —`, e.message)
+          }
+        }
+      }
+
       return preEnriched.map(t => {
         const ai = aiMap.get(t.txId)
         if (!ai) return { ...t, aiEnriched: true, aiEnrichedAt: new Date().toISOString() }
