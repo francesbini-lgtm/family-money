@@ -305,7 +305,7 @@ const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSp
 // vacanza dichiarata — modificabili, assegnabili a una vacanza esistente (la
 // competenza della spesa si sposta al primo giorno di quel periodo) o a una
 // vacanza creata al volo (usa la competenza della spesa come date iniziali) ──
-function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVacation, updateVacation, onClose }) {
+function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVacation, updateVacation, setUndo, onClose }) {
   const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
 
@@ -316,12 +316,38 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
       setNv({ name: '', from: d, to: d })
       return
     }
-    const v = vacations.find(x => x.id === vacId)
-    if (!v) return
+    // BUG TROVATO 2026-07-13 (segnalato dall'utente: "clicco assegna ma non succede
+    // niente"): le vacanze create con useVacations().add() hanno id NUMERICO
+    // (Date.now(), vedi useCalendarVacations.js) ma <option value={v.id}> nel DOM
+    // diventa sempre una STRINGA — x.id === vacId (numero !== stringa) falliva SEMPRE
+    // silenziosamente, per OGNI vacanza esistente, senza errori in console. Stesso
+    // identico bug già risolto altrove (ImportWizard.jsx:356, String(v.id) === vacId)
+    // ma rimasto qui. Fix: confronto sempre come stringa.
+    const v = vacations.find(x => String(x.id) === String(vacId))
+    if (!v) {
+      console.warn('[assignTo] vacanza non trovata per id', vacId, '— nessuna modifica applicata')
+      return
+    }
+    // Valori PRIMA della modifica — servono per il bottone "Annulla" dello snackbar
+    const prevCompetenza = t.competenza ?? null
+    const prevEffDate    = t._effDate ?? t.date
     // Allinea la spesa al periodo esistente spostandone la competenza al primo giorno
     // della vacanza (richiesta utente 2026-07-12) — non si estendono più le date della
     // vacanza per coprire la spesa: è la spesa che si sposta nel periodo, non viceversa
-    updateTransaction(t.txId, { competenza: v.from === t.date ? null : v.from, _effDate: v.from })
+    const newCompetenza = v.from === t.date ? null : v.from
+    updateTransaction(t.txId, { competenza: newCompetenza, _effDate: v.from })
+    console.log(`[assignTo] ${t.txId}: competenza ${prevCompetenza ?? '(default)'} → ${newCompetenza ?? '(default = ' + t.date + ')'}, vacanza "${v.city || v.name}" (${v.from}–${v.to})`)
+    // Conferma visibile (richiesta utente 2026-07-13: "clicco assegna ma non succede
+    // niente, nessun pop up, nessuna comunicazione") — prima l'unico segnale era la
+    // riga che spariva dalla tabella, facile da non notare in una lista lunga.
+    // Riusa lo stesso snackbar "Annulla" già presente nella pagina (elimina/ignora).
+    setUndo?.({
+      label: `Spesa assegnata a "${v.city || v.name || 'vacanza'}" (${fmtDate(v.from)}–${fmtDate(v.to)})`,
+      onUndo: () => {
+        updateTransaction(t.txId, { competenza: prevCompetenza, _effDate: prevEffDate })
+        setUndo?.(null)
+      },
+    })
   }
 
   function saveNewVac(t) {
@@ -1080,7 +1106,7 @@ export default function WeekendVacanzeV2Page() {
       {showFuori && (
         <FuoriPeriodoModal txs={fuoriTxs} vacations={sorted} allCats={allCats}
           updateTransaction={updateTransaction} addVacation={add} updateVacation={update}
-          onClose={() => setShowFuori(false)} />
+          setUndo={setUndo} onClose={() => setShowFuori(false)} />
       )}
 
       {/* Overlay spese in giorni di vacanza non allocate in Weekend e Vacanze */}
