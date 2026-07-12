@@ -9,6 +9,7 @@ import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { exportTransactionsCSV } from '../services/export'
 import { categorizeOne, enrichBatch, enrichCitiesBatch, processFeedback, computeDescAI, callGemini } from '../data/aiService'
 import { isVacationEligible, findVacationForDate } from '../data/vacationRules'
+import { useVacations } from '../hooks/useCalendarVacations'
 // aiRules.js removed — AI naming rules now stored in Firestore via appPrefs
 import './TransactionsPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
@@ -561,6 +562,32 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
   const [applied,   setApplied]   = useState(false)
   const [descEdit,  setDescEdit]  = useState(tx?.descAI || '')
 
+  // ── Pannello "vacanza/weekend collegato" — si apre a destra quando L1/L2 =
+  // Weekend e Vacanze › Vacanze o Weekend (richiesta utente 2026-07-13: "quando
+  // utente seleziona L2 Weekend o Vacanze, deve aprirsi un'altra parte a destra
+  // dove può selezionare la vacanza o weekend, e viene assegnato anche in
+  // Weekend e Vacanze sheet"). Stesso store di WeekendVacanzeV2Page/Calendario
+  // (appPrefs.calendarVacations via useVacations()) — niente di nuovo da creare,
+  // solo un modo per collegarsi da qui invece che dover andare in quella pagina.
+  const { vacations, add: addVacationRecord } = useVacations()
+  const showVacPanel = sel1 === 'Weekend e Vacanze' && (sel2 === 'Vacanze' || sel2 === 'Weekend')
+  const [selVac, setSelVac] = useState(() => {
+    const d = tx?.competenza || tx?.date
+    if (!d) return ''
+    const hit = findVacationForDate(d, vacations)
+    return hit ? String(hit.id) : ''
+  })
+  const [addingVac, setAddingVac] = useState(false)
+  const [newVac, setNewVac] = useState({ name: '', from: '', to: '' })
+
+  function confirmNewVac() {
+    if (!newVac.name.trim() || !newVac.from || !newVac.to) return
+    const rec = addVacationRecord({ name: newVac.name.trim(), city: newVac.name.trim(), from: newVac.from, to: newVac.to })
+    setSelVac(String(rec.id))
+    setAddingVac(false)
+    setNewVac({ name: '', from: '', to: '' })
+  }
+
   // Multi-condition rule state (only used when rulesOpen)
   // Auto-detect best "controparte" field: prefer merchant if populated, else description
   const _initCond = (() => {
@@ -611,6 +638,22 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
 
   function save() {
     const patch = { cat1: sel1, cat2: sel2, conf: 100, ...(descEdit.trim() ? { descAI: descEdit.trim(), aiEnriched: true } : {}) }
+    // Collegamento a vacanza/weekend scelto nel pannello a destra: se la spesa
+    // cade GIÀ dentro il periodo selezionato, non serve toccare la competenza
+    // (il match per data funziona già da solo); se invece è fuori dal periodo,
+    // sposta la competenza al primo giorno del periodo per collegarla — stesso
+    // comportamento di "Assegna a…" in Weekend e Vacanze → Spese fuori periodo.
+    if (showVacPanel && selVac) {
+      const v = vacations.find(x => String(x.id) === selVac)
+      if (v) {
+        const cur = tx?.competenza || tx?.date
+        const inRange = cur && cur >= v.from && cur <= v.to
+        if (!inRange) {
+          patch.competenza = v.from
+          patch._effDate = v.from
+        }
+      }
+    }
     updateTransaction(txId, patch)
     if (rulesOpen && ruleActive && scope !== 'solo') {
       // Persist the rule to Firestore (visible in Impostazioni → Regole AI)
@@ -639,7 +682,7 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
     setTimeout(onClose, 500)
   }
 
-  const modalW = rulesOpen ? 720 : 360
+  const modalW = 360 + (rulesOpen ? 360 : 0) + (showVacPanel ? 270 : 0)
 
   return (
     <>
@@ -695,7 +738,7 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
           </div>
 
           {/* L2 — subcategories */}
-          <div className="cat-dropdown-l2" style={{flex:1, minWidth:0, padding:'8px 0 0', borderRight: rulesOpen ? '1px solid var(--border)' : 'none', display:'flex', flexDirection:'column'}}>
+          <div className="cat-dropdown-l2" style={{flex:1, minWidth:0, padding:'8px 0 0', borderRight: (rulesOpen || showVacPanel) ? '1px solid var(--border)' : 'none', display:'flex', flexDirection:'column'}}>
             <div style={{flex:1,overflowY:'auto',padding:'0 0 4px'}}>
               {(allCats[sel1]?.sub||[]).length > 0 ? allCats[sel1].sub.map(s=>(
                 <button key={s} className={'cat-dropdown-sub'+(s===sel2?' active':'')}
@@ -731,6 +774,64 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
               </button>
             ))}
           </div>
+
+          {/* Vacation/weekend link panel — shown only when L1/L2 = Weekend e Vacanze › Vacanze/Weekend */}
+          {showVacPanel && (
+            <div style={{flex:'0 0 250px', padding:'14px 16px', background:'var(--surface2)',
+              borderRight: rulesOpen ? '1px solid var(--border)' : 'none', display:'flex', flexDirection:'column', gap:8, overflowY:'auto'}}>
+              <div style={{fontSize:10,fontWeight:800,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)'}}>
+                🏖️ {sel2 === 'Vacanze' ? 'Vacanza' : 'Weekend'} collegato
+              </div>
+              {vacations.length === 0 && !addingVac && (
+                <div style={{fontSize:12,color:'var(--text3)',fontStyle:'italic'}}>Nessuna vacanza/weekend dichiarato ancora.</div>
+              )}
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                {vacations.slice().sort((a,b)=>(b.from||'').localeCompare(a.from||'')).map(v=>{
+                  const vId = String(v.id)
+                  const active = selVac === vId
+                  return (
+                    <button key={vId} onClick={()=>setSelVac(active ? '' : vId)}
+                      style={{
+                        padding:'6px 10px', borderRadius:8, textAlign:'left', cursor:'pointer',
+                        border:`1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        background: active ? 'var(--accent)' : 'var(--surface)',
+                        color: active ? '#fff' : 'var(--text2)', fontSize:12, fontFamily:'var(--font-sans)',
+                      }}>
+                      <div style={{fontWeight:700}}>{active ? '✓ ' : ''}{v.city || v.name || '—'}</div>
+                      <div style={{fontSize:10, opacity:.8}}>{fmtDate(v.from)}–{fmtDate(v.to)}</div>
+                    </button>
+                  )
+                })}
+              </div>
+              {addingVac ? (
+                <div style={{display:'flex',flexDirection:'column',gap:5,padding:8,border:'1px dashed var(--border)',borderRadius:8}}>
+                  <input autoFocus value={newVac.name} onChange={e=>setNewVac(v=>({...v,name:e.target.value}))} placeholder="Nome / località"
+                    style={{padding:'4px 7px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,fontFamily:'var(--font-sans)'}}/>
+                  <input type="date" value={newVac.from} onChange={e=>setNewVac(v=>({...v,from:e.target.value}))}
+                    style={{padding:'4px 7px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,fontFamily:'var(--font-sans)'}}/>
+                  <input type="date" value={newVac.to} onChange={e=>setNewVac(v=>({...v,to:e.target.value}))}
+                    style={{padding:'4px 7px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,fontFamily:'var(--font-sans)'}}/>
+                  <div style={{display:'flex',gap:6}}>
+                    <button onClick={confirmNewVac} disabled={!newVac.name.trim()||!newVac.from||!newVac.to}
+                      style={{flex:1,padding:'5px 8px',background:'var(--accent)',color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:700,cursor:'pointer',
+                        opacity:(!newVac.name.trim()||!newVac.from||!newVac.to)?.5:1}}>Crea</button>
+                    <button onClick={()=>setAddingVac(false)}
+                      style={{padding:'5px 8px',background:'none',border:'1px solid var(--border)',borderRadius:6,fontSize:12,cursor:'pointer',color:'var(--text3)'}}>✕</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={()=>{ setAddingVac(true); setNewVac({ name:'', from: tx?.competenza||tx?.date||'', to: tx?.competenza||tx?.date||'' }) }}
+                  style={{padding:'6px 10px',background:'none',border:'1px dashed var(--border)',borderRadius:8,fontSize:12,color:'var(--accent)',cursor:'pointer',fontWeight:600,textAlign:'left'}}>
+                  + Nuova {sel2 === 'Vacanze' ? 'vacanza' : 'weekend'}
+                </button>
+              )}
+              {selVac && (
+                <div style={{fontSize:10,color:'var(--text3)',lineHeight:1.4}}>
+                  Se la data della spesa cade fuori da questo periodo, la competenza verrà spostata al primo giorno del periodo per collegarla.
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Rules panel — shown only when rulesOpen */}
           {rulesOpen && (

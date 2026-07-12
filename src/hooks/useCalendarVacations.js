@@ -12,7 +12,15 @@ export function useVacations() {
   useEffect(() => { setVacations(appPrefs.calendarVacations || []) }, [appPrefs.calendarVacations])
 
   function save(v) { setVacations(v); setAppPref('calendarVacations', v) }
-  function add(vac) { save([...vacations, { id: Date.now(), ...vac }]) }
+  // Ritorna il record creato (con l'id) — utile a chi deve selezionarlo subito
+  // dopo la creazione (es. TransactionsPage: crea una vacanza "al volo" e la
+  // collega subito alla transazione). I chiamanti precedenti ignoravano il
+  // valore di ritorno, quindi restare compatibile aggiungendolo non rompe nulla.
+  function add(vac) {
+    const rec = { id: Date.now(), ...vac }
+    save([...vacations, rec])
+    return rec
+  }
   // Aggiunge più periodi in un colpo solo (evita id/Date.now() duplicati e scritture concorrenti)
   function addMultiple(vacsArr) {
     const withIds = vacsArr.map((v, i) => ({ id: Date.now() + i, ...v }))
