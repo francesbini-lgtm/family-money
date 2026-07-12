@@ -302,8 +302,9 @@ const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSp
   position: 'sticky', top: 0, zIndex: 1 }
 
 // ── Overlay "Fuori periodo": spese Weekend e Vacanze non coperte da nessuna
-// vacanza dichiarata — modificabili, assegnabili a una vacanza (estendendone le
-// date fino a coprire la spesa) o a una vacanza creata al volo ──
+// vacanza dichiarata — modificabili, assegnabili a una vacanza esistente (la
+// competenza della spesa si sposta al primo giorno di quel periodo) o a una
+// vacanza creata al volo (usa la competenza della spesa come date iniziali) ──
 function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVacation, updateVacation, onClose }) {
   const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
@@ -317,11 +318,10 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
     }
     const v = vacations.find(x => x.id === vacId)
     if (!v) return
-    // Estende il periodo della vacanza per coprire la data della spesa
-    const patch = {}
-    if (d < v.from) patch.from = d
-    if (d > v.to) patch.to = d
-    if (Object.keys(patch).length) updateVacation(v.id, patch)
+    // Allinea la spesa al periodo esistente spostandone la competenza al primo giorno
+    // della vacanza (richiesta utente 2026-07-12) — non si estendono più le date della
+    // vacanza per coprire la spesa: è la spesa che si sposta nel periodo, non viceversa
+    updateTransaction(t.txId, { competenza: v.from === t.date ? null : v.from, _effDate: v.from })
   }
 
   function saveNewVac(t) {
@@ -334,8 +334,8 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
     <Modal title={`📆 Spese Weekend e Vacanze fuori periodo (${txs.length})`} onClose={onClose} width={1170}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese categorizzate "Weekend e Vacanze" la cui data non cade in nessuna vacanza/weekend dichiarata.
-        Modifica i campi direttamente, oppure assegna la spesa a una vacanza (le date della vacanza si
-        estendono per coprirla) o creane una nuova.
+        Modifica i campi direttamente, oppure assegna la spesa a una vacanza (la competenza si sposta al
+        primo giorno di quel periodo) o creane una nuova.
       </div>
       {txs.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Tutto coperto</div>
