@@ -8,7 +8,7 @@ import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations
 import {
   vacationTotalCost, allDatesBetween, dominantVacationType,
   destCategoryEmoji, destCategoryLabel, computeCandidateVacations,
-  DEST_TYPES, labelToEmoji,
+  DEST_TYPES, labelToEmoji, findVacationForDate,
 } from '../data/vacationRules'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -48,6 +48,7 @@ function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '�
         autoFocus
         type={type === 'date' ? 'date' : 'text'}
         value={val}
+        onClick={e => e.stopPropagation()}
         onChange={e => setVal(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
@@ -66,7 +67,7 @@ function EditCell({ value, onSave, type = 'text', width = 100, placeholder = '�
 
   return (
     <span
-      onClick={() => { setEditing(true); setVal(String(value ?? '')) }}
+      onClick={e => { e.stopPropagation(); setEditing(true); setVal(String(value ?? '')) }}
       title="Clicca per modificare"
       style={{
         cursor: 'pointer', display: 'inline-block',
@@ -175,16 +176,314 @@ function RecategorizeModal({ tx, onConfirm, onClose }) {
   )
 }
 
+// ── Merchant "vacanza" di default (Impostazioni ⚙️ in questa pagina; usati anche
+// dal wizard di importazione per chiedere competenza/vacanza sulle prenotazioni) ──
+export const DEFAULT_VAC_MERCHANTS = ['booking', 'airbnb', 'bravonext', 'lastminute']
+export function getVacationMerchants(appPrefs) {
+  const list = appPrefs?.vacationMerchants
+  return Array.isArray(list) && list.length ? list : DEFAULT_VAC_MERCHANTS
+}
+
+// Puntino descrizione originale (come in Transazioni): hover per vedere il testo
+function OrigDot({ description }) {
+  if (!description) return null
+  return (
+    <span title={description} onClick={e => e.stopPropagation()}
+      style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+        background: 'var(--text3)', opacity: .55, cursor: 'help', flexShrink: 0 }} />
+  )
+}
+
+// ── Riga transazione editabile per gli overlay (Fuori periodo / To review) ──
+// Colonne: Data contabile, Data valuta, AI descrizione, • descr. originale,
+// Location, L1, L2, Importo — tutti i campi modificabili (l'importo no: tocca il saldo).
+function TxEditRow({ t, allCats, updateTransaction, children }) {
+  const cat2Options = allCats[t.cat1]?.sub || []
+  const selStyle = { padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
+    background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)', maxWidth: 130 }
+  const td = { padding: '6px 8px', fontSize: 12, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+  return (
+    <tr>
+      <td style={td}>
+        <EditCell type="date" value={t.date_reg || t.date} width={105}
+          onSave={v => v && updateTransaction(t.txId, { date_reg: v })} />
+      </td>
+      <td style={td}>
+        <EditCell type="date" value={t.date} width={105}
+          onSave={v => v && updateTransaction(t.txId, { date: v, _effDate: t.competenza || v })} />
+      </td>
+      <td style={{ ...td, fontWeight: 600, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <EditCell value={t.descAI || ''} width={130}
+          onSave={v => updateTransaction(t.txId, { descAI: v || null, userEditedDesc: true })} />
+      </td>
+      <td style={{ ...td, textAlign: 'center' }}><OrigDot description={t.description} /></td>
+      <td style={td}>
+        <EditCell value={t.city || ''} width={90}
+          onSave={v => updateTransaction(t.txId, { city: v || null, cityUserEdited: true })} />
+      </td>
+      <td style={td}>
+        <select value={t.cat1 || ''} style={selStyle}
+          onChange={e => updateTransaction(t.txId, { cat1: e.target.value, cat2: '', userEditedCat: true })}>
+          <option value="">—</option>
+          {Object.keys(allCats).map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </td>
+      <td style={td}>
+        <select value={t.cat2 || ''} disabled={!cat2Options.length} style={{ ...selStyle, opacity: cat2Options.length ? 1 : .4 }}
+          onChange={e => updateTransaction(t.txId, { cat2: e.target.value, userEditedCat: true })}>
+          <option value="">—</option>
+          {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </td>
+      <td style={{ ...td, textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)',
+        color: t.amount >= 0 ? 'var(--green)' : 'var(--red)' }}>
+        {t.amount >= 0 ? '+' : '−'}€ {fmtIT(Math.abs(t.amount), 2)}
+      </td>
+      {children}
+    </tr>
+  )
+}
+
+const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.05em',
+  textTransform: 'uppercase', color: 'var(--text3)', background: 'var(--surface2)',
+  borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap',
+  position: 'sticky', top: 0, zIndex: 1 }
+
+// ── Overlay "Fuori periodo": spese Weekend e Vacanze non coperte da nessuna
+// vacanza dichiarata — modificabili, assegnabili a una vacanza (estendendone le
+// date fino a coprire la spesa) o a una vacanza creata al volo ──
+function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVacation, updateVacation, onClose }) {
+  const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
+  const [nv, setNv] = useState({ name: '', from: '', to: '' })
+
+  function assignTo(t, vacId) {
+    const d = t._effDate || t.date
+    if (vacId === '__new__') {
+      setNewVacFor(t.txId)
+      setNv({ name: '', from: d, to: d })
+      return
+    }
+    const v = vacations.find(x => x.id === vacId)
+    if (!v) return
+    // Estende il periodo della vacanza per coprire la data della spesa
+    const patch = {}
+    if (d < v.from) patch.from = d
+    if (d > v.to) patch.to = d
+    if (Object.keys(patch).length) updateVacation(v.id, patch)
+  }
+
+  function saveNewVac(t) {
+    if (!nv.name.trim() || !nv.from || !nv.to) return
+    addVacation({ name: nv.name.trim(), city: nv.name.trim(), from: nv.from, to: nv.to })
+    setNewVacFor(null)
+  }
+
+  return (
+    <Modal title={`📆 Spese Weekend e Vacanze fuori periodo (${txs.length})`} onClose={onClose} width={960}>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Spese categorizzate "Weekend e Vacanze" la cui data non cade in nessuna vacanza/weekend dichiarata.
+        Modifica i campi direttamente, oppure assegna la spesa a una vacanza (le date della vacanza si
+        estendono per coprirla) o creane una nuova.
+      </div>
+      {txs.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Tutto coperto</div>
+      ) : (
+        <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+            <thead><tr>
+              {['Data cont.', 'Data valuta', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Assegna a vacanza'].map((h, i) => (
+                <th key={i} style={{ ...OVERLAY_TH, textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {txs.map(t => (
+                <Fragment key={t.txId}>
+                  <TxEditRow t={t} allCats={allCats} updateTransaction={updateTransaction}>
+                    <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                      <select defaultValue="" onChange={e => { assignTo(t, e.target.value); e.target.value = '' }}
+                        style={{ padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
+                          background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, maxWidth: 170, fontFamily: 'var(--font-sans)' }}>
+                        <option value="">Assegna a…</option>
+                        {vacations.map(v => (
+                          <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
+                        ))}
+                        <option value="__new__">➕ Nuova vacanza…</option>
+                      </select>
+                    </td>
+                  </TxEditRow>
+                  {newVacFor === t.txId && (
+                    <tr>
+                      <td colSpan={9} style={{ padding: '8px 10px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+                          <strong>➕ Nuova vacanza:</strong>
+                          <input value={nv.name} onChange={e => setNv(f => ({ ...f, name: e.target.value }))} placeholder="Nome / località"
+                            style={{ padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, width: 150, fontFamily: 'var(--font-sans)' }} />
+                          <input type="date" value={nv.from} onChange={e => setNv(f => ({ ...f, from: e.target.value }))}
+                            style={{ padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, fontFamily: 'var(--font-sans)' }} />
+                          <input type="date" value={nv.to} onChange={e => setNv(f => ({ ...f, to: e.target.value }))}
+                            style={{ padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, fontFamily: 'var(--font-sans)' }} />
+                          <button onClick={() => saveNewVac(t)} disabled={!nv.name.trim() || !nv.from || !nv.to}
+                            style={{ padding: '5px 12px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: (!nv.name.trim() || !nv.from || !nv.to) ? .5 : 1 }}>
+                            Crea
+                          </button>
+                          <button onClick={() => setNewVacFor(null)}
+                            style={{ padding: '5px 10px', background: 'none', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+// ── Overlay "To review": spese avvenute DURANTE una vacanza dichiarata ma NON
+// categorizzate Weekend e Vacanze — mostra quale vacanza era attiva; con ✅ la
+// spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo) ──
+function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose }) {
+  return (
+    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1020}>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
+        Con ✅ la spesa passa in Weekend e Vacanze (L2 in base al tipo di periodo); con ✕ non verrà più proposta.
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Niente da rivedere</div>
+      ) : (
+        <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+            <thead><tr>
+              {['Data cont.', 'Data valuta', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Vacanza attiva', ''].map((h, i) => (
+                <th key={i} style={{ ...OVERLAY_TH, textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {rows.map(({ t, vac, vacType }) => (
+                <TxEditRow key={t.txId} t={t} allCats={allCats} updateTransaction={updateTransaction}>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', fontSize: 11 }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                      background: vacType === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
+                      color: vacType === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)' }}>
+                      {vac.city || vac.name || '—'}
+                    </span>
+                    <span style={{ color: 'var(--text3)', marginLeft: 6 }}>{fmtDate(vac.from)}–{fmtDate(vac.to)}</span>
+                  </td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                    <button title={`È una spesa della vacanza → Weekend e Vacanze › ${vacType}`}
+                      onClick={() => updateTransaction(t.txId, { cat1: 'Weekend e Vacanze', cat2: vacType, userEditedCat: true })}
+                      style={{ padding: '3px 9px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', marginRight: 4 }}>
+                      ✅
+                    </button>
+                    <button title="Non fa parte della vacanza — non riproporre"
+                      onClick={() => onDismiss(t.txId)}
+                      style={{ padding: '3px 9px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                      ✕
+                    </button>
+                  </td>
+                </TxEditRow>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+// ── Impostazioni merchant vacanze (usati anche dal wizard di importazione) ──
+function VacMerchantsModal({ appPrefs, setAppPref, onClose }) {
+  const list = getVacationMerchants(appPrefs)
+  const [draft, setDraft] = useState('')
+  function save(next) { setAppPref('vacationMerchants', next) }
+  return (
+    <Modal title="⚙️ Merchant prenotazioni vacanze" onClose={onClose} width={440}>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Quando l'import trova una spesa di uno di questi merchant (Booking, Airbnb, …), il wizard
+        chiede la competenza vera e a quale vacanza collegarla.
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        {list.map(m => (
+          <span key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px',
+            borderRadius: 14, fontSize: 12, fontWeight: 600, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+            {m}
+            <button onClick={() => save(list.filter(x => x !== m))}
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 12, padding: 0 }}>×</button>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="es. edreams"
+          onKeyDown={e => { if (e.key === 'Enter' && draft.trim()) { save([...list, draft.trim().toLowerCase()]); setDraft('') } }}
+          style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, fontFamily: 'var(--font-sans)' }} />
+        <button onClick={() => { if (draft.trim()) { save([...list, draft.trim().toLowerCase()]); setDraft('') } }}
+          style={{ padding: '6px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          Aggiungi
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function WeekendVacanzeV2Page() {
   const transactions = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
+  const appPrefs = useStore(s => s.appPrefs)
+  const setAppPref = useStore(s => s.setAppPref)
+  const customCats = useStore(s => s.customCats)
+  const allCats = useMemo(() => getMergedCats(customCats), [customCats])
   const { vacations, add, update, remove } = useVacations()
   const { notVacationDates, mark, unmark } = useNotVacationDates()
 
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ dest: '', dateFrom: '', dateTo: '' })
   const [showCandidates, setShowCandidates] = useState(false)
+  const [showFuori, setShowFuori] = useState(false)     // overlay spese W&V fuori periodo
+  const [showReview, setShowReview] = useState(false)   // overlay spese in vacanza non allocate
+  const [showMerch, setShowMerch] = useState(false)     // impostazioni merchant vacanze
   const [candCityOverride, setCandCityOverride] = useState({})
+  const [candDateOverride, setCandDateOverride] = useState({}) // { candId: { from, to } }
+
+  // Soprannomi famiglia per la colonna Utente
+  const nicknames = useMemo(() => {
+    const n = []
+    if (appPrefs?.ownerNickname) n.push(appPrefs.ownerNickname)
+    ;(appPrefs?.family || []).forEach(m => { if (m.nickname) n.push(m.nickname) })
+    return n
+  }, [appPrefs])
+
+  // KPI "Fuori periodo": spese Weekend e Vacanze non coperte da NESSUNA vacanza dichiarata
+  const fuoriTxs = useMemo(() =>
+    transactions
+      .filter(t => !t.excluded && t.amount < 0 && t.cat1 === 'Weekend e Vacanze' &&
+        !findVacationForDate(t._effDate || t.date, vacations))
+      .sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
+  , [transactions, vacations])
+
+  // "To review": spese avvenute DENTRO una vacanza dichiarata ma NON in Weekend e Vacanze
+  // (esclusi i txId già liquidati con ✕ — persistiti in appPrefs.wv2ReviewDismissed)
+  const reviewDismissed = appPrefs?.wv2ReviewDismissed || {}
+  const reviewRows = useMemo(() =>
+    transactions
+      .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' && !reviewDismissed[t.txId])
+      .map(t => {
+        const vac = findVacationForDate(t._effDate || t.date, vacations)
+        if (!vac) return null
+        const vacType = dominantVacationType(transactions, vac.from, vac.to)
+          || (nightsBetween(vac.from, vac.to) >= 3 ? 'Vacanze' : 'Weekend')
+        return { t, vac, vacType }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.t._effDate || b.t.date || '').localeCompare(a.t._effDate || a.t.date || ''))
+  , [transactions, vacations, reviewDismissed])
+
+  function dismissReview(txId) {
+    setAppPref('wv2ReviewDismissed', { ...reviewDismissed, [txId]: true })
+  }
   const [selectedCand, setSelectedCand] = useState(new Set())
   const [mergeName, setMergeName] = useState('')
   const [undo, setUndo] = useState(null) // { label, onUndo }
@@ -231,9 +530,15 @@ export default function WeekendVacanzeV2Page() {
 
   // Candidate: giorni con spesa "Weekend e Vacanze" non ancora coperti da un periodo
   // dichiarato né esclusi — raggruppati per vicinanza di date E stessa località
-  const candidates = useMemo(
+  const allCandidates = useMemo(
     () => computeCandidateVacations(transactions, vacations, notVacationDates),
     [transactions, vacations, notVacationDates]
+  )
+  // Solo candidate CON una località (richiesta utente 2026-07-12: niente vacanze
+  // proposte senza nome — quelle senza location non vengono presentate)
+  const candidates = useMemo(
+    () => allCandidates.filter(c => ((c.city || '')).trim()),
+    [allCandidates]
   )
 
   function upd(v, field, value) {
@@ -276,8 +581,12 @@ export default function WeekendVacanzeV2Page() {
 
   function confirmCandidate(cand) {
     const city = candCityOverride[cand.id] ?? cand.city ?? ''
-    add({ name: 'Weekend e Vacanze', from: cand.from, to: cand.to, city })
+    // Date modificabili nel pannello (richiesta utente 2026-07-12)
+    const from = candDateOverride[cand.id]?.from || cand.from
+    const to   = candDateOverride[cand.id]?.to   || cand.to
+    add({ name: 'Weekend e Vacanze', from, to, city })
     setCandCityOverride(o => { const n = { ...o }; delete n[cand.id]; return n })
+    setCandDateOverride(o => { const n = { ...o }; delete n[cand.id]; return n })
   }
 
   function ignoreCandidate(cand) {
@@ -417,12 +726,26 @@ export default function WeekendVacanzeV2Page() {
             Solo vacanze confermate — sincronizzato con Calendario &gt; Vacanze
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {/* To review: spese nei giorni di vacanza dichiarata NON allocate in Weekend e Vacanze */}
+          <button onClick={() => setShowReview(true)} title="Spese avvenute durante una vacanza dichiarata ma categorizzate altrove"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: reviewRows.length ? 'rgba(220,50,50,.08)' : 'var(--surface2)', color: reviewRows.length ? 'var(--red)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+            🚩 To review {reviewRows.length > 0 && `(${reviewRows.length})`}
+          </button>
+          {/* Fuori periodo: spese W&V non coperte da nessuna vacanza dichiarata */}
+          <button onClick={() => setShowFuori(true)} title='Spese "Weekend e Vacanze" fuori da ogni periodo dichiarato'
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: fuoriTxs.length ? 'var(--blue-l,#e8f0fe)' : 'var(--surface2)', color: fuoriTxs.length ? 'var(--blue,#2563eb)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+            📆 Fuori periodo {fuoriTxs.length > 0 && `(${fuoriTxs.length})`}
+          </button>
           <button onClick={() => setShowCandidates(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: candidates.length ? 'var(--gold-l,#fef9e7)' : 'var(--surface2)', color: candidates.length ? 'var(--gold,#b45309)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
             <Search size={14} /> Da confermare {candidates.length > 0 && `(${candidates.length})`}
           </button>
           <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
             <Plus size={14} /> Aggiungi
+          </button>
+          <button onClick={() => setShowMerch(true)} title="Merchant prenotazioni vacanze (Booking, Airbnb, …) — usati dal wizard di importazione"
+            style={{ padding: '7px 10px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
+            ⚙️
           </button>
         </div>
       </div>
@@ -545,7 +868,23 @@ export default function WeekendVacanzeV2Page() {
               </div>
 
               <div className="card" style={{ overflow: 'auto', padding: 0 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                {/* tableLayout fixed + colgroup identico per ogni anno: prima le tabelle
+                    dei vari anni auto-dimensionavano le colonne in modo diverso e
+                    risultavano disallineate tra loro (segnalazione utente, screenshot 2023) */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 980 }}>
+                  <colgroup>
+                    <col style={{ width: 90 }} />{/* Tipo */}
+                    <col style={{ width: 40 }} />{/* emoji */}
+                    <col />{/* DOVE — prende lo spazio rimanente */}
+                    <col style={{ width: 112 }} />{/* Da */}
+                    <col style={{ width: 112 }} />{/* A */}
+                    <col style={{ width: 110 }} />{/* Utente */}
+                    <col style={{ width: 64 }} />{/* Giorni */}
+                    <col style={{ width: 64 }} />{/* Notti */}
+                    <col style={{ width: 92 }} />{/* Spese TX */}
+                    <col style={{ width: 104 }} />{/* Costo/giorno */}
+                    <col style={{ width: 40 }} />{/* del */}
+                  </colgroup>
                   <thead>
                     <tr>
                       <th style={thStyle}>Tipo</th>
@@ -553,6 +892,7 @@ export default function WeekendVacanzeV2Page() {
                       <th style={thStyle}>DOVE</th>
                       <th style={thStyle}>Da</th>
                       <th style={thStyle}>A</th>
+                      <th style={thStyle}>Utente</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Giorni</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Notti</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Spese TX</th>
@@ -593,20 +933,40 @@ export default function WeekendVacanzeV2Page() {
                                 color: type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
                               }}>{type}</span>
                             </td>
-                            {/* Emoji destinazione — senza header, solo icona */}
-                            <td style={{ ...tdStyle, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                            {/* Emoji destinazione — senza header, solo icona.
+                                NOTA: niente stopPropagation sul td — la riga è tutta
+                                cliccabile (richiesta utente), si ferma solo il click
+                                sugli elementi editabili veri (EditCell/select) */}
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
                               <DestTypeSelect value={destType} onSave={val => upd(v, 'destType', val)} />
                             </td>
                             {/* DOVE */}
-                            <td style={{ ...tdStyle, fontWeight: 700 }} onClick={e => e.stopPropagation()}>
+                            <td style={{ ...tdStyle, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               <EditCell value={v.city} onSave={val => upd(v, 'city', val)} width={110} />
                             </td>
                             {/* Date */}
-                            <td style={tdStyle} onClick={e => e.stopPropagation()}>
-                              <EditCell value={v.from || ''} type="date" onSave={val => upd(v, 'from', val)} width={110} />
+                            <td style={tdStyle}>
+                              <EditCell value={v.from || ''} type="date" onSave={val => upd(v, 'from', val)} width={106} />
                             </td>
-                            <td style={tdStyle} onClick={e => e.stopPropagation()}>
-                              <EditCell value={v.to || ''} type="date" onSave={val => upd(v, 'to', val)} width={110} />
+                            <td style={tdStyle}>
+                              <EditCell value={v.to || ''} type="date" onSave={val => upd(v, 'to', val)} width={106} />
+                            </td>
+                            {/* Utente: uno dei soprannomi, o entrambi */}
+                            <td style={tdStyle}>
+                              <select
+                                value={(v.users?.length >= 2) ? '__both__' : (v.users?.[0] || '')}
+                                onClick={e => e.stopPropagation()}
+                                onChange={e => {
+                                  const val = e.target.value
+                                  upd(v, 'users', val === '__both__' ? nicknames : (val ? [val] : []))
+                                }}
+                                style={{ border: '1px solid transparent', background: 'transparent', cursor: 'pointer',
+                                  fontSize: 12, fontFamily: 'var(--font-sans)', color: v.users?.length ? 'var(--accent)' : 'var(--text3)',
+                                  fontWeight: v.users?.length ? 700 : 400, maxWidth: 100 }}>
+                                <option value="">—</option>
+                                {nicknames.map(n => <option key={n} value={n}>{n}</option>)}
+                                {nicknames.length >= 2 && <option value="__both__">Entrambi</option>}
+                              </select>
                             </td>
                             {/* Giorni */}
                             <td style={numTd}>{giorni}</td>
@@ -620,15 +980,15 @@ export default function WeekendVacanzeV2Page() {
                             <td style={{ ...numTd, color: costPerGiorno > 0 ? 'var(--text1)' : 'var(--text3)' }}>
                               {costPerGiorno > 0 ? `€ ${fmtIT(costPerGiorno, 0)}` : '—'}
                             </td>
-                            <td style={{ ...tdStyle, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                              <button onClick={() => removeRow(v)} title="Elimina / segna come non vacanza" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center' }}>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              <button onClick={e => { e.stopPropagation(); removeRow(v) }} title="Elimina / segna come non vacanza" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center' }}>
                                 <Trash2 size={12} />
                               </button>
                             </td>
                           </tr>
                           {isOpen && (
                             <tr key={`${v.id}-detail`}>
-                              <td colSpan={10} style={{ padding: 0, background: 'var(--bg2, #f7f5f2)', borderBottom: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+                              <td colSpan={11} style={{ padding: 0, background: 'var(--bg2, #f7f5f2)', borderBottom: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
                                 <div style={{ padding: '8px 16px 12px' }}>
                                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '4px 0 2px' }}>
                                     Spese "Weekend e Vacanze" in questo periodo
@@ -662,6 +1022,25 @@ export default function WeekendVacanzeV2Page() {
       {/* Modale ricategorizzazione: richiesta prima di togliere una spesa dalla vacanza */}
       {recatTx && (
         <RecategorizeModal tx={recatTx} onConfirm={confirmRecategorize} onClose={() => setRecatTx(null)} />
+      )}
+
+      {/* Overlay spese Weekend e Vacanze fuori da ogni periodo dichiarato */}
+      {showFuori && (
+        <FuoriPeriodoModal txs={fuoriTxs} vacations={sorted} allCats={allCats}
+          updateTransaction={updateTransaction} addVacation={add} updateVacation={update}
+          onClose={() => setShowFuori(false)} />
+      )}
+
+      {/* Overlay spese in giorni di vacanza non allocate in Weekend e Vacanze */}
+      {showReview && (
+        <ToReviewModal rows={reviewRows} allCats={allCats}
+          updateTransaction={updateTransaction} onDismiss={dismissReview}
+          onClose={() => setShowReview(false)} />
+      )}
+
+      {/* Impostazioni merchant vacanze (Booking, Airbnb, …) */}
+      {showMerch && (
+        <VacMerchantsModal appPrefs={appPrefs} setAppPref={setAppPref} onClose={() => setShowMerch(false)} />
       )}
 
       {/* Pannello "Vacanze da confermare" */}
@@ -724,7 +1103,14 @@ export default function WeekendVacanzeV2Page() {
                     placeholder="Dove"
                     style={{ ...inp, width: 130, flexShrink: 0 }}
                   />
-                  <span style={{ fontSize: 12, color: 'var(--text2)', flexShrink: 0 }}>{fmtDate(cand.from)} → {fmtDate(cand.to)}</span>
+                  {/* Date modificabili prima della conferma */}
+                  <input type="date" value={candDateOverride[cand.id]?.from || cand.from || ''}
+                    onChange={e => setCandDateOverride(o => ({ ...o, [cand.id]: { ...(o[cand.id] || {}), from: e.target.value } }))}
+                    style={{ ...inp, width: 125, flexShrink: 0, fontSize: 12, padding: '4px 6px' }} />
+                  <span style={{ color: 'var(--text3)', flexShrink: 0 }}>→</span>
+                  <input type="date" value={candDateOverride[cand.id]?.to || cand.to || ''}
+                    onChange={e => setCandDateOverride(o => ({ ...o, [cand.id]: { ...(o[cand.id] || {}), to: e.target.value } }))}
+                    style={{ ...inp, width: 125, flexShrink: 0, fontSize: 12, padding: '4px 6px' }} />
                   <span style={{ fontSize: 12, color: 'var(--text3)', flexShrink: 0 }}>€ {fmtIT(cand.spend, 0)}</span>
                   <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
                     <button onClick={() => confirmCandidate(cand)} title="Confermo, è una vacanza/weekend" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>

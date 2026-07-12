@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import './CalendarioPage.css'
 import { fmtIT } from '../utils/format'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
-import { groupConsecutiveDates } from '../data/vacationRules'
+import { groupConsecutiveDates, labelToEmoji, destCategoryLabel } from '../data/vacationRules'
 
 // ── Net amount after compensation ──────────────────────────
 // Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
@@ -83,29 +83,26 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
   const vacs  = vacations.filter(v => dateStr >= v.from && dateStr <= v.to)
   const isVac = vacs.length > 0
 
-  // Vacation from transactions: days with "Weekend e Vacanze" spending —
-  // ignorato se il giorno è stato esplicitamente marcato "non vacanza"
-  const isNotVacDay = notVacSet?.has(dateStr)
-  const vacTxs = useMemo(() =>
-    isNotVacDay ? [] : allDayTxs.filter(t => t.cat1 === 'Weekend e Vacanze')
-  , [allDayTxs, isNotVacDay])
-  const isVacTx = vacTxs.length > 0
+  // Richiesta utente 2026-07-12: nel Calendario si vedono SOLO le vacanze
+  // CONFERMATE (appPrefs.calendarVacations, gestite da Weekend e Vacanze v2) —
+  // i giorni con sole spese "Weekend e Vacanze" non vengono più mostrati come
+  // vacanza automatica/rilevata (isVacTx rimosso).
 
-  // Vacation emoji: from city of vacation transactions, fallback to vacation name
+  // Emoji per TIPO di destinazione della vacanza dichiarata (mare/montagna/
+  // città/altro — v.destType impostato in Weekend e Vacanze v2), con fallback
+  // sull'euristica dal nome/città
   const vacIcon = useMemo(() => {
-    if (isVacTx) {
-      const city = vacTxs.find(t => t.city && t.city !== 'null')?.city
-      return cityToVacEmoji(city || '')
-    }
-    if (isVac) return cityToVacEmoji(vacs[0]?.name || '')
-    return null
-  }, [isVacTx, isVac, vacTxs, vacs])
+    if (!isVac) return null
+    const v = vacs[0]
+    const label = v?.destType || destCategoryLabel(v?.city || v?.name || '')
+    return labelToEmoji(label) || cityToVacEmoji(v?.city || v?.name || '')
+  }, [isVac, vacs])
 
   // Boat trip
   const isBoat = boatDaySet.has(dateStr)
 
   // Quick-filter dimming
-  const isAnyVac = isVac || isVacTx
+  const isAnyVac = isVac
   const isDimmed = (quickFilter === 'boat' && !isBoat) ||
                    (quickFilter === 'vacation' && !isAnyVac)
 

@@ -30,7 +30,6 @@ import CalendarioPage      from './pages/CalendarioPage'
 import MappaSpesePage      from './pages/MappaSpesePage'
 import StipendiPage        from './pages/StipendiPage'
 import StipendioPage       from './pages/StipendioPage'
-import WeekendVacanzePage  from './pages/WeekendVacanzePage'
 import { NannyPage, ColfPage } from './pages/NannyColfPage'
 import SettingsPage        from './pages/SettingsPage'
 import InvestimentiPage    from './pages/InvestimentiPage'
@@ -48,6 +47,7 @@ import AnalyticsPage        from './pages/AnalyticsPage'
 import RisparmioPage        from './pages/RisparmioPage'
 import CarteCreditoPage     from './pages/CarteCreditoPage'
 import UscitePage           from './pages/UscitePage'
+import WeekendVacanzeV2Page from './pages/WeekendVacanzeV2Page'
 import DevlogPage           from './pages/DevlogPage'
 import QualityDashboard     from './pages/QualityDashboard'
 import BlocNotesPage        from './pages/BlocNotesPage'
@@ -101,7 +101,7 @@ const PAGE_MAP = {
   veicoli:           VeicoliPage,
   spesa:             SpeseAlimentariPage,
   'tempo-libero':    TempoLiberoPage,
-  'weekend-vacanze': WeekendVacanzePage,
+  'weekend-vacanze': WeekendVacanzeV2Page,  // v1 rimossa (2026-07-12): la route legacy apre la v2
   shopping:          ShoppingPage,
   salute:            SalutePage,
   satispay:          SatispayPage,
