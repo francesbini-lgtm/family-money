@@ -8,6 +8,7 @@ import ImportModal from './ImportModal'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
 import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException } from '../pages/TransactionsPage'
+import { getVacationMerchants } from '../pages/WeekendVacanzeV2Page'
 import { navigateRef } from '../utils/navigate'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -268,6 +269,135 @@ function SatispayPanel({ onNavigate, limitTxIds = null }) {
   )
 }
 
+// ── Step "Vacanze" del wizard (richiesta utente 2026-07-12): per le spese
+// importate riconducibili ai merchant vacanza (Booking, Airbnb, Bravonext… —
+// configurabili con ⚙️ in Weekend e Vacanze v2), chiede la COMPETENZA vera
+// (quando è davvero la vacanza, non quando è stata pagata la prenotazione) e a
+// quale vacanza collegarla — con creazione della vacanza al volo se non esiste.
+function VacanzaBookingRow({ t, vacations, onConfirm, onSkip }) {
+  const effDate = t._effDate || t.date
+  const [competenza, setCompetenza] = useState(effDate)
+  const [vacId, setVacId] = useState('')
+  const [nv, setNv] = useState({ name: '', from: '', to: '' })
+  const isNew = vacId === '__new__'
+  const inp = { padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6,
+    fontSize: 12, fontFamily: 'var(--font-sans)', background: 'var(--surface)', color: 'var(--text)' }
+  const canConfirm = competenza && (isNew ? (nv.name.trim() && nv.from && nv.to) : true)
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>🏝️ {t.descAI || t.merchant || t.description?.slice(0, 40)}</span>
+        <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(effDate)}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
+          −€ {fmtIT(Math.abs(t.amount), 2)}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--text3)', flexBasis: '100%' }} title={t.description}>{(t.description || '').slice(0, 90)}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', marginBottom: 3 }}>Competenza vera</div>
+          <input type="date" value={competenza} onChange={e => setCompetenza(e.target.value)} style={inp} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', marginBottom: 3 }}>Vacanza collegata</div>
+          <select value={vacId} onChange={e => {
+            const v = e.target.value
+            setVacId(v)
+            if (v === '__new__') setNv({ name: '', from: competenza, to: competenza })
+          }} style={{ ...inp, maxWidth: 220 }}>
+            <option value="">— nessuna (solo competenza) —</option>
+            {vacations.map(v => (
+              <option key={v.id} value={String(v.id)}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
+            ))}
+            <option value="__new__">➕ Crea nuova vacanza…</option>
+          </select>
+        </div>
+        {isNew && (
+          <>
+            <input value={nv.name} onChange={e => setNv(f => ({ ...f, name: e.target.value }))} placeholder="Nome / località" style={{ ...inp, width: 140 }} />
+            <input type="date" value={nv.from} onChange={e => setNv(f => ({ ...f, from: e.target.value }))} style={inp} />
+            <input type="date" value={nv.to} onChange={e => setNv(f => ({ ...f, to: e.target.value }))} style={inp} />
+          </>
+        )}
+        <button disabled={!canConfirm} onClick={() => onConfirm(t, { competenza, vacId, nv })}
+          style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 7,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: canConfirm ? 1 : .5 }}>
+          ✅ Conferma
+        </button>
+        <button onClick={() => onSkip(t)}
+          style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)',
+            border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
+          Lascia così
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function VacanzeStep({ importedIdSet, onNext }) {
+  const transactions      = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const appPrefs          = useStore(s => s.appPrefs)
+  const setAppPref        = useStore(s => s.setAppPref)
+  const [handled, setHandled] = useState({})
+
+  const merchants = getVacationMerchants(appPrefs)
+  const vacations = appPrefs?.calendarVacations || []
+
+  const rows = useMemo(() =>
+    transactions.filter(t =>
+      importedIdSet.has(t.txId) && !t.excluded && t.amount < 0 && !handled[t.txId] &&
+      merchants.some(m => `${t.merchant || ''} ${t.description || ''} ${t.descAI || ''}`.toLowerCase().includes(m.toLowerCase()))
+    )
+  , [transactions, importedIdSet, handled, merchants])
+
+  function confirm(t, { competenza, vacId, nv }) {
+    let vac = vacations.find(v => String(v.id) === vacId) || null
+    if (vacId === '__new__') {
+      vac = { id: Date.now(), name: nv.name.trim(), city: nv.name.trim(), from: nv.from, to: nv.to }
+      setAppPref('calendarVacations', [...vacations, vac])
+    }
+    const nights = vac ? Math.max(0, Math.round((new Date(vac.to) - new Date(vac.from)) / 86400000)) : 0
+    const cat2 = vac ? (nights >= 3 ? 'Vacanze' : 'Weekend') : 'Vacanze'
+    updateTransaction(t.txId, {
+      competenza, _effDate: competenza,           // la spesa "cade" quando è la vacanza
+      ...(vac ? { cat1: 'Weekend e Vacanze', cat2, userEditedCat: true } : {}),
+      flagCompetenza: false,
+    })
+    setHandled(h => ({ ...h, [t.txId]: true }))
+    showToast(vac ? `✅ Collegata a "${vac.city || vac.name}"` : '✅ Competenza aggiornata', 'success')
+  }
+
+  return (
+    <>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>🏝️ Prenotazioni vacanze trovate ({rows.length})</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Spese importate riconducibili ai merchant vacanza ({merchants.join(', ')}) — per ciascuna indica la
+        competenza vera (quando è la vacanza, non quando hai pagato) e la vacanza collegata, creandola se serve.
+        I merchant si configurano con ⚙️ in Weekend e Vacanze.
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+          ✅ Nessuna prenotazione vacanze in questo import
+        </div>
+      ) : (
+        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          {rows.map(t => (
+            <VacanzaBookingRow key={t.txId} t={t} vacations={vacations}
+              onConfirm={confirm} onSkip={tx => setHandled(h => ({ ...h, [tx.txId]: true }))} />
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+          Avanti →
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ═══════════════════════════════ WIZARD ═════════════════════════════════════
 export default function ImportWizard({ onClose }) {
   const transactions      = useStore(s => s.transactions)
@@ -294,9 +424,10 @@ export default function ImportWizard({ onClose }) {
     if (sources.carta) q.push({ id:'import', src:'carta' },
       { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
     if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
+    // 'vacanze': competenza/vacanza per le prenotazioni Booking/Airbnb/… importate
     // 'review' (richiesta utente 2026-07-12): ultima pagina PRIMA dei KPI con
     // l'elenco completo delle transazioni importate in questo flusso
-    q.push({ id:'compensazioni' }, { id:'review' }, { id:'summary' })
+    q.push({ id:'vacanze' }, { id:'compensazioni' }, { id:'review' }, { id:'summary' })
     return q
   }
 
@@ -412,6 +543,7 @@ export default function ImportWizard({ onClose }) {
         s.id === 'import' ? SRC_LABEL[s.src]
         : s.id === 'refine' ? `🔍 Rifinisci ${s.src}`
         : s.id === 'paypal-result' ? '💙 Esito PayPal'
+        : s.id === 'vacanze' ? '🏝️ Vacanze'
         : s.id === 'compensazioni' ? '🔗 Compensazioni'
         : s.id === 'review' ? '📄 Transazioni'
         : '🏁 Riepilogo' })
@@ -582,6 +714,11 @@ export default function ImportWizard({ onClose }) {
         })()}
 
         {/* ── Compensazioni (d) ── */}
+        {/* ── Vacanze: competenza/collegamento per le prenotazioni importate ── */}
+        {step && step.id === 'vacanze' && (
+          <VacanzeStep importedIdSet={importedIdSet} onNext={next} />
+        )}
+
         {step && step.id === 'compensazioni' && (
           <>
             <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🔗 Compensazioni</div>

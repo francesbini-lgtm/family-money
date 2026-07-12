@@ -5,7 +5,7 @@ import { saveTotpSecret } from '../services/firestore'
 import { getLastLogin, isBiometricSupported } from '../services/biometric'
 import './LoginScreen.css'
 
-export const APP_VERSION = '20260712-1922 Rome'
+export const APP_VERSION = '20260712-2011 Rome'
 export const BUILD_TIME  = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '—'
 
 // ── Digit input (6 boxes) ─────────────────────────────────────────────────────
