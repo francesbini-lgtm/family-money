@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { CAT_NAMES, CATS, getMergedCats } from '../data/categories'
 import { useStore } from '../store/useStore'
+import { txMatchesConditions } from '../data/ruleMatching'
 
 // ── Proxy URL + API key resolution (mirrors src/data/aiService.js) ──
 function proxyUrl(path) {
@@ -468,56 +469,12 @@ function LiveMatchCount({ conds, transactions, logic = 'and' }) {
 
 // ── Live match counter helper ─────────────────────────────────
 function countMatchingTx(transactions, conds, logic = 'and') {
-  const active = conds.filter(c => c.value.trim())
+  // Consolidamento 2026-07-12: stesso motore (ruleMatching.js) usato da
+  // applyAiRules/applySingleRule/isKingProtected — l'anteprima "N corrispondenti"
+  // ora coincide SEMPRE con ciò che la regola farà davvero.
+  const active = conds.filter(c => String(c?.value ?? '').trim() !== '')
   if (!active.length) return null
-  const combine = logic === 'or' ? Array.prototype.some : Array.prototype.every
-  return transactions.filter(tx => {
-    if (tx.excluded) return false
-    return combine.call(active, cond => {
-      const val = (cond.value || '').toLowerCase()
-      switch (cond.field) {
-        case 'anywhere':
-        case 'description': {
-          const hay = (tx.description || tx.descAI || '').toLowerCase()
-          switch (cond.op) {
-            case 'contains':     return hay.includes(val)
-            case 'not_contains': return !hay.includes(val)
-            case 'starts_with':  return hay.startsWith(val)
-            case 'ends_with':    return hay.endsWith(val)
-            case 'equals':       return hay === val
-            default: return false
-          }
-        }
-        case 'merchant': {
-          const hay = (tx.merchant || '').toLowerCase()
-          switch (cond.op) {
-            case 'contains':    return hay.includes(val)
-            case 'equals':      return hay === val
-            case 'starts_with': return hay.startsWith(val)
-            default: return false
-          }
-        }
-        case 'counterpart': {
-          const hay = (tx.counterpart || tx.description || '').toLowerCase()
-          return hay.includes(val)
-        }
-        case 'importo':
-        case 'amount': {
-          const amt = Math.abs(tx.amount || 0)
-          const n = parseFloat(cond.value || 0)
-          switch (cond.op) {
-            case 'gt': case '>':  return amt > n
-            case 'gte': case '>=': return amt >= n
-            case 'lt': case '<':  return amt < n
-            case 'lte': case '<=': return amt <= n
-            case 'equals': return Math.abs(amt - n) < 0.01
-            default: return false
-          }
-        }
-        default: return false
-      }
-    })
-  }).length
+  return transactions.filter(tx => !tx.excluded && txMatchesConditions(tx, active, logic)).length
 }
 
 // ── Multi-condition rules table ───────────────────────────────

@@ -2,6 +2,7 @@ import { useState, useRef, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
 import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiService'
+import { applyCatRulesTo } from '../data/ruleMatching'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import './ImportModal.css'
@@ -530,13 +531,8 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
   // duplicazione già presente altrove nel codice, es. matching regole AI — vedi
   // fmt-airules-matching-duplicated in memoria — da consolidare in futuro in un modulo condiviso).
   function applyCatRulesLocal(tx, rules) {
-    for (const r of (rules || []).filter(r => r.enabled !== false)) {
-      const val = (r.matchValue || '').toLowerCase()
-      if (!val) continue
-      const src = ((tx[r.matchField] || tx.description || tx.descAI || '')).toLowerCase()
-      if (src.includes(val)) return { cat1: r.cat1 || tx.cat1, cat2: r.cat2 !== undefined ? r.cat2 : tx.cat2 }
-    }
-    return null
+    // Consolidamento 2026-07-12: matching delegato al modulo unico ruleMatching.js
+    return applyCatRulesTo(tx, rules)
   }
 
   // ── Fase "rules" (richiesta esplicita dell'utente, ultimo step della pipeline): applica
@@ -572,7 +568,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       if (catOverride) { cat1 = catOverride.cat1; cat2 = catOverride.cat2; changed = true }
 
       if (typeof applyAiRules === 'function') {
-        const zr = applyAiRules(curTx.description, curTx.amount, curTx.date)
+        const zr = applyAiRules(curTx)  // oggetto completo: le condizioni su descAI/merchant matchano sui campi veri
         if (zr?.cats?.[0]) { cat1 = zr.cats[0].cat1; cat2 = zr.cats[0].cat2 || ''; changed = true }
         if (zr?.descAI) { descAI = zr.descAI; changed = true }
         if (zr?.exclude) { excluded = true; changed = true }
@@ -587,7 +583,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       if (vacHit && isVacationEligible(curTx)) { cat1 = 'Weekend e Vacanze'; cat2 = 'Vacanze'; changed = true }
 
       const catProtected = !!curTx.userEditedCat ||
-        (typeof isKingProtected === 'function' && isKingProtected(curTx.description, curTx.amount))
+        (typeof isKingProtected === 'function' && isKingProtected(curTx))
       if (catProtected) { cat1 = curTx.cat1; cat2 = curTx.cat2 }
 
       const flagCompetenza = cat1 === 'Weekend e Vacanze' && notVacationDates.includes(effDateForVac)

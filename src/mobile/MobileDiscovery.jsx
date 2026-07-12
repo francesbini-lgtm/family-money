@@ -5,6 +5,7 @@ import { useAuth }    from '../auth/AuthContext'
 import { getMergedCats } from '../data/categories'
 import { fmtIT }     from '../utils/format'
 import { enrichBatch, lookupPlaceForMerchant } from '../data/aiService'
+import { applyCatRulesTo } from '../data/ruleMatching'
 import {
   learnException,
   autoDetectMatch,
@@ -749,14 +750,11 @@ export default function MobileDiscovery() {
       // (nota: logica di matching già duplicata in più punti — vedi
       // fmt-airules-matching-duplicated in memoria), importo positivo → Entrate.
       const { applyAiRules, appPrefs: prefs } = useStore.getState()
-      for (const r of (prefs?.catRules || []).filter(r => r.enabled !== false)) {
-        const val = (r.matchValue || '').toLowerCase()
-        if (!val) continue
-        const src = ((tx[r.matchField] || tx.description || tx.descAI || '')).toLowerCase()
-        if (src.includes(val)) { tx.cat1 = r.cat1 || tx.cat1; tx.cat2 = r.cat2 !== undefined ? r.cat2 : tx.cat2; break }
-      }
+      // Consolidamento 2026-07-12: matching catRules delegato a ruleMatching.js
+      const catOverride = applyCatRulesTo(tx, prefs?.catRules || [])
+      if (catOverride) { tx.cat1 = catOverride.cat1; tx.cat2 = catOverride.cat2 }
       if (typeof applyAiRules === 'function') {
-        const zr = applyAiRules(tx.description, tx.amount, tx.date)
+        const zr = applyAiRules(tx)  // oggetto completo: le condizioni su descAI/merchant matchano sui campi veri
         if (zr?.cats?.[0]) { tx.cat1 = zr.cats[0].cat1; tx.cat2 = zr.cats[0].cat2 || '' } // le regole AI vincono sempre
         if (zr?.descAI) tx.descAI = zr.descAI
       }

@@ -6,6 +6,7 @@ import {
 } from '../services/firestore'
 import { generateDescAI, parseRow } from '../data/csvParser'
 import { computeVacationPatch } from '../data/vacationRules'
+import { txMatchesConditions } from '../data/ruleMatching'
 
 
 // ── Resolve user from card → member mapping (pure, no store) ─
@@ -1146,65 +1147,26 @@ export const useStore = create((set, get) => ({
     set(s=>({ aiRules: s.aiRules.filter(r=>r.id!==id) }))
     deleteDocument('ai_rules', id)
   },
-  applyAiRules: (description, amount, date) => {
+  // txOrDescription: preferibilmente l'OGGETTO transazione completo (così le
+  // condizioni su descAI/merchant/counterpart/city matchano sui campi veri);
+  // retro-compatibile con la vecchia firma (description, amount, date) — in quel
+  // caso i campi arricchiti non sono disponibili e si valuta solo la descrizione.
+  // Matching delegato al motore unico condiviso (src/data/ruleMatching.js) —
+  // consolidamento 2026-07-12, prima qui c'era una copia divergente che non
+  // gestiva descAI e valutava merchant sulla descrizione.
+  applyAiRules: (txOrDescription, amount, date) => {
+    const tx = (txOrDescription && typeof txOrDescription === 'object')
+      ? txOrDescription
+      : { description: txOrDescription, amount, date }
     // Returns [{cat1, cat2, pct, action}] if a rule matches, null otherwise
     // King rules always evaluated first — they win over all other rules
     const rules = get().aiRules
       .filter(r => r.enabled !== false)
       .sort((a, b) => (b.isKing ? 1 : 0) - (a.isKing ? 1 : 0))
-    const desc  = (description || '').toLowerCase()
-    const amt   = Math.abs(amount || 0)
 
     for (const rule of rules) {
       if (!rule.conditions?.length) continue
-      // rule.logic: 'and' (default, tutte le condizioni) oppure 'or' (almeno una)
-      const combine = rule.logic === 'or' ? Array.prototype.some : Array.prototype.every
-      const matches = combine.call(rule.conditions, cond => {
-        const val = (cond.value || '').toLowerCase()
-        const val2 = (cond.value2 || '').toLowerCase()
-        switch(cond.field) {
-          case 'anywhere': {
-            const src = desc  // "anywhere" = search in description (only field available here)
-            switch(cond.op) {
-              case 'contains':     return src.includes(val)
-              case 'not_contains': return !src.includes(val)
-              case 'starts_with':  return src.startsWith(val)
-              case 'ends_with':    return src.endsWith(val)
-              case 'equals': case 'è': return src === val
-              default: return false
-            }
-          }
-          case 'description':
-          case 'counterpart': // alias — evaluated against description here
-            switch(cond.op) {
-              case 'contains':     return desc.includes(val)
-              case 'not_contains': return !desc.includes(val)
-              case 'starts_with':  return desc.startsWith(val)
-              case 'ends_with':    return desc.endsWith(val)
-              case 'equals': case 'è': return desc === val
-              default: return false
-            }
-          case 'amount':
-          case 'importo': // stored as 'importo' when created from TransactionsPage
-            switch(cond.op) {
-              case 'gt':  case '>':  return amt > parseFloat(cond.value||0)
-              case 'gte': case '>=': return amt >= parseFloat(cond.value||0)
-              case 'lt':  case '<':  return amt < parseFloat(cond.value||0)
-              case 'lte': case '<=': return amt <= parseFloat(cond.value||0)
-              case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value||0)) < 0.01
-              case 'between': return amt >= parseFloat(cond.value||0) && amt <= parseFloat(cond.value2||0)
-              default: return false
-            }
-          case 'merchant':
-            switch(cond.op) {
-              case 'contains':    return desc.includes(val)
-              case 'equals': case 'è': return desc === val
-              case 'starts_with': return desc.startsWith(val)
-              default: return false
-            }
-          default: return false
-        }
-      })
+      const matches = txMatchesConditions(tx, rule.conditions, rule.logic)
 
       if (matches) {
         // Return action
@@ -1224,40 +1186,19 @@ export const useStore = create((set, get) => ({
 
   // Returns true if a KING rule matches this transaction — used to block non-king overwrites
   // excludeRuleId: skip this rule from the check (used when running a king rule on itself)
-  isKingProtected: (description, amount, excludeRuleId = null) => {
+  // txOrDescription: preferibilmente l'OGGETTO transazione (le king su
+  // descAI/merchant/counterpart proteggono davvero solo così); retro-compatibile
+  // con la vecchia firma (description, amount). Matching delegato al motore
+  // unico condiviso (ruleMatching.js) — consolidamento 2026-07-12.
+  isKingProtected: (txOrDescription, amount, excludeRuleId = null) => {
     const kingRules = get().aiRules.filter(r => r.isKing && r.enabled !== false && r.id !== excludeRuleId)
     if (!kingRules.length) return false
-    const desc = (description || '').toLowerCase()
-    const amt  = Math.abs(amount || 0)
-    return kingRules.some(rule => {
-      if (!rule.conditions?.length) return false
-      const combine = rule.logic === 'or' ? Array.prototype.some : Array.prototype.every
-      return combine.call(rule.conditions, cond => {
-        const val = (cond.value || '').toLowerCase()
-        switch (cond.field) {
-          case 'anywhere': case 'description': case 'merchant':
-            switch (cond.op) {
-              case 'contains': case 'contiene': return desc.includes(val)
-              case 'not_contains':              return !desc.includes(val)
-              case 'starts_with':               return desc.startsWith(val)
-              case 'ends_with':                 return desc.endsWith(val)
-              case 'equals': case 'è':          return desc === val
-              default: return false
-            }
-          case 'amount': case 'importo':
-            switch (cond.op) {
-              case 'gt':  case '>':  return amt > parseFloat(cond.value||0)
-              case 'gte': case '>=': return amt >= parseFloat(cond.value||0)
-              case 'lt':  case '<':  return amt < parseFloat(cond.value||0)
-              case 'lte': case '<=': return amt <= parseFloat(cond.value||0)
-              case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value||0)) < 0.01
-              case 'between': return amt >= parseFloat(cond.value||0) && amt <= parseFloat(cond.value2||0)
-              default: return false
-            }
-          default: return false
-        }
-      })
-    })
+    const tx = (txOrDescription && typeof txOrDescription === 'object')
+      ? txOrDescription
+      : { description: txOrDescription, amount }
+    return kingRules.some(rule =>
+      rule.conditions?.length ? txMatchesConditions(tx, rule.conditions, rule.logic) : false
+    )
   },
 
   // ── Bulk apply all rules to entire DB ────────────────
@@ -1317,7 +1258,7 @@ export const useStore = create((set, get) => ({
       // 3. Multi-condition rules → cat1/cat2/descAI or excluded (highest priority — always wins over catRules)
       //    Skip transactions manually categorized by the user (same guard as step 2)
       if (multiRules.length > 0 && !tx.userEditedCat) {
-        const result = s.applyAiRules(tx.description, tx.amount, tx.date)
+        const result = s.applyAiRules(tx)  // oggetto completo (motore unico ruleMatching.js)
         if (result) {
           if (result.exclude && !tx.excluded) {
             patch.excluded = true
@@ -1396,49 +1337,12 @@ export const useStore = create((set, get) => ({
       if (onProgress) onProgress(i + 1, transactions.length)
       // King rules always win — never let a non-king single rule overwrite them
       // Pass ruleId so a king rule running on itself is not blocked by its own protection
-      if (s.isKingProtected(tx.description, tx.amount, ruleId)) continue
+      if (s.isKingProtected(tx, null, ruleId)) continue
       const patch = {}
 
-      const desc = (tx.description || tx.descAI || '').toLowerCase()
-      const amt  = Math.abs(tx.amount || 0)
-
-      const combine = rule.logic === 'or' ? Array.prototype.some : Array.prototype.every
-      const matches = combine.call(rule.conditions || [], cond => {
-        const val = (cond.value || '').toLowerCase()
-        switch (cond.field) {
-          case 'anywhere':
-          case 'description':
-            switch (cond.op) {
-              case 'contains':     return desc.includes(val)
-              case 'not_contains': return !desc.includes(val)
-              case 'starts_with':  return desc.startsWith(val)
-              case 'ends_with':    return desc.endsWith(val)
-              case 'equals':       return desc === val
-              default: return false
-            }
-          case 'amount':
-          case 'importo':
-            switch (cond.op) {
-              case 'gt':  case '>':  return amt > parseFloat(cond.value || 0)
-              case 'gte': case '>=': return amt >= parseFloat(cond.value || 0)
-              case 'lt':  case '<':  return amt < parseFloat(cond.value || 0)
-              case 'lte': case '<=': return amt <= parseFloat(cond.value || 0)
-              case 'equals': case '=': return Math.abs(amt - parseFloat(cond.value || 0)) < 0.01
-              case 'between': case 'tra': return amt >= parseFloat(cond.value || 0) && amt <= parseFloat(cond.value2 || 0)
-              default: return false
-            }
-          case 'merchant': {
-            const merch = (tx.merchant || '').toLowerCase()
-            switch (cond.op) {
-              case 'contains':    return merch.includes(val)
-              case 'equals': case 'è': return merch === val
-              case 'starts_with': return merch.startsWith(val)
-              default: return false
-            }
-          }
-          default: return false
-        }
-      })
+      // Matching delegato al motore unico condiviso (ruleMatching.js) —
+      // consolidamento 2026-07-12: stessa semantica di applyAiRules/anteprima
+      const matches = txMatchesConditions(tx, rule.conditions || [], rule.logic)
 
       if (matches) {
         if (rule.action === 'exclude') {

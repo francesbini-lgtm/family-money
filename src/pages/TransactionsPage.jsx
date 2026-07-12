@@ -13,6 +13,7 @@ import { isVacationEligible, findVacationForDate } from '../data/vacationRules'
 import './TransactionsPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { netAmt } from '../data/compensation'
+import { txMatchesConditions, applyCatRulesTo } from '../data/ruleMatching'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
@@ -222,26 +223,11 @@ function CatPill({ cat1, cat2, mixCats, onClick, pillRef }) {
 }
 
 // ── helpers for multi-condition rule matching ────────────
-function conditionMatches(cond, t) {
-  const { field, op, value } = cond
-  if (!value.trim()) return true // empty condition → always matches (ignore it)
-  if (field === 'importo') {
-    const amt = Math.abs(t.amount)
-    const num = parseFloat(value)
-    if (isNaN(num)) return false
-    if (op === '=') return Math.abs(amt - num) < 0.01
-    if (op === '>') return amt > num
-    if (op === '<') return amt < num
-    return false
-  }
-  const hay = (t[field]||'').toLowerCase()
-  const val = value.trim().toLowerCase()
-  if (op === 'contiene') return hay.includes(val)
-  if (op === 'è')        return hay === val
-  return false
-}
+// Consolidamento 2026-07-12: delega al motore unico condiviso (ruleMatching.js)
+// — condizioni con value vuoto ignorate lì (activeConditions), stessa semantica
+// di anteprima regole, enrichment di massa e applicazione singola.
 function allConditionsMatch(conditions, t) {
-  return conditions.every(c => conditionMatches(c, t))
+  return txMatchesConditions(t, conditions, 'and')
 }
 
 const SEL_STYLE = {padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',fontSize:11,
@@ -378,7 +364,7 @@ function BulkEditModal({ txIds, onClose }) {
         if (txIds.has(t.txId) || t.excluded) return
         if (scope === 'future' && (t._effDate || t.date || '') < refDate) return
         if (!allConditionsMatch(conditions, t)) return
-        if (isKingProtected(t.description, t.amount)) return
+        if (isKingProtected(t)) return
         updateTransaction(t.txId, patch)
       })
     }
@@ -645,7 +631,7 @@ function CatDropdown({ txId, cat1, cat2, tx, onClose, onOpenMix }) {
         if (t.txId === txId || t.excluded) return
         if (scope === 'future' && (t._effDate||(t._effDate||t.date||'')) < txDate) return
         if (!allConditionsMatch(conditions, t)) return
-        if (isKingProtected(t.description, t.amount)) return
+        if (isKingProtected(t)) return
         updateTransaction(t.txId, patch)
       })
     }
@@ -1944,16 +1930,8 @@ let   _enrichRunning    = false // module-level guard — survives StrictMode re
 // ── Cat rules helpers (from Firestore via appPrefs) ────────
 function getCatRulesLS() { return (useStore.getState()?.appPrefs?.catRules) || [] }
 function applyCatRules(tx) {
-  const rules = getCatRulesLS().filter(r => r.enabled !== false)
-  for (const r of rules) {
-    const val = (r.matchValue||'').toLowerCase()
-    if (!val) continue
-    const src = ((tx[r.matchField]||tx.description||tx.descAI||'')).toLowerCase()
-    if (src.includes(val)) {
-      return { cat1: r.cat1 || tx.cat1, cat2: r.cat2 !== undefined ? r.cat2 : tx.cat2 }
-    }
-  }
-  return null
+  // Consolidamento 2026-07-12: matching delegato al modulo unico ruleMatching.js
+  return applyCatRulesTo(tx, getCatRulesLS())
 }
 
 // overrideUserEdits: true SOLO per l'enrichment esplicito di transazioni selezionate
@@ -2114,7 +2092,7 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false, overrideUse
           if (catOverride) { t.cat1 = catOverride.cat1; t.cat2 = catOverride.cat2 }
           // 2. Zustand aiRules (multi-condition rules from Transactions panel)
           if (typeof applyAiRules === 'function') {
-            const zr = applyAiRules(t.description, t.amount, t.date)
+            const zr = applyAiRules(t)  // oggetto completo: le condizioni su descAI/merchant matchano sui campi veri
             if (zr?.cats?.[0]) { t.cat1 = zr.cats[0].cat1; t.cat2 = zr.cats[0].cat2 || '' } // aiRules always win over catRules
             if (zr?.descAI) t.descAI = zr.descAI
             if (zr?.exclude) { t.excluded = true }
@@ -2145,12 +2123,12 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false, overrideUse
           // userEditedCat NON protegge più — la protezione King resta sempre.
           const _isKingProtected = useStore.getState().isKingProtected
           const catProtected = (!overrideUserEdits && !!curTx?.userEditedCat) ||
-            (typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount))
+            (typeof _isKingProtected === 'function' && _isKingProtected(t))
           if (curTx?.userEditedCat || curTx?.userEditedDesc || curTx?.cityUserEdited) {
             console.log(`[enrich] ${t.txId}: protezioni`, {
               userEditedCat: !!curTx?.userEditedCat, userEditedDesc: !!curTx?.userEditedDesc,
               cityUserEdited: !!curTx?.cityUserEdited,
-              king: typeof _isKingProtected === 'function' && _isKingProtected(t.description, t.amount),
+              king: typeof _isKingProtected === 'function' && _isKingProtected(t),
             }, overrideUserEdits ? '→ scavalcate e azzerate (re-enrich esplicito)' : '→ rispettate')
           }
           const finalCat1 = catProtected ? (curTx?.cat1 ?? null) : (t.cat1 || null)
