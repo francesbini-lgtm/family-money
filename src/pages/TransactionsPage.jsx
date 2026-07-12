@@ -1096,11 +1096,17 @@ function ColFilterPopup({ popup, onApply, onClose }) {
 
   const filtered = popup.values.filter(v => v.toLowerCase().includes(search.toLowerCase()))
 
+  // Il popup può aprirsi vicino al bordo destro (es. colonna Importo, spesso l'ultima
+  // visibile) — clamp orizzontale così resta sempre dentro la viewport invece di uscire
+  // dallo schermo (segnalazione utente con screenshot)
+  const POPUP_W = 280
+  const left = Math.max(8, Math.min(popup.rect.left, window.innerWidth - POPUP_W - 8))
+
   return (
     <div style={{
-      position:'fixed', top: popup.rect.bottom + 4, left: popup.rect.left,
+      position:'fixed', top: popup.rect.bottom + 4, left,
       zIndex: 9999, background:'var(--surface)', border:'1px solid var(--border)',
-      borderRadius:10, boxShadow:'0 8px 28px rgba(0,0,0,.18)', padding:12, minWidth:220, maxWidth:280,
+      borderRadius:10, boxShadow:'0 8px 28px rgba(0,0,0,.18)', padding:12, minWidth:220, maxWidth:POPUP_W,
     }} onClick={e=>e.stopPropagation()}>
       {/* Search */}
       <input
