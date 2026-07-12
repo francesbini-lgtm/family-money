@@ -155,7 +155,10 @@ function RefineTable({ txs, allCats, updateTransaction, onOpenRulePopup, emptyMs
 // Elenca le Altre Entrate non ancora abbinate e, quando esiste una spesa con
 // importo IDENTICO, propone l'abbinamento (conferma → compensateGroup, lo stesso
 // motore condiviso). Gli altri abbinamenti restano manuali nello sheet Altre Entrate.
-function AltreEntratePanel() {
+// limitTxIds: perimetro dell'import corrente (richiesta utente 2026-07-12) —
+// si mostrano solo le Altre Entrate appena importate, e i suggerimenti solo se
+// coinvolgono almeno una transazione di questo flusso.
+function AltreEntratePanel({ limitTxIds = null }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
   const appPrefs          = useStore(s => s.appPrefs)
@@ -173,18 +176,20 @@ function AltreEntratePanel() {
     const EXCL_L2 = ['satispay', 'stipendio', ...nicknames]
     return transactions.filter(t =>
       t.amount > 0 && !t.excluded && !t._forcedBalance &&
+      (!limitTxIds || limitTxIds.has(t.txId)) &&
       (t.cat1 === 'Entrate' || t.cat2 === 'Prestiti') &&
       !EXCL_L2.includes((t.cat2 || '').toLowerCase()) &&
       !compLinks[t.txId] && !isCompensated(t)
     )
-  }, [transactions, appPrefs, nicknames])
+  }, [transactions, appPrefs, nicknames, limitTxIds])
 
   // Suggerimenti solo per importo IDENTICO (findCompPairs condiviso: al centesimo,
-  // rimborso mai precedente alla spesa) contro tutte le spese non compensate
+  // rimborso mai precedente alla spesa) contro tutte le spese non compensate —
+  // limitati alle coppie che coinvolgono l'import corrente
   const suggestions = useMemo(() => {
     const expenses = transactions.filter(t => t.amount < 0 && !t.excluded && !isCompensated(t))
-    return findCompPairs([...aeIncomes, ...expenses], {})
-  }, [transactions, aeIncomes])
+    return findCompPairs([...aeIncomes, ...expenses], {}, limitTxIds)
+  }, [transactions, aeIncomes, limitTxIds])
 
   function confirmPair(p) {
     const result = compensateGroup([p.exp, p.inc], updateTransaction)
@@ -199,8 +204,8 @@ function AltreEntratePanel() {
       <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>💸 Altre Entrate</div>
       <div style={{fontSize:12,color:'var(--text3)',marginBottom:10}}>
         {aeIncomes.length === 0
-          ? 'Nessuna entrata da abbinare. ✅'
-          : `${aeIncomes.length} entrat${aeIncomes.length===1?'a':'e'} non abbinat${aeIncomes.length===1?'a':'e'} — ${suggestions.length} con una spesa di importo identico (suggerite qui sotto); le altre si abbinano dallo sheet Altre Entrate.`}
+          ? 'Nessuna entrata da abbinare in questo import. ✅'
+          : `${aeIncomes.length} entrat${aeIncomes.length===1?'a':'e'} non abbinat${aeIncomes.length===1?'a':'e'} in questo import — ${suggestions.length} con una spesa di importo identico (suggerite qui sotto); le altre si abbinano dallo sheet Altre Entrate.`}
       </div>
       {suggestions.map(p => (
         <div key={`${p.exp.txId}|${p.inc.txId}`}
@@ -233,13 +238,16 @@ function AltreEntratePanel() {
 // confermare" accrediti/spese) vive dentro lo sheet Satispay con la configurazione
 // dei fondi: qui il wizard mostra lo stato (quanti abbinamenti in attesa) e porta
 // direttamente là, senza duplicare quella logica.
-function SatispayPanel({ onNavigate }) {
+function SatispayPanel({ onNavigate, limitTxIds = null }) {
   const transactions = useStore(s => s.transactions)
   const appPrefs     = useStore(s => s.appPrefs)
   const satiMatches  = appPrefs?.satiMatches || {}
   const txIds        = useMemo(() => new Set(transactions.map(t => t.txId)), [transactions])
+  // Con limitTxIds si contano solo gli abbinamenti pendenti legati alle
+  // transazioni di QUESTO import (richiesta utente 2026-07-12)
   const pendingCount = Object.entries(satiMatches)
-    .filter(([txId, m]) => m.status === 'pending_approval' && txIds.has(txId)).length
+    .filter(([txId, m]) => m.status === 'pending_approval' && txIds.has(txId) &&
+      (!limitTxIds || limitTxIds.has(txId) || (m.pendingIncomeTxId && limitTxIds.has(m.pendingIncomeTxId)))).length
 
   return (
     <div style={{border:'1px solid var(--border)',borderRadius:12,padding:'14px 16px',marginBottom:14}}>
@@ -248,8 +256,8 @@ function SatispayPanel({ onNavigate }) {
         Auto-abbinamento accantonamenti e conferma accrediti/spese si gestiscono nello sheet Satispay
         (serve la configurazione dei fondi).
         {pendingCount > 0
-          ? ` Ci sono ${pendingCount} abbinament${pendingCount===1?'o':'i'} in attesa di conferma.`
-          : ' Nessun abbinamento in attesa. ✅'}
+          ? ` Ci sono ${pendingCount} abbinament${pendingCount===1?'o':'i'} in attesa di conferma legati a questo import.`
+          : ' Nessun abbinamento in attesa legato a questo import. ✅'}
       </div>
       <button onClick={onNavigate}
         style={{padding:'6px 14px',borderRadius:8,border:'1px solid var(--accent)',background:'transparent',
@@ -286,7 +294,9 @@ export default function ImportWizard({ onClose }) {
     if (sources.carta) q.push({ id:'import', src:'carta' },
       { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
     if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
-    q.push({ id:'compensazioni' }, { id:'summary' })
+    // 'review' (richiesta utente 2026-07-12): ultima pagina PRIMA dei KPI con
+    // l'elenco completo delle transazioni importate in questo flusso
+    q.push({ id:'compensazioni' }, { id:'review' }, { id:'summary' })
     return q
   }
 
@@ -308,6 +318,14 @@ export default function ImportWizard({ onClose }) {
     const ids = new Set(results[src]?.savedTxIds || [])
     return transactions.filter(t => ids.has(t.txId) && !t.excluded)
   }
+
+  // Tutti i txId importati in QUESTO flusso (conto + carte) — usati per limitare
+  // gli abbinamenti/compensazioni alle sole operazioni che c'entrano con questo
+  // import (richiesta utente 2026-07-12), non a tutto il pending storico
+  const importedIdSet = useMemo(() => new Set([
+    ...(results.conto?.savedTxIds || []),
+    ...(results.carta?.savedTxIds || []),
+  ]), [results])
   function refineRows(src, kind) {
     const txs = importedTxs(src)
     if (kind === 'l2')   return txs.filter(t => (!t.cat1 || t.cat1 === 'Non Categorizzato' || !t.cat2) && t.cat1 !== 'Entrate')
@@ -368,8 +386,8 @@ export default function ImportWizard({ onClose }) {
       noDesc: imported.filter(noDesc).length,
       ppAdded: pp?.added || 0, ppMatched: pp?.matchedNew || 0,
       ppPending: pp?.pendingNew || 0, ppUnmatched: pp?.unmatchedNew || 0,
-      compPaypal: findCompPairs(paypalTxs, rejected.paypal || {}).length,
-      compCarte:  findCompPairs(cardTxs,   rejected.carte  || {}).length,
+      compPaypal: findCompPairs(paypalTxs, rejected.paypal || {}, idSet).length,
+      compCarte:  findCompPairs(cardTxs,   rejected.carte  || {}, idSet).length,
     }
   }, [queue, stepIdx, results, transactions, appPrefs])
 
@@ -395,6 +413,7 @@ export default function ImportWizard({ onClose }) {
         : s.id === 'refine' ? `🔍 Rifinisci ${s.src}`
         : s.id === 'paypal-result' ? '💙 Esito PayPal'
         : s.id === 'compensazioni' ? '🔗 Compensazioni'
+        : s.id === 'review' ? '📄 Transazioni'
         : '🏁 Riepilogo' })
     })
     const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id
@@ -565,19 +584,23 @@ export default function ImportWizard({ onClose }) {
         {/* ── Compensazioni (d) ── */}
         {step && step.id === 'compensazioni' && (
           <>
-            <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>🔗 Compensazioni</div>
-            <SatispayPanel onNavigate={()=>{ navigateRef.current?.('satispay'); onClose() }}/>
-            <AltreEntratePanel/>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🔗 Compensazioni</div>
+            <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>
+              Solo abbinamenti che coinvolgono le transazioni importate in QUESTO flusso —
+              il pending storico resta gestibile dai rispettivi sheet.
+            </div>
+            <SatispayPanel limitTxIds={importedIdSet} onNavigate={()=>{ navigateRef.current?.('satispay'); onClose() }}/>
+            <AltreEntratePanel limitTxIds={importedIdSet}/>
             <div style={{border:'1px solid var(--border)',borderRadius:12,padding:'14px 16px',marginBottom:14}}>
               <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>💙 PayPal &nbsp;·&nbsp; 💳 Carte</div>
               <div style={{fontSize:12,color:'var(--text3)',marginBottom:10}}>
-                Coppie spesa/rimborso con lo stesso importo, da confermare una alla volta
-                (identico alla modalità "Da confermare" di Satispay). Se non compare nessun
-                bottone, non c'è niente da abbinare. ✅
+                Coppie spesa/rimborso con lo stesso importo che coinvolgono l'import corrente,
+                da confermare una alla volta (identico alla modalità "Da confermare" di Satispay).
+                Se non compare nessun bottone, non c'è niente da abbinare. ✅
               </div>
               <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                <CompDaConfermare txs={transactions.filter(isPayPal)} scope="paypal" incomeLabel="📥 Rimborso PayPal"/>
-                <CompDaConfermare txs={transactions.filter(t => !t.excluded && t.cardImportCard4)} scope="carte" incomeLabel="📥 Rimborso carta"/>
+                <CompDaConfermare txs={transactions.filter(isPayPal)} scope="paypal" incomeLabel="📥 Rimborso PayPal" limitTxIds={importedIdSet}/>
+                <CompDaConfermare txs={transactions.filter(t => !t.excluded && t.cardImportCard4)} scope="carte" incomeLabel="📥 Rimborso carta" limitTxIds={importedIdSet}/>
               </div>
             </div>
             <div style={{display:'flex',justifyContent:'flex-end'}}>
@@ -587,6 +610,76 @@ export default function ImportWizard({ onClose }) {
             </div>
           </>
         )}
+
+        {/* ── Riepilogo transazioni importate (richiesta utente 2026-07-12):
+            ultima pagina PRIMA dei KPI — dentro al riquadro tutte le transazioni
+            che risultano importate a fine procedura, fresche dallo store ── */}
+        {step && step.id === 'review' && (() => {
+          const rows = transactions
+            .filter(t => importedIdSet.has(t.txId))
+            .sort((a,b) => (b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+          return (
+            <>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
+                📄 Transazioni importate in questo flusso ({rows.length})
+              </div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>
+                Controllo finale prima del riepilogo — così vedi esattamente cosa è entrato nel database.
+              </div>
+              {rows.length === 0 ? (
+                <div style={{padding:'32px 20px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
+                  Nessuna transazione bancaria importata in questo flusso
+                  {results.paypal ? ' (le operazioni PayPal vivono nel registro PayPal, vedi pagina precedente)' : ''}.
+                </div>
+              ) : (
+                <div style={{overflow:'auto',maxHeight:'56vh',border:'1px solid var(--border)',borderRadius:10}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',minWidth:820}}>
+                    <thead>
+                      <tr>
+                        {['Data','Fonte','✨ AI Descrizione','Descrizione','Categoria','Importo'].map((h,i)=>(
+                          <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
+                            textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
+                            borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',
+                            whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(t => (
+                        <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
+                          <td style={{padding:'7px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                            {fmtDate(t._effDate||t.date)}
+                          </td>
+                          <td style={{padding:'7px 10px',whiteSpace:'nowrap',fontSize:11,fontWeight:700}}>
+                            {t.cardImportCard4 ? `💳 *${t.cardImportCard4}` : '🏦 Conto'}
+                          </td>
+                          <td style={{padding:'7px 10px',fontSize:12,fontWeight:600,maxWidth:170,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.descAI||''}>
+                            {t.descAI || <span style={{opacity:.4}}>—</span>}
+                          </td>
+                          <td style={{padding:'7px 10px',fontSize:11,color:'var(--text3)',maxWidth:230,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.description||''}>
+                            {(t.description||'').slice(0,70)}
+                          </td>
+                          <td style={{padding:'7px 10px',fontSize:12,whiteSpace:'nowrap'}}>
+                            {t.cat1 ? `${t.cat1}${t.cat2 ? ' › '+t.cat2 : ''}` : <span style={{color:'var(--red)',fontWeight:700}}>—</span>}
+                          </td>
+                          <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,
+                            fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
+                            {t.amount>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount),2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}>
+                <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={next}>
+                  Avanti →
+                </button>
+              </div>
+            </>
+          )
+        })()}
 
         {/* ── Riepilogo finale (e) ── */}
         {step && step.id === 'summary' && summary && (

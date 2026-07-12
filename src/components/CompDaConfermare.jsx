@@ -29,7 +29,11 @@ function fmtDate(d) {
   return m ? `${String(m[3]).padStart(2,'0')} ${MONTHS[parseInt(m[2])-1]} ${m[1].slice(2)}` : (d||'—')
 }
 
-export function findCompPairs(txs, rejected) {
+// limitTxIds (opzionale, Set di txId): se presente, vengono proposte SOLO le
+// coppie in cui ALMENO UNA delle due transazioni appartiene al set — usato dal
+// wizard di importazione per limitare i suggerimenti alle transazioni importate
+// in QUEL flusso (richiesta utente 2026-07-12), non a tutto il pending storico.
+export function findCompPairs(txs, rejected, limitTxIds = null) {
   const free = (txs||[]).filter(t => t && !t.excluded && !isCompensated(t))
   const exps = free.filter(t => t.amount < 0)
   const incs = free.filter(t => t.amount > 0)
@@ -47,6 +51,7 @@ export function findCompPairs(txs, rejected) {
       if (gap < bestGap) { bestGap = gap; best = exp }
     }
     if (best) {
+      if (limitTxIds && !limitTxIds.has(best.txId) && !limitTxIds.has(inc.txId)) continue
       usedExp.add(best.txId)
       pairs.push({ exp: best, inc, gapDays: Math.round(bestGap) })
     }
@@ -77,7 +82,7 @@ function TxCard({ title, color, bg, border, tx, sign }) {
 
 // scope: 'paypal' | 'carte' — chiave separata di appPrefs.compRejectedPairs,
 // così un rifiuto in PayPal non tocca Carte e viceversa.
-export default function CompDaConfermare({ txs, scope, incomeLabel = '📥 Rimborso/Storno' }) {
+export default function CompDaConfermare({ txs, scope, incomeLabel = '📥 Rimborso/Storno', limitTxIds = null }) {
   const appPrefs          = useStore(s => s.appPrefs)
   const setAppPref        = useStore(s => s.setAppPref)
   const updateTransaction = useStore(s => s.updateTransaction)
@@ -85,7 +90,7 @@ export default function CompDaConfermare({ txs, scope, incomeLabel = '📥 Rimbo
   const allRejected = appPrefs?.compRejectedPairs || {}
   const rejected    = allRejected[scope] || {}
 
-  const pairs = useMemo(() => findCompPairs(txs, rejected), [txs, rejected])
+  const pairs = useMemo(() => findCompPairs(txs, rejected, limitTxIds), [txs, rejected, limitTxIds])
 
   const [idx, setIdx] = useState(null) // null = modale chiuso
 
