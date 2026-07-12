@@ -245,12 +245,48 @@ function OrigDot({ description }) {
 // La Competenza è la data usata per stabilire se la spesa cade dentro/fuori un periodo
 // vacanza (vedi effDate() sopra) — editabile qui come in Transazioni.
 function TxEditRow({ t, allCats, updateTransaction, children }) {
-  const cat2Options = allCats[t.cat1]?.sub || []
+  // Cambio categoria L1/L2: se la nuova L1 ha sottocategorie, NON si scrive subito
+  // nello store — altrimenti la riga sparisce IMMEDIATAMENTE da questa tabella
+  // (filtrata su cat1 === / !== 'Weekend e Vacanze') prima che l'utente possa
+  // scegliere anche la L2 (segnalato dall'utente 2026-07-13: "seleziono la L1... la
+  // transazione scompare... deve darmi tempo di selezionare anche la L2"). La
+  // scelta resta "in sospeso" localmente finché l'utente sceglie una L2 (commit
+  // automatico), conferma comunque senza L2 (✓), o annulla (✕). Se la L1 scelta
+  // non ha sottocategorie, si scrive subito come prima (nulla da aspettare).
+  const [pending, setPending] = useState(null) // { cat1, cat2 } oppure null
+  const cat1Val = pending ? pending.cat1 : (t.cat1 || '')
+  const cat2Val = pending ? pending.cat2 : (t.cat2 || '')
+  const cat2Options = allCats[cat1Val]?.sub || []
+
+  function chooseCat1(newCat1) {
+    const hasSub = (allCats[newCat1]?.sub || []).length > 0
+    if (!hasSub) {
+      setPending(null)
+      updateTransaction(t.txId, { cat1: newCat1, cat2: '', userEditedCat: true })
+    } else {
+      setPending({ cat1: newCat1, cat2: '' })
+    }
+  }
+  function chooseCat2(newCat2) {
+    if (pending) {
+      updateTransaction(t.txId, { cat1: pending.cat1, cat2: newCat2, userEditedCat: true })
+      setPending(null)
+    } else {
+      updateTransaction(t.txId, { cat2: newCat2, userEditedCat: true })
+    }
+  }
+  function confirmPending() {
+    if (!pending) return
+    updateTransaction(t.txId, { cat1: pending.cat1, cat2: pending.cat2, userEditedCat: true })
+    setPending(null)
+  }
+  function cancelPending() { setPending(null) }
+
   const selStyle = { padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
     background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)', maxWidth: 130 }
   const td = { padding: '6px 8px', fontSize: 12, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
   return (
-    <tr>
+    <tr style={pending ? { background: 'var(--gold-l,#fef9e7)' } : undefined}>
       <td style={td}>
         <EditCell type="date" value={t.date_reg || t.date} width={105}
           onSave={v => v && updateTransaction(t.txId, { date_reg: v })} />
@@ -274,18 +310,32 @@ function TxEditRow({ t, allCats, updateTransaction, children }) {
           onSave={v => updateTransaction(t.txId, { city: v || null, cityUserEdited: true })} />
       </td>
       <td style={td}>
-        <select value={t.cat1 || ''} style={selStyle}
-          onChange={e => updateTransaction(t.txId, { cat1: e.target.value, cat2: '', userEditedCat: true })}>
+        <select value={cat1Val} style={selStyle}
+          onChange={e => chooseCat1(e.target.value)}>
           <option value="">—</option>
           {Object.keys(allCats).map(n => <option key={n} value={n}>{n}</option>)}
         </select>
       </td>
       <td style={td}>
-        <select value={t.cat2 || ''} disabled={!cat2Options.length} style={{ ...selStyle, opacity: cat2Options.length ? 1 : .4 }}
-          onChange={e => updateTransaction(t.txId, { cat2: e.target.value, userEditedCat: true })}>
-          <option value="">—</option>
-          {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <select value={cat2Val} disabled={!cat2Options.length} style={{ ...selStyle, opacity: cat2Options.length ? 1 : .4 }}
+            onChange={e => chooseCat2(e.target.value)}>
+            <option value="">—</option>
+            {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          {pending && (
+            <>
+              <button onClick={confirmPending} title="Conferma categoria (anche senza L2)"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green,#16a34a)', padding: 2, display: 'flex', flexShrink: 0 }}>
+                <Check size={13} />
+              </button>
+              <button onClick={cancelPending} title="Annulla cambio categoria"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', flexShrink: 0 }}>
+                <XIcon size={13} />
+              </button>
+            </>
+          )}
+        </div>
       </td>
       <td style={{ ...td, textAlign: 'right', fontWeight: 700, fontFamily: 'var(--font-mono)',
         color: t.amount >= 0 ? 'var(--green)' : 'var(--red)' }}>
