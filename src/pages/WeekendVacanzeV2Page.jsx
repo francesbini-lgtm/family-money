@@ -279,7 +279,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
   }
 
   return (
-    <Modal title={`📆 Spese Weekend e Vacanze fuori periodo (${txs.length})`} onClose={onClose} width={960}>
+    <Modal title={`📆 Spese Weekend e Vacanze fuori periodo (${txs.length})`} onClose={onClose} width={1060}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese categorizzate "Weekend e Vacanze" la cui data non cade in nessuna vacanza/weekend dichiarata.
         Modifica i campi direttamente, oppure assegna la spesa a una vacanza (le date della vacanza si
@@ -347,7 +347,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
 // spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo) ──
 function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose }) {
   return (
-    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1020}>
+    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1120}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
         Con ✅ la spesa passa in Weekend e Vacanze (L2 in base al tipo di periodo); con ✕ non verrà più proposta.
@@ -1045,7 +1045,7 @@ export default function WeekendVacanzeV2Page() {
 
       {/* Pannello "Vacanze da confermare" */}
       {showCandidates && (
-        <Modal title="🔍 Vacanze e weekend da confermare" onClose={closeCandidatesPanel} width={640}>
+        <Modal title="🔍 Vacanze e weekend da confermare" onClose={closeCandidatesPanel} width={960}>
           <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14 }}>
             Rilevati dalle spese categorizzate "Weekend e Vacanze": giorni vicini nella stessa località sono già uniti in una riga.
             Conferma per farli comparire nella tabella, oppure ignora se non è una vacanza. Se lo stesso viaggio tocca più
@@ -1076,14 +1076,14 @@ export default function WeekendVacanzeV2Page() {
               </button>
             </div>
           )}
-          <div style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ maxHeight: '55vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {candidates.length === 0 && (
               <div style={{ textAlign: 'center', padding: 24, color: 'var(--text3)', fontSize: 13 }}>Nessuna candidata al momento 🎉</div>
             )}
             {candidates.map(cand => {
               const emoji = destCategoryEmoji(candCityOverride[cand.id] ?? cand.city)
               return (
-                <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: selectedCand.has(cand.id) ? '1px solid var(--accent)' : '1px solid var(--border)', background: selectedCand.has(cand.id) ? 'var(--surface2)' : 'transparent', borderRadius: 8, flexWrap: 'wrap' }}>
+                <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: selectedCand.has(cand.id) ? '1px solid var(--accent)' : '1px solid var(--border)', background: selectedCand.has(cand.id) ? 'var(--surface2)' : 'transparent', borderRadius: 8, flexWrap: 'nowrap', minWidth: 'max-content' }}>
                   <input
                     type="checkbox"
                     checked={selectedCand.has(cand.id)}
