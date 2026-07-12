@@ -854,7 +854,12 @@ export async function enrichCitiesBatch(transactions, { onProgress, skipCache = 
             placeId = data.placeId || null
             console.log(`[places] query="${query}" → city: ${city}, address: ${address}`)
           } else {
-            console.warn(`[places] HTTP ${resp.status} for "${t.merchant}"`)
+            // Prova a leggere il messaggio d'errore vero dal proxy (api/places.js
+            // risponde {error: e.message} sui 500) — prima veniva scartato, lasciando
+            // solo "HTTP 500" in console senza dire PERCHÉ (richiesta utente, non si
+            // riusciva a capire se fosse la chiave, la quota o altro)
+            const errBody = await resp.json().catch(() => null)
+            console.warn(`[places] HTTP ${resp.status} for "${t.merchant}"${errBody?.error ? ' — ' + errBody.error : ''}`)
             city = null
           }
           // Only cache positive results — nulls are retried next run
