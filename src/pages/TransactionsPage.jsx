@@ -1929,7 +1929,14 @@ function AiDescCell({ tx, updateTransaction }) {
 }
 
 // ── AI Enrichment overlay ─────────────────────────────────
-const ENRICH_BATCH      = 15   // transactions per AI call
+// ENRICH_BATCH ridotto 15→6 (2026-07-13, segnalazione utente ripetuta): batch grandi ed
+// eterogenei (formati banca diversi, EUR/CHF, mescolati) fanno sì che il modello (gemini-
+// 2.0-flash) "diluisca l'attenzione" e produca risultati peggiori o nulli per le tx più
+// insolite del batch, anche con l'istruzione anti-contaminazione nel prompt e i guardrail
+// aggiunti in enrichBatch() — confermato ripetutamente dall'utente: stessa tx, batch=vuota/
+// scadente, singola=perfetta. Batch più piccoli costano più chiamate AI ma sono molto più
+// affidabili — la correttezza qui conta più della velocità.
+const ENRICH_BATCH      = 6    // transactions per AI call
 const ENRICH_WAVE_SIZE  = 400  // auto-split into waves above this threshold
 const ENRICH_WAVE_PAUSE = 90   // seconds to pause between waves
 let   _enrichRunning    = false // module-level guard — survives StrictMode remount

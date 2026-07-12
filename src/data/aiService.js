@@ -59,9 +59,18 @@ export function cleanRawDescFallback(desc) {
   if (!desc) return desc
   let s = String(desc)
   s = s.replace(/\b\d{8,}\b/g, ' ')  // codici riferimento/transazione lunghi
-  s = s.replace(/^\s*pagamento\s+(contactless|c-?less|pos|apple\s*pay|google\s*pay|maestro|mastercard|visa|nfc)\b\s*(c-?less\b)?\s*/i, '')
+  // Sequenza di token tecnici di pagamento in testa — combinabili in QUALSIASI ordine/
+  // numero (es. "PAGAMENTO APPLE PAY MASTERCARD NFC..." non veniva ripulito del tutto
+  // prima del 2026-07-13 perché il vecchio regex ne accettava solo uno alla volta)
+  s = s.replace(/^\s*(pagamento\s+)?((contactless|c-?less|pos|apple\s*pay|google\s*pay|maestro|mastercard|visa|nfc)\s+)+/i, '')
   s = s.replace(/^\s*pagamento\s+/i, '')
-  s = s.replace(/^\s*carta\s+\*?\d{3,4}\s*(di\s+[a-z]{3}\s+[\d.,]+)?\s*/i, '')  // "CARTA *2476 DI EUR 40,20"
+  // Bancomat/carta, italiani ed esteri (Svizzera/PostFinance e simili — 2026-07-13, tx
+  // che arrivavano al fallback quasi del tutto grezze perché questi formati non erano
+  // coperti): "CARTA *2476 DI EUR 40,20 ...", "PAGOBANCOMAT C-LESS CON CARTA *8623 DEL
+  // 25/03 ...", "del 08/08/2025 CARTA *6587 DI EUR 20,10 ...", "22/11/22 CARTA *8623 DI
+  // CHF 26,50 ..." — data prima o dopo "carta", con o senza prefisso pagobancomat
+  s = s.replace(/^\s*(pagobancomat\s+(c-?less\s+)?(con\s+)?)?(del\s+\d{1,2}\/\d{1,2}(\/\d{2,4})?\s+)?carta\s*\*?\d{3,4}\s*(del\s+\d{1,2}\/\d{1,2}(\/\d{2,4})?)?\s*(di\s+[a-z]{3}\s+[\d.,]+)?\s*/i, '')
+  s = s.replace(/^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s+carta\s*\*?\d{3,4}\s*(di\s+[a-z]{3}\s+[\d.,]+)?\s*/i, '')
   s = s.replace(/\s{2,}/g, ' ').trim()
   return s || desc
 }
