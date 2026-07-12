@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Fragment } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 import { Plus, Trash2, Search, Check, X as XIcon, ChevronDown, ChevronRight } from 'lucide-react'
 import { fmtIT } from '../utils/format'
@@ -191,13 +191,51 @@ export function getVacationMerchants(appPrefs) {
   return Array.isArray(list) && list.length ? list : DEFAULT_VAC_MERCHANTS
 }
 
-// Puntino descrizione originale (come in Transazioni): hover per vedere il testo
+// Puntino descrizione originale: clicca per aprire un popover con il testo completo
+// (l'hover via title non bastava — richiesta utente: "non si riesce a cliccare").
+// Posizionato con position:fixed (coordinate del click) invece che absolute perché il
+// puntino vive dentro un contenitore overflow:auto (tabella scrollabile del modale) —
+// con absolute il popover verrebbe tagliato dallo scroll invece di restare visibile.
 function OrigDot({ description }) {
+  const [pos, setPos] = useState(null) // { top, left } oppure null = chiuso
+  const popRef = useRef(null)
+  useEffect(() => {
+    if (!pos) return
+    function onDocClick(e) { if (popRef.current && !popRef.current.contains(e.target)) setPos(null) }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [pos])
   if (!description) return null
+  function toggle(e) {
+    e.stopPropagation()
+    if (pos) { setPos(null); return }
+    const r = e.currentTarget.getBoundingClientRect()
+    const POP_W = 260
+    setPos({
+      top: r.bottom + 4,
+      left: Math.max(8, Math.min(r.left - POP_W / 2, window.innerWidth - POP_W - 8)),
+    })
+  }
   return (
-    <span title={description} onClick={e => e.stopPropagation()}
-      style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
-        background: 'var(--text3)', opacity: .55, cursor: 'help', flexShrink: 0 }} />
+    <>
+      <span
+        onClick={toggle}
+        title="Clicca per vedere la descrizione originale"
+        style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+          background: pos ? 'var(--accent)' : 'var(--text3)', opacity: pos ? 1 : .55,
+          cursor: 'pointer', flexShrink: 0 }} />
+      {pos && (
+        <div ref={popRef} onClick={e => e.stopPropagation()} style={{
+          position: 'fixed', top: pos.top, left: pos.left,
+          zIndex: 9999, background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,.18)', padding: '8px 10px',
+          fontSize: 11, fontWeight: 400, color: 'var(--text2)', whiteSpace: 'pre-wrap',
+          textAlign: 'left', minWidth: 160, maxWidth: 260,
+        }}>
+          {description}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -361,7 +399,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
 // spesa passa a Weekend e Vacanze › Weekend/Vacanze (per tipo periodo) ──
 function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose }) {
   return (
-    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1230}>
+    <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1480}>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
         Con ✅ la spesa passa in Weekend e Vacanze (L2 in base al tipo di periodo); con ✕ non verrà più proposta.
@@ -370,7 +408,7 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onClose })
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Niente da rivedere</div>
       ) : (
         <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1090 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1380 }}>
             <thead><tr>
               {['Data cont.', 'Data valuta', 'Competenza', '✨ AI Descrizione', '•', 'Location', 'L1', 'L2', 'Importo', 'Vacanza attiva', ''].map((h, i) => (
                 <th key={i} style={{ ...OVERLAY_TH, textAlign: h === 'Importo' ? 'right' : 'left' }}>{h}</th>
