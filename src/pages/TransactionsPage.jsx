@@ -1084,6 +1084,7 @@ function getColValueStr(tx, colId, userAccounts) {
       return u || '—'
     }
     case 'isBonifico':  return tx.isBonifico ? 'Sì' : 'No'
+    case 'amount':      return fmtIT(Math.abs(tx.amount), 2)
     default:            return '—'
   }
 }
@@ -1106,7 +1107,7 @@ function ColFilterPopup({ popup, onApply, onClose }) {
         autoFocus
         value={search}
         onChange={e=>setSearch(e.target.value)}
-        placeholder="Cerca..."
+        placeholder={popup.colId==='amount' ? 'Cerca importo (es. 45,00)…' : 'Cerca...'}
         style={{width:'100%',padding:'5px 8px',borderRadius:6,border:'1px solid var(--border)',
           fontSize:12,background:'var(--surface)',color:'var(--text)',outline:'none',
           fontFamily:'var(--font-sans)',boxSizing:'border-box',marginBottom:8}}
@@ -3256,6 +3257,11 @@ export default function TransactionsPage() {
       // L1s first, then full L1›L2 combos
       uniqueVals = [...l1s, ...uniqueVals.filter(v => v.includes(' › '))]
     }
+    if (colId === 'amount') {
+      // Ordine numerico crescente (non alfabetico) — es. "20,00" prima di "100,00"
+      const toNum = v => parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0
+      uniqueVals = [...uniqueVals].sort((a, b) => toNum(a) - toNum(b))
+    }
     setFilterPopup({ colId, rect, values: uniqueVals, selected: new Set(colFilters[colId] || []) })
   }
 
@@ -3509,7 +3515,7 @@ export default function TransactionsPage() {
                   if(id==='cat')         return <th key={id} className="tx-th" style={{cursor:'pointer'}} onClick={()=>toggleSort('cat1')}>Categoria {sortIcon('cat1')}{filterBtn('cat')}</th>
                   if(id==='conf')        return <th key={id} className="tx-th" style={{width:55,textAlign:'right'}}>Conf%</th>
                   if(id==='isBonifico')  return <th key={id} className="tx-th" style={{width:40,textAlign:'center'}}>Bon.{filterBtn('isBonifico')}</th>
-                  if(id==='amount')      return <th key={id} className="tx-th" style={{textAlign:'right',width:120,cursor:'pointer'}} onClick={()=>toggleSort('amount')}>Importo (€) {sortIcon('amount')}</th>
+                  if(id==='amount')      return <th key={id} className="tx-th" style={{textAlign:'right',width:120,cursor:'pointer'}} onClick={()=>toggleSort('amount')} title="Clicca sull'icona ▽ per cercare un importo preciso">Importo (€) {sortIcon('amount')}{filterBtn('amount')}</th>
                   return null
                 })}
               </tr>
