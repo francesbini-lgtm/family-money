@@ -448,6 +448,15 @@ ${p.category}${locationHint}
 Available categories:
 ${CAT_LIST}
 
+CRITICAL — TRANSACTIONS ARE INDEPENDENT: the list below often contains many transactions with
+the SAME bank template text (e.g. "PAGAMENTO ... CARTA *XXXX DEL DD/MM ...") that differ ONLY in
+the merchant name at the end, because the same person/place appears repeatedly. Do NOT let this
+similarity bias you: for EACH transaction, derive merchant/descAI/city ONLY from the literal text
+of THAT transaction's own description — never copy or reuse the answer from a different, merely
+similar-looking transaction elsewhere in this list, even if most other transactions in the batch
+share the same merchant. Read every description character-by-character before answering; a
+transaction that looks superficially similar to others is very often a DIFFERENT place.
+
 TRANSACTIONS TO ANALYZE:
 ${list}
 
