@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { createInvite } from '../services/invite'
-import { exportTransactionsCSV, exportSummaryCSV } from '../services/export'
+import { exportTransactionsCSV, exportSummaryCSV, exportVacanzeBackupJSON } from '../services/export'
 import { Plus, Trash2, LogOut, Download, Copy, UserPlus, Check, Pencil } from 'lucide-react'
 import { fmtIT, fmtDate } from '../utils/format'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
@@ -722,6 +722,13 @@ function ProfileTab() {
           <button className="btn btn-secondary" onClick={()=>exportSummaryCSV(transactions)}>
             <Download size={13}/> Riepilogo per categoria (.csv)
           </button>
+          <button className="btn btn-secondary" onClick={()=>exportVacanzeBackupJSON(appPrefs)}>
+            <Download size={13}/> Backup vacanze e weekend (.json)
+          </button>
+        </div>
+        <div style={{fontSize:11,color:"var(--text3)",marginTop:10,lineHeight:1.5}}>
+          Il backup vacanze salva sul tuo computer una copia di tutte le vacanze/weekend
+          dichiarati e dei giorni esclusi. Consigliato dopo grosse sessioni di modifica manuale.
         </div>
       </div>
 

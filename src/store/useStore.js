@@ -120,6 +120,12 @@ export const useStore = create((set, get) => ({
   aiRules:       [],   // AI learning rules (Firestore ai_rules collection)
   cityOverrides: {},   // permanent merchant→city overrides (Firestore user_settings/city_overrides)
   locationExclusions: [], // merchants/keywords excluded from location views (Firestore)
+  // true solo DOPO che loadAllData() ha risolto il caricamento di app_prefs da Firestore.
+  // Finché è false, setAppPref() blocca le scritture: appPrefs locale (es. calendarVacations)
+  // è ancora [] di default, quindi qualunque add/update/remove partirebbe da uno stato vuoto
+  // e, con mergeDocument che sostituisce i campi-array per intero, sovrascriverebbe in
+  // silenzio i dati reali già su Firestore. Vedi guardia in setAppPref più sotto.
+  appPrefsLoaded: false,
   // ── App-wide preferences (Firestore user_settings/app_prefs) ─
   appPrefs: {
     family:             [],
@@ -203,6 +209,11 @@ export const useStore = create((set, get) => ({
     if (appPrefsDoc) {
       set(s => ({ appPrefs: { ...s.appPrefs, ...appPrefsDoc } }))
     }
+    // Solo da qui in avanti appPrefs locale è affidabile (documento caricato, o
+    // confermato assente): sblocca le scritture in setAppPref. Va impostato anche se
+    // appPrefsDoc è falsy (nuovo utente senza documento ancora) — altrimenti le scritture
+    // resterebbero bloccate per sempre.
+    set({ appPrefsLoaded: true })
     // Load permanent city overrides
     const cityOverridesDoc = await loadDocument('user_settings', 'city_overrides')
     if (cityOverridesDoc) {
@@ -747,7 +758,7 @@ export const useStore = create((set, get) => ({
       { id:'de3', vehicleId:'dv2', date:'2026-05-02', cat:'Assicurazione', desc:'Rinnovo RC Auto', amount:680 },
     ]
 
-    set({ transactions:txs, scadenze, vehicles, vehExpenses, nannyTS, colfTS:[], portfolios, satiPots, vacations, isDemoMode:true })
+    set({ transactions:txs, scadenze, vehicles, vehExpenses, nannyTS, colfTS:[], portfolios, satiPots, vacations, isDemoMode:true, appPrefsLoaded:true })
   },
 
   setOnboardingDone: () => {
@@ -1116,6 +1127,17 @@ export const useStore = create((set, get) => ({
   },
 
   setAppPref: (key, value) => {
+    // Guardia anti data-loss (2026-07-13): se loadAllData() non ha ancora finito di
+    // caricare app_prefs da Firestore, lo stato locale di appPrefs è ancora quello di
+    // default (es. calendarVacations: []). Scrivere in questa finestra — anche solo per
+    // un click arrivato prima del previsto — sovrascriverebbe il campo reale su Firestore
+    // con un array vuoto/parziale (mergeDocument sostituisce i campi-array per intero, non
+    // fa merge elemento per elemento). Blocchiamo e segnaliamo invece di scrivere: molto
+    // meglio perdere un click che perdere dati già salvati.
+    if (!get().appPrefsLoaded) {
+      console.warn(`[setAppPref] Scrittura di "${key}" bloccata: dati non ancora caricati da Firestore. Riprova tra un istante.`)
+      return
+    }
     set(s => ({ appPrefs: { ...s.appPrefs, [key]: value } }))
     // mergeDocument (merge:true) invece di saveDocument (overwrite totale): app_prefs
     // è un documento condiviso con DECINE di preferenze diverse (soprannomi, chiave AI,

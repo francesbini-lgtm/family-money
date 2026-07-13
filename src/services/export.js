@@ -49,6 +49,22 @@ export function exportSummaryCSV(transactions) {
   downloadFile('\uFEFF' + csv, 'family-money-riepilogo.csv', 'text/csv;charset=utf-8')
 }
 
+// ── Backup vacanze (appPrefs.calendarVacations / calendarNotVacationDates) ──
+// Backup manuale su richiesta esplicita dell'utente (2026-07-13, dopo una giornata
+// intera passata a sistemare le vacanze): non è un sostituto della vera causa del
+// bug (vedi guardia appPrefsLoaded in useStore.js), ma una rete di sicurezza
+// indipendente — un JSON scaricato sul PC dell'utente, fuori da qualunque bug futuro
+// dell'app o di Firestore.
+export function exportVacanzeBackupJSON(appPrefs) {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    calendarVacations: appPrefs?.calendarVacations || [],
+    calendarNotVacationDates: appPrefs?.calendarNotVacationDates || [],
+  }
+  const stamp = new Date().toISOString().slice(0, 10)
+  downloadFile(JSON.stringify(payload, null, 2), `family-money-backup-vacanze-${stamp}.json`, 'application/json;charset=utf-8')
+}
+
 // ── Helper ────────────────────────────────────────────────
 function downloadFile(content, filename, mimeType) {
   const blob = new Blob([content], { type: mimeType })
