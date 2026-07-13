@@ -222,50 +222,47 @@ function FuelManualCostRow({ v, vehicles, fuelPriceByYear, upd }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fuelEstimate.cost, amountAuto])
 
+  // Tooltip riassuntivo del calcolo — la stima resta disponibile al passaggio del
+  // mouse invece di occupare una seconda riga (richiesta utente 2026-07-13: "km e
+  // tipologia di veicoli e € mettili stessa riga di carburante così usi meno
+  // spazio verticale").
+  const estimateHint = fuelEstimate.cost != null
+    ? `≈ ${fuelEstimate.litri.toFixed(1)} L × € ${fuelEstimate.price} = € ${fuelEstimate.cost.toFixed(2)}`
+    : fuelEstimate.reason === 'altro' ? 'Veicolo "Altro": nessun calcolo automatico'
+    : fuelEstimate.reason === 'no-price' ? `Manca il prezzo medio benzina per il ${fuelEstimate.year || ''} — ⚙️ in alto`
+    : fuelEstimate.reason === 'no-consumo' ? 'Nessun consumo (km/l) disponibile per calcolare'
+    : 'Inserisci i KM per calcolare automaticamente il costo'
+
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12 }}>
-        <span style={{ width: 110, flexShrink: 0 }}>⛽ Carburante</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: 'var(--text3)' }}>€</span>
-        <input
-          type="number" value={val} placeholder="0"
-          onChange={e => { setVal(e.target.value); setAmountAuto(false) }}
-          onBlur={() => upd(v, 'manualCarburante', parseFloat(val) || 0)}
-          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-          style={{ width: 80, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 12, textAlign: 'right', fontFamily: 'var(--font-sans)' }}
-        />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px 6px 8px', fontSize: 11 }}>
-        <span style={{ width: 110, flexShrink: 0 }} />
-        <span style={{ color: 'var(--text3)' }}>KM</span>
-        <input
-          type="number" value={km} placeholder="es. 350"
-          onChange={e => setKm(e.target.value)}
-          onBlur={() => upd(v, 'manualCarburanteKm', km)}
-          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-          style={{ width: 64, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)' }}
-        />
-        <select
-          value={consumoVehicleId}
-          onChange={e => upd(v, 'manualCarburanteVehicleId', e.target.value)}
-          style={{ padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)', cursor: 'pointer' }}
-        >
-          <option value="non_so">Non lo so (media veicoli)</option>
-          {(vehicles || []).map(veh => (
-            <option key={veh.id} value={veh.id}>{veh.name}{veh.consumo ? ` — ${veh.consumo} km/l` : ''}</option>
-          ))}
-          <option value="altro">Altro</option>
-        </select>
-        <span style={{ flex: 1, textAlign: 'right', color: 'var(--text3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {fuelEstimate.cost != null
-            ? `≈ ${fuelEstimate.litri.toFixed(1)} L × € ${fuelEstimate.price}`
-            : fuelEstimate.reason === 'altro' ? 'nessun calcolo (Altro)'
-            : fuelEstimate.reason === 'no-price' ? `manca prezzo ${fuelEstimate.year || ''} — ⚙️ in alto`
-            : fuelEstimate.reason === 'no-consumo' ? 'nessun consumo veicolo disponibile'
-            : ''}
-        </span>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', fontSize: 12 }} title={estimateHint}>
+      <span style={{ width: 92, flexShrink: 0 }}>⛽ Carburante</span>
+      <span style={{ color: 'var(--text3)', fontSize: 11, flexShrink: 0 }}>KM</span>
+      <input
+        type="number" value={km} placeholder="es. 350"
+        onChange={e => setKm(e.target.value)}
+        onBlur={() => upd(v, 'manualCarburanteKm', km)}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        style={{ width: 56, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)' }}
+      />
+      <select
+        value={consumoVehicleId}
+        onChange={e => upd(v, 'manualCarburanteVehicleId', e.target.value)}
+        style={{ flex: 1, minWidth: 0, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)', cursor: 'pointer' }}
+      >
+        <option value="non_so">Non lo so (media veicoli)</option>
+        {(vehicles || []).map(veh => (
+          <option key={veh.id} value={veh.id}>{veh.name}{veh.consumo ? ` — ${veh.consumo} km/l` : ''}</option>
+        ))}
+        <option value="altro">Altro</option>
+      </select>
+      <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>€</span>
+      <input
+        type="number" value={val} placeholder="0"
+        onChange={e => { setVal(e.target.value); setAmountAuto(false) }}
+        onBlur={() => upd(v, 'manualCarburante', parseFloat(val) || 0)}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        style={{ width: 72, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 12, textAlign: 'right', fontFamily: 'var(--font-sans)', flexShrink: 0 }}
+      />
     </div>
   )
 }

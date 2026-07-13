@@ -8,6 +8,27 @@ import { fmtIT, fmtDate } from '../utils/format'
 
 const CATS_SCD = ['Mutuo/Prestito','Assicurazione','Abbonamento','Tasse','Auto','Utenze','Altro']
 
+// ── Rinnovo automatico scadenze veicolo (richiesta utente 2026-07-13) ────────
+// Assunzione di base: assicurazione/tagliando/bollo si ripetono ogni anno,
+// revisione ogni 2 — quindi una data passata NON significa "scaduta per
+// sempre", va avanzata automaticamente alla prossima occorrenza (stesso
+// giorno/mese, anno successivo) finché non cade oggi o nel futuro. Il campo
+// originale sul veicolo (v.assicurazione/tagliando/revisione/bollo) NON viene
+// mai toccato/sovrascritto qui — l'utente può sempre correggerlo a mano
+// quando conosce la vera data di rinnovo, e da lì il calcolo riparte.
+function nextOccurrence(dateStr, years, todayStr) {
+  if (!dateStr) return dateStr
+  let cur = dateStr
+  let guard = 0 // evita loop infiniti su date malformate
+  while (cur < todayStr && guard < 60) {
+    const d = new Date(cur)
+    d.setFullYear(d.getFullYear() + years)
+    cur = d.toISOString().slice(0, 10)
+    guard++
+  }
+  return cur
+}
+
 function urgencyClass(daysLeft, pagata) {
   if (pagata) return 'paid'
   if (daysLeft < 0)  return 'overdue'
@@ -121,7 +142,7 @@ export default function ScadenzePage() {
     .map(([k, label, cadenza]) => ({
       id: `veh-${v.id}-${k}`,
       nome: `${label} — ${v.name}`,
-      data: v[k],
+      data: nextOccurrence(v[k], cadenza === 'Biennale' ? 2 : 1, today),
       cat: 'Auto',
       cadenza,
       importo: 0,

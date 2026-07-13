@@ -707,14 +707,19 @@ function VehicleCharts({ vehicles, allRows = [] }) {
     value: Math.round(nonFuelRows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
   })).filter(x=>x.value>0)
 
-  // ── Chart 3: Costo per veicolo donut (escluso carburante, MEDIA ANNUA) ──
-  // Richiesta utente 2026-07-13: mostrare la media annua, non il totale storico —
-  // divide per il numero di anni distinti presenti nei dati (non fuel), minimo 1.
-  const nonFuelYears = new Set(nonFuelRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))
-  const numYearsNonFuel = nonFuelYears.size || 1
+  // ── Chart 3: Costo per veicolo donut (MEDIA ANNUA, solo costi allocabili) ──
+  // Richiesta utente 2026-07-13: mostrare la media annua (non il totale storico) —
+  // divide per il numero di anni distinti presenti nei dati. Escluse anche
+  // Autostrada e Parcheggio oltre al Carburante: sono costi tipicamente NON
+  // allocabili a un singolo veicolo (spesso senza vehicleId assegnato, o comuni
+  // a più veicoli), quindi falserebbero il confronto per-veicolo; restano invece
+  // visibili nel grafico "Costi per Categoria" qui sotto, che non è per-veicolo.
+  const vehAllocRows = allRows.filter(r => !['Carburante','Autostrada','Parcheggio'].includes(r.cat))
+  const vehAllocYears = new Set(vehAllocRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))
+  const numYearsVehAlloc = vehAllocYears.size || 1
   const vehTotals = vehicles.map((v,i)=>({
     name: v.name,
-    value: Math.round(nonFuelRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0) / numYearsNonFuel),
+    value: Math.round(vehAllocRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0) / numYearsVehAlloc),
     color: VEH_COLORS[i%VEH_COLORS.length]
   })).filter(x=>x.value>0)
 
@@ -804,8 +809,8 @@ function VehicleCharts({ vehicles, allRows = [] }) {
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* 3 — Costo per Veicolo donut (media annua, escluso carburante) */}
-      <ChartCard title="🚗 Costo per Veicolo (media annua, escluso carburante)">
+      {/* 3 — Costo per Veicolo donut (media annua, solo costi allocabili) */}
+      <ChartCard title="🚗 Costo per Veicolo (media annua, escluso carburante/autostrada/parcheggio)">
         {vehTotals.length === 0
           ? empty
           : <>
@@ -828,19 +833,31 @@ function VehicleCharts({ vehicles, allRows = [] }) {
       <ChartCard title="📊 Costi per Categoria (escluso carburante)">
         {catTotals.length === 0
           ? empty
-          : <>
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
-                  dataKey="value" paddingAngle={2}
-                  label={renderPieLabel} labelLine={false}>
-                  {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
-                </Pie>
-                <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
-              </PieChart>
-            </ResponsiveContainer>
-            {renderLegend(catTotals, DONUT_COLORS)}
-          </>
+          : (
+            /* Legenda a destra del pie (richiesta utente 2026-07-13), non più sotto */
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <div style={{flex:'1 1 60%',minWidth:0}}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={catTotals} cx="50%" cy="50%" innerRadius={45} outerRadius={72}
+                      dataKey="value" paddingAngle={2}
+                      label={renderPieLabel} labelLine={false}>
+                      {catTotals.map((_,i)=><Cell key={i} fill={DONUT_COLORS[i%DONUT_COLORS.length]}/>)}
+                    </Pie>
+                    <Tooltip formatter={v=>[`€ ${fmtIT(v,0)}`]} contentStyle={CHART_TOOLTIP}/>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:6,flex:'1 1 40%',minWidth:0}}>
+                {catTotals.map((item,i)=>(
+                  <span key={item.name} style={{fontSize:10,display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{width:8,height:8,borderRadius:'50%',background:DONUT_COLORS[i%DONUT_COLORS.length],display:'inline-block',flexShrink:0}}/>
+                    <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.name}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
         }
       </ChartCard>
 

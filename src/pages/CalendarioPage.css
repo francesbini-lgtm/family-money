@@ -72,6 +72,16 @@
 .cal-table {
   border-collapse: collapse; width: max-content; min-width: 100%;
   background: var(--surface);
+  /* Fix 2026-07-13 (segnalazione utente: "le celle cambiano larghezza se è
+     vacanza o no"): con table-layout:auto (default) il browser ridistribuisce
+     la larghezza delle colonne in base al contenuto di TUTTE le celle della
+     tabella, comprese quelle unite (colSpan) di una vacanza — che con
+     .cal-merged-cell forzavano width:auto/min-width:0, "rubando" spazio e
+     alterando la larghezza delle colonne giorno anche nelle righe SENZA
+     vacanza. table-layout:fixed rende le larghezze di colonna dipendenti SOLO
+     dall'intestazione (.cal-day-th/.cal-month-th), sempre identiche riga per
+     riga, unite o no. */
+  table-layout: fixed;
 }
 
 .cal-month-th { width: 50px; }

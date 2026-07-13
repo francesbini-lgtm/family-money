@@ -425,7 +425,14 @@ export default function CeciliaPage() {
 
   const totalSaved  = ceciliaGoals.reduce((s,g) => s + (g.current || 0), 0)
   const totalTarget = ceciliaGoals.reduce((s,g) => s + g.target, 0)
-  const thisMonthSpend = Math.abs(cecTxs.filter(t=>(t._effDate||t.date).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
+  // KPI "Spese Figli" da inizio anno (YTD), non solo il mese corrente — richiesta
+  // utente 2026-07-13: "i kpis prima riga, metti YTD, scrivilo nel titolo"
+  const todayStr  = now.toISOString().slice(0, 10)
+  const thisYear  = thisYM.slice(0, 4)
+  const ytdSpend  = Math.abs(cecTxs.filter(t=>{
+    const d = t._effDate || t.date
+    return d && d.startsWith(thisYear) && d <= todayStr
+  }).reduce((s,t)=>s+t.amount,0))
 
   // Satispay "Cecilia" fund — find pot by name (case-insensitive)
   const cecSatiPot = (satiPots||[]).find(p => p.name?.toLowerCase().includes('cecilia'))
@@ -460,7 +467,7 @@ export default function CeciliaPage() {
         {[
           [Target,    'Totale Accantonato', `€ ${fmtIT(totalSaved, 0)}`, 'var(--green)'],
           [Gift,      'Obiettivi Totali',   `€ ${fmtIT(totalTarget, 0)}`, 'var(--blue)'],
-          [TrendingUp,'Spese Figli (mese)', `€ ${fmtIT(thisMonthSpend, 0)}`, 'var(--accent)'],
+          [TrendingUp,'Spese Figli (YTD)', `€ ${fmtIT(ytdSpend, 0)}`, 'var(--accent)'],
         ].map(([Icon,label,val,color])=>(
           <div key={label} className="card cec-kpi">
             <Icon size={16} color={color}/>
