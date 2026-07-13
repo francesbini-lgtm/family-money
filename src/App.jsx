@@ -62,24 +62,22 @@ import './App.css'
 
 const NAV = [
   { id:'quality',          icon:'📊', label:'Accuracy',           group:null },
-  { id:'ai',              icon:'✨', label:'AI Assistant',       group:'AI' },
-  { id:'dashboard',       icon:'🏠', label:'Summary',           group:'Overview' },
+  { id:'dashboard',       icon:'🏠', label:'Summary',           group:'General' },
+  { id:'patrimonio',      icon:'💎', label:'Patrimonio',          group:null },
+  { id:'ai',              icon:'✨', label:'AI Assistant',       group:null },
   { id:'transactions',    icon:'💳', label:'Transazioni',        group:null },
   { id:'entrate',         icon:'💰', label:'Entrate',             group:null },
-  { id:'uscite',          icon:'📉', label:'Uscite',              group:null },
-  { id:'tempo-libero',    icon:'🎭', label:'Tempo Libero',       group:'Main Categories' },
-  { id:'scadenze',        icon:'📅', label:'Scadenze',           group:null },
-  { id:'cecilia',         icon:'👧', label:'Cecilia',             group:'Famiglia' },
+  { id:'uscite',          icon:'📉', label:'Uscite',              group:'USCITE' },
+  { id:'cecilia',         icon:'👧', label:'Cecilia',             group:null },
   { id:'nanny',           icon:'👩', label:'Nanny',              group:null },
   { id:'colf',            icon:'🧹', label:'Colf',               group:null },
+  { id:'tempo-libero',    icon:'🎭', label:'Tempo Libero',       group:'Main Categories' },
   { id:'shopping',        icon:'🛍', label:'Shopping',           group:'Other' },
   { id:'salute',          icon:'💊', label:'Salute e Cura',      group:null },
   { id:'analytics',       icon:'🔬', label:'Analytics',           group:'Analytics' },
-  { id:'calendario',      icon:'🗓', label:'Calendario',          group:null },
+  { id:'risparmio',       icon:'💹', label:'Risparmio',           group:null },
   { id:'forecast',        icon:'📊', label:'Forecast',           group:null },
-  { id:'patrimonio',      icon:'💎', label:'Patrimonio',          group:'Finanza' },
-  { id:'risparmio',       icon:'🐷', label:'Risparmio',           group:'Finanza' },
-  { id:'prestiti',        icon:'🏦', label:'Prestiti & Mutui',    group:null },
+  { id:'prestiti',        icon:'🏦', label:'Prestiti & Mutui',    group:'Finanza' },
   { id:'investimenti',    icon:'📈', label:'Investimenti',       group:null },
   { id:'satispay',        icon:'💚', label:'Satispay',           group:null },
   { id:'paypal',          icon:'💙', label:'PayPal',             group:null },
@@ -87,8 +85,8 @@ const NAV = [
   { id:'contanti',        icon:'💵', label:'Contanti',            group:null },
   { id:'mutuo',          icon:'🏠', label:'Mutuo',              group:null },
   { id:'stipendio',      icon:'💼', label:'Stipendi',            group:null },
-  { id:'settings',        icon:'⚙️', label:'Impostazioni',       group:null },
-  { id:'devlog',          icon:'🛠', label:'Sviluppo',            group:null },
+  { id:'scadenze',        icon:'📅', label:'Scadenze',           group:'ALTRO' },
+  { id:'calendario',      icon:'🗓', label:'Calendario',          group:null },
   { id:'blocnotes',       icon:'📝', label:'Bloc Notes',          group:null },
 ]
 
@@ -323,6 +321,15 @@ function AppShell() {
           )}
 
           <div className="topbar-right">
+          <button
+            onClick={()=>navigate('settings')}
+            title="Impostazioni"
+            style={{width:36,height:36,borderRadius:8,background:'var(--bg)',border:'1px solid var(--border)',
+              display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:16,
+              transition:'all .15s'}}
+          >
+            ⚙️
+          </button>
           <button
             onClick={()=>setDarkMode(d=>!d)}
             title={darkMode?'Modalità chiara':'Modalità scura'}

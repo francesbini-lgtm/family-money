@@ -12,6 +12,7 @@ import { fmtIT, fmtDate } from '../utils/format'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
 import { saveTotpSecret, deleteTotpSecret } from '../services/firestore'
 import { ForcedBalanceModal } from './TransactionsPage'
+import DevlogPage from './DevlogPage'
 
 function Tabs({ tabs, active, onChange }) {
   return (
@@ -2344,9 +2345,10 @@ export default function SettingsPage() {
     {id:"ai-prompt",     icon:"🤖", label:"AI Prompt"},
     {id:"ai-enrichment", icon:"✨", label:"AI Enrichment"},
     {id:"discovery-skip",icon:"🚫", label:"Discovery"},
+    {id:"devlog",        icon:"🛠", label:"Sviluppo"},
   ]
   return (
-    <div style={{padding:"28px 32px",maxWidth:tab==="excluded"?1300:900}}>
+    <div style={{padding:"28px 32px",maxWidth:tab==="excluded"?1300:tab==="devlog"?1100:900}}>
       <h1 style={{fontFamily:"var(--font-serif)",fontSize:26,fontWeight:600,marginBottom:24}}>⚙️ Impostazioni</h1>
       <Tabs tabs={TABS} active={tab} onChange={setTab}/>
       {tab==="security"       && <SecurityTab/>}
@@ -2361,6 +2363,7 @@ export default function SettingsPage() {
       {tab==="ai-prompt"      && <AIPromptTab/>}
       {tab==="ai-enrichment"  && <AIEnrichmentTab/>}
       {tab==="discovery-skip" && <DiscoverySkipTab/>}
+      {tab==="devlog"         && <DevlogPage/>}
     </div>
   )
 }

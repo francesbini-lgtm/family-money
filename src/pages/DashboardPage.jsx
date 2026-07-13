@@ -342,6 +342,13 @@ function SpeseCatChart({ transactions }) {
   const [selectedTx, setSelectedTx]   = useState(null)
   const now = new Date()
 
+  // Selettore mese/anno per period==='M' — default: penultimo mese (now-2, non il mese corrente
+  // ancora incompleto né l'ultimo mese chiuso, ma quello precedente a quest'ultimo)
+  const defRef = new Date(now.getFullYear(), now.getMonth()-2, 1)
+  const [selMonth, setSelMonth] = useState(defRef.getMonth())
+  const [selYear,  setSelYear]  = useState(defRef.getFullYear())
+  const selYM = `${selYear}-${String(selMonth+1).padStart(2,'0')}`
+
   const getMonths = () => {
     const months = []
     for (let i=5;i>=0;i--) {
@@ -358,7 +365,7 @@ function SpeseCatChart({ transactions }) {
       .map(([name, info]) => {
         const txs = transactions.filter(t=>!t.excluded&&t.amount<0&&t.cat1===name)
         const periodTxs = period==='M'
-          ? txs.filter(t=>(t._effDate||t.date||'').startsWith(months[5]))
+          ? txs.filter(t=>(t._effDate||t.date||'').startsWith(selYM))
           : period==='Q'
             ? txs.filter(t=>(t._effDate||t.date||'')>=months[months.length-3])
             : txs.filter(t=>(t._effDate||t.date||'')>=months[0])
@@ -370,7 +377,7 @@ function SpeseCatChart({ transactions }) {
       })
       .filter(d=>d.total>0)
       .sort((a,b)=>b.total-a.total)
-  }, [transactions, period, mergedCats])
+  }, [transactions, period, mergedCats, selYM])
 
   // When L2 is on, expand each L1 slice into its L2 children
   const pieData = useMemo(() => {
@@ -404,7 +411,7 @@ function SpeseCatChart({ transactions }) {
 
   const activeCat = activeIdx !== null ? pieData[activeIdx] : null
 
-  const periodLabel = period==='M' ? MONTHS_SHORT[now.getMonth()]+' '+String(now.getFullYear()).slice(2)
+  const periodLabel = period==='M' ? MONTHS_SHORT[selMonth]+' '+String(selYear).slice(2)
     : period==='Q' ? 'Ultimi 3 mesi' : 'Ultimi 6 mesi'
 
   // Transactions for selected category, sorted by absolute amount descending
@@ -420,14 +427,14 @@ function SpeseCatChart({ transactions }) {
     }
     // Apply period filter
     if (period === 'M') {
-      txs = txs.filter(t => (t._effDate||t.date||'').startsWith(months[5]))
+      txs = txs.filter(t => (t._effDate||t.date||'').startsWith(selYM))
     } else if (period === 'Q') {
       txs = txs.filter(t => (t._effDate||t.date||'') >= months[months.length-3])
     } else {
       txs = txs.filter(t => (t._effDate||t.date||'') >= months[0])
     }
     return [...txs].sort((a,b) => Math.abs(a.amount) - Math.abs(b.amount)).reverse()
-  }, [selectedCat, selectedParent, transactions, period, showL2])
+  }, [selectedCat, selectedParent, transactions, period, showL2, selYM])
 
   const btnStyle = (active) => ({
     padding:'3px 10px',borderRadius:14,
@@ -468,6 +475,18 @@ function SpeseCatChart({ transactions }) {
         {[['M','Mese'],['Q','Trimestre'],['A','6 Mesi']].map(([v,l])=>(
           <button key={v} onClick={()=>{setPeriod(v);setSelectedCat(null);setSelectedParent(null)}} style={btnStyle(period===v)}>{l}</button>
         ))}
+        {period==='M' && (
+          <>
+            <select value={selMonth} onChange={e=>{setSelMonth(parseInt(e.target.value));setSelectedCat(null);setSelectedParent(null)}}
+              style={{fontSize:11,fontWeight:600,padding:'3px 6px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text2)',fontFamily:'var(--font-sans)'}}>
+              {MONTHS_SHORT.map((m,i)=><option key={i} value={i}>{m}</option>)}
+            </select>
+            <select value={selYear} onChange={e=>{setSelYear(parseInt(e.target.value));setSelectedCat(null);setSelectedParent(null)}}
+              style={{fontSize:11,fontWeight:600,padding:'3px 6px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text2)',fontFamily:'var(--font-sans)'}}>
+              {Array.from({length:6},(_,k)=>now.getFullYear()-4+k).map(y=><option key={y} value={y}>{y}</option>)}
+            </select>
+          </>
+        )}
         <button onClick={()=>{setShowL2(s=>!s);setSelectedCat(null);setSelectedParent(null)}} style={{...btnStyle(showL2),marginLeft:'auto'}}>
           {showL2?'▾ L2':'▸ L2'}
         </button>
