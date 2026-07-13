@@ -485,25 +485,16 @@ function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransa
   const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
 
-  function assignTo(t, vacId) {
-    const d = effDate(t)
-    if (vacId === '__new__') {
-      setNewVacFor(t.txId)
-      setNv({ name: '', from: d, to: d })
-      return
-    }
-    // BUG TROVATO 2026-07-13 (segnalato dall'utente: "clicco assegna ma non succede
-    // niente"): le vacanze create con useVacations().add() hanno id NUMERICO
-    // (Date.now(), vedi useCalendarVacations.js) ma <option value={v.id}> nel DOM
-    // diventa sempre una STRINGA — x.id === vacId (numero !== stringa) falliva SEMPRE
-    // silenziosamente, per OGNI vacanza esistente, senza errori in console. Stesso
-    // identico bug già risolto altrove (ImportWizard.jsx:356, String(v.id) === vacId)
-    // ma rimasto qui. Fix: confronto sempre come stringa.
-    const v = vacations.find(x => String(x.id) === String(vacId))
-    if (!v) {
-      console.warn('[assignTo] vacanza non trovata per id', vacId, '— nessuna modifica applicata')
-      return
-    }
+  // Logica di assegnazione condivisa — presa in ingresso direttamente l'OGGETTO
+  // vacanza (non un id da ricercare in `vacations`), così funziona anche subito
+  // dopo aver creato una vacanza al volo: `vacations` è una prop passata dal
+  // padre e resta quella "vecchia" fino al prossimo render, quindi cercare lì il
+  // record appena creato con `addVacation()` fallirebbe silenziosamente (stesso
+  // bug-pattern del confronto id numero/stringa già risolto altrove in questo
+  // file) — richiesta utente 2026-07-13: "se clicco su crea vacanza... deve
+  // anche assegnare quella spesa alla vacanza, non lo fa".
+  function applyAssignment(t, v) {
+    if (!v) return
     // Valori PRIMA della modifica — servono per il bottone "Annulla" dello snackbar
     const prevCompetenza = t.competenza ?? null
     const prevEffDate    = t._effDate ?? t.date
@@ -537,10 +528,38 @@ function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransa
     })
   }
 
+  function assignTo(t, vacId) {
+    const d = effDate(t)
+    if (vacId === '__new__') {
+      setNewVacFor(t.txId)
+      setNv({ name: '', from: d, to: d })
+      return
+    }
+    // BUG TROVATO 2026-07-13 (segnalato dall'utente: "clicco assegna ma non succede
+    // niente"): le vacanze create con useVacations().add() hanno id NUMERICO
+    // (Date.now(), vedi useCalendarVacations.js) ma <option value={v.id}> nel DOM
+    // diventa sempre una STRINGA — x.id === vacId (numero !== stringa) falliva SEMPRE
+    // silenziosamente, per OGNI vacanza esistente, senza errori in console. Stesso
+    // identico bug già risolto altrove (ImportWizard.jsx:356, String(v.id) === vacId)
+    // ma rimasto qui. Fix: confronto sempre come stringa.
+    const v = vacations.find(x => String(x.id) === String(vacId))
+    if (!v) {
+      console.warn('[assignTo] vacanza non trovata per id', vacId, '— nessuna modifica applicata')
+      return
+    }
+    applyAssignment(t, v)
+  }
+
   function saveNewVac(t) {
     if (!nv.name.trim() || !nv.from || !nv.to) return
-    addVacation({ name: nv.name.trim(), city: nv.name.trim(), from: nv.from, to: nv.to })
+    // addVacation() (= add() di useVacations) ritorna il record appena creato con
+    // l'id — lo usiamo direttamente per assegnare SUBITO la spesa alla vacanza
+    // (applyAssignment), senza dover ri-cercarlo nella prop `vacations` (che qui
+    // resterebbe quella di PRIMA della creazione fino al prossimo render: era
+    // esattamente questo il motivo per cui prima la spesa non veniva assegnata).
+    const v = addVacation({ name: nv.name.trim(), city: nv.name.trim(), from: nv.from, to: nv.to })
     setNewVacFor(null)
+    applyAssignment(t, v)
   }
 
   return (
