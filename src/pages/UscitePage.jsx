@@ -843,8 +843,10 @@ export default function UscitePage() {
 
                 return (
                   <>
-                    {/* Fixed cats group */}
-                    {fixedCatList.map(cat1 => renderCatRow(cat1))}
+                    {/* Fixed cats group — nascoste le categorie a zero in tutti i mesi
+                        visibili (richiesta utente 2026-07-13: righe tutte a €0,00 non
+                        vanno mostrate) */}
+                    {fixedCatList.filter(cat1 => rowTotal(cat1) !== 0).map(cat1 => renderCatRow(cat1))}
 
                     {/* Subtotale core */}
                     {(
@@ -870,8 +872,8 @@ export default function UscitePage() {
                       </tr>
                     )}
 
-                    {/* Remaining cats */}
-                    {remainingCatList.map(cat1 => renderCatRow(cat1))}
+                    {/* Remaining cats — stessa regola: nasconde le righe a zero */}
+                    {remainingCatList.filter(cat1 => rowTotal(cat1) !== 0).map(cat1 => renderCatRow(cat1))}
                   </>
                 )
               })()}
