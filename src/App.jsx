@@ -52,6 +52,7 @@ import DevlogPage           from './pages/DevlogPage'
 import QualityDashboard     from './pages/QualityDashboard'
 import BlocNotesPage        from './pages/BlocNotesPage'
 import OnboardingWizard     from './components/OnboardingWizard'
+import SidebarNav           from './components/SidebarNav'
 
 import { requestNotificationPermission, scheduleScadenzeNotifications } from './services/notifications'
 import { OfflineBanner } from './hooks/useOnlineStatus'
@@ -262,17 +263,7 @@ function AppShell() {
             <span className="logo-sub logo-version">v{APP_VERSION} · {BUILD_TIME}</span>
           </div>
         </div>
-        <nav className="sidebar-nav">
-          {(()=>{ const visibleNav = NAV.filter(n => !(appPrefs.disabledNav||[]).includes(n.id)); return visibleNav.map(item=>(
-            <div key={item.id}>
-              {item.group && <div className="nav-group">{item.group}</div>}
-              <button className={"nav-item"+(page===item.id?" active":"")} onClick={()=>navigate(item.id)}>
-                <span className="nav-icon">{item.icon}</span>
-                {item.label}
-              </button>
-            </div>
-          ))})()}
-        </nav>
+        <SidebarNav NAV={NAV} page={page} navigate={navigate}/>
         <div className="sidebar-user">
           {user?.photoURL
             ? <img src={user.photoURL} className="user-photo" alt=""/>
