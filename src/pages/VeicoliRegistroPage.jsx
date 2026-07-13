@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import VehicleQuickPicker from '../components/VehicleQuickPicker'
@@ -132,6 +132,38 @@ function getLast6Months() {
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
 // fmtDate imported from utils/format
 
+// ── Calcolo automatico costo Carburante da KM + consumo veicolo ──────────
+// Richiesta utente 2026-07-13: inserendo i KM percorsi e il veicolo (o
+// "non lo so"/"altro"), il sistema stima il costo usando il consumo del
+// veicolo (km/l, campo v.consumo) e il prezzo medio benzina dell'anno della
+// spesa (appPrefs.fuelPriceByYear[anno]). Se "altro" non calcola nulla
+// (richiesta esplicita). Se "non lo so", fa la media dei soli veicoli che
+// hanno un consumo impostato (ignora quelli senza).
+function avgConsumoVehicles(vehicles) {
+  const withConsumo = (vehicles || []).filter(v => parseFloat(v.consumo) > 0)
+  if (!withConsumo.length) return null
+  const tot = withConsumo.reduce((s, v) => s + parseFloat(v.consumo), 0)
+  return tot / withConsumo.length
+}
+function estimateFuelCost({ km, consumoVehicleId, date, vehicles, fuelPriceByYear }) {
+  const kmNum = parseFloat(km)
+  if (!kmNum || kmNum <= 0) return { cost: null, reason: 'no-km' }
+  if (consumoVehicleId === 'altro') return { cost: null, reason: 'altro' }
+  let consumo = null
+  if (!consumoVehicleId || consumoVehicleId === 'non_so') {
+    consumo = avgConsumoVehicles(vehicles)
+  } else {
+    const v = (vehicles || []).find(v => String(v.id) === String(consumoVehicleId))
+    consumo = v && parseFloat(v.consumo) > 0 ? parseFloat(v.consumo) : null
+  }
+  if (!consumo) return { cost: null, reason: 'no-consumo' }
+  const year = (date || '').slice(0, 4)
+  const price = parseFloat(fuelPriceByYear?.[year])
+  if (!price) return { cost: null, reason: 'no-price', consumo, year }
+  const litri = kmNum / consumo
+  return { cost: litri * price, litri, consumo, price, year, reason: null }
+}
+
 // ── Add/Edit Vehicle Modal ────────────────────────────────
 function VehicleModal({ vehicle, onClose }) {
   const { addVehicle, updateVehicle } = useStore()
@@ -187,10 +219,66 @@ function VehicleModal({ vehicle, onClose }) {
   )
 }
 
+// ── Prezzo medio benzina per anno (appPrefs.fuelPriceByYear) ─────────────
+// Richiesta utente 2026-07-13: ingranaggio impostazioni della pagina, usato
+// dal box "Calcolo automatico" di AddExpenseModal per stimare il costo di
+// una spesa Carburante da KM + consumo del veicolo.
+function FuelPriceModal({ onClose }) {
+  const appPrefs   = useStore(s => s.appPrefs)
+  const setAppPref = useStore(s => s.setAppPref)
+  const saved = appPrefs?.fuelPriceByYear || {}
+  const [rows, setRows] = useState(() => {
+    const years = Object.keys(saved).sort((a,b)=>b.localeCompare(a))
+    return years.length
+      ? years.map(y=>({ year:y, price:String(saved[y]) }))
+      : [{ year:String(new Date().getFullYear()), price:'' }]
+  })
+  const setRow    = (i,k,v) => setRows(r=>r.map((row,idx)=>idx===i?{...row,[k]:v}:row))
+  const addRow    = () => setRows(r=>[{ year:String(new Date().getFullYear()), price:'' }, ...r])
+  const removeRow = i  => setRows(r=>r.filter((_,idx)=>idx!==i))
+
+  function save() {
+    const map = {}
+    rows.forEach(r => { if (r.year && r.price) map[String(r.year).trim()] = parseFloat(r.price) })
+    setAppPref('fuelPriceByYear', map)
+    onClose()
+  }
+
+  return (
+    <Modal title="⛽ Prezzo medio benzina" onClose={onClose} width={420}>
+      <div style={{fontSize:12,color:'var(--text3)',marginBottom:12,lineHeight:1.5}}>
+        Prezzo medio benzina (€/litro) per anno — usato per stimare automaticamente
+        il costo di una spesa Carburante da KM percorsi + consumo del veicolo.
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {rows.map((row,i)=>(
+          <div key={i} style={{display:'flex',gap:8,alignItems:'center'}}>
+            <Input type="number" value={row.year} onChange={e=>setRow(i,'year',e.target.value)} placeholder="Anno" style={{width:90}}/>
+            <span style={{fontSize:12,color:'var(--text3)'}}>€/L</span>
+            <Input type="number" step="0.01" value={row.price} onChange={e=>setRow(i,'price',e.target.value)} placeholder="1.75" style={{width:90}}/>
+            <button onClick={()=>removeRow(i)} title="Rimuovi anno"
+              style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',padding:2,display:'flex',alignItems:'center'}}>
+              <Trash2 size={13}/>
+            </button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addRow} className="btn btn-secondary" style={{marginTop:10,fontSize:12}}>
+        <Plus size={12}/> Aggiungi anno
+      </button>
+      <ModalFooter>
+        <button className="btn btn-primary" onClick={save}>Salva</button>
+        <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
 // ── Add/Edit Expense Modal ────────────────────────────────
 // expense = null → add mode; expense = obj → edit mode
 function AddExpenseModal({ vehicles, preVehicleId, expense: editingExpense, onClose }) {
   const { addVehExpense, updateVehExpense } = useStore()
+  const appPrefs = useStore(s => s.appPrefs)
   const isEdit = !!editingExpense
 
   const [form, setForm] = useState(() => {
@@ -202,15 +290,36 @@ function AddExpenseModal({ vehicles, preVehicleId, expense: editingExpense, onCl
       vehicleId: editingExpense.vehicleId || vehicles[0]?.id || '',
       payMethod: editingExpense.payMethod || 'carta',
       notes: editingExpense.notes || '',
+      km: editingExpense.km || '',
+      consumoVehicleId: editingExpense.consumoVehicleId || 'non_so',
     }
     return {
       date: new Date().toISOString().slice(0,10),
       desc: '', cat: 'Carburante', amount: '',
       vehicleId: preVehicleId || vehicles[0]?.id || '',
-      payMethod: 'carta', notes: ''
+      payMethod: 'carta', notes: '',
+      km: '', consumoVehicleId: 'non_so',
     }
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
+  // true finché l'importo non è mai stato toccato a mano: mentre è true, il
+  // box "Carburante" può scrivere l'importo stimato da KM+consumo+prezzo;
+  // al primo intervento manuale sull'importo si ferma per non sovrascrivere
+  // una scelta esplicita dell'utente (richiesta: "può inserire sempre
+  // manualmente il costo se vuole").
+  const [amountAuto, setAmountAuto] = useState(true)
+
+  const fuelEstimate = useMemo(() => {
+    if (form.cat !== 'Carburante') return { cost: null, reason: null }
+    return estimateFuelCost({
+      km: form.km, consumoVehicleId: form.consumoVehicleId, date: form.date,
+      vehicles, fuelPriceByYear: appPrefs?.fuelPriceByYear,
+    })
+  }, [form.cat, form.km, form.consumoVehicleId, form.date, vehicles, appPrefs?.fuelPriceByYear])
+
+  useEffect(() => {
+    if (amountAuto && fuelEstimate.cost != null) set('amount', fuelEstimate.cost.toFixed(2))
+  }, [fuelEstimate.cost, amountAuto])
 
   // Existing attachments (edit mode) — can be individually removed
   const [existingAtts, setExistingAtts] = useState(isEdit ? (editingExpense.attachments || []) : [])
@@ -293,7 +402,7 @@ function AddExpenseModal({ vehicles, preVehicleId, expense: editingExpense, onCl
             : <Input type="date" value={form.date} onChange={e=>set('date',e.target.value)}/>
           }
         </FormRow>
-        <FormRow label="Importo €"><Input type="number" value={form.amount} onChange={e=>set('amount',e.target.value)} placeholder="0" step="0.01" autoFocus/></FormRow>
+        <FormRow label="Importo €"><Input type="number" value={form.amount} onChange={e=>{set('amount',e.target.value); setAmountAuto(false)}} placeholder="0" step="0.01" autoFocus/></FormRow>
         <FormRow label="Metodo pagamento">
           <Select value={form.payMethod} onChange={e=>set('payMethod',e.target.value)}>
             <option value="carta">💳 Carta</option>
@@ -303,6 +412,39 @@ function AddExpenseModal({ vehicles, preVehicleId, expense: editingExpense, onCl
           </Select>
         </FormRow>
       </div>
+
+      {/* Box calcolo automatico Carburante da KM+consumo — richiesta utente 2026-07-13 */}
+      {form.cat === 'Carburante' && (
+        <div style={{marginTop:10,marginBottom:4,padding:'10px 14px',borderRadius:10,background:'rgba(59,130,246,.05)',border:'1px solid rgba(59,130,246,.18)'}}>
+          <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:8}}>
+            ⛽ Calcolo automatico dal consumo (opzionale)
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <FormRow label="KM percorsi"><Input type="number" value={form.km} onChange={e=>set('km',e.target.value)} placeholder="es. 350"/></FormRow>
+            <FormRow label="Veicolo (per il consumo)">
+              <Select value={form.consumoVehicleId} onChange={e=>set('consumoVehicleId',e.target.value)}>
+                <option value="non_so">Non lo so (media veicoli)</option>
+                {vehicles.map(v=>(
+                  <option key={v.id} value={v.id}>{v.name}{v.consumo?` — ${v.consumo} km/l`:''}</option>
+                ))}
+                <option value="altro">Altro</option>
+              </Select>
+            </FormRow>
+          </div>
+          <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
+            {fuelEstimate.cost != null
+              ? `≈ ${fuelEstimate.litri.toFixed(1)} L × € ${fuelEstimate.price} = € ${fuelEstimate.cost.toFixed(2)} — importo qui sotto aggiornato automaticamente`
+              : fuelEstimate.reason === 'altro'
+                ? 'Veicolo "Altro": nessun calcolo automatico, inserisci l\'importo a mano.'
+                : fuelEstimate.reason === 'no-price'
+                  ? `Manca il prezzo medio benzina per il ${fuelEstimate.year || (form.date||'').slice(0,4)} — impostalo con ⚙️ in alto nella pagina.`
+                  : fuelEstimate.reason === 'no-consumo'
+                    ? 'Nessun consumo (km/l) disponibile per calcolare — inserisci l\'importo a mano.'
+                    : 'Inserisci i KM per calcolare automaticamente il costo.'}
+          </div>
+        </div>
+      )}
+
       <FormRow label="Descrizione"><Input value={form.desc} onChange={e=>set('desc',e.target.value)} placeholder="es. Rifornimento IP Como"/></FormRow>
 
       {/* File drop zone */}
@@ -1518,6 +1660,7 @@ export default function VeicoliRegistroPage() {
   const [editVeh,     setEditVeh]     = useState(null)
   const [showAddExp,  setShowAddExp]  = useState(false)
   const [preVehId,    setPreVehId]    = useState('')
+  const [showFuelPrice, setShowFuelPrice] = useState(false)
 
   // ── Merged rows (same logic as AllExpensesTable, unfiltered) for charts ──
   const vehCatFiltersPage = useMemo(() => {
@@ -1586,6 +1729,9 @@ export default function VeicoliRegistroPage() {
           <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Gestisci spese, manutenzioni e scadenze</div>
         </div>
         <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-secondary" style={{fontSize:12,padding:'7px 10px'}} onClick={()=>setShowFuelPrice(true)} title="Prezzo medio benzina per anno">
+            ⚙️
+          </button>
           <button className="btn btn-secondary" style={{fontSize:12}} onClick={()=>openAddExpense()}>
             <Plus size={12}/> Spesa
           </button>
@@ -1594,6 +1740,7 @@ export default function VeicoliRegistroPage() {
           </button>
         </div>
       </div>
+      {showFuelPrice && <FuelPriceModal onClose={()=>setShowFuelPrice(false)}/>}
 
       {/* Vehicle chips — row 1 */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12,marginBottom:16}}>
