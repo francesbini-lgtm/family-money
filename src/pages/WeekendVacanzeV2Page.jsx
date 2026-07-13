@@ -748,6 +748,10 @@ export default function WeekendVacanzeV2Page() {
   const [showFuori, setShowFuori] = useState(false)     // overlay spese W&V fuori periodo
   const [showReview, setShowReview] = useState(false)   // overlay spese in vacanza non allocate
   const [showMerch, setShowMerch] = useState(false)     // impostazioni merchant vacanze
+  // Menu "Revisione" — i 3 bottoni Da confermare/Fuori periodo/Non allocate erano
+  // separati in alto; consolidati in un unico tab a tendina (richiesta utente
+  // 2026-07-13: "aggregali tutti sotto un tab dedicato, sempre lì in alto a destra")
+  const [showRevisionMenu, setShowRevisionMenu] = useState(false)
   const [candCityOverride, setCandCityOverride] = useState({})
   const [candDateOverride, setCandDateOverride] = useState({}) // { candId: { from, to } }
 
@@ -911,6 +915,8 @@ export default function WeekendVacanzeV2Page() {
     () => allCandidates.filter(c => ((c.city || '')).trim()),
     [allCandidates]
   )
+  // Conteggio totale per il badge del tab "Revisione" consolidato
+  const revisionTotal = candidates.length + fuoriTxs.length + reviewRows.length
 
   function upd(v, field, value) {
     update(v.id, { [field]: value })
@@ -1087,6 +1093,17 @@ export default function WeekendVacanzeV2Page() {
   const numTd = { ...tdStyle, textAlign: 'right' }
   const inp = { padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text1)', fontSize: 13 }
 
+  // Voci del menu a tendina "Revisione"
+  const revisionMenuItemStyle = {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px',
+    background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer',
+    fontSize: 13, fontWeight: 600, color: 'var(--text1)', textAlign: 'left', fontFamily: 'var(--font-sans)',
+  }
+  const revisionBadgeStyle = (color, bg) => ({
+    flexShrink: 0, fontSize: 11, fontWeight: 700, color, background: bg,
+    padding: '1px 7px', borderRadius: 10,
+  })
+
   return (
     <div style={{ padding: '24px 28px' }}>
       {/* Header */}
@@ -1098,19 +1115,43 @@ export default function WeekendVacanzeV2Page() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {/* To review: spese nei giorni di vacanza dichiarata NON allocate in Weekend e Vacanze */}
-          <button onClick={() => setShowReview(true)} title="Spese avvenute durante una vacanza dichiarata ma categorizzate altrove"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: reviewRows.length ? 'rgba(220,50,50,.08)' : 'var(--surface2)', color: reviewRows.length ? 'var(--red)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-            🚩 To review {reviewRows.length > 0 && `(${reviewRows.length})`}
-          </button>
-          {/* Fuori periodo: spese W&V non coperte da nessuna vacanza dichiarata */}
-          <button onClick={() => setShowFuori(true)} title='Spese "Weekend e Vacanze" fuori da ogni periodo dichiarato'
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: fuoriTxs.length ? 'var(--blue-l,#e8f0fe)' : 'var(--surface2)', color: fuoriTxs.length ? 'var(--blue,#2563eb)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-            📆 Fuori periodo {fuoriTxs.length > 0 && `(${fuoriTxs.length})`}
-          </button>
-          <button onClick={() => setShowCandidates(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: candidates.length ? 'var(--gold-l,#fef9e7)' : 'var(--surface2)', color: candidates.length ? 'var(--gold,#b45309)' : 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
-            <Search size={14} /> Da confermare {candidates.length > 0 && `(${candidates.length})`}
-          </button>
+          {/* Revisione — consolida i 3 pannelli "Da confermare" / "Fuori periodo" /
+              "Non allocate" (ex "To review", rinominato per coerenza col titolo del
+              modale stesso) sotto un unico tab a tendina in alto a destra (richiesta
+              utente 2026-07-13: "aggregali tutti sotto un tab dedicato"). */}
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowRevisionMenu(s => !s)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                background: revisionTotal ? 'rgba(220,50,50,.08)' : 'var(--surface2)',
+                color: revisionTotal ? 'var(--red)' : 'var(--text3)',
+                border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+              🔎 Revisione {revisionTotal > 0 && `(${revisionTotal})`} <ChevronDown size={13} style={{ transform: showRevisionMenu ? 'rotate(180deg)' : 'none', transition: 'transform .12s' }} />
+            </button>
+            {showRevisionMenu && (
+              <>
+                <div onClick={() => setShowRevisionMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
+                <div style={{ position: 'absolute', top: '110%', right: 0, zIndex: 999, background: 'var(--surface)',
+                  border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+                  minWidth: 280, padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <button onClick={() => { setShowCandidates(true); setShowRevisionMenu(false) }} style={revisionMenuItemStyle}>
+                    <Search size={14} style={{ color: 'var(--gold,#b45309)', flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>Vacanze e weekend da confermare</span>
+                    {candidates.length > 0 && <span style={revisionBadgeStyle('var(--gold,#b45309)', 'var(--gold-l,#fef9e7)')}>{candidates.length}</span>}
+                  </button>
+                  <button onClick={() => { setShowFuori(true); setShowRevisionMenu(false) }} style={revisionMenuItemStyle}>
+                    <span style={{ flexShrink: 0 }}>📆</span>
+                    <span style={{ flex: 1 }}>Spese fuori periodo</span>
+                    {fuoriTxs.length > 0 && <span style={revisionBadgeStyle('var(--blue,#2563eb)', 'var(--blue-l,#e8f0fe)')}>{fuoriTxs.length}</span>}
+                  </button>
+                  <button onClick={() => { setShowReview(true); setShowRevisionMenu(false) }} style={revisionMenuItemStyle}>
+                    <span style={{ flexShrink: 0 }}>🚩</span>
+                    <span style={{ flex: 1 }}>Spese non allocate</span>
+                    {reviewRows.length > 0 && <span style={revisionBadgeStyle('var(--red)', 'rgba(220,50,50,.08)')}>{reviewRows.length}</span>}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
             <Plus size={14} /> Aggiungi
           </button>
