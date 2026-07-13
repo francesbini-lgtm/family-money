@@ -780,7 +780,12 @@ export default function UscitePage() {
                   const expanded = expandedCats.has(cat1)
                   const allL2 = new Set()
                   months.forEach(m => Object.keys(dataMap[cat1]?.[m.key]?.l2 || {}).forEach(l2 => allL2.add(l2)))
-                  const l2List = [...allL2].sort((a, b) => rowTotal(cat1, b) - rowTotal(cat1, a))
+                  // Nasconde anche le sottocategorie (L2) a zero in tutti i mesi — non solo le
+                  // righe L1 (chiarimento utente 2026-07-13: "intendevo se un'intera riga è
+                  // zero", vale per qualunque riga della tabella, non solo la categoria madre)
+                  const l2List = [...allL2]
+                    .filter(cat2 => rowTotal(cat1, cat2) !== 0)
+                    .sort((a, b) => rowTotal(cat1, b) - rowTotal(cat1, a))
                   const hasL2 = l2List.length > 1 || (l2List.length === 1 && l2List[0] !== '(altro)')
 
                   return [
