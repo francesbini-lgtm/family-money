@@ -446,6 +446,28 @@ function CandTxRow({ t, allCats, updateTransaction }) {
   )
 }
 
+// ── Banner "Annulla" visibile DENTRO il modale (richiesta utente 2026-07-13:
+// il toast globale "Annulla" (8s, in fondo alla pagina) resta invisibile mentre
+// un modale largo come questo è aperto sopra di lui — qui mostriamo lo stesso
+// identico stato `undo`/`setUndo` del componente padre, ma dentro il modale ──
+function UndoBanner({ undo, setUndo }) {
+  if (!undo) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '7px 12px',
+      background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 8, fontSize: 12 }}>
+      <span style={{ flex: 1 }}>↩️ {undo.label}</span>
+      <button onClick={undo.onUndo}
+        style={{ padding: '5px 12px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+        Annulla
+      </button>
+      <button onClick={() => setUndo?.(null)} title="Chiudi"
+        style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', display: 'flex', padding: 0 }}>
+        <XIcon size={14} />
+      </button>
+    </div>
+  )
+}
+
 const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.05em',
   textTransform: 'uppercase', color: 'var(--text3)', background: 'var(--surface2)',
   borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap',
@@ -455,7 +477,7 @@ const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSp
 // vacanza dichiarata — modificabili, assegnabili a una vacanza esistente (la
 // competenza della spesa si sposta al primo giorno di quel periodo) o a una
 // vacanza creata al volo (usa la competenza della spesa come date iniziali) ──
-function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransaction, addVacation, updateVacation, setUndo, onClose }) {
+function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransaction, addVacation, updateVacation, undo, setUndo, onClose }) {
   const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
 
@@ -524,6 +546,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransa
         Modifica i campi direttamente, oppure assegna la spesa a una vacanza (la competenza si sposta al
         primo giorno di quel periodo) o creane una nuova.
       </div>
+      <UndoBanner undo={undo} setUndo={setUndo} />
       {txs.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Tutto coperto</div>
       ) : (
@@ -588,7 +611,7 @@ function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransa
 // dover cliccare riga per riga (richiesta utente 2026-07-13: "possibilità di
 // selezionare sulla sinistra multipla e cliccare su accetta, ignora una sola
 // volta e semplificare") — le azioni riga-per-riga restano comunque disponibili ──
-function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDismiss, setUndo,
+function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDismiss, undo, setUndo,
   neverAiDescs, onAddNever, onRemoveNever, onClose }) {
   const [selected, setSelected] = useState(new Set())
   const [showNeverPanel, setShowNeverPanel] = useState(false)
@@ -646,6 +669,7 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
           <Settings size={13} /> Escluse sempre{neverAiDescs?.length > 0 ? ` (${neverAiDescs.length})` : ''}
         </button>
       </div>
+      <UndoBanner undo={undo} setUndo={setUndo} />
       {selected.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '7px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}>
           <strong>{selected.size} selezionate</strong>
@@ -1538,7 +1562,7 @@ export default function WeekendVacanzeV2Page() {
       {showFuori && (
         <FuoriPeriodoModal txs={fuoriTxs} vacations={sorted} allCats={allCats} transactions={transactions}
           updateTransaction={updateTransaction} addVacation={add} updateVacation={update}
-          setUndo={setUndo} onClose={() => setShowFuori(false)} />
+          undo={undo} setUndo={setUndo} onClose={() => setShowFuori(false)} />
       )}
 
       {/* Overlay spese in giorni di vacanza non allocate in Weekend e Vacanze */}
@@ -1546,7 +1570,7 @@ export default function WeekendVacanzeV2Page() {
         <ToReviewModal rows={reviewRows} allCats={allCats}
           updateTransaction={updateTransaction} onDismiss={dismissReview} onBulkDismiss={dismissReviewBulk}
           neverAiDescs={neverAiDescs} onAddNever={addNeverAiDesc} onRemoveNever={removeNeverAiDesc}
-          setUndo={setUndo} onClose={() => setShowReview(false)} />
+          undo={undo} setUndo={setUndo} onClose={() => setShowReview(false)} />
       )}
 
       {/* Impostazioni merchant vacanze (Booking, Airbnb, …) */}
@@ -1570,6 +1594,7 @@ export default function WeekendVacanzeV2Page() {
               </>
             )}
           </div>
+          <UndoBanner undo={undo} setUndo={setUndo} />
           {selectedCand.size >= 2 && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 10px', background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 8, marginBottom: 10, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>🔗 {selectedCand.size} selezionate</span>
