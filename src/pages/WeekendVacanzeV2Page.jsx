@@ -1227,25 +1227,6 @@ export default function WeekendVacanzeV2Page() {
       .slice(0, 4)
   , [confirmed, transactions])
 
-  // Nuove destinazioni per anno: una città conta come "nuova" solo la prima
-  // volta che appare in tutto lo storico (anche se antecedente agli ultimi 5
-  // anni mostrati nel grafico) — evita di contare come "nuova" una destinazione
-  // già visitata in passato solo perché fuori dalla finestra dei 5 anni.
-  const newPlacesData = useMemo(() => {
-    const seen = new Set()
-    const byY = {}
-    years5.forEach(y => { byY[y] = 0 })
-    const chron = [...confirmed].sort((a, b) => (a.from || '').localeCompare(b.from || ''))
-    chron.forEach(v => {
-      const key = (v.city || '').trim().toLowerCase()
-      if (!key || seen.has(key)) return
-      seen.add(key)
-      const yr = String(getYear(v))
-      if (byY[yr] !== undefined) byY[yr]++
-    })
-    return years5.map(y => ({ year: y, Nuovi: byY[y] }))
-  }, [confirmed, years5])
-
   const weekendCount = last5.filter(v => vacationType(v, transactions) === 'Weekend').length
   const vacanzeCount = last5.length - weekendCount
 
@@ -1397,18 +1378,6 @@ export default function WeekendVacanzeV2Page() {
                 <Bar dataKey="Vacanze" stackId="a" fill={TYPE_COLORS.Vacanze} radius={[4, 4, 0, 0]} isAnimationActive={false}>
                   <LabelList content={<DaysTotalLabel />} />
                 </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div style={{ minWidth: 180 }}>
-            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Nuove destinazioni per anno</div>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={newPlacesData} margin={{ top: 4, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: 'var(--text2)' }} axisLine={{ stroke: '#e0dcd8' }} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={22} allowDecimals={false} />
-                <Tooltip formatter={value => [`${value} nuove`, 'Destinazioni']} />
-                <Bar dataKey="Nuovi" fill="#8b5cf6" radius={[4, 4, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </div>
