@@ -38,6 +38,32 @@ function reconcileLayout(stored, NAV) {
 
 function entryKey(e) { return e.type === 'divider' ? e.key : `item:${e.id}` }
 
+// Icone custom per voci il cui simbolo di brand non è rappresentabile con
+// un'emoji standard (richiesta utente: "solo simbolo, non la scritta").
+// item.icon vale 'svg:<key>' per queste — mappa key -> piccolo SVG inline.
+const BRAND_ICONS = {
+  satispay: (
+    <svg viewBox="0 0 24 24" width="15" height="15">
+      <polygon points="12,2 22,12 12,22 2,12" fill="#FF4438"/>
+      <polygon points="12,2 22,12 12,12" fill="#FF7A6E"/>
+    </svg>
+  ),
+  paypal: (
+    <svg viewBox="0 0 24 24" width="15" height="15">
+      <text x="4" y="19" fontFamily="Arial, Helvetica, sans-serif" fontWeight="900" fontSize="21" fill="#1F2670">P</text>
+      <text x="7.5" y="20" fontFamily="Arial, Helvetica, sans-serif" fontWeight="900" fontSize="21" fill="#139AD6">P</text>
+    </svg>
+  ),
+}
+
+function NavIcon({ icon }) {
+  if (typeof icon === 'string' && icon.startsWith('svg:')) {
+    const key = icon.slice(4)
+    return <span className="nav-icon" style={{ display: 'inline-flex' }}>{BRAND_ICONS[key] || null}</span>
+  }
+  return <span className="nav-icon">{icon}</span>
+}
+
 // Nasconde i divisori rimasti senza nessuna voce visibile sotto (es. l'unica
 // voce di quella sezione è stata disabilitata) — solo per la vista normale.
 function visibleEntries(layout, disabledNav) {
@@ -202,7 +228,7 @@ export default function SidebarNav({ NAV, page, navigate }) {
                 onClick={() => !editMode && navigate(item.id)}
                 style={editMode ? { cursor: 'default', flex: 1 } : undefined}
               >
-                <span className="nav-icon">{item.icon}</span>
+                <NavIcon icon={item.icon}/>
                 {item.label}
               </button>
               {editMode && (
