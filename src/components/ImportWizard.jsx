@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 import { getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
@@ -8,7 +8,9 @@ import ImportModal from './ImportModal'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
 import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException } from '../pages/TransactionsPage'
-import { getVacationMerchants } from '../pages/WeekendVacanzeV2Page'
+import { getVacationMerchants, isHomeCityTx, normDesc } from '../pages/WeekendVacanzeV2Page'
+import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
+import { computeCandidateVacations, findVacationForDate, allDatesBetween, vacationType } from '../data/vacationRules'
 import { navigateRef } from '../utils/navigate'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -398,6 +400,248 @@ function VacanzeStep({ importedIdSet, onNext }) {
   )
 }
 
+// ── 3 nuovi step di revisione vacanze, tutti limitati al periodo effettivamente
+// importato in QUESTO flusso (minDate/maxDate, non tutto lo storico) — richiesta
+// utente 2026-07-13, punto 2: dopo l'import, il wizard chiede "hai fatto vacanze
+// in questo periodo?" (stessa logica "Da confermare" di Weekend e Vacanze v2),
+// poi mostra le spese "fuori periodo" e quelle "non allocate" relative allo
+// stesso intervallo — nessuna logica nuova, riusa le funzioni condivise già
+// esistenti in data/vacationRules.js e gli stessi appPrefs di WeekendVacanzeV2Page,
+// quindi tutto resta sincronizzato con quella pagina.
+
+function overlapsRange(from, to, minDate, maxDate) {
+  if (!minDate || !maxDate) return true
+  return to >= minDate && from <= maxDate
+}
+
+// ── 2a. Vacanze/weekend candidate rilevate nel periodo importato ───────────
+function VacCandidatesStep({ minDate, maxDate, onNext }) {
+  const transactions = useStore(s => s.transactions)
+  const appPrefs      = useStore(s => s.appPrefs)
+  const { vacations, add: addVacation } = useVacations()
+  const { notVacationDates, mark } = useNotVacationDates()
+  const [resolved, setResolved] = useState({}) // { candId: true }
+
+  const candidates = useMemo(() => {
+    const all = computeCandidateVacations(transactions, vacations, notVacationDates)
+    return all.filter(c => (c.city || '').trim() && !resolved[c.id] && overlapsRange(c.from, c.to, minDate, maxDate))
+  }, [transactions, vacations, notVacationDates, resolved, minDate, maxDate])
+
+  function confirm(c) {
+    addVacation({ name: c.city, city: c.city, from: c.from, to: c.to })
+    setResolved(r => ({ ...r, [c.id]: true }))
+    showToast(`✅ "${c.city}" confermata come vacanza`, 'success')
+  }
+  function ignore(c) {
+    mark(c.dates)
+    setResolved(r => ({ ...r, [c.id]: true }))
+  }
+
+  return (
+    <>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>🔍 Vacanze e weekend trovati in questo import ({candidates.length})</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Nei dati appena importati il sistema ha rilevato questi possibili periodi di vacanza/weekend (spese categorizzate
+        "Weekend e Vacanze" raggruppate per data e località). Conferma quelli che lo sono davvero, oppure ignora gli altri —
+        stessa logica del pannello "Da confermare" in Weekend e Vacanze.
+      </div>
+      {candidates.length === 0 ? (
+        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+          ✅ Nessuna vacanza/weekend da confermare in questo periodo
+        </div>
+      ) : (
+        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          {candidates.map(c => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{c.city}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(c.from)}–{fmtDate(c.to)}</span>
+              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                background: c.type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
+                color: c.type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)' }}>{c.type}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>€ {fmtIT(c.spend, 2)}</span>
+              <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                <button onClick={() => confirm(c)}
+                  style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  ✅ È una vacanza
+                </button>
+                <button onClick={() => ignore(c)}
+                  style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
+                  ✕ Non lo è
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+          Avanti →
+        </button>
+      </div>
+    </>
+  )
+}
+
+// ── 2b. Spese "Weekend e Vacanze" fuori da ogni periodo dichiarato, nel periodo importato ──
+function VacFuoriPeriodoStep({ minDate, maxDate, onNext }) {
+  const transactions      = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const { vacations, add: addVacation } = useVacations()
+  const [handled, setHandled] = useState({})
+
+  const rows = useMemo(() => transactions.filter(t => {
+    if (t.excluded || t.amount >= 0 || t.cat1 !== 'Weekend e Vacanze' || handled[t.txId]) return false
+    const d = t.competenza || t.date
+    if (!d || !overlapsRange(d, d, minDate, maxDate)) return false
+    return !findVacationForDate(d, vacations)
+  }), [transactions, vacations, handled, minDate, maxDate])
+
+  // Stessa logica di assignTo() in WeekendVacanzeV2Page: la spesa si allinea al
+  // periodo scelto (competenza = primo giorno se fuori dal range) e la L2 si
+  // allinea al tipo reale del periodo (vacationType, rispetta un typeOverride manuale)
+  function assignTo(t, vacId) {
+    const v = vacations.find(x => String(x.id) === String(vacId))
+    if (!v) return
+    const inRange = t.date >= v.from && t.date <= v.to
+    updateTransaction(t.txId, {
+      competenza: inRange ? (v.from === t.date ? null : t.competenza) : v.from,
+      _effDate: inRange ? (t.competenza || t.date) : v.from,
+      cat2: vacationType(v, transactions),
+    })
+    setHandled(h => ({ ...h, [t.txId]: true }))
+  }
+
+  return (
+    <>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>📆 Spese fuori periodo in questo import ({rows.length})</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Spese categorizzate "Weekend e Vacanze" la cui data non cade in nessuna vacanza dichiarata — assegnale a un
+        periodo esistente (anche appena confermato) o lasciale così per sistemarle più avanti da Weekend e Vacanze.
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+          ✅ Nessuna spesa fuori periodo in questo import
+        </div>
+      ) : (
+        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          {rows.map(t => (
+            <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(t.competenza || t.date)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.descAI || t.description?.slice(0, 40)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
+                −€ {fmtIT(Math.abs(t.amount), 2)}
+              </span>
+              <select defaultValue="" onChange={e => { if (e.target.value) assignTo(t, e.target.value); e.target.value = '' }}
+                style={{ ...SEL_STYLE, width: 'auto', minWidth: 180, marginLeft: 'auto' }}>
+                <option value="">Assegna a…</option>
+                {vacations.map(v => (
+                  <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
+                ))}
+              </select>
+              <button onClick={() => setHandled(h => ({ ...h, [t.txId]: true }))}
+                style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
+                Lascia così
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+          Avanti →
+        </button>
+      </div>
+    </>
+  )
+}
+
+// ── 2c. Spese avvenute dentro un periodo dichiarato ma NON allocate a "Weekend
+// e Vacanze", nel periodo importato — stesso identico criterio di ToReviewModal
+// in WeekendVacanzeV2Page (rispetta wv2ReviewDismissed, homeCity, wv2NeverAiDescs
+// così le decisioni prese qui restano coerenti con quella pagina) ──
+function VacNonAllocateStep({ minDate, maxDate, onNext }) {
+  const transactions      = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const appPrefs          = useStore(s => s.appPrefs)
+  const setAppPref        = useStore(s => s.setAppPref)
+  const { vacations } = useVacations()
+  const reviewDismissed = appPrefs?.wv2ReviewDismissed || {}
+  const homeCity        = appPrefs?.homeCity
+  const neverAiDescsSet = useMemo(
+    () => new Set((appPrefs?.wv2NeverAiDescs || []).map(normDesc)),
+    [appPrefs?.wv2NeverAiDescs]
+  )
+  const [handled, setHandled] = useState({})
+
+  const rows = useMemo(() => transactions.map(t => {
+    if (t.excluded || t.amount >= 0 || t.cat1 === 'Weekend e Vacanze' || handled[t.txId]) return null
+    if (reviewDismissed[t.txId] || isHomeCityTx(t, homeCity)) return null
+    if (neverAiDescsSet.has(normDesc(t.descAI || t.description))) return null
+    const d = t.competenza || t.date
+    if (!d || !overlapsRange(d, d, minDate, maxDate)) return null
+    const vac = findVacationForDate(d, vacations)
+    if (!vac) return null
+    return { t, vac, vacType: vacationType(vac, transactions) }
+  }).filter(Boolean), [transactions, vacations, reviewDismissed, homeCity, neverAiDescsSet, handled, minDate, maxDate])
+
+  function confirm(row) {
+    updateTransaction(row.t.txId, { cat1: 'Weekend e Vacanze', cat2: row.vacType, userEditedCat: true })
+    setHandled(h => ({ ...h, [row.t.txId]: true }))
+  }
+  function dismiss(row) {
+    setAppPref('wv2ReviewDismissed', { ...reviewDismissed, [row.t.txId]: true })
+    setHandled(h => ({ ...h, [row.t.txId]: true }))
+  }
+
+  return (
+    <>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>🚩 Spese non allocate in questo import ({rows.length})</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Spese avvenute durante una vacanza/weekend dichiarata ma categorizzate altrove — con ✅ passano a
+        "Weekend e Vacanze", con ✕ non verranno più riproposte (né qui né nella pagina Weekend e Vacanze).
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+          ✅ Nessuna spesa non allocata in questo import
+        </div>
+      ) : (
+        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          {rows.map(({ t, vac, vacType }) => (
+            <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(t.competenza || t.date)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.descAI || t.description?.slice(0, 40)}</span>
+              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                background: 'var(--gold-l,#fef9e7)', color: 'var(--gold,#b45309)' }}>{vac.city || vac.name}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
+                −€ {fmtIT(Math.abs(t.amount), 2)}
+              </span>
+              <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                <button onClick={() => confirm({ t, vac, vacType })}
+                  title={`È una spesa della vacanza → Weekend e Vacanze › ${vacType}`}
+                  style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  ✅ È della vacanza
+                </button>
+                <button onClick={() => dismiss({ t })}
+                  style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
+                  ✕ Non fa parte
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+          Avanti →
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ═══════════════════════════════ WIZARD ═════════════════════════════════════
 export default function ImportWizard({ onClose }) {
   const transactions      = useStore(s => s.transactions)
@@ -425,9 +669,15 @@ export default function ImportWizard({ onClose }) {
       { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
     if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
     // 'vacanze': competenza/vacanza per le prenotazioni Booking/Airbnb/… importate
+    // 'vac-candidates'/'vac-fuori'/'vac-nonalloc' (richiesta utente 2026-07-13,
+    // punto 2): stessa revisione "Da confermare"/"Fuori periodo"/"Non allocate"
+    // di Weekend e Vacanze v2, ma limitata al periodo appena importato
     // 'review' (richiesta utente 2026-07-12): ultima pagina PRIMA dei KPI con
     // l'elenco completo delle transazioni importate in questo flusso
-    q.push({ id:'vacanze' }, { id:'compensazioni' }, { id:'review' }, { id:'summary' })
+    q.push(
+      { id:'vacanze' }, { id:'vac-candidates' }, { id:'vac-fuori' }, { id:'vac-nonalloc' },
+      { id:'compensazioni' }, { id:'review' }, { id:'summary' }
+    )
     return q
   }
 
@@ -457,6 +707,19 @@ export default function ImportWizard({ onClose }) {
     ...(results.conto?.savedTxIds || []),
     ...(results.carta?.savedTxIds || []),
   ]), [results])
+
+  // Intervallo di date effettivamente coperto da QUESTO import — usato dagli
+  // step vac-candidates/vac-fuori/vac-nonalloc per limitare la revisione al
+  // periodo appena caricato invece che a tutto lo storico (richiesta utente
+  // 2026-07-13, punto 2: "sempre all'interno del periodo caricato")
+  const { vacMinDate, vacMaxDate } = useMemo(() => {
+    const dates = transactions
+      .filter(t => importedIdSet.has(t.txId))
+      .map(t => t.competenza || t.date)
+      .filter(Boolean)
+    if (!dates.length) return { vacMinDate: null, vacMaxDate: null }
+    return { vacMinDate: dates.reduce((m, d) => d < m ? d : m), vacMaxDate: dates.reduce((m, d) => d > m ? d : m) }
+  }, [transactions, importedIdSet])
   function refineRows(src, kind) {
     const txs = importedTxs(src)
     if (kind === 'l2')   return txs.filter(t => (!t.cat1 || t.cat1 === 'Non Categorizzato' || !t.cat2) && t.cat1 !== 'Entrate')
@@ -530,8 +793,11 @@ export default function ImportWizard({ onClose }) {
     ai:   { title: 'Categorizzate dall’AI (nessuna regola applicata) — verifica', empty: 'Nessuna transazione categorizzata solo dall’AI da verificare.' },
   }
 
-  // Chip di avanzamento in testa al wizard
-  function StepChips() {
+  // Stepper numerato sempre visibile in alto (richiesta utente 2026-07-13, punto 3:
+  // "fin da subito si vede in alto il processo step by step per ogni pagina che si
+  // procede") — sostituisce i vecchi chip testuali con un indicatore 1/2/3.../N con
+  // stato fatto/corrente/da fare, sempre alla stessa posizione qualunque sia lo step.
+  function StepProgress() {
     if (!queue) return null
     const labels = []
     const seen = new Set()
@@ -541,23 +807,82 @@ export default function ImportWizard({ onClose }) {
       seen.add(key)
       labels.push({ key, label:
         s.id === 'import' ? SRC_LABEL[s.src]
-        : s.id === 'refine' ? `🔍 Rifinisci ${s.src}`
-        : s.id === 'paypal-result' ? '💙 Esito PayPal'
-        : s.id === 'vacanze' ? '🏝️ Vacanze'
-        : s.id === 'compensazioni' ? '🔗 Compensazioni'
-        : s.id === 'review' ? '📄 Transazioni'
-        : '🏁 Riepilogo' })
+        : s.id === 'refine' ? `Rifinisci ${s.src}`
+        : s.id === 'paypal-result' ? 'Esito PayPal'
+        : s.id === 'vacanze' ? 'Prenotazioni'
+        : s.id === 'vac-candidates' ? 'Vacanze trovate'
+        : s.id === 'vac-fuori' ? 'Fuori periodo'
+        : s.id === 'vac-nonalloc' ? 'Non allocate'
+        : s.id === 'compensazioni' ? 'Compensazioni'
+        : s.id === 'review' ? 'Transazioni'
+        : 'Riepilogo' })
     })
     const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id
+    const curIdx = labels.findIndex(l => l.key === curKey)
     return (
-      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:16}}>
-        {labels.map(l => (
-          <span key={l.key} style={{fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:12,
-            border:`1px solid ${l.key===curKey?'var(--accent)':'var(--border)'}`,
-            background:l.key===curKey?'var(--accent-l)':'var(--surface2)',
-            color:l.key===curKey?'var(--accent)':'var(--text3)'}}>{l.label}</span>
+      <div style={{display:'flex',alignItems:'flex-start',marginBottom:18,overflowX:'auto',paddingBottom:2,flexShrink:0}}>
+        {labels.map((l,i) => (
+          <Fragment key={l.key}>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:62,flexShrink:0}}>
+              <div style={{width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+                fontSize:11,fontWeight:700,flexShrink:0,
+                background: i<curIdx ? 'var(--green)' : i===curIdx ? 'var(--accent)' : 'var(--surface2)',
+                color: i<=curIdx ? '#fff' : 'var(--text3)',
+                border: i===curIdx ? '2px solid var(--accent)' : '1px solid var(--border)'}}>
+                {i<curIdx ? '✓' : i+1}
+              </div>
+              <div style={{fontSize:9.5,fontWeight:i===curIdx?700:500,color:i===curIdx?'var(--accent)':'var(--text3)',
+                textAlign:'center',maxWidth:74,lineHeight:1.2}}>{l.label}</div>
+            </div>
+            {i < labels.length-1 && (
+              <div style={{flex:'0 0 20px',height:2,background:i<curIdx?'var(--green)':'var(--border)',marginTop:11}}/>
+            )}
+          </Fragment>
         ))}
       </div>
+    )
+  }
+
+  // Import conto/carta/PayPal riusano ImportModal/PaypalImportModal, che hanno
+  // il proprio backdrop+box a schermo intero — sovrapporre anche il frame del
+  // wizard sopra creava 2 modali impilati di dimensioni diverse (richiesta
+  // utente 2026-07-13, punto 3: "si aprono diversi tab uno sopra l'altro, di
+  // dimensioni diverse"). Fix: durante questo step, il wizard non renderizza il
+  // proprio frame — resta visibile solo il modulo di import, poi al termine
+  // (onFlowDone/onImport) si torna al frame uniforme del wizard per gli step successivi.
+  if (step && step.id === 'import') {
+    return (
+      <>
+        {step.src !== 'paypal' ? (
+          <ImportModal
+            accountFilter={step.src}
+            onClose={()=>skipSource(step.src)}
+            onFlowDone={res => { setResults(r => ({ ...r, [step.src]: res })); next() }}
+          />
+        ) : (
+          <PaypalImportModal
+            onClose={()=>{
+              // se non è stato importato niente, salta anche la schermata esito
+              setStepIdx(i => ppImportedRef.current ? i + 1 : i + 2)
+            }}
+            onImport={(items)=>{
+              const res = applyPaypalImport(items, { paypalImports: appPrefs?.paypalImports || [], transactions, updateTransaction, setAppPref })
+              setResults(r => ({ ...r, paypal: res }))
+              ppImportedRef.current = true
+            }}
+            transactions={transactions}
+            apiKey={apiKey}
+            paypalImports={appPrefs?.paypalImports || []}
+          />
+        )}
+        {rulePopup && (
+          <RuleApplyPopup
+            tx={rulePopup.tx} match={rulePopup.match} newDesc={rulePopup.newDesc}
+            txId={rulePopup.tx.txId} txDate={rulePopup.tx._effDate || rulePopup.tx.date}
+            onApply={handleApplyRule} onClose={()=>setRulePopup(null)}
+          />
+        )}
+      </>
     )
   }
 
@@ -565,16 +890,26 @@ export default function ImportWizard({ onClose }) {
     <div style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.55)',backdropFilter:'blur(3px)',
       display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
       onClick={e => e.target === e.currentTarget && !queue && onClose()}>
-      <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 28px',width:'100%',maxWidth:980,
-        maxHeight:'92vh',overflowY:'auto',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+      {/* Frame uniforme — dimensione FISSA per tutti gli step "nativi" del wizard
+          (richiesta utente 2026-07-13, punto 3: "fai un grande e uniforme...
+          facendo next scambia pagina, ma non grandezza o UI"): solo il contenuto
+          scorre (area interna flex:1 con overflow), l'header e lo stepper restano
+          sempre nella stessa posizione. */}
+      <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 28px',
+        width:900,height:'82vh',maxWidth:'96vw',maxHeight:'92vh',
+        display:'flex',flexDirection:'column',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
         <button onClick={onClose} title="Chiudi il wizard"
           style={{position:'absolute',top:14,right:16,background:'none',border:'none',cursor:'pointer',
             fontSize:18,color:'var(--text3)'}}>✕</button>
 
-        <div style={{fontSize:18,fontWeight:800,marginBottom:2}}>📥 Importa</div>
-        <div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>
+        <div style={{fontSize:18,fontWeight:800,marginBottom:2,flexShrink:0}}>📥 Importa</div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:16,flexShrink:0}}>
           Import unificato: conto, carte e PayPal in un unico flusso guidato, con rifinitura e compensazioni.
         </div>
+
+        {queue && step && <StepProgress/>}
+
+        <div style={{flex:1,overflowY:'auto',minHeight:0}}>
 
         {/* ── Selezione sorgenti ── */}
         {!queue && (
@@ -604,42 +939,6 @@ export default function ImportWizard({ onClose }) {
               Avvia importazione →
             </button>
           </>
-        )}
-
-        {queue && step && <StepChips/>}
-
-        {/* ── Import conto/carta: riusa ImportModal (pipeline completa) ── */}
-        {step && step.id === 'import' && step.src !== 'paypal' && (
-          <>
-            <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>{SRC_LABEL[step.src]}</div>
-            <div style={{fontSize:12,color:'var(--text3)',marginBottom:8}}>
-              Si apre il modulo di importazione — al termine (CSV → Salvataggio → AI Gemini → Regole) il wizard
-              prosegue da solo con le schermate di rifinitura. Chiudendo il modulo la sorgente viene saltata.
-            </div>
-            <ImportModal
-              accountFilter={step.src}
-              onClose={()=>skipSource(step.src)}
-              onFlowDone={res => { setResults(r => ({ ...r, [step.src]: res })); next() }}
-            />
-          </>
-        )}
-
-        {/* ── Import PayPal: riusa PaypalImportModal ── */}
-        {step && step.id === 'import' && step.src === 'paypal' && (
-          <PaypalImportModal
-            onClose={()=>{
-              // se non è stato importato niente, salta anche la schermata esito
-              setStepIdx(i => ppImportedRef.current ? i + 1 : i + 2)
-            }}
-            onImport={(items)=>{
-              const res = applyPaypalImport(items, { paypalImports: appPrefs?.paypalImports || [], transactions, updateTransaction, setAppPref })
-              setResults(r => ({ ...r, paypal: res }))
-              ppImportedRef.current = true
-            }}
-            transactions={transactions}
-            apiKey={apiKey}
-            paypalImports={appPrefs?.paypalImports || []}
-          />
         )}
 
         {/* ── Rifinitura (a/b): 3 schermate per sorgente ── */}
@@ -713,12 +1012,24 @@ export default function ImportWizard({ onClose }) {
           )
         })()}
 
-        {/* ── Compensazioni (d) ── */}
         {/* ── Vacanze: competenza/collegamento per le prenotazioni importate ── */}
         {step && step.id === 'vacanze' && (
           <VacanzeStep importedIdSet={importedIdSet} onNext={next} />
         )}
 
+        {/* ── Vacanze/weekend candidate, fuori periodo, non allocate — limitate al
+            periodo di QUESTO import (richiesta utente 2026-07-13, punto 2) ── */}
+        {step && step.id === 'vac-candidates' && (
+          <VacCandidatesStep minDate={vacMinDate} maxDate={vacMaxDate} onNext={next} />
+        )}
+        {step && step.id === 'vac-fuori' && (
+          <VacFuoriPeriodoStep minDate={vacMinDate} maxDate={vacMaxDate} onNext={next} />
+        )}
+        {step && step.id === 'vac-nonalloc' && (
+          <VacNonAllocateStep minDate={vacMinDate} maxDate={vacMaxDate} onNext={next} />
+        )}
+
+        {/* ── Compensazioni (d) ── */}
         {step && step.id === 'compensazioni' && (
           <>
             <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🔗 Compensazioni</div>
@@ -854,6 +1165,7 @@ export default function ImportWizard({ onClose }) {
             </button>
           </>
         )}
+        </div>
 
         {/* Popup regola (identico allo sheet Transazioni) */}
         {rulePopup && (

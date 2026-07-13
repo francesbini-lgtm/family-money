@@ -41,7 +41,7 @@ function effDate(t) {
 // periodo dichiarato — è semplicemente successa "a casa" nel frattempo (es.
 // idraulico, bollette...). Confronto case-insensitive e "contains" in entrambe
 // le direzioni per tollerare varianti tipo "Como" vs "Como, Italia" (Places).
-function isHomeCityTx(t, homeCity) {
+export function isHomeCityTx(t, homeCity) {
   if (!t.city || !homeCity) return false
   const a = t.city.trim().toLowerCase()
   const b = homeCity.trim().toLowerCase()
@@ -51,7 +51,7 @@ function isHomeCityTx(t, homeCity) {
 
 // Normalizza una descrizione AI per il confronto nella lista "escludi sempre"
 // (appPrefs.wv2NeverAiDescs) — case-insensitive, spazi ai bordi ignorati.
-function normDesc(s) {
+export function normDesc(s) {
   return (s || '').trim().toLowerCase()
 }
 
