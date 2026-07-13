@@ -1,3 +1,5 @@
+import { netAmt } from './compensation'
+
 // ── Regole di riassegnazione automatica "Weekend e Vacanze" ────────────────
 // Usato da bulkApplyRules/applySingleRule (useStore.js), dall'AI Enrichment
 // overlay (TransactionsPage.jsx, import CSV), da CalendarioPage.jsx e dalla
@@ -217,6 +219,11 @@ export function computeCandidateVacations(transactions, declaredVacations = [], 
   const dayCity = {}
   ;(transactions || []).forEach(t => {
     if (t.excluded || t.cat1 !== 'Weekend e Vacanze') return
+    // Spesa interamente compensata (es. Airbnb/Booking rimborsati, importo netto
+    // zero) — non è più una spesa "vacanza" vera, non deve generare né alimentare
+    // una candidata (richiesta utente 2026-07-13: "sono state compensate e vanno
+    // a zero, quindi qui non devono esserci")
+    if (Math.abs(netAmt(t)) < 0.005) return
     const d = t._effDate || t.date
     if (!d || notSet.has(d) || isCovered(d)) return
     const c = t.city && t.city !== 'null' ? t.city : null

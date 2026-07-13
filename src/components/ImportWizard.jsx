@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore'
 import { getMergedCats } from '../data/categories'
 import { fmtIT } from '../utils/format'
 import { showToast } from '../services/notifications'
-import { isCompensated, compensateGroup } from '../data/compensation'
+import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
@@ -514,6 +514,9 @@ function VacFuoriPeriodoStep({ importedIdSet, onNext, embedded, registerUndo }) 
   const rows = useMemo(() => transactions.filter(t => {
     if (!importedIdSet.has(t.txId)) return false
     if (t.excluded || t.amount >= 0 || t.cat1 !== 'Weekend e Vacanze' || handled[t.txId]) return false
+    // Spesa interamente compensata (rimborsata, importo netto zero) — non è più
+    // una spesa vacanza vera, stesso fix di WeekendVacanzeV2Page (richiesta utente 2026-07-13)
+    if (Math.abs(netAmt(t)) < 0.005) return false
     const d = t.competenza || t.date
     if (!d) return false
     return !findVacationForDate(d, vacations)
@@ -608,6 +611,7 @@ function VacNonAllocateStep({ importedIdSet, onNext, embedded, registerUndo }) {
   const rows = useMemo(() => transactions.map(t => {
     if (!importedIdSet.has(t.txId)) return null
     if (t.excluded || t.amount >= 0 || t.cat1 === 'Weekend e Vacanze' || handled[t.txId]) return null
+    if (Math.abs(netAmt(t)) < 0.005) return null
     if (reviewDismissed[t.txId] || isHomeCityTx(t, homeCity)) return null
     if (neverAiDescsSet.has(normDesc(t.descAI || t.description))) return null
     const d = t.competenza || t.date

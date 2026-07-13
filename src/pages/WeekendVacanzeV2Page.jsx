@@ -4,6 +4,7 @@ import { Plus, Trash2, Search, Check, X as XIcon, ChevronDown, ChevronRight, Set
 import { fmtIT } from '../utils/format'
 import Modal from '../components/Modal'
 import { getMergedCats } from '../data/categories'
+import { netAmt } from '../data/compensation'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
 import {
   vacationTotalCost, allDatesBetween, vacationType,
@@ -892,9 +893,13 @@ export default function WeekendVacanzeV2Page() {
   }, [appPrefs])
 
   // KPI "Fuori periodo": spese Weekend e Vacanze non coperte da NESSUNA vacanza dichiarata
+  // — esclude anche le spese interamente compensate (rimborsate, importo netto zero:
+  // netAmt() da src/data/compensation.js, es. Airbnb/Booking rimborsati) perché non
+  // sono più "spese vacanza" vere (richiesta utente 2026-07-13)
   const fuoriTxs = useMemo(() =>
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 === 'Weekend e Vacanze' &&
+        Math.abs(netAmt(t)) > 0.005 &&
         !findVacationForDate(effDate(t), vacations))
       .sort((a, b) => (effDate(b) || '').localeCompare(effDate(a) || ''))
   , [transactions, vacations])
@@ -914,6 +919,7 @@ export default function WeekendVacanzeV2Page() {
   const reviewRows = useMemo(() =>
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' &&
+        Math.abs(netAmt(t)) > 0.005 &&
         !reviewDismissed[t.txId] && !isHomeCityTx(t, homeCity) &&
         !neverAiDescsSet.has(normDesc(t.descAI || t.description)))
       .map(t => {
