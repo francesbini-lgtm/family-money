@@ -6,7 +6,7 @@ import { uploadExpenseFiles, deleteExpenseFile } from '../services/storage'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, LabelList,
-  LineChart, Line, PieChart, Pie, Cell, Area, AreaChart
+  PieChart, Pie, Cell
 } from 'recharts'
 import { Plus, Trash2, Link } from 'lucide-react'
 import './VeicoliRegistroPage.css'
@@ -849,17 +849,24 @@ function VehicleCharts({ vehicles, allRows = [] }) {
     value: Math.round(nonFuelRows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
   })).filter(x=>x.value>0)
 
-  // ── Chart 3: Costo per veicolo donut (escluso carburante) ──
+  // ── Chart 3: Costo per veicolo donut (escluso carburante, MEDIA ANNUA) ──
+  // Richiesta utente 2026-07-13: mostrare la media annua, non il totale storico —
+  // divide per il numero di anni distinti presenti nei dati (non fuel), minimo 1.
+  const nonFuelYears = new Set(nonFuelRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))
+  const numYearsNonFuel = nonFuelYears.size || 1
   const vehTotals = vehicles.map((v,i)=>({
     name: v.name,
-    value: Math.round(nonFuelRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0)),
+    value: Math.round(nonFuelRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0) / numYearsNonFuel),
     color: VEH_COLORS[i%VEH_COLORS.length]
   })).filter(x=>x.value>0)
 
-  // ── Chart 4: Trend costi totali — area chart ──────────────
-  const trendData = last6.map(ym => ({
-    label: MONTHS_IT[parseInt(ym.slice(5))-1],
-    Totale: Math.round(allRows.filter(r=>(r.date||'').startsWith(ym)).reduce((s,r)=>s+r.amount,0))
+  // ── Chart 4: Totale costi veicoli per anno — istogramma, tutti gli anni presenti ──
+  // Richiesta utente 2026-07-13: sostituito il trend a 6 mesi con un istogramma
+  // annuale che copre TUTTI gli anni trovati nei dati (non solo gli ultimi).
+  const yearsAll = [...new Set(allRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))].sort()
+  const trendData = yearsAll.map(y => ({
+    year: y,
+    Totale: Math.round(allRows.filter(r=>(r.date||'').startsWith(y)).reduce((s,r)=>s+r.amount,0))
   }))
 
   const DONUT_COLORS = ['#c8622a','#2a5c8a','#2a7a4a','#b8942a','#9b59b6','#2a9aa0','#e74c3c','#1abc9c']
@@ -922,28 +929,25 @@ function VehicleCharts({ vehicles, allRows = [] }) {
         </div>
       </ChartCard>
 
-      {/* 2 — Trend costi totali (area) */}
+      {/* 2 — Totale costi veicoli per anno (istogramma, tutti gli anni presenti) */}
       <ChartCard title="📈 Trend Costi Totali">
         <ResponsiveContainer width="100%" height={190}>
-          <AreaChart data={trendData} margin={{top:4,right:4,bottom:0,left:0}}>
-            <defs>
-              <linearGradient id="vehGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#c8622a" stopOpacity={0.25}/>
-                <stop offset="95%" stopColor="#c8622a" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
+          <BarChart data={trendData} margin={{top:20,right:4,bottom:0,left:0}}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-            <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+            <XAxis dataKey="year" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
             <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={48} tickFormatter={v=>`€${v}`}/>
             <Tooltip formatter={v=>[`€ ${fmtIT(Math.round(v),0)}`,'Totale']} contentStyle={CHART_TOOLTIP}/>
-            <Area type="monotone" dataKey="Totale" stroke="#c8622a" strokeWidth={2.5}
-              fill="url(#vehGrad)" dot={{r:3,fill:'#c8622a'}} activeDot={{r:5}}/>
-          </AreaChart>
+            <Bar dataKey="Totale" fill="#c8622a" radius={[4,4,0,0]}>
+              <LabelList dataKey="Totale" position="top"
+                formatter={v=>v>0?`€${fmtIT(Math.round(v),0)}`:''}
+                style={{fontSize:9,fill:'var(--text2)',fontFamily:'var(--font-mono)'}}/>
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* 3 — Costo per Veicolo donut (escluso carburante) */}
-      <ChartCard title="🚗 Costo per Veicolo (escluso carburante)">
+      {/* 3 — Costo per Veicolo donut (media annua, escluso carburante) */}
+      <ChartCard title="🚗 Costo per Veicolo (media annua, escluso carburante)">
         {vehTotals.length === 0
           ? empty
           : <>
@@ -1676,10 +1680,12 @@ export default function VeicoliRegistroPage() {
       cat: e.cat || '—', vehicleId: e.vehicleId || '',
       amount: e.amount || 0, id: e.id,
     }))
-    // Always include Carburante bank txs + any other vehCatFilters matches
+    // Always include Carburante e Parcheggio bank txs (indipendentemente dai filtri
+    // configurabili, come richiesto — "metti anche il parcheggio" nel grafico Costi
+    // per Categoria) + qualunque altro match dei vehCatFilters personalizzati
     const autoRows = transactions
       .filter(t => !t.excluded && t.amount < 0 && (
-        (t.cat1 === 'Veicoli' && t.cat2 === 'Carburante') ||
+        (t.cat1 === 'Veicoli' && (t.cat2 === 'Carburante' || t.cat2 === 'Parcheggio')) ||
         vehCatFiltersPage.some(f => t.cat1 === f.cat1 && t.cat2 === f.cat2)
       ))
       .map(t => ({
