@@ -337,7 +337,7 @@ function VacanzaBookingRow({ t, vacations, onConfirm, onSkip }) {
   )
 }
 
-function VacanzeStep({ importedIdSet, onNext }) {
+function VacanzeStep({ importedIdSet, onNext, embedded, registerUndo }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
   const appPrefs          = useStore(s => s.appPrefs)
@@ -355,9 +355,12 @@ function VacanzeStep({ importedIdSet, onNext }) {
   , [transactions, importedIdSet, handled, merchants])
 
   function confirm(t, { competenza, vacId, nv }) {
+    const prev = { competenza: t.competenza ?? null, _effDate: t._effDate ?? null, cat1: t.cat1 ?? null, cat2: t.cat2 ?? null, flagCompetenza: t.flagCompetenza ?? false }
     let vac = vacations.find(v => String(v.id) === vacId) || null
+    let createdId = null
     if (vacId === '__new__') {
       vac = { id: Date.now(), name: nv.name.trim(), city: nv.name.trim(), from: nv.from, to: nv.to }
+      createdId = vac.id
       setAppPref('calendarVacations', [...vacations, vac])
     }
     const nights = vac ? Math.max(0, Math.round((new Date(vac.to) - new Date(vac.from)) / 86400000)) : 0
@@ -369,6 +372,14 @@ function VacanzeStep({ importedIdSet, onNext }) {
     })
     setHandled(h => ({ ...h, [t.txId]: true }))
     showToast(vac ? `✅ Collegata a "${vac.city || vac.name}"` : '✅ Competenza aggiornata', 'success')
+    registerUndo?.(vac ? `Collegata a "${vac.city || vac.name}"` : 'Competenza aggiornata', () => {
+      updateTransaction(t.txId, prev)
+      if (createdId) {
+        const cur = useStore.getState().appPrefs?.calendarVacations || []
+        setAppPref('calendarVacations', cur.filter(v => v.id !== createdId))
+      }
+      setHandled(h => { const n = { ...h }; delete n[t.txId]; return n })
+    })
   }
 
   return (
@@ -380,77 +391,85 @@ function VacanzeStep({ importedIdSet, onNext }) {
         I merchant si configurano con ⚙️ in Weekend e Vacanze.
       </div>
       {rows.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
           ✅ Nessuna prenotazione vacanze in questo import
         </div>
       ) : (
-        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <div>
           {rows.map(t => (
             <VacanzaBookingRow key={t.txId} t={t} vacations={vacations}
               onConfirm={confirm} onSkip={tx => setHandled(h => ({ ...h, [tx.txId]: true }))} />
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
-          Avanti →
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+            Avanti →
+          </button>
+        </div>
+      )}
     </>
   )
 }
 
-// ── 3 nuovi step di revisione vacanze, tutti limitati al periodo effettivamente
-// importato in QUESTO flusso (minDate/maxDate, non tutto lo storico) — richiesta
-// utente 2026-07-13, punto 2: dopo l'import, il wizard chiede "hai fatto vacanze
-// in questo periodo?" (stessa logica "Da confermare" di Weekend e Vacanze v2),
-// poi mostra le spese "fuori periodo" e quelle "non allocate" relative allo
-// stesso intervallo — nessuna logica nuova, riusa le funzioni condivise già
-// esistenti in data/vacationRules.js e gli stessi appPrefs di WeekendVacanzeV2Page,
-// quindi tutto resta sincronizzato con quella pagina.
+// ── 3 sezioni di revisione vacanze, tutte limitate ESCLUSIVAMENTE alle
+// transazioni effettivamente importate in QUESTO flusso (importedIdSet, non un
+// range di date — richiesta utente 2026-07-13 punto 2: "deve essere SOLO sulla
+// base delle transazioni caricate", corretto un bug per cui un confronto sul
+// range di date pescava anche transazioni non importate ora ma con la stessa
+// data). Insieme a VacanzeStep (prenotazioni) sopra, sono le 4 sezioni del
+// mega-step "🏖️ Vacanze" (richiesta utente 2026-07-13 punto 1), mostrate tutte
+// nella stessa pagina invece che come 4 step separati — nessuna logica nuova,
+// riusa le funzioni condivise già esistenti in data/vacationRules.js e gli
+// stessi appPrefs di WeekendVacanzeV2Page, quindi tutto resta sincronizzato
+// con quella pagina.
 
-function overlapsRange(from, to, minDate, maxDate) {
-  if (!minDate || !maxDate) return true
-  return to >= minDate && from <= maxDate
-}
-
-// ── 2a. Vacanze/weekend candidate rilevate nel periodo importato ───────────
-function VacCandidatesStep({ minDate, maxDate, onNext }) {
+// ── 2a. Vacanze/weekend candidate rilevate SOLO tra le transazioni importate ──
+function VacCandidatesStep({ importedIdSet, onNext, embedded, registerUndo }) {
   const transactions = useStore(s => s.transactions)
-  const appPrefs      = useStore(s => s.appPrefs)
-  const { vacations, add: addVacation } = useVacations()
-  const { notVacationDates, mark } = useNotVacationDates()
+  const { vacations, add: addVacation, remove: removeVacation } = useVacations()
+  const { notVacationDates, mark, unmark } = useNotVacationDates()
   const [resolved, setResolved] = useState({}) // { candId: true }
 
   const candidates = useMemo(() => {
-    const all = computeCandidateVacations(transactions, vacations, notVacationDates)
-    return all.filter(c => (c.city || '').trim() && !resolved[c.id] && overlapsRange(c.from, c.to, minDate, maxDate))
-  }, [transactions, vacations, notVacationDates, resolved, minDate, maxDate])
+    const importedTx = transactions.filter(t => importedIdSet.has(t.txId))
+    const all = computeCandidateVacations(importedTx, vacations, notVacationDates)
+    return all.filter(c => (c.city || '').trim() && !resolved[c.id])
+  }, [transactions, vacations, notVacationDates, resolved, importedIdSet])
 
   function confirm(c) {
-    addVacation({ name: c.city, city: c.city, from: c.from, to: c.to })
+    const rec = addVacation({ name: c.city, city: c.city, from: c.from, to: c.to })
     setResolved(r => ({ ...r, [c.id]: true }))
     showToast(`✅ "${c.city}" confermata come vacanza`, 'success')
+    registerUndo?.(`"${c.city}" confermata come vacanza`, () => {
+      removeVacation(rec.id)
+      setResolved(r => { const n = { ...r }; delete n[c.id]; return n })
+    })
   }
   function ignore(c) {
     mark(c.dates)
     setResolved(r => ({ ...r, [c.id]: true }))
+    registerUndo?.(`"${c.city}" ignorata`, () => {
+      unmark(c.dates)
+      setResolved(r => { const n = { ...r }; delete n[c.id]; return n })
+    })
   }
 
   return (
     <>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>🔍 Vacanze e weekend trovati in questo import ({candidates.length})</div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        Nei dati appena importati il sistema ha rilevato questi possibili periodi di vacanza/weekend (spese categorizzate
-        "Weekend e Vacanze" raggruppate per data e località). Conferma quelli che lo sono davvero, oppure ignora gli altri —
-        stessa logica del pannello "Da confermare" in Weekend e Vacanze.
+        Tra le spese appena importate il sistema ha rilevato questi possibili periodi di vacanza/weekend (spese
+        categorizzate "Weekend e Vacanze" raggruppate per data e località). Conferma quelli che lo sono davvero,
+        oppure ignora gli altri — stessa logica del pannello "Da confermare" in Weekend e Vacanze.
       </div>
       {candidates.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
-          ✅ Nessuna vacanza/weekend da confermare in questo periodo
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
+          ✅ Nessuna vacanza/weekend da confermare in questo import
         </div>
       ) : (
-        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <div>
           {candidates.map(c => (
             <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
@@ -474,28 +493,31 @@ function VacCandidatesStep({ minDate, maxDate, onNext }) {
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
-          Avanti →
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+            Avanti →
+          </button>
+        </div>
+      )}
     </>
   )
 }
 
-// ── 2b. Spese "Weekend e Vacanze" fuori da ogni periodo dichiarato, nel periodo importato ──
-function VacFuoriPeriodoStep({ minDate, maxDate, onNext }) {
+// ── 2b. Spese "Weekend e Vacanze" IMPORTATE ORA e fuori da ogni periodo dichiarato ──
+function VacFuoriPeriodoStep({ importedIdSet, onNext, embedded, registerUndo }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
-  const { vacations, add: addVacation } = useVacations()
+  const { vacations } = useVacations()
   const [handled, setHandled] = useState({})
 
   const rows = useMemo(() => transactions.filter(t => {
+    if (!importedIdSet.has(t.txId)) return false
     if (t.excluded || t.amount >= 0 || t.cat1 !== 'Weekend e Vacanze' || handled[t.txId]) return false
     const d = t.competenza || t.date
-    if (!d || !overlapsRange(d, d, minDate, maxDate)) return false
+    if (!d) return false
     return !findVacationForDate(d, vacations)
-  }), [transactions, vacations, handled, minDate, maxDate])
+  }), [transactions, vacations, handled, importedIdSet])
 
   // Stessa logica di assignTo() in WeekendVacanzeV2Page: la spesa si allinea al
   // periodo scelto (competenza = primo giorno se fuori dal range) e la L2 si
@@ -503,6 +525,7 @@ function VacFuoriPeriodoStep({ minDate, maxDate, onNext }) {
   function assignTo(t, vacId) {
     const v = vacations.find(x => String(x.id) === String(vacId))
     if (!v) return
+    const prev = { competenza: t.competenza ?? null, _effDate: t._effDate ?? null, cat2: t.cat2 ?? null }
     const inRange = t.date >= v.from && t.date <= v.to
     updateTransaction(t.txId, {
       competenza: inRange ? (v.from === t.date ? null : t.competenza) : v.from,
@@ -510,21 +533,26 @@ function VacFuoriPeriodoStep({ minDate, maxDate, onNext }) {
       cat2: vacationType(v, transactions),
     })
     setHandled(h => ({ ...h, [t.txId]: true }))
+    registerUndo?.(`Assegnata a "${v.city || v.name}"`, () => {
+      updateTransaction(t.txId, prev)
+      setHandled(h => { const n = { ...h }; delete n[t.txId]; return n })
+    })
   }
 
   return (
     <>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>📆 Spese fuori periodo in questo import ({rows.length})</div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        Spese categorizzate "Weekend e Vacanze" la cui data non cade in nessuna vacanza dichiarata — assegnale a un
-        periodo esistente (anche appena confermato) o lasciale così per sistemarle più avanti da Weekend e Vacanze.
+        Tra le spese appena importate, quelle categorizzate "Weekend e Vacanze" la cui data non cade in nessuna
+        vacanza dichiarata — assegnale a un periodo esistente (anche appena confermato) o lasciale così per
+        sistemarle più avanti da Weekend e Vacanze.
       </div>
       {rows.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
           ✅ Nessuna spesa fuori periodo in questo import
         </div>
       ) : (
-        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <div>
           {rows.map(t => (
             <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
@@ -548,20 +576,22 @@ function VacFuoriPeriodoStep({ minDate, maxDate, onNext }) {
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
-          Avanti →
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+            Avanti →
+          </button>
+        </div>
+      )}
     </>
   )
 }
 
-// ── 2c. Spese avvenute dentro un periodo dichiarato ma NON allocate a "Weekend
-// e Vacanze", nel periodo importato — stesso identico criterio di ToReviewModal
+// ── 2c. Spese IMPORTATE ORA, avvenute dentro un periodo dichiarato ma NON
+// allocate a "Weekend e Vacanze" — stesso identico criterio di ToReviewModal
 // in WeekendVacanzeV2Page (rispetta wv2ReviewDismissed, homeCity, wv2NeverAiDescs
 // così le decisioni prese qui restano coerenti con quella pagina) ──
-function VacNonAllocateStep({ minDate, maxDate, onNext }) {
+function VacNonAllocateStep({ importedIdSet, onNext, embedded, registerUndo }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
   const appPrefs          = useStore(s => s.appPrefs)
@@ -576,38 +606,51 @@ function VacNonAllocateStep({ minDate, maxDate, onNext }) {
   const [handled, setHandled] = useState({})
 
   const rows = useMemo(() => transactions.map(t => {
+    if (!importedIdSet.has(t.txId)) return null
     if (t.excluded || t.amount >= 0 || t.cat1 === 'Weekend e Vacanze' || handled[t.txId]) return null
     if (reviewDismissed[t.txId] || isHomeCityTx(t, homeCity)) return null
     if (neverAiDescsSet.has(normDesc(t.descAI || t.description))) return null
     const d = t.competenza || t.date
-    if (!d || !overlapsRange(d, d, minDate, maxDate)) return null
+    if (!d) return null
     const vac = findVacationForDate(d, vacations)
     if (!vac) return null
     return { t, vac, vacType: vacationType(vac, transactions) }
-  }).filter(Boolean), [transactions, vacations, reviewDismissed, homeCity, neverAiDescsSet, handled, minDate, maxDate])
+  }).filter(Boolean), [transactions, vacations, reviewDismissed, homeCity, neverAiDescsSet, handled, importedIdSet])
 
   function confirm(row) {
+    const prev = { cat1: row.t.cat1 ?? null, cat2: row.t.cat2 ?? null, userEditedCat: row.t.userEditedCat ?? false }
     updateTransaction(row.t.txId, { cat1: 'Weekend e Vacanze', cat2: row.vacType, userEditedCat: true })
     setHandled(h => ({ ...h, [row.t.txId]: true }))
+    registerUndo?.('Spesa assegnata alla vacanza', () => {
+      updateTransaction(row.t.txId, prev)
+      setHandled(h => { const n = { ...h }; delete n[row.t.txId]; return n })
+    })
   }
   function dismiss(row) {
     setAppPref('wv2ReviewDismissed', { ...reviewDismissed, [row.t.txId]: true })
     setHandled(h => ({ ...h, [row.t.txId]: true }))
+    registerUndo?.('Spesa esclusa dalla vacanza', () => {
+      const cur = useStore.getState().appPrefs?.wv2ReviewDismissed || {}
+      const n = { ...cur }; delete n[row.t.txId]
+      setAppPref('wv2ReviewDismissed', n)
+      setHandled(h => { const n2 = { ...h }; delete n2[row.t.txId]; return n2 })
+    })
   }
 
   return (
     <>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>🚩 Spese non allocate in questo import ({rows.length})</div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        Spese avvenute durante una vacanza/weekend dichiarata ma categorizzate altrove — con ✅ passano a
-        "Weekend e Vacanze", con ✕ non verranno più riproposte (né qui né nella pagina Weekend e Vacanze).
+        Tra le spese appena importate, quelle avvenute durante una vacanza/weekend dichiarata ma categorizzate
+        altrove — con ✅ passano a "Weekend e Vacanze", con ✕ non verranno più riproposte (né qui né nella pagina
+        Weekend e Vacanze).
       </div>
       {rows.length === 0 ? (
-        <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
           ✅ Nessuna spesa non allocata in questo import
         </div>
       ) : (
-        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+        <div>
           {rows.map(({ t, vac, vacType }) => (
             <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
@@ -633,14 +676,145 @@ function VacNonAllocateStep({ minDate, maxDate, onNext }) {
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-        <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
-          Avanti →
-        </button>
+      {!embedded && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+            Avanti →
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── Mega-step "🏖️ Vacanze" (richiesta utente 2026-07-13, punto 1): le 4
+// sezioni sopra mostrate tutte insieme in UNA pagina, con un'unica barra di
+// navigazione in fondo — posizionato dopo "Compensazioni" nella coda (prima
+// era prima, subito dopo l'import) ──
+function VacanzeMegaStep({ importedIdSet, vacMinDate, vacMaxDate, registerUndo }) {
+  return (
+    <>
+      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>🏖️ Vacanze</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>
+        Tutta la revisione vacanze relativa a QUESTO import in un'unica pagina: prenotazioni da collegare, nuove
+        vacanze/weekend da confermare, spese fuori periodo e spese non ancora allocate.
+      </div>
+      {vacMinDate && vacMaxDate && (
+        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 14 }}>
+          📅 Periodo di questo import: <strong>{fmtDate(vacMinDate)} – {fmtDate(vacMaxDate)}</strong>
+          {' '}(range più ampio tra le sorgenti caricate)
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <VacanzeStep importedIdSet={importedIdSet} embedded registerUndo={registerUndo} />
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <VacCandidatesStep importedIdSet={importedIdSet} embedded registerUndo={registerUndo} />
+        </div>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <VacFuoriPeriodoStep importedIdSet={importedIdSet} embedded registerUndo={registerUndo} />
+        </div>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <VacNonAllocateStep importedIdSet={importedIdSet} embedded registerUndo={registerUndo} />
+        </div>
       </div>
     </>
   )
 }
+
+// ── Step "Doppioni" (richiesta utente 2026-07-13, punto 4): dopo la rifinitura
+// di ciascuna sorgente (conto/carta), verifica se le transazioni appena lette
+// dal CSV duplicano qualcosa GIÀ nel DB della STESSA categoria (conto contro
+// conto, carta contro carta — mai incrociate) con data e descrizione originale
+// IDENTICHE (non simile/fuzzy) — un controllo più severo e visibile di quello
+// automatico e silenzioso già fatto da addTransactions() in fase di salvataggio
+// (che invece confronta data+importo+prime 60 char della descrizione, e scarta
+// senza mostrare nulla). Qui l'utente vede ogni possibile doppione e decide.
+function findDuplicatesForSource(src, srcTxs, allTransactions) {
+  const isCarta = t => !!t.cardImportCard4
+  const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
+  const srcIds = new Set(srcTxs.map(t => t.txId))
+  const dbPool = allTransactions.filter(t => !srcIds.has(t.txId) && !t.excluded && sameCategory(t))
+  return srcTxs.filter(t => !t.excluded).map(t => {
+    const origDesc = (t.description || '').trim()
+    if (!origDesc) return null
+    const match = dbPool.find(e => e.date === t.date && (e.description || '').trim() === origDesc)
+    return match ? { t, match } : null
+  }).filter(Boolean)
+}
+
+function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
+  const transactions      = useStore(s => s.transactions)
+  const deleteTransaction = useStore(s => s.deleteTransaction)
+  const [handled, setHandled] = useState({})
+
+  const dupes = useMemo(
+    () => findDuplicatesForSource(src, srcTxs, transactions).filter(d => !handled[d.t.txId]),
+    [src, srcTxs, transactions, handled]
+  )
+
+  function removeDupe(d) {
+    deleteTransaction(d.t.txId)
+    setHandled(h => ({ ...h, [d.t.txId]: true }))
+    registerUndo?.('Doppione eliminato', () => useStore.getState().undoLastTx?.())
+  }
+  function keepBoth(d) {
+    setHandled(h => ({ ...h, [d.t.txId]: true }))
+  }
+
+  return (
+    <>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>
+        🔁 Possibili doppioni — {SRC_LABEL_MAP[src]} ({dupes.length})
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        Transazioni appena lette dal CSV con la STESSA data e la STESSA descrizione originale (esatta, non simile)
+        di una transazione già presente nel database, nella stessa categoria ({src === 'carta' ? 'carte contro carte' : 'conto contro conto'}).
+        Controllo più severo di quello automatico in import (che confronta anche l'importo e scarta senza chiedere).
+      </div>
+      {dupes.length === 0 ? (
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
+          ✅ Nessun doppione trovato in questo import
+        </div>
+      ) : (
+        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
+          {dupes.map(d => (
+            <div key={d.t.txId} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', marginBottom: 6 }}>
+                Nuova (dal CSV) vs già presente nel DB
+              </div>
+              {[['Importata ora', d.t], ['Già nel DB', d.match]].map(([label, tx]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, marginBottom: 3 }}>
+                  <span style={{ minWidth: 90, color: 'var(--text3)' }}>{label}:</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(tx.date)}</span>
+                  <span style={{ fontWeight: 700 }}>{tx.descAI || tx.description?.slice(0, 50)}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--red)' }}>−€ {fmtIT(Math.abs(tx.amount), 2)}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button onClick={() => removeDupe(d)}
+                  style={{ padding: '6px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  🗑️ Elimina doppione
+                </button>
+                <button onClick={() => keepBoth(d)}
+                  style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
+                  Non è un doppione, tieni entrambe
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!embedded && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+            Avanti →
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+const SRC_LABEL_MAP = { conto: '🏦 Conto corrente', carta: '💳 Carte di credito' }
 
 // ═══════════════════════════════ WIZARD ═════════════════════════════════════
 export default function ImportWizard({ onClose }) {
@@ -661,28 +835,63 @@ export default function ImportWizard({ onClose }) {
   // onClose (doImport), lo state non è ancora aggiornato — il ref sì.
   const ppImportedRef = useRef(false)
 
+  // ── Undo condiviso (richiesta utente 2026-07-13, punto 5): una singola barra
+  // in fondo alla pagina, valida per l'ultima azione fatta in QUALSIASI step —
+  // stesso pattern snackbar "Annulla" già usato in WeekendVacanzeV2Page, qui
+  // centralizzato invece di duplicato in ogni componente ──
+  const [wizUndo, setWizUndo] = useState(null) // { label, onUndo }
+  const undoTimerRef = useRef(null)
+  function registerUndo(label, onUndo) {
+    clearTimeout(undoTimerRef.current)
+    setWizUndo({ label, onUndo })
+    undoTimerRef.current = setTimeout(() => setWizUndo(null), 8000)
+  }
+  function doUndo() {
+    clearTimeout(undoTimerRef.current)
+    wizUndo?.onUndo?.()
+    setWizUndo(null)
+  }
+
   function buildQueue() {
     const q = []
+    // 'doppioni' (richiesta utente 2026-07-13, punto 4): subito dopo la rifinitura
+    // di ciascuna sorgente, verifica doppioni contro il DB della STESSA categoria
     if (sources.conto) q.push({ id:'import', src:'conto' },
-      { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' })
+      { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' },
+      { id:'doppioni', src:'conto' })
     if (sources.carta) q.push({ id:'import', src:'carta' },
-      { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
+      { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' },
+      { id:'doppioni', src:'carta' })
     if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
-    // 'vacanze': competenza/vacanza per le prenotazioni Booking/Airbnb/… importate
-    // 'vac-candidates'/'vac-fuori'/'vac-nonalloc' (richiesta utente 2026-07-13,
-    // punto 2): stessa revisione "Da confermare"/"Fuori periodo"/"Non allocate"
-    // di Weekend e Vacanze v2, ma limitata al periodo appena importato
+    // 'compensazioni' PRIMA di 'vacanze' (richiesta utente 2026-07-13, punto 1:
+    // spostare il mega-step Vacanze dopo Compensazioni)
+    // 'vacanze': mega-step con le 4 sezioni (prenotazioni, candidate, fuori
+    // periodo, non allocate), tutte limitate SOLO alle transazioni di questo import
     // 'review' (richiesta utente 2026-07-12): ultima pagina PRIMA dei KPI con
     // l'elenco completo delle transazioni importate in questo flusso
     q.push(
-      { id:'vacanze' }, { id:'vac-candidates' }, { id:'vac-fuori' }, { id:'vac-nonalloc' },
-      { id:'compensazioni' }, { id:'review' }, { id:'summary' }
+      { id:'compensazioni' }, { id:'vacanze' }, { id:'review' }, { id:'summary' }
     )
     return q
   }
 
   const step = queue ? queue[stepIdx] : null
-  function next() { setStepIdx(i => Math.min(i + 1, (queue?.length || 1) - 1)) }
+  function next() { setWizUndo(null); setStepIdx(i => Math.min(i + 1, (queue?.length || 1) - 1)) }
+  // Torna allo step nativo precedente, saltando eventuali step 'import' (che non
+  // vanno mai riattraversati all'indietro — richiederebbero un nuovo import CSV,
+  // non hanno senso come "pagina precedente") — richiesta utente 2026-07-13, punto 5
+  function back() {
+    setWizUndo(null)
+    setStepIdx(i => {
+      for (let j = i - 1; j >= 0; j--) if (queue[j].id !== 'import') return j
+      return i
+    })
+  }
+  function canGoBack() {
+    if (!queue) return false
+    for (let j = stepIdx - 1; j >= 0; j--) if (queue[j].id !== 'import') return true
+    return false
+  }
 
   // Salta le schermate di rifinitura di una sorgente il cui import è stato
   // annullato/chiuso senza salvare nulla
@@ -701,17 +910,19 @@ export default function ImportWizard({ onClose }) {
   }
 
   // Tutti i txId importati in QUESTO flusso (conto + carte) — usati per limitare
-  // gli abbinamenti/compensazioni alle sole operazioni che c'entrano con questo
-  // import (richiesta utente 2026-07-12), non a tutto il pending storico
+  // gli abbinamenti/compensazioni/vacanze alle sole operazioni che c'entrano con
+  // questo import (richiesta utente 2026-07-12), non a tutto il pending storico
   const importedIdSet = useMemo(() => new Set([
     ...(results.conto?.savedTxIds || []),
     ...(results.carta?.savedTxIds || []),
   ]), [results])
 
-  // Intervallo di date effettivamente coperto da QUESTO import — usato dagli
-  // step vac-candidates/vac-fuori/vac-nonalloc per limitare la revisione al
-  // periodo appena caricato invece che a tutto lo storico (richiesta utente
-  // 2026-07-13, punto 2: "sempre all'interno del periodo caricato")
+  // Intervallo di date coperto da QUESTO import — SOLO informativo (mostrato nel
+  // mega-step Vacanze), il range più ampio tra le sorgenti caricate, es. conto
+  // 6/05–8/08 + carta 15/05–15/08 → periodo mostrato 6/05–15/08 (richiesta utente
+  // 2026-07-13, punto 3). Il filtro EFFETTIVO delle 4 sezioni vacanze usa
+  // importedIdSet (appartenenza reale alla transazione, non il range di date —
+  // punto 2, fix di un bug per cui comparivano transazioni non importate ora)
   const { vacMinDate, vacMaxDate } = useMemo(() => {
     const dates = transactions
       .filter(t => importedIdSet.has(t.txId))
@@ -802,22 +1013,20 @@ export default function ImportWizard({ onClose }) {
     const labels = []
     const seen = new Set()
     queue.forEach(s => {
-      const key = s.id === 'refine' ? `rifinisci-${s.src}` : s.id === 'import' ? `import-${s.src}` : s.id
+      const key = s.id === 'refine' ? `rifinisci-${s.src}` : s.id === 'import' ? `import-${s.src}` : s.id === 'doppioni' ? `doppioni-${s.src}` : s.id
       if (seen.has(key)) return
       seen.add(key)
       labels.push({ key, label:
         s.id === 'import' ? SRC_LABEL[s.src]
         : s.id === 'refine' ? `Rifinisci ${s.src}`
+        : s.id === 'doppioni' ? `Doppioni ${s.src}`
         : s.id === 'paypal-result' ? 'Esito PayPal'
-        : s.id === 'vacanze' ? 'Prenotazioni'
-        : s.id === 'vac-candidates' ? 'Vacanze trovate'
-        : s.id === 'vac-fuori' ? 'Fuori periodo'
-        : s.id === 'vac-nonalloc' ? 'Non allocate'
+        : s.id === 'vacanze' ? 'Vacanze'
         : s.id === 'compensazioni' ? 'Compensazioni'
         : s.id === 'review' ? 'Transazioni'
         : 'Riepilogo' })
     })
-    const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id
+    const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id === 'doppioni' ? `doppioni-${step.src}` : step.id
     const curIdx = labels.findIndex(l => l.key === curKey)
     return (
       <div style={{display:'flex',alignItems:'flex-start',marginBottom:18,overflowX:'auto',paddingBottom:2,flexShrink:0}}>
@@ -839,6 +1048,26 @@ export default function ImportWizard({ onClose }) {
             )}
           </Fragment>
         ))}
+      </div>
+    )
+  }
+
+  // Barra di navigazione condivisa: "← Indietro" (richiesta utente 2026-07-13,
+  // punto 5 — disabilitato quando non c'è un precedente step "nativo" a cui
+  // tornare, es. subito dopo un import CSV) + "Avanti →"/label custom
+  function StepNav({ nextLabel = 'Avanti →', onNextClick = next }) {
+    const canBack = canGoBack()
+    return (
+      <div style={{display:'flex',justifyContent:'space-between',marginTop:14}}>
+        <button onClick={back} disabled={!canBack}
+          style={{fontSize:13,padding:'8px 18px',fontWeight:700,borderRadius:8,cursor:canBack?'pointer':'default',
+            background:'transparent',border:'1px solid var(--border)',color:canBack?'var(--text)':'var(--text3)',
+            opacity:canBack?1:.5}}>
+          ← Indietro
+        </button>
+        <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={onNextClick}>
+          {nextLabel}
+        </button>
       </div>
     )
   }
@@ -958,11 +1187,16 @@ export default function ImportWizard({ onClose }) {
               onOpenRulePopup={setRulePopup}
               emptyMsg={KIND_LABEL[step.kind].empty}
             />
-            <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}>
-              <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={next}>
-                Avanti →
-              </button>
-            </div>
+            <StepNav/>
+          </>
+        )}
+
+        {/* ── Doppioni (richiesta utente 2026-07-13, punto 4): subito dopo la
+            rifinitura della sorgente, verifica contro il DB della stessa categoria ── */}
+        {step && step.id === 'doppioni' && (
+          <>
+            <DoppioniStep src={step.src} srcTxs={importedTxs(step.src)} embedded registerUndo={registerUndo} />
+            <StepNav/>
           </>
         )}
 
@@ -1003,31 +1237,10 @@ export default function ImportWizard({ onClose }) {
                   </div>
                 </>
               )}
-              <div style={{display:'flex',justifyContent:'flex-end'}}>
-                <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={next}>
-                  Avanti →
-                </button>
-              </div>
+              <StepNav/>
             </>
           )
         })()}
-
-        {/* ── Vacanze: competenza/collegamento per le prenotazioni importate ── */}
-        {step && step.id === 'vacanze' && (
-          <VacanzeStep importedIdSet={importedIdSet} onNext={next} />
-        )}
-
-        {/* ── Vacanze/weekend candidate, fuori periodo, non allocate — limitate al
-            periodo di QUESTO import (richiesta utente 2026-07-13, punto 2) ── */}
-        {step && step.id === 'vac-candidates' && (
-          <VacCandidatesStep minDate={vacMinDate} maxDate={vacMaxDate} onNext={next} />
-        )}
-        {step && step.id === 'vac-fuori' && (
-          <VacFuoriPeriodoStep minDate={vacMinDate} maxDate={vacMaxDate} onNext={next} />
-        )}
-        {step && step.id === 'vac-nonalloc' && (
-          <VacNonAllocateStep minDate={vacMinDate} maxDate={vacMaxDate} onNext={next} />
-        )}
 
         {/* ── Compensazioni (d) ── */}
         {step && step.id === 'compensazioni' && (
@@ -1051,11 +1264,18 @@ export default function ImportWizard({ onClose }) {
                 <CompDaConfermare txs={transactions.filter(t => !t.excluded && t.cardImportCard4)} scope="carte" incomeLabel="📥 Rimborso carta" limitTxIds={importedIdSet}/>
               </div>
             </div>
-            <div style={{display:'flex',justifyContent:'flex-end'}}>
-              <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={next}>
-                Avanti →
-              </button>
-            </div>
+            <StepNav/>
+          </>
+        )}
+
+        {/* ── Vacanze: mega-step con le 4 sezioni (prenotazioni, candidate, fuori
+            periodo, non allocate), DOPO Compensazioni (richiesta utente
+            2026-07-13, punto 1), tutte limitate SOLO alle transazioni di questo
+            import (punto 2) ── */}
+        {step && step.id === 'vacanze' && (
+          <>
+            <VacanzeMegaStep importedIdSet={importedIdSet} vacMinDate={vacMinDate} vacMaxDate={vacMaxDate} registerUndo={registerUndo} />
+            <StepNav/>
           </>
         )}
 
@@ -1120,11 +1340,7 @@ export default function ImportWizard({ onClose }) {
                   </table>
                 </div>
               )}
-              <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}>
-                <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={next}>
-                  Avanti →
-                </button>
-              </div>
+              <StepNav/>
             </>
           )
         })()}
@@ -1160,12 +1376,36 @@ export default function ImportWizard({ onClose }) {
               Ciò che richiede ancora un intervento si ritrova in: Accuracy (KPI qualità), Transazioni
               (filtro Non Categorizzato), PayPal/Carte (⏳ Da confermare), Satispay e Altre Entrate.
             </div>
-            <button className="btn btn-primary" style={{fontSize:14,padding:'9px 26px',fontWeight:700}} onClick={onClose}>
-              ✅ Fine
-            </button>
+            <div style={{display:'flex',justifyContent:'space-between'}}>
+              <button onClick={back} disabled={!canGoBack()}
+                style={{fontSize:13,padding:'8px 18px',fontWeight:700,borderRadius:8,cursor:canGoBack()?'pointer':'default',
+                  background:'transparent',border:'1px solid var(--border)',color:canGoBack()?'var(--text)':'var(--text3)',
+                  opacity:canGoBack()?1:.5}}>
+                ← Indietro
+              </button>
+              <button className="btn btn-primary" style={{fontSize:14,padding:'9px 26px',fontWeight:700}} onClick={onClose}>
+                ✅ Fine
+              </button>
+            </div>
           </>
         )}
         </div>
+
+        {/* ── Barra "↩️ Annulla" condivisa (richiesta utente 2026-07-13, punto 5) —
+            fuori dall'area scrollabile, sempre visibile in fondo al frame quando
+            c'è un'azione recente da poter annullare ── */}
+        {wizUndo && (
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,
+            padding:'8px 14px',marginTop:10,borderRadius:10,background:'var(--surface2)',
+            border:'1px solid var(--border)',flexShrink:0}}>
+            <span style={{fontSize:12,color:'var(--text3)'}}>↩️ {wizUndo.label}</span>
+            <button onClick={doUndo}
+              style={{fontSize:12,fontWeight:700,padding:'5px 14px',borderRadius:7,cursor:'pointer',
+                background:'var(--accent)',color:'#fff',border:'none'}}>
+              Annulla
+            </button>
+          </div>
+        )}
 
         {/* Popup regola (identico allo sheet Transazioni) */}
         {rulePopup && (
