@@ -136,7 +136,7 @@ function uid() { return Date.now().toString(36)+Math.random().toString(36).slice
 function VehicleModal({ vehicle, onClose }) {
   const { addVehicle, updateVehicle } = useStore()
   const [form, setForm] = useState(vehicle || {
-    name:'', targa:'', marca:'', anno:'', icon:'🚗',
+    name:'', targa:'', marca:'', anno:'', icon:'🚗', consumo:'',
     assicurazione:'', tagliando:'', revisione:'', bollo:''
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
@@ -155,6 +155,7 @@ function VehicleModal({ vehicle, onClose }) {
         <FormRow label="Targa"><Input value={form.targa} onChange={e=>set('targa',e.target.value.toUpperCase())} placeholder="AB123CD"/></FormRow>
         <FormRow label="Marca"><Input value={form.marca} onChange={e=>set('marca',e.target.value)} placeholder="BMW"/></FormRow>
         <FormRow label="Anno"><Input type="number" value={form.anno} onChange={e=>set('anno',e.target.value)} placeholder="2022"/></FormRow>
+        <FormRow label="Consumo (km/l)"><Input type="number" step="0.1" value={form.consumo||''} onChange={e=>set('consumo',e.target.value)} placeholder="es. 15"/></FormRow>
         <FormRow label="Icona">
           <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
             {VEH_ICONS.map(ic=>(

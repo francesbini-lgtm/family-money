@@ -132,8 +132,8 @@ function DestTypeSelect({ value, onSave }) {
 function VacationTxRow({ t, onDeleteRequest }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12, borderBottom: '1px solid var(--border)' }}>
-      <span style={{ color: 'var(--text3)', width: 60, flexShrink: 0 }}>{fmtDate(t._effDate || t.date)}</span>
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.descAI || t.description}</span>
+      <span style={{ color: 'var(--text3)', width: 76, flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtDate(t._effDate || t.date)}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{t.descAI || t.description}</span>
       <span style={{ fontWeight: 600, color: 'var(--text1)', flexShrink: 0 }}>€ {fmtIT(Math.abs(t.amount), 2)}</span>
       <button onClick={() => onDeleteRequest(t)} title="Togli dalla vacanza (richiede una nuova categoria)"
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -1201,6 +1201,51 @@ export default function WeekendVacanzeV2Page() {
     return tot / last5.length
   }, [last5, transactions])
 
+  // Costo medio al giorno (richiesta utente 2026-07-13: "costo medio fallo anche
+  // per anno e per giorno") — totale spesa / totale giorni, ultimi 5 anni.
+  const avgCostPerDay = useMemo(() => {
+    if (!last5.length) return 0
+    const totSpend = last5.reduce((s, v) => s + vacationTotalCost(transactions, v), 0)
+    const totDays  = last5.reduce((s, v) => s + nightsBetween(v.from, v.to) + 1, 0)
+    return totDays ? totSpend / totDays : 0
+  }, [last5, transactions])
+
+  // Costo medio per vacanza, spezzato per anno (0 se nessuna vacanza in quell'anno)
+  const avgCostByYear = useMemo(() => years5.map(y => {
+    const vacsY = last5.filter(v => String(getYear(v)) === y)
+    const tot = vacsY.reduce((s, v) => s + vacationTotalCost(transactions, v), 0)
+    return { year: y, Media: vacsY.length ? tot / vacsY.length : 0 }
+  }), [last5, years5, transactions])
+
+  // Top 4 vacanze più costose DI SEMPRE (tutto lo storico confermato, non solo
+  // gli ultimi 5 anni — a differenza degli altri KPI di questa card)
+  const top4Costliest = useMemo(() =>
+    confirmed
+      .map(v => ({ v, spend: vacationTotalCost(transactions, v) }))
+      .filter(x => x.spend > 0)
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 4)
+  , [confirmed, transactions])
+
+  // Nuove destinazioni per anno: una città conta come "nuova" solo la prima
+  // volta che appare in tutto lo storico (anche se antecedente agli ultimi 5
+  // anni mostrati nel grafico) — evita di contare come "nuova" una destinazione
+  // già visitata in passato solo perché fuori dalla finestra dei 5 anni.
+  const newPlacesData = useMemo(() => {
+    const seen = new Set()
+    const byY = {}
+    years5.forEach(y => { byY[y] = 0 })
+    const chron = [...confirmed].sort((a, b) => (a.from || '').localeCompare(b.from || ''))
+    chron.forEach(v => {
+      const key = (v.city || '').trim().toLowerCase()
+      if (!key || seen.has(key)) return
+      seen.add(key)
+      const yr = String(getYear(v))
+      if (byY[yr] !== undefined) byY[yr]++
+    })
+    return years5.map(y => ({ year: y, Nuovi: byY[y] }))
+  }, [confirmed, years5])
+
   const weekendCount = last5.filter(v => vacationType(v, transactions) === 'Weekend').length
   const vacanzeCount = last5.length - weekendCount
 
@@ -1356,6 +1401,31 @@ export default function WeekendVacanzeV2Page() {
             </ResponsiveContainer>
           </div>
 
+          <div style={{ minWidth: 180 }}>
+            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Nuove destinazioni per anno</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={newPlacesData} margin={{ top: 4, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: 'var(--text2)' }} axisLine={{ stroke: '#e0dcd8' }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={22} allowDecimals={false} />
+                <Tooltip formatter={value => [`${value} nuove`, 'Destinazioni']} />
+                <Bar dataKey="Nuovi" fill="#8b5cf6" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ minWidth: 180 }}>
+            <div className="uscite-chart-title" style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Costo medio a vacanza per anno</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={avgCostByYear} margin={{ top: 4, right: 6, left: 0, bottom: 0 }} barCategoryGap="28%">
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: 'var(--text2)' }} axisLine={{ stroke: '#e0dcd8' }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} axisLine={false} tickLine={false} width={32}
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
+                <Tooltip formatter={value => [`€ ${fmtIT(Math.round(value))}`, 'Media']} />
+                <Bar dataKey="Media" fill="#0d9488" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
           {pieData.length > 0 && (
             <div style={{ minWidth: 150 }}>
               <div style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700, marginBottom: 8 }}>Mare / Montagna / Città</div>
@@ -1368,14 +1438,37 @@ export default function WeekendVacanzeV2Page() {
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginLeft: 'auto' }}>
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 700, letterSpacing: '.04em' }}>COSTO MEDIO</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>€ {fmtIT(Math.round(avgCost))}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginLeft: 'auto', minWidth: 200 }}>
+            <div style={{ display: 'flex', gap: 18 }}>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 700, letterSpacing: '.04em' }}>COSTO MEDIO</div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>€ {fmtIT(Math.round(avgCost))}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 700, letterSpacing: '.04em' }}>AL GIORNO</div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>€ {fmtIT(Math.round(avgCostPerDay))}</div>
+              </div>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text3)' }}>
               <span style={{ color: TYPE_COLORS.Weekend, fontWeight: 700 }}>{weekendCount}</span> weekend · <span style={{ color: TYPE_COLORS.Vacanze, fontWeight: 700 }}>{vacanzeCount}</span> vacanze
             </div>
+            {top4Costliest.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 700, letterSpacing: '.04em', marginBottom: 5 }}>
+                  🏆 TOP {top4Costliest.length} PIÙ COSTOSE DI SEMPRE
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {top4Costliest.map(({ v, spend }, i) => (
+                    <div key={v.id} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 12 }}>
+                      <span style={{ color: 'var(--text3)', fontWeight: 700, width: 12 }}>{i + 1}.</span>
+                      <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 100 }}>{v.city || v.name || '—'}</span>
+                      <span style={{ color: 'var(--text3)', flexShrink: 0 }}>{getYear(v) || ''}</span>
+                      <span style={{ marginLeft: 'auto', fontWeight: 700, flexShrink: 0 }}>€ {fmtIT(Math.round(spend))}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
