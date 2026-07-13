@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import './CalendarioPage.css'
 import { fmtIT } from '../utils/format'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
-import { groupConsecutiveDates, labelToEmoji, destCategoryLabel } from '../data/vacationRules'
+import { groupConsecutiveDates, labelToEmoji, destCategoryLabel, findVacationForDate, vacationTotalCost } from '../data/vacationRules'
 
 // ── Net amount after compensation ──────────────────────────
 // Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
@@ -273,6 +273,61 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
             title="Clicca per modificare location"
           >
             {city ? city.split(' ')[0] : ''}
+          </div>
+        )}
+      </div>
+    </td>
+  )
+}
+
+// ── Cella unita per una vacanza/weekend DICHIARATO (Weekend e Vacanze) ────
+// Richiesta utente 2026-07-13: in modalità 🌴 Vacanze le celle di un periodo
+// dichiarato devono unirsi con un solo nome (quello della vacanza) e il COSTO
+// TOTALE della vacanza (vacationTotalCost — stessa funzione/stesso valore
+// mostrato in "Spese TX" nella tabella annuale di Weekend e Vacanze, così i
+// due punti restano sempre sincronizzati per costruzione, non per copia).
+// A differenza di MergedCell (che raggruppa per città rilevata giorno per
+// giorno ed è usata come fallback sui giorni NON coperti da un periodo
+// dichiarato), qui il raggruppamento è per id della vacanza dichiarata,
+// quindi resta unita anche se la città cambia di giorno in giorno.
+function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, selectMode, selected, onCellMouseDown, onCellMouseEnter, onClick }) {
+  const colspan = endDay - startDay + 1
+  const total = useMemo(() => vacationTotalCost(transactions, vacation), [transactions, vacation])
+
+  const isWeekendCell = useMemo(() => {
+    for (let d = startDay; d <= endDay; d++) {
+      if (!IS_WEEKEND(year, month, d)) return false
+    }
+    return true
+  }, [year, month, startDay, endDay])
+
+  const rangeDates = useMemo(() => {
+    const arr = []
+    for (let d = startDay; d <= endDay; d++) {
+      arr.push(`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`)
+    }
+    return arr
+  }, [year, month, startDay, endDay])
+
+  const firstDateStr = rangeDates[0]
+  const label = vacation.name || vacation.city || '—'
+
+  return (
+    <td
+      className={`cal-cell cal-merged-cell vacation${isWeekendCell ? ' weekend' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
+      colSpan={colspan}
+      onClick={() => { if (!selectMode) onClick(firstDateStr) }}
+      onMouseDown={selectMode ? (e => { e.preventDefault(); onCellMouseDown(rangeDates) }) : undefined}
+      onMouseEnter={selectMode ? (() => onCellMouseEnter(rangeDates)) : undefined}
+      title={`${label} · ${vacation.from} → ${vacation.to} · € ${fmtIT(Math.round(total),0)}`}
+    >
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:'100%', padding:'2px 5px', gap:3 }}>
+        <div className="cal-day-city" style={{ opacity:1, fontWeight:700, fontSize:9, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+          {label}
+        </div>
+        {total !== 0 && (
+          <div className="cal-day-total negative" style={{ fontSize:9, flexShrink:0 }}>
+            {Math.abs(Math.round(total)).toLocaleString('it-IT')}
           </div>
         )}
       </div>
@@ -691,7 +746,15 @@ export default function CalendarioPage() {
           <div style={{fontSize:13,color:'var(--text3)'}}>Transazioni per giorno nell'anno</div>
         </div>
         <div className="cal-header-actions">
-          {/* Quick filters */}
+          {/* Quick filters — "Seleziona giorni" a sinistra di Barca/Vacanze
+              (richiesta utente 2026-07-13), visibile solo in modalità 🌴 Vacanze */}
+          {quickFilter === 'vacation' && (
+            <button
+              className={'cal-filter-btn' + (selectMode ? ' active' : '')}
+              onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+              title="Seleziona più giorni per dichiarare una vacanza e la location"
+            >🖊️ Seleziona giorni</button>
+          )}
           <button
             className={'cal-filter-btn' + (quickFilter === 'boat' ? ' active' : '')}
             onClick={() => setQuickFilter(q => q === 'boat' ? null : 'boat')}
@@ -708,13 +771,6 @@ export default function CalendarioPage() {
             }}
             title="Mostra solo giorni di vacanza / weekend fuori"
           >🌴 Vacanze</button>
-          {quickFilter === 'vacation' && (
-            <button
-              className={'cal-filter-btn' + (selectMode ? ' active' : '')}
-              onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-              title="Seleziona più giorni per dichiarare una vacanza e la location"
-            >🖊️ Seleziona giorni</button>
-          )}
           <button
             className={'cal-filter-btn' + (hideSati ? ' active' : '')}
             onClick={() => setHideSati(v => !v)}
@@ -783,7 +839,7 @@ export default function CalendarioPage() {
         <span className="cal-legend-item positive-eg">+Entrate</span>
         <span className="cal-legend-item negative-eg">−Uscite</span>
         {boatDaySet.size > 0 && <span style={{fontSize:11,color:'var(--text3)'}}>🚤 = uscita barca</span>}
-        {mergeMode && !selectMode && <span style={{fontSize:11,color:'var(--text3)'}}>Celle unite per location · clicca city per modificare</span>}
+        {mergeMode && !selectMode && <span style={{fontSize:11,color:'var(--text3)'}}>Celle unite per vacanza/weekend dichiarato (nome + costo totale) o per location rilevata · clicca city per modificare</span>}
         {selectMode && <span style={{fontSize:11,color:'#b8792a',fontWeight:700}}>🖊️ Clicca o trascina sui giorni da selezionare, poi in basso conferma come vacanza oppure segna come "non è vacanza"</span>}
       </div>
 
@@ -808,6 +864,42 @@ export default function CalendarioPage() {
                 let i = 1
                 while (i <= daysInMonth) {
                   const dateStr = `${year}-${String(m+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`
+                  // 1) Periodo dichiarato (Weekend e Vacanze) — priorità sul merge per
+                  // città: unisce tutti i giorni consecutivi della STESSA vacanza,
+                  // anche se la città rilevata cambia di giorno in giorno.
+                  const vac = findVacationForDate(dateStr, vacations)
+                  if (vac) {
+                    let j = i + 1
+                    while (j <= daysInMonth) {
+                      const nd = `${year}-${String(m+1).padStart(2,'0')}-${String(j).padStart(2,'0')}`
+                      const nextVac = findVacationForDate(nd, vacations)
+                      if (!nextVac || nextVac.id !== vac.id) break
+                      j++
+                    }
+                    cells.push(
+                      <VacMergedCell
+                        key={i}
+                        year={year} month={m}
+                        startDay={i} endDay={j-1}
+                        vacation={vac}
+                        transactions={transactions}
+                        selectMode={selectMode}
+                        selected={selectMode && Array.from({length:j-i},(_,k)=>`${year}-${String(m+1).padStart(2,'0')}-${String(i+k).padStart(2,'0')}`).every(d => selectedDates.has(d))}
+                        onCellMouseDown={handleCellMouseDown}
+                        onCellMouseEnter={handleCellMouseEnter}
+                        onClick={ds => {
+                          const dayTxs = txByDate[ds] || []
+                          const dayVacs = vacations.filter(v => ds >= v.from && ds <= v.to)
+                          setModal({dateStr: ds, txs: dayTxs, vacs: dayVacs})
+                        }}
+                      />
+                    )
+                    i = j
+                    continue
+                  }
+                  // 2) Nessun periodo dichiarato su questo giorno — fallback: merge per
+                  // città rilevata dalle transazioni (comportamento preesistente, utile
+                  // per individuare cluster di spesa non ancora dichiarati come vacanza).
                   const city = effectiveCityByDate[dateStr]
                   if (city) {
                     let j = i + 1

@@ -7,6 +7,10 @@ import {
 } from 'recharts'
 import './ForecastPage.css'
 import { fmtIT } from '../utils/format'
+// Importi NETTI post-compensazione (fix 2026-07-13: questa pagina era rimasta
+// indietro rispetto a UscitePage/RisparmioPage, che già usano netAmt — vedi
+// audit richiesto dall'utente sulla coerenza dei totali Uscite tra le 3 pagine)
+import { netAmt } from '../data/compensation'
 
 // ── Helpers ───────────────────────────────────────────────
 const MON = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
@@ -20,7 +24,7 @@ function expTotal(transactions, ym) {
     if (t._satiLinked && t.splits?.length > 0) {
       t.splits.forEach(sp => { if (sp.amount > 0) total += sp.amount })
     } else {
-      total += Math.abs(t.amount)
+      total += Math.abs(netAmt(t))  // netto post-compensazione, come UscitePage/RisparmioPage
     }
   })
   return total
@@ -36,8 +40,13 @@ function expList(transactions, yms) {
     if (!ymSet.has(ym)) return
     if (t._satiLinked && t.splits?.length > 0) {
       t.splits.forEach(sp => {
+        // _compensatedAmt/_compensatedBy azzerati esplicitamente: sono dell'intera
+        // transazione satiLinked, non di questo singolo split — se non li si pulisce,
+        // netAmt() sul virtuale applicherebbe per errore la compensazione del
+        // genitore a un importo che non le appartiene (fix 2026-07-13).
         if (sp.amount > 0) result.push({ ...t, _virtual: true, amount: -sp.amount,
-          cat1: sp.cat1 || 'Non Categorizzato', cat2: sp.cat2 || 'Altro' })
+          cat1: sp.cat1 || 'Non Categorizzato', cat2: sp.cat2 || 'Altro',
+          _compensatedAmt: null, _compensatedBy: null })
       })
     } else {
       result.push(t)
@@ -330,9 +339,9 @@ export default function ForecastPage() {
       const c1 = t.cat1 || 'Non Categorizzato'
       if (c1 === 'Entrate') return
       if (!catRaw[c1]) catRaw[c1] = { total: 0, subs: {}, color: (getMergedCats(customCats)[c1]?.color) || '#888' }
-      catRaw[c1].total += Math.abs(t.amount)
+      catRaw[c1].total += Math.abs(netAmt(t))
       const c2 = t.cat2 || 'Altro'
-      catRaw[c1].subs[c2] = (catRaw[c1].subs[c2] || 0) + Math.abs(t.amount)
+      catRaw[c1].subs[c2] = (catRaw[c1].subs[c2] || 0) + Math.abs(netAmt(t))
     })
     const catStats = {}
     Object.entries(catRaw).forEach(([c1, data]) => {

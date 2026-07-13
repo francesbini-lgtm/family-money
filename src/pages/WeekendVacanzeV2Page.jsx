@@ -30,6 +30,39 @@ function fmtDate(d) {
   return d ? d.split('-').reverse().join('/') : '—'
 }
 
+// ── Calcolo automatico costo Carburante da KM + consumo veicolo ──────────
+// Richiesta utente 2026-07-13 (corretta dopo un fraintendimento iniziale che
+// l'aveva messa in Registro Veicoli): sulla riga "Carburante" dei costi
+// manuali di una vacanza, inserendo i KM percorsi e il veicolo (o "non lo
+// so"/"altro") il sistema stima il costo usando il consumo del veicolo
+// (km/l, campo v.consumo in Registro Veicoli) e il prezzo medio benzina
+// dell'anno della vacanza (appPrefs.fuelPriceByYear[anno]). "Altro" non
+// calcola nulla; "Non lo so" fa la media dei soli veicoli con consumo noto.
+function avgConsumoVehicles(vehicles) {
+  const withConsumo = (vehicles || []).filter(v => parseFloat(v.consumo) > 0)
+  if (!withConsumo.length) return null
+  const tot = withConsumo.reduce((s, v) => s + parseFloat(v.consumo), 0)
+  return tot / withConsumo.length
+}
+function estimateFuelCost({ km, consumoVehicleId, date, vehicles, fuelPriceByYear }) {
+  const kmNum = parseFloat(km)
+  if (!kmNum || kmNum <= 0) return { cost: null, reason: 'no-km' }
+  if (consumoVehicleId === 'altro') return { cost: null, reason: 'altro' }
+  let consumo = null
+  if (!consumoVehicleId || consumoVehicleId === 'non_so') {
+    consumo = avgConsumoVehicles(vehicles)
+  } else {
+    const v = (vehicles || []).find(v => String(v.id) === String(consumoVehicleId))
+    consumo = v && parseFloat(v.consumo) > 0 ? parseFloat(v.consumo) : null
+  }
+  if (!consumo) return { cost: null, reason: 'no-consumo' }
+  const year = (date || '').slice(0, 4)
+  const price = parseFloat(fuelPriceByYear?.[year])
+  if (!price) return { cost: null, reason: 'no-price', consumo, year }
+  const litri = kmNum / consumo
+  return { cost: litri * price, litri, consumo, price, year, reason: null }
+}
+
 // Data di competenza "fresca": sempre ricalcolata da competenza/date, mai dalla
 // cache _effDate (che updateTransaction NON ricalcola — vedi useStore.js) — è la
 // chiave corretta per capire se una spesa cade dentro/fuori un periodo vacanza.
@@ -160,6 +193,135 @@ function ManualCostRow({ icon, label, value, onSave }) {
         style={{ width: 80, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 12, textAlign: 'right', fontFamily: 'var(--font-sans)' }}
       />
     </div>
+  )
+}
+
+// ── Riga costo manuale Carburante — con calcolo automatico opzionale da KM+consumo ──
+function FuelManualCostRow({ v, vehicles, fuelPriceByYear, upd }) {
+  const [val, setVal] = useState(String(v.manualCarburante || ''))
+  useEffect(() => { setVal(String(v.manualCarburante || '')) }, [v.manualCarburante])
+  const [km, setKm] = useState(String(v.manualCarburanteKm || ''))
+  useEffect(() => { setKm(String(v.manualCarburanteKm || '')) }, [v.manualCarburanteKm])
+  const consumoVehicleId = v.manualCarburanteVehicleId || 'non_so'
+  // true finché l'importo non è mai stato toccato a mano: mentre è true, la
+  // stima da KM+consumo+prezzo scrive automaticamente manualCarburante; al
+  // primo intervento manuale si ferma (richiesta: "può inserire sempre
+  // manualmente il costo se vuole").
+  const [amountAuto, setAmountAuto] = useState(true)
+
+  const fuelEstimate = useMemo(() => estimateFuelCost({
+    km, consumoVehicleId, date: v.from, vehicles, fuelPriceByYear,
+  }), [km, consumoVehicleId, v.from, vehicles, fuelPriceByYear])
+
+  useEffect(() => {
+    if (amountAuto && fuelEstimate.cost != null) {
+      const rounded = Number(fuelEstimate.cost.toFixed(2))
+      setVal(String(rounded))
+      upd(v, 'manualCarburante', rounded)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fuelEstimate.cost, amountAuto])
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12 }}>
+        <span style={{ width: 110, flexShrink: 0 }}>⛽ Carburante</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--text3)' }}>€</span>
+        <input
+          type="number" value={val} placeholder="0"
+          onChange={e => { setVal(e.target.value); setAmountAuto(false) }}
+          onBlur={() => upd(v, 'manualCarburante', parseFloat(val) || 0)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          style={{ width: 80, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 12, textAlign: 'right', fontFamily: 'var(--font-sans)' }}
+        />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px 6px 8px', fontSize: 11 }}>
+        <span style={{ width: 110, flexShrink: 0 }} />
+        <span style={{ color: 'var(--text3)' }}>KM</span>
+        <input
+          type="number" value={km} placeholder="es. 350"
+          onChange={e => setKm(e.target.value)}
+          onBlur={() => upd(v, 'manualCarburanteKm', km)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          style={{ width: 64, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)' }}
+        />
+        <select
+          value={consumoVehicleId}
+          onChange={e => upd(v, 'manualCarburanteVehicleId', e.target.value)}
+          style={{ padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)', cursor: 'pointer' }}
+        >
+          <option value="non_so">Non lo so (media veicoli)</option>
+          {(vehicles || []).map(veh => (
+            <option key={veh.id} value={veh.id}>{veh.name}{veh.consumo ? ` — ${veh.consumo} km/l` : ''}</option>
+          ))}
+          <option value="altro">Altro</option>
+        </select>
+        <span style={{ flex: 1, textAlign: 'right', color: 'var(--text3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {fuelEstimate.cost != null
+            ? `≈ ${fuelEstimate.litri.toFixed(1)} L × € ${fuelEstimate.price}`
+            : fuelEstimate.reason === 'altro' ? 'nessun calcolo (Altro)'
+            : fuelEstimate.reason === 'no-price' ? `manca prezzo ${fuelEstimate.year || ''} — ⚙️ in alto`
+            : fuelEstimate.reason === 'no-consumo' ? 'nessun consumo veicolo disponibile'
+            : ''}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ── Prezzo medio benzina per anno (appPrefs.fuelPriceByYear) ─────────────
+// Usato da FuelManualCostRow per stimare il costo Carburante da KM+consumo.
+function FuelPriceModal({ onClose }) {
+  const appPrefs = useStore(s => s.appPrefs)
+  const setAppPref = useStore(s => s.setAppPref)
+  const saved = appPrefs?.fuelPriceByYear || {}
+  const [rows, setRows] = useState(() => {
+    const years = Object.keys(saved).sort((a, b) => b.localeCompare(a))
+    return years.length
+      ? years.map(y => ({ year: y, price: String(saved[y]) }))
+      : [{ year: String(new Date().getFullYear()), price: '' }]
+  })
+  const setRow    = (i, k, v) => setRows(r => r.map((row, idx) => idx === i ? { ...row, [k]: v } : row))
+  const addRow    = () => setRows(r => [{ year: String(new Date().getFullYear()), price: '' }, ...r])
+  const removeRow = i => setRows(r => r.filter((_, idx) => idx !== i))
+
+  function save() {
+    const map = {}
+    rows.forEach(r => { if (r.year && r.price) map[String(r.year).trim()] = parseFloat(r.price) })
+    setAppPref('fuelPriceByYear', map)
+    onClose()
+  }
+
+  return (
+    <Modal title="⛽ Prezzo medio benzina" onClose={onClose} width={380}>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12, lineHeight: 1.5 }}>
+        Prezzo medio benzina (€/litro) per anno — usato per stimare automaticamente
+        il costo Carburante di una vacanza da KM percorsi + consumo del veicolo.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map((row, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="number" value={row.year} onChange={e => setRow(i, 'year', e.target.value)} placeholder="Anno"
+              style={{ width: 90, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text1)', fontSize: 13 }} />
+            <span style={{ fontSize: 12, color: 'var(--text3)' }}>€/L</span>
+            <input type="number" step="0.01" value={row.price} onChange={e => setRow(i, 'price', e.target.value)} placeholder="1.75"
+              style={{ width: 90, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text1)', fontSize: 13 }} />
+            <button onClick={() => removeRow(i)} title="Rimuovi anno"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center' }}>
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addRow} style={{ marginTop: 10, fontSize: 12, padding: '6px 12px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <Plus size={12} /> Aggiungi anno
+      </button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+        <button onClick={save} style={{ padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>Salva</button>
+        <button onClick={onClose} style={{ padding: '7px 14px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>Annulla</button>
+      </div>
+    </Modal>
   )
 }
 
@@ -863,6 +1025,7 @@ export default function WeekendVacanzeV2Page() {
   const updateTransaction = useStore(s => s.updateTransaction)
   const appPrefs = useStore(s => s.appPrefs)
   const setAppPref = useStore(s => s.setAppPref)
+  const vehicles = useStore(s => s.vehicles)
   const customCats = useStore(s => s.customCats)
   const allCats = useMemo(() => getMergedCats(customCats), [customCats])
   const { vacations, add, update, remove } = useVacations()
@@ -874,6 +1037,7 @@ export default function WeekendVacanzeV2Page() {
   const [showFuori, setShowFuori] = useState(false)     // overlay spese W&V fuori periodo
   const [showReview, setShowReview] = useState(false)   // overlay spese in vacanza non allocate
   const [showMerch, setShowMerch] = useState(false)     // impostazioni merchant vacanze
+  const [showFuelPrice, setShowFuelPrice] = useState(false) // impostazioni prezzo medio benzina/anno
   // Menu "Revisione" — i 3 bottoni Da confermare/Fuori periodo/Non allocate erano
   // separati in alto; consolidati in un unico tab a tendina (richiesta utente
   // 2026-07-13: "aggregali tutti sotto un tab dedicato, sempre lì in alto a destra")
@@ -1329,6 +1493,10 @@ export default function WeekendVacanzeV2Page() {
             style={{ padding: '7px 10px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
             ⚙️
           </button>
+          <button onClick={() => setShowFuelPrice(true)} title="Prezzo medio benzina per anno — usato per il calcolo automatico del costo Carburante"
+            style={{ padding: '7px 10px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
+            ⛽
+          </button>
         </div>
       </div>
 
@@ -1627,7 +1795,7 @@ export default function WeekendVacanzeV2Page() {
                                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 2px' }}>
                                     Costi manuali (aggiunti al totale vacanza)
                                   </div>
-                                  <ManualCostRow icon="⛽" label="Carburante" value={v.manualCarburante} onSave={val => upd(v, 'manualCarburante', val)} />
+                                  <FuelManualCostRow v={v} vehicles={vehicles} fuelPriceByYear={appPrefs?.fuelPriceByYear} upd={upd} />
                                   <ManualCostRow icon="🛣️" label="Autostrada" value={v.manualAutostrada} onSave={val => upd(v, 'manualAutostrada', val)} />
                                 </div>
                               </td>
@@ -1667,6 +1835,11 @@ export default function WeekendVacanzeV2Page() {
       {/* Impostazioni merchant vacanze (Booking, Airbnb, …) */}
       {showMerch && (
         <VacMerchantsModal appPrefs={appPrefs} setAppPref={setAppPref} onClose={() => setShowMerch(false)} />
+      )}
+
+      {/* Impostazioni prezzo medio benzina per anno */}
+      {showFuelPrice && (
+        <FuelPriceModal onClose={() => setShowFuelPrice(false)} />
       )}
 
       {/* Pannello "Vacanze da confermare" */}
