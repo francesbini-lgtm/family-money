@@ -6,7 +6,7 @@ import Modal from '../components/Modal'
 import { getMergedCats } from '../data/categories'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
 import {
-  vacationTotalCost, allDatesBetween, dominantVacationType,
+  vacationTotalCost, allDatesBetween, vacationType,
   destCategoryEmoji, destCategoryLabel, computeCandidateVacations,
   DEST_TYPES, labelToEmoji, findVacationForDate,
 } from '../data/vacationRules'
@@ -776,8 +776,7 @@ export default function WeekendVacanzeV2Page() {
       .map(t => {
         const vac = findVacationForDate(effDate(t), vacations)
         if (!vac) return null
-        const vacType = dominantVacationType(transactions, vac.from, vac.to)
-          || (nightsBetween(vac.from, vac.to) >= 3 ? 'Vacanze' : 'Weekend')
+        const vacType = vacationType(vac, transactions)
         return { t, vac, vacType }
       })
       .filter(Boolean)
@@ -1008,7 +1007,7 @@ export default function WeekendVacanzeV2Page() {
     years5.forEach(y => { byY[y] = { year: y, Weekend: 0, Vacanze: 0 } })
     last5.forEach(v => {
       const yr = String(getYear(v))
-      const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
+      const type = vacationType(v, transactions)
       byY[yr][type] += vacationTotalCost(transactions, v)
     })
     return years5.map(y => byY[y])
@@ -1020,7 +1019,7 @@ export default function WeekendVacanzeV2Page() {
     years5.forEach(y => { byY[y] = { year: y, Weekend: 0, Vacanze: 0 } })
     last5.forEach(v => {
       const yr = String(getYear(v))
-      const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
+      const type = vacationType(v, transactions)
       byY[yr][type] += nightsBetween(v.from, v.to) + 1
     })
     return years5.map(y => byY[y])
@@ -1041,7 +1040,7 @@ export default function WeekendVacanzeV2Page() {
     return tot / last5.length
   }, [last5, transactions])
 
-  const weekendCount = last5.filter(v => (dominantVacationType(transactions, v.from, v.to) || 'Weekend') === 'Weekend').length
+  const weekendCount = last5.filter(v => vacationType(v, transactions) === 'Weekend').length
   const vacanzeCount = last5.length - weekendCount
 
   // Etichette totale in cima alle barre impilate (Weekend+Vacanze) — usate come LabelList content
@@ -1265,7 +1264,7 @@ export default function WeekendVacanzeV2Page() {
                     {vacs.map(v => {
                       const nights = nightsBetween(v.from, v.to)
                       const giorni = nights + 1
-                      const type = dominantVacationType(transactions, v.from, v.to) || 'Weekend'
+                      const type = vacationType(v, transactions)
                       const spend = vacationTotalCost(transactions, v)
                       const destType = v.destType || destCategoryLabel(v.city)
                       const costPerGiorno = spend > 0 ? spend / Math.max(giorni, 1) : 0
@@ -1286,13 +1285,20 @@ export default function WeekendVacanzeV2Page() {
                             style={{ transition: 'background .1s', cursor: 'pointer', background: isOpen ? 'var(--surface2)' : undefined }}
                             onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = 'var(--surface2)' }}
                             onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = '' }}>
-                            {/* Tipo (derivato dal cat2 dominante delle transazioni, non editabile) */}
+                            {/* Tipo — derivato (cat2 dominante delle transazioni, o durata come fallback)
+                                ma ora sovrascrivibile a mano: click sul badge per cambiare Weekend↔Vacanze
+                                (richiesta utente 2026-07-13: "utente può cambiare da weekend a vacanza
+                                cliccandoci sopra"). Scrive v.typeOverride, letto con priorità da
+                                vacationType() — unico punto di calcolo del tipo in tutta l'app. */}
                             <td style={tdStyle}>
-                              <span style={{
-                                fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700,
-                                background: type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
-                                color: type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
-                              }}>{type}</span>
+                              <span onClick={e => { e.stopPropagation(); upd(v, 'typeOverride', type === 'Vacanze' ? 'Weekend' : 'Vacanze') }}
+                                title="Clicca per cambiare tipo (Weekend / Vacanze)"
+                                style={{
+                                  fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700, cursor: 'pointer',
+                                  borderBottom: '1px dashed currentColor',
+                                  background: type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
+                                  color: type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
+                                }}>{type}</span>
                             </td>
                             {/* Emoji destinazione — senza header, solo icona.
                                 NOTA: niente stopPropagation sul td — la riga è tutta

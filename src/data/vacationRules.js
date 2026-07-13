@@ -161,6 +161,23 @@ export function dominantVacationType(transactions, from, to) {
   return entries.sort((a, b) => b[1] - a[1])[0][0]
 }
 
+export function vacationNights(v) {
+  if (!v?.from || !v?.to) return 0
+  return Math.max(0, Math.round((new Date(v.to) - new Date(v.from)) / 86400000))
+}
+
+// Tipo (Vacanze/Weekend) di un periodo dichiarato — punto UNICO di calcolo,
+// usato ovunque nell'app serva sapere se un periodo è "Vacanze" o "Weekend"
+// (WeekendVacanzeV2Page, TransactionsPage). Priorità: (1) v.typeOverride —
+// scelta manuale esplicita dell'utente, click sul badge "Tipo" nella tabella
+// annuale di Weekend e Vacanze (richiesta 2026-07-13: "utente può cambiare da
+// weekend a vacanza cliccandoci sopra"); (2) cat2 dominante tra le transazioni
+// già assegnate al periodo; (3) fallback sulla durata, 3+ notti = Vacanze.
+export function vacationType(v, transactions) {
+  if (v?.typeOverride === 'Vacanze' || v?.typeOverride === 'Weekend') return v.typeOverride
+  return dominantVacationType(transactions, v.from, v.to) || (vacationNights(v) >= 3 ? 'Vacanze' : 'Weekend')
+}
+
 // ── Classificazione destinazione (Mare / Montagna / Città) da nome località ──
 const DEST_BEACH_KEYWORDS = ['mare','sard','rimini','cost','bagn','lido','lignan','riccione','cattolica','riviera','tropea','sicil','calabr','puglia','salent','amalfi','elba','capri','ischia','taormin','eolie','positano','gallipoli','otranto','vieste','ibiza','mykonos','maiorca','tenerife','palermo','catania','miami','maldive','seychelles','sharm','hurghada','cancun']
 const DEST_MOUNTAIN_KEYWORDS = ['mont','alp','dolomit','aosta','neve','ski','snowboard','courmayeur','livigno','madonna','sestriere','bormio','cervinia','cortina','trentino','val di fass','val garden','alta badia','davos','zermatt','innsbruck','salzburg','chamonix']
