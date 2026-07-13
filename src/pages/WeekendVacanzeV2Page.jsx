@@ -377,7 +377,7 @@ const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSp
 // vacanza dichiarata — modificabili, assegnabili a una vacanza esistente (la
 // competenza della spesa si sposta al primo giorno di quel periodo) o a una
 // vacanza creata al volo (usa la competenza della spesa come date iniziali) ──
-function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVacation, updateVacation, setUndo, onClose }) {
+function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransaction, addVacation, updateVacation, setUndo, onClose }) {
   const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
 
@@ -403,20 +403,31 @@ function FuoriPeriodoModal({ txs, vacations, allCats, updateTransaction, addVaca
     // Valori PRIMA della modifica — servono per il bottone "Annulla" dello snackbar
     const prevCompetenza = t.competenza ?? null
     const prevEffDate    = t._effDate ?? t.date
+    const prevCat2       = t.cat2 ?? null
     // Allinea la spesa al periodo esistente spostandone la competenza al primo giorno
     // della vacanza (richiesta utente 2026-07-12) — non si estendono più le date della
     // vacanza per coprire la spesa: è la spesa che si sposta nel periodo, non viceversa
     const newCompetenza = v.from === t.date ? null : v.from
-    updateTransaction(t.txId, { competenza: newCompetenza, _effDate: v.from })
-    console.log(`[assignTo] ${t.txId}: competenza ${prevCompetenza ?? '(default)'} → ${newCompetenza ?? '(default = ' + t.date + ')'}, vacanza "${v.city || v.name}" (${v.from}–${v.to})`)
+    // Allinea anche la L2 (Weekend/Vacanze) al tipo REALE del periodo scelto — richiesta
+    // utente 2026-07-13: "se io qui seleziono di assegnare a una vacanza ma L2 è su
+    // 'weekend' sistema deve anche cambiare la L2, viceversa..." — prima si limitava a
+    // spostare la competenza lasciando la L2 con qualunque valore avesse già, che poteva
+    // non corrispondere più al periodo appena assegnato (es. tx con L2 "Weekend" assegnata
+    // a una vacanza di 10 giorni). vacationType() è la stessa funzione condivisa usata
+    // ovunque nell'app per stabilire il tipo di un periodo (rispetta anche typeOverride).
+    const newCat2 = vacationType(v, transactions)
+    const patch = { competenza: newCompetenza, _effDate: v.from }
+    if (newCat2 !== t.cat2) patch.cat2 = newCat2
+    updateTransaction(t.txId, patch)
+    console.log(`[assignTo] ${t.txId}: competenza ${prevCompetenza ?? '(default)'} → ${newCompetenza ?? '(default = ' + t.date + ')'}, L2 ${prevCat2 ?? '(nessuna)'} → ${newCat2}, vacanza "${v.city || v.name}" (${v.from}–${v.to})`)
     // Conferma visibile (richiesta utente 2026-07-13: "clicco assegna ma non succede
     // niente, nessun pop up, nessuna comunicazione") — prima l'unico segnale era la
     // riga che spariva dalla tabella, facile da non notare in una lista lunga.
     // Riusa lo stesso snackbar "Annulla" già presente nella pagina (elimina/ignora).
     setUndo?.({
-      label: `Spesa assegnata a "${v.city || v.name || 'vacanza'}" (${fmtDate(v.from)}–${fmtDate(v.to)})`,
+      label: `Spesa assegnata a "${v.city || v.name || 'vacanza'}" (${fmtDate(v.from)}–${fmtDate(v.to)})${newCat2 !== prevCat2 ? ` — L2 → ${newCat2}` : ''}`,
       onUndo: () => {
-        updateTransaction(t.txId, { competenza: prevCompetenza, _effDate: prevEffDate })
+        updateTransaction(t.txId, { competenza: prevCompetenza, _effDate: prevEffDate, cat2: prevCat2 })
         setUndo?.(null)
       },
     })
@@ -1393,7 +1404,7 @@ export default function WeekendVacanzeV2Page() {
 
       {/* Overlay spese Weekend e Vacanze fuori da ogni periodo dichiarato */}
       {showFuori && (
-        <FuoriPeriodoModal txs={fuoriTxs} vacations={sorted} allCats={allCats}
+        <FuoriPeriodoModal txs={fuoriTxs} vacations={sorted} allCats={allCats} transactions={transactions}
           updateTransaction={updateTransaction} addVacation={add} updateVacation={update}
           setUndo={setUndo} onClose={() => setShowFuori(false)} />
       )}
