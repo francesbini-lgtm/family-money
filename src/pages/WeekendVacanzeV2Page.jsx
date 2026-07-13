@@ -368,6 +368,84 @@ function TxEditRow({ t, allCats, updateTransaction, children, leading }) {
   )
 }
 
+// ── Riga di dettaglio dentro il breakdown di una candidata "da confermare"
+// (click sull'importo — richiesta utente 2026-07-13: poter vedere/correggere
+// L1/L2 e la descrizione originale delle singole spese PRIMA di confermare il
+// periodo). Non è una <tr> come TxEditRow (qui il contenitore è un div flex,
+// non una tabella) ma riusa lo stesso pattern "pending" per non perdere la
+// scelta L1 prima che l'utente possa scegliere anche la L2.
+function CandTxRow({ t, allCats, updateTransaction }) {
+  const [pending, setPending] = useState(null) // { cat1, cat2 } oppure null
+  const cat1Val = pending ? pending.cat1 : (t.cat1 || '')
+  const cat2Val = pending ? pending.cat2 : (t.cat2 || '')
+  const cat2Options = allCats[cat1Val]?.sub || []
+
+  function chooseCat1(newCat1) {
+    const hasSub = (allCats[newCat1]?.sub || []).length > 0
+    if (!hasSub) {
+      setPending(null)
+      updateTransaction(t.txId, { cat1: newCat1, cat2: '', userEditedCat: true })
+    } else {
+      setPending({ cat1: newCat1, cat2: '' })
+    }
+  }
+  function chooseCat2(newCat2) {
+    if (pending) {
+      updateTransaction(t.txId, { cat1: pending.cat1, cat2: newCat2, userEditedCat: true })
+      setPending(null)
+    } else {
+      updateTransaction(t.txId, { cat2: newCat2, userEditedCat: true })
+    }
+  }
+  function confirmPending() {
+    if (!pending) return
+    updateTransaction(t.txId, { cat1: pending.cat1, cat2: pending.cat2, userEditedCat: true })
+    setPending(null)
+  }
+  function cancelPending() { setPending(null) }
+
+  const selStyle = { padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
+    background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, fontFamily: 'var(--font-sans)', maxWidth: 120 }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+      borderBottom: '1px solid var(--border)', background: pending ? 'var(--gold-l,#fef9e7)' : undefined, fontSize: 12 }}>
+      <span style={{ color: 'var(--text3)', fontFamily: 'var(--font-mono)', flexShrink: 0, width: 76 }}>
+        {fmtDate(t._effDate || t.date)}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text2)' }}
+        title={t.description || ''}>
+        {t.description || '—'}
+      </span>
+      <select value={cat1Val} style={selStyle} onChange={e => chooseCat1(e.target.value)}>
+        <option value="">—</option>
+        {Object.keys(allCats).map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <select value={cat2Val} disabled={!cat2Options.length} style={{ ...selStyle, opacity: cat2Options.length ? 1 : .4 }}
+        onChange={e => chooseCat2(e.target.value)}>
+        <option value="">—</option>
+        {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+      {pending && (
+        <>
+          <button onClick={confirmPending} title="Conferma categoria (anche senza L2)"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green,#16a34a)', padding: 2, display: 'flex', flexShrink: 0 }}>
+            <Check size={13} />
+          </button>
+          <button onClick={cancelPending} title="Annulla cambio categoria"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', flexShrink: 0 }}>
+            <XIcon size={13} />
+          </button>
+        </>
+      )}
+      <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', flexShrink: 0, width: 68, textAlign: 'right',
+        color: t.amount >= 0 ? 'var(--green)' : 'var(--red)' }}>
+        {t.amount >= 0 ? '+' : '−'}€ {fmtIT(Math.abs(t.amount), 2)}
+      </span>
+    </div>
+  )
+}
+
 const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.05em',
   textTransform: 'uppercase', color: 'var(--text3)', background: 'var(--surface2)',
   borderBottom: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap',
@@ -754,6 +832,9 @@ export default function WeekendVacanzeV2Page() {
   const [showRevisionMenu, setShowRevisionMenu] = useState(false)
   const [candCityOverride, setCandCityOverride] = useState({})
   const [candDateOverride, setCandDateOverride] = useState({}) // { candId: { from, to } }
+  // Breakdown per-transazione di una candidata (click sull'importo — richiesta
+  // utente 2026-07-13: vedere/correggere L1/L2 e descrizione originale prima di confermare)
+  const [expandedCandId, setExpandedCandId] = useState(null)
 
   // Soprannomi famiglia per la colonna Utente
   const nicknames = useMemo(() => {
@@ -881,6 +962,16 @@ export default function WeekendVacanzeV2Page() {
     const t = setTimeout(() => setUndo(null), 8000)
     return () => clearTimeout(t)
   }, [undo])
+
+  // Transazioni che compongono una candidata — stessa chiave (_effDate || date)
+  // usata da computeCandidateVacations() per costruire cand.dates, così il
+  // breakdown mostra esattamente le spese che hanno formato il cluster
+  function candTxs(cand) {
+    const dateSet = new Set(cand.dates)
+    return transactions
+      .filter(t => !t.excluded && t.cat1 === 'Weekend e Vacanze' && dateSet.has(t._effDate || t.date))
+      .sort((a, b) => (a._effDate || a.date || '').localeCompare(b._effDate || b.date || ''))
+  }
 
   function toggleCand(id) {
     setSelectedCand(s => {
@@ -1502,44 +1593,65 @@ export default function WeekendVacanzeV2Page() {
             )}
             {candidates.map(cand => {
               const emoji = destCategoryEmoji(candCityOverride[cand.id] ?? cand.city)
+              const isExpanded = expandedCandId === cand.id
               return (
-                <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: selectedCand.has(cand.id) ? '1px solid var(--accent)' : '1px solid var(--border)', background: selectedCand.has(cand.id) ? 'var(--surface2)' : 'transparent', borderRadius: 8, flexWrap: 'nowrap', minWidth: 'max-content' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedCand.has(cand.id)}
-                    onChange={() => toggleCand(cand.id)}
-                    title="Seleziona per unire con altre candidate"
-                    style={{ flexShrink: 0, cursor: 'pointer' }}
-                  />
-                  <span style={{
-                    fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700, flexShrink: 0,
-                    background: cand.type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
-                    color: cand.type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
-                  }}>{cand.type}</span>
-                  <span>{emoji}</span>
-                  <input
-                    value={candCityOverride[cand.id] ?? cand.city ?? ''}
-                    onChange={e => setCandCityOverride(o => ({ ...o, [cand.id]: e.target.value }))}
-                    placeholder="Dove"
-                    style={{ ...inp, width: 130, flexShrink: 0 }}
-                  />
-                  {/* Date modificabili prima della conferma */}
-                  <input type="date" value={candDateOverride[cand.id]?.from || cand.from || ''}
-                    onChange={e => setCandDateOverride(o => ({ ...o, [cand.id]: { ...(o[cand.id] || {}), from: e.target.value } }))}
-                    style={{ ...inp, width: 125, flexShrink: 0, fontSize: 12, padding: '4px 6px' }} />
-                  <span style={{ color: 'var(--text3)', flexShrink: 0 }}>→</span>
-                  <input type="date" value={candDateOverride[cand.id]?.to || cand.to || ''}
-                    onChange={e => setCandDateOverride(o => ({ ...o, [cand.id]: { ...(o[cand.id] || {}), to: e.target.value } }))}
-                    style={{ ...inp, width: 125, flexShrink: 0, fontSize: 12, padding: '4px 6px' }} />
-                  <span style={{ fontSize: 12, color: 'var(--text3)', flexShrink: 0 }}>€ {fmtIT(cand.spend, 0)}</span>
-                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-                    <button onClick={() => confirmCandidate(cand)} title="Confermo, è una vacanza/weekend" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                      <Check size={12} /> Confermo
+                <div key={cand.id} style={{ border: selectedCand.has(cand.id) ? '1px solid var(--accent)' : '1px solid var(--border)', background: selectedCand.has(cand.id) ? 'var(--surface2)' : 'transparent', borderRadius: 8, minWidth: 'max-content' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', flexWrap: 'nowrap' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedCand.has(cand.id)}
+                      onChange={() => toggleCand(cand.id)}
+                      title="Seleziona per unire con altre candidate"
+                      style={{ flexShrink: 0, cursor: 'pointer' }}
+                    />
+                    <span style={{
+                      fontSize: 10, padding: '2px 7px', borderRadius: 10, fontWeight: 700, flexShrink: 0,
+                      background: cand.type === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
+                      color: cand.type === 'Vacanze' ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
+                    }}>{cand.type}</span>
+                    <span>{emoji}</span>
+                    <input
+                      value={candCityOverride[cand.id] ?? cand.city ?? ''}
+                      onChange={e => setCandCityOverride(o => ({ ...o, [cand.id]: e.target.value }))}
+                      placeholder="Dove"
+                      style={{ ...inp, width: 130, flexShrink: 0 }}
+                    />
+                    {/* Date modificabili prima della conferma */}
+                    <input type="date" value={candDateOverride[cand.id]?.from || cand.from || ''}
+                      onChange={e => setCandDateOverride(o => ({ ...o, [cand.id]: { ...(o[cand.id] || {}), from: e.target.value } }))}
+                      style={{ ...inp, width: 125, flexShrink: 0, fontSize: 12, padding: '4px 6px' }} />
+                    <span style={{ color: 'var(--text3)', flexShrink: 0 }}>→</span>
+                    <input type="date" value={candDateOverride[cand.id]?.to || cand.to || ''}
+                      onChange={e => setCandDateOverride(o => ({ ...o, [cand.id]: { ...(o[cand.id] || {}), to: e.target.value } }))}
+                      style={{ ...inp, width: 125, flexShrink: 0, fontSize: 12, padding: '4px 6px' }} />
+                    {/* Importo centrato tra le date e Confermo/Ignora — cliccabile per
+                        vedere/correggere L1-L2 e descrizione originale delle singole
+                        spese che compongono la candidata (richiesta utente 2026-07-13) */}
+                    <button
+                      onClick={() => setExpandedCandId(isExpanded ? null : cand.id)}
+                      title="Vedi/correggi le spese che compongono questa candidata"
+                      style={{ flex: 1, minWidth: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                        background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: 6,
+                        fontSize: 12, fontWeight: 600, color: isExpanded ? 'var(--accent)' : 'var(--text2)' }}>
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      € {fmtIT(cand.spend, 0)}
                     </button>
-                    <button onClick={() => ignoreCandidate(cand)} title="Non è una vacanza" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
-                      <XIcon size={12} /> Ignora
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+                      <button onClick={() => confirmCandidate(cand)} title="Confermo, è una vacanza/weekend" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                        <Check size={12} /> Confermo
+                      </button>
+                      <button onClick={() => ignoreCandidate(cand)} title="Non è una vacanza" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                        <XIcon size={12} /> Ignora
+                      </button>
+                    </div>
                   </div>
+                  {isExpanded && (
+                    <div style={{ borderTop: '1px solid var(--border)' }}>
+                      {candTxs(cand).map(t => (
+                        <CandTxRow key={t.txId} t={t} allCats={allCats} updateTransaction={updateTransaction} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
