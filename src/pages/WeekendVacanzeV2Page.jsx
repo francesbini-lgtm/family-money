@@ -413,10 +413,14 @@ function CandTxRow({ t, allCats, updateTransaction }) {
       <span style={{ color: 'var(--text3)', fontFamily: 'var(--font-mono)', flexShrink: 0, width: 76 }}>
         {fmtDate(t._effDate || t.date)}
       </span>
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text2)' }}
-        title={t.description || ''}>
-        {t.description || '—'}
+      {/* Descrizione AI (breve) invece del testo bancario grezzo, che forzava lo
+          scroll orizzontale del modale — la descrizione originale completa resta
+          disponibile nel pallino cliccabile, stesso componente OrigDot già usato
+          nelle altre tabelle (richiesta utente 2026-07-13) */}
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>
+        {t.descAI || t.merchant || '—'}
       </span>
+      <OrigDot description={t.description} />
       <select value={cat1Val} style={selStyle} onChange={e => chooseCat1(e.target.value)}>
         <option value="">—</option>
         {Object.keys(allCats).map(n => <option key={n} value={n}>{n}</option>)}
