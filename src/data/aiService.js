@@ -1011,12 +1011,13 @@ const paypalPromptSuffix = (year, merchantHistory) => {
 - merchant: nome esatto del merchant/negozio/servizio (stringa)
 - date: data nel formato YYYY-MM-DD. Se l'anno non è indicato usa ${yr}. Mesi italiani: gen=01 feb=02 mar=03 apr=04 mag=05 giu=06 lug=07 ago=08 set=09 ott=10 nov=11 dic=12
 - amount: importo come numero (negativo per uscite, positivo per entrate/rimborsi)
+- currency: codice valuta ISO a 3 lettere dell'importo che riporti in "amount" (es. "EUR", "SEK", "USD", "GBP"). IMPORTANTE: se PayPal mostra ENTRAMBI un importo in valuta estera (es. "−519,00 kr") E il suo equivalente in euro (spesso vicino, più piccolo, con simbolo € o dicitura "importo convertito"/"conversione"), usa SEMPRE l'equivalente in EURO come "amount" e metti "currency":"EUR" — non riportare mai l'importo in valuta estera come se fosse in euro. Se vedi SOLO l'importo in valuta estera senza alcun equivalente EUR visibile, riporta quell'importo così com'è con il suo vero codice valuta (NON convertirlo tu, non conosci il tasso di cambio esatto del giorno) — verrà segnalato all'utente per una verifica manuale.
 - type: tipo operazione originale (es. "Pagamento", "Pagamento automatico", "Rimborso", "Trasferimento")
 - cat1_suggestion: categoria L1 suggerita tra: Casa, Veicoli, Spesa e Alimentari, Tempo Libero, Weekend e Vacanze, Shopping, Salute e Cura, Figli, Altro
 - cat2_suggestion: sottocategoria L2 appropriata
 ${histSection}
 Rispondi SOLO con un array JSON valido, nessun testo aggiuntivo. Esempio:
-[{"merchant":"Netflix","date":"${yr}-06-15","amount":-15.99,"type":"Pagamento automatico","cat1_suggestion":"Tempo Libero","cat2_suggestion":"Altro"}]`
+[{"merchant":"Netflix","date":"${yr}-06-15","amount":-15.99,"currency":"EUR","type":"Pagamento automatico","cat1_suggestion":"Tempo Libero","cat2_suggestion":"Altro"}]`
 }
 
 async function parsePaypalResponse(res) {

@@ -1199,6 +1199,7 @@ function getColValueStr(tx, colId, userAccounts) {
     }
     case 'isBonifico':  return tx.isBonifico ? 'Sì' : 'No'
     case 'amount':      return fmtIT(Math.abs(tx.amount), 2)
+    case 'dataImport':  return tx.importedAt ? tx.importedAt.slice(0,10) : '—'
     default:            return '—'
   }
 }
@@ -1369,6 +1370,7 @@ const ALL_COLUMNS = [
   { id:'conf',        label:'📊 Confidenza %'                           },
   { id:'isBonifico',  label:'🔵 Bonifico'                               },
   { id:'amount',      label:'💰 Importo',              alwaysOn:true  },
+  { id:'dataImport',  label:'📥 Data Import'                            },
 ]
 const DEFAULT_VISIBLE = new Set(['date','emoji','descAI','note','city','time','card','user','cat','amount'])
 const DEFAULT_ORDER   = ALL_COLUMNS.map(c=>c.id)
@@ -2867,6 +2869,11 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
             {tx.isBonifico ? '🔵' : ''}
           </td>
         )
+        if(id==='dataImport') return (
+          <td key={id} style={{padding:'4px 8px',textAlign:'center',fontSize:11,color:'var(--text3)'}}>
+            {tx.importedAt ? fmtDate(tx.importedAt) : '—'}
+          </td>
+        )
         if(id==='amount') return (
           <td key={id} className={'tx-amount'+amtClass} style={{position:'relative'}}>
             {tx._compensatedAmt>0 ? (
@@ -3643,6 +3650,7 @@ export default function TransactionsPage() {
                   if(id==='conf')        return <th key={id} className="tx-th" style={{width:55,textAlign:'right'}}>Conf%</th>
                   if(id==='isBonifico')  return <th key={id} className="tx-th" style={{width:40,textAlign:'center'}}>Bon.{filterBtn('isBonifico')}</th>
                   if(id==='amount')      return <th key={id} className="tx-th" style={{textAlign:'right',width:120,cursor:'pointer'}} onClick={()=>toggleSort('amount')} title="Clicca sull'icona ▽ per cercare un importo preciso">Importo (€) {sortIcon('amount')}{filterBtn('amount')}</th>
+                  if(id==='dataImport')  return <th key={id} className="tx-th" style={{width:80,textAlign:'center',cursor:'pointer'}} onClick={()=>toggleSort('importedAt')} title="Data in cui la transazione è stata importata nel sistema">📥 Import {sortIcon('importedAt')}</th>
                   return null
                 })}
               </tr>

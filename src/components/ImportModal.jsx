@@ -574,7 +574,13 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         if (zr?.exclude) { excluded = true; changed = true }
       }
 
-      if (curTx.amount > 0 && cat1 && cat1 !== 'Entrate') { cat1 = 'Entrate'; cat2 = ''; changed = true }
+      // BUG (segnalato dall'utente 2026-07-14): il controllo `cat1 &&` escludeva
+      // proprio le transazioni ANCORA senza categoria (il caso più comune per un
+      // importo positivo appena importato) — quindi non diventavano mai "Entrate"
+      // e non comparivano nello step "Altre Entrate" del wizard (che filtra su
+      // cat1==='Entrate'). La regola va applicata a QUALSIASI importo positivo
+      // non ancora "Entrate", categorizzato o no.
+      if (curTx.amount > 0 && cat1 !== 'Entrate') { cat1 = 'Entrate'; cat2 = ''; changed = true }
 
       const effDateForVac = curTx._effDate || curTx.competenza || curTx.date
       const vacHit = curTx.amount < 0 && cat1 !== 'Weekend e Vacanze' && !notVacationDates.includes(effDateForVac)
@@ -582,9 +588,17 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         : null
       if (vacHit && isVacationEligible(curTx)) { cat1 = 'Weekend e Vacanze'; cat2 = 'Vacanze'; changed = true }
 
-      const catProtected = !!curTx.userEditedCat ||
-        (typeof isKingProtected === 'function' && isKingProtected(curTx))
-      if (catProtected) { cat1 = curTx.cat1; cat2 = curTx.cat2 }
+      // BUG REALE (segnalato dall'utente 2026-07-14): qui si ri-controllava
+      // isKingProtected(curTx) e, se una regola King matchava, si ripristinava
+      // cat1/cat2 al valore PRECEDENTE (curTx) — ma è esattamente quella stessa
+      // regola King ad aver appena calcolato la categoria giusta poche righe sopra
+      // (applyAiRules ordina già le regole King per prime, quindi il loro esito è
+      // già in `cat1`/`cat2`). Il controllo quindi ANNULLAVA sempre la categorizzazione
+      // King appena fatta, ripristinando qualunque cosa Gemini (fase precedente,
+      // runEnrichmentStep) avesse indovinato prima — per questo "Commissioni" restava
+      // "Non Categorizzato" nonostante la regola King esistesse. Qui va protetta SOLO
+      // una modifica manuale esplicita dell'utente, non ri-verificata la King stessa.
+      if (curTx.userEditedCat) { cat1 = curTx.cat1; cat2 = curTx.cat2 }
 
       const flagCompetenza = cat1 === 'Weekend e Vacanze' && notVacationDates.includes(effDateForVac)
       if (flagCompetenza !== !!curTx.flagCompetenza) changed = true

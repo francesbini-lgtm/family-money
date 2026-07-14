@@ -72,8 +72,9 @@ function WizardRow({ t, allCats, updateTransaction, onOpenRulePopup }) {
   }
 
   return (
-    <tr style={{borderBottom:'1px solid var(--border)'}}>
+    <tr style={{borderBottom:'1px solid var(--border)', opacity: t._wizDone ? 0.55 : 1}}>
       <td style={{padding:'8px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+        {t._wizDone && <span title="Già sistemata" style={{color:'var(--green)',marginRight:4}}>✓</span>}
         {fmtDate(t._effDate||t.date)}
       </td>
       <td style={{padding:'4px 8px',minWidth:150}}>
@@ -112,12 +113,20 @@ function WizardRow({ t, allCats, updateTransaction, onOpenRulePopup }) {
         fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
         {t.amount>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount),2)}
       </td>
-      <td style={{padding:'4px 8px'}}>
+      <td style={{padding:'4px 8px',whiteSpace:'nowrap'}}>
         <button title="Crea una regola da questa transazione"
           onClick={()=>onOpenRulePopup({ tx: t, match: autoDetectMatch(t), newDesc: t.descAI || '' })}
           style={{border:'1px solid var(--border)',background:'var(--surface)',borderRadius:6,
-            fontSize:11,padding:'3px 8px',cursor:'pointer',color:'var(--text3)',fontFamily:'var(--font-sans)'}}>
+            fontSize:11,padding:'3px 8px',cursor:'pointer',color:'var(--text3)',fontFamily:'var(--font-sans)',marginRight:4}}>
           ✚ Regola
+        </button>
+        <button title={t._flagged ? 'Rimuovi da To Review' : 'Segna To Review'}
+          onClick={()=>updateTransaction(t.txId,{_flagged:!t._flagged})}
+          style={{border:`1px solid ${t._flagged?'var(--gold)':'var(--border)'}`,
+            background:t._flagged?'rgba(200,160,0,.1)':'var(--surface)',borderRadius:6,
+            fontSize:11,padding:'3px 6px',cursor:'pointer',color:t._flagged?'var(--gold)':'var(--text3)',
+            fontFamily:'var(--font-sans)'}}>
+          🚩
         </button>
       </td>
     </tr>
@@ -560,7 +569,7 @@ function VacFuoriPeriodoStep({ importedIdSet, onNext, embedded, registerUndo }) 
             <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(t.competenza || t.date)}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.descAI || t.description?.slice(0, 40)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.merchant || t.descAI || t.description?.slice(0, 40)}</span>
               <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
                 −€ {fmtIT(Math.abs(t.amount), 2)}
               </span>
@@ -659,9 +668,9 @@ function VacNonAllocateStep({ importedIdSet, onNext, embedded, registerUndo }) {
             <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(t.competenza || t.date)}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.descAI || t.description?.slice(0, 40)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.merchant || t.descAI || t.description?.slice(0, 40)}</span>
               <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
-                background: 'var(--gold-l,#fef9e7)', color: 'var(--gold,#b45309)' }}>{vac.city || vac.name}</span>
+                background: 'var(--gold-l,#fef9e7)', color: 'var(--gold,#b45309)' }}>✈️ {vac.city || vac.name}</span>
               <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
                 −€ {fmtIT(Math.abs(t.amount), 2)}
               </span>
@@ -669,7 +678,7 @@ function VacNonAllocateStep({ importedIdSet, onNext, embedded, registerUndo }) {
                 <button onClick={() => confirm({ t, vac, vacType })}
                   title={`È una spesa della vacanza → Weekend e Vacanze › ${vacType}`}
                   style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  ✅ È della vacanza
+                  ✅ È della vacanza "{vac.city || vac.name || '—'}"
                 </button>
                 <button onClick={() => dismiss({ t })}
                   style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
@@ -738,12 +747,23 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
   const srcIds = new Set(srcTxs.map(t => t.txId))
   const dbPool = allTransactions.filter(t => !srcIds.has(t.txId) && !t.excluded && sameCategory(t))
-  return srcTxs.filter(t => !t.excluded).map(t => {
+  const results = []
+  // Doppioni DENTRO lo stesso batch appena importato (bug segnalato 2026-07-14:
+  // dbPool esclude sempre il batch corrente, quindi due righe identiche lette
+  // dallo stesso CSV — o da più file con intervalli di date sovrapposti — non
+  // venivano mai confrontate fra loro, solo contro il DB preesistente).
+  const seenInBatch = new Map() // `${date}|${descrizione}` -> prima tx vista
+  srcTxs.filter(t => !t.excluded).forEach(t => {
     const origDesc = (t.description || '').trim()
-    if (!origDesc) return null
-    const match = dbPool.find(e => e.date === t.date && (e.description || '').trim() === origDesc)
-    return match ? { t, match } : null
-  }).filter(Boolean)
+    if (!origDesc) return
+    const dbMatch = dbPool.find(e => e.date === t.date && (e.description || '').trim() === origDesc)
+    if (dbMatch) { results.push({ t, match: dbMatch }); return }
+    const key = `${t.date}|${origDesc}`
+    const prevInBatch = seenInBatch.get(key)
+    if (prevInBatch) results.push({ t, match: prevInBatch, _sameBatch: true })
+    else seenInBatch.set(key, t)
+  })
+  return results
 }
 
 function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
@@ -784,9 +804,9 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
           {dupes.map(d => (
             <div key={d.t.txId} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', marginBottom: 6 }}>
-                Nuova (dal CSV) vs già presente nel DB
+                {d._sameBatch ? '⚠️ Doppione dentro questo stesso import (non contro il DB)' : 'Nuova (dal CSV) vs già presente nel DB'}
               </div>
-              {[['Importata ora', d.t], ['Già nel DB', d.match]].map(([label, tx]) => (
+              {[[d._sameBatch ? 'Riga 1' : 'Importata ora', d.t], [d._sameBatch ? 'Riga 2 (duplicata)' : 'Già nel DB', d.match]].map(([label, tx]) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, marginBottom: 3 }}>
                   <span style={{ minWidth: 90, color: 'var(--text3)' }}>{label}:</span>
                   <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(tx.date)}</span>
@@ -888,15 +908,25 @@ export default function ImportWizard({ onClose }) {
 
   function buildQueue() {
     const q = []
-    // 'doppioni' (richiesta utente 2026-07-13, punto 4): subito dopo la rifinitura
-    // di ciascuna sorgente, verifica doppioni contro il DB della STESSA categoria
-    if (sources.conto) q.push({ id:'import', src:'conto' },
-      { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' },
-      { id:'doppioni', src:'conto' })
-    if (sources.carta) q.push({ id:'import', src:'carta' },
-      { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' },
-      { id:'doppioni', src:'carta' })
+    // 'doppioni' spostato SUBITO dopo l'import, PRIMA della rifinitura (richiesta
+    // utente 2026-07-14: i doppioni vanno eliminati prima di spendere tempo a
+    // rifinire righe che verranno comunque scartate — prima stava dopo i 3 step
+    // di rifinitura). NOTA: la chiamata AI Gemini di enrichment avviene comunque
+    // dentro lo step 'import' stesso (ImportModal.jsx, sincrona subito dopo il
+    // salvataggio) — spostare questo step non evita quella chiamata, evita solo
+    // il lavoro di rifinitura manuale su righe poi eliminate come doppioni.
+    // PayPal per PRIMO (richiesta utente 2026-07-14: "subito quando ti chiede
+    // cosa vuoi importare, utente sceglie... e subito chiede di caricare i
+    // file" — prima veniva chiesto per ultimo, dopo tutti gli step di conto/
+    // carta). Se l'utente seleziona più fonti, l'upload PayPal parte per primo,
+    // poi si passa a conto/carta.
     if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
+    if (sources.conto) q.push({ id:'import', src:'conto' },
+      { id:'doppioni', src:'conto' },
+      { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' })
+    if (sources.carta) q.push({ id:'import', src:'carta' },
+      { id:'doppioni', src:'carta' },
+      { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
     // 'compensazioni' PRIMA di 'vacanze' (richiesta utente 2026-07-13, punto 1:
     // spostare il mega-step Vacanze dopo Compensazioni)
     // 'vacanze': mega-step con le 4 sezioni (prenotazioni, candidate, fuori
@@ -965,13 +995,30 @@ export default function ImportWizard({ onClose }) {
     if (!dates.length) return { vacMinDate: null, vacMaxDate: null }
     return { vacMinDate: dates.reduce((m, d) => d < m ? d : m), vacMaxDate: dates.reduce((m, d) => d > m ? d : m) }
   }, [transactions, importedIdSet])
-  function refineRows(src, kind) {
-    const txs = importedTxs(src)
-    if (kind === 'l2')   return txs.filter(t => (!t.cat1 || t.cat1 === 'Non Categorizzato' || !t.cat2) && t.cat1 !== 'Entrate')
-    if (kind === 'desc') return txs.filter(noDesc)
-    // 'ai': categorizzate dall'AI senza che nessuna regola sia scattata, e non toccate a mano
+  // Elenco "congelato" per ogni schermata di rifinitura (bug segnalato 2026-07-14:
+  // appena l'utente sceglieva una L1/L2, la riga spariva SUBITO dalla tabella,
+  // perché il filtro veniva ricalcolato dal vivo sullo store a ogni render e la
+  // riga non soddisfaceva più il criterio — sia in questa schermata che in quella
+  // precedente). Ora l'elenco di transazioni mostrate in una schermata si fissa
+  // alla prima visita e non si restringe più: le righe già sistemate restano
+  // visibili con un segno ✓ invece di sparire, così l'utente vede sempre lo stato
+  // reale invece di perdere il riferimento a cosa ha appena modificato.
+  const frozenRefineIdsRef = useRef({})
+  function refineMatchFn(src, kind) {
+    if (kind === 'l2')   return t => (!t.cat1 || t.cat1 === 'Non Categorizzato' || !t.cat2) && t.cat1 !== 'Entrate'
+    if (kind === 'desc') return noDesc
     const ruleIds = new Set(results[src]?.ruleAppliedIds || [])
-    return txs.filter(t => t.cat1 && t.cat1 !== 'Non Categorizzato' && t.aiCategorized && !ruleIds.has(t.txId) && !t.userEditedCat)
+    return t => t.cat1 && t.cat1 !== 'Non Categorizzato' && t.aiCategorized && !ruleIds.has(t.txId)
+  }
+  function refineRows(src, kind) {
+    const key = `${src}|${kind}`
+    const txs = importedTxs(src)
+    const matchFn = refineMatchFn(src, kind)
+    if (!frozenRefineIdsRef.current[key]) {
+      frozenRefineIdsRef.current[key] = txs.filter(matchFn).map(t => t.txId)
+    }
+    const frozenIds = new Set(frozenRefineIdsRef.current[key])
+    return txs.filter(t => frozenIds.has(t.txId)).map(t => ({ ...t, _wizDone: !matchFn(t) }))
   }
 
   // Gestione regola dal popup (stessa semantica di handleApplyRule dello sheet Transazioni)
@@ -1159,7 +1206,7 @@ export default function ImportWizard({ onClose }) {
           scorre (area interna flex:1 con overflow), l'header e lo stepper restano
           sempre nella stessa posizione. */}
       <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 28px',
-        width:900,height:'82vh',maxWidth:'96vw',maxHeight:'92vh',
+        width:1040,height:'82vh',maxWidth:'96vw',maxHeight:'92vh',
         display:'flex',flexDirection:'column',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
         <button onClick={onClose} title="Chiudi il wizard"
           style={{position:'absolute',top:14,right:16,background:'none',border:'none',cursor:'pointer',

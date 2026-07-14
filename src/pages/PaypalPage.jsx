@@ -610,22 +610,40 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
         allResults = allResults.concat(parsed)
       }
 
-      // Detect duplicates: against existing imports + intra-batch
+      // Detect duplicates: against existing imports + intra-batch.
+      // Chiave "loose" (data+importo, senza merchant) aggiunta 2026-07-14: il
+      // merchant estratto dall'AI da screenshot diversi della STESSA transazione
+      // può variare leggermente (OCR/formattazione), facendo sfuggire doppioni
+      // reali alla chiave stretta dupKey() — utente ha segnalato doppioni visibili
+      // non rilevati. Qui si aggiunge un secondo controllo più permissivo: stessa
+      // data+importo nello stesso batch è quasi sempre lo stesso movimento reale
+      // per un conto personale, quindi va comunque segnalato come possibile
+      // doppione (l'utente resta libero di deselezionarlo o tenerlo comunque,
+      // la selezione automatica esclude sempre i sospetti doppioni per default).
+      const looseKey = r => `${r.date}|${Math.round(Math.abs(r.amount||0)*100)}`
       const dupSet = new Set()
       const batchSeen = new Set()
+      const batchSeenLoose = new Set()
       allResults.forEach((r, i) => {
         const k = dupKey(r)
-        if (isAlreadyImported(r, paypalImports) || batchSeen.has(k)) {
+        const lk = looseKey(r)
+        if (isAlreadyImported(r, paypalImports) || batchSeen.has(k) || batchSeenLoose.has(lk)) {
           dupSet.add(i)
         } else {
           batchSeen.add(k)
+          batchSeenLoose.add(lk)
         }
       })
 
       setResults(allResults)
       setDuplicates(dupSet)
-      // Auto-select only non-duplicates
-      setSelected(new Set(allResults.map((_,i) => i).filter(i => !dupSet.has(i))))
+      // Auto-select solo i non-doppioni E non in valuta estera non riconciliata:
+      // se l'AI riporta un currency diverso da EUR (nessun equivalente € visibile
+      // sullo screenshot), l'importo NON va assunto come euro — va confermato a mano
+      // dall'utente dopo verifica (bug segnalato 2026-07-14: "-519,00 kr SEK"
+      // importato come 519 euro).
+      const isForeign = r => r.currency && String(r.currency).toUpperCase() !== 'EUR'
+      setSelected(new Set(allResults.map((_,i) => i).filter(i => !dupSet.has(i) && !isForeign(allResults[i]))))
     } catch(e) {
       alert('Errore analisi AI: ' + e.message)
     } finally {
@@ -761,6 +779,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
               <tbody>
                 {results.map((r,i) => {
                   const isDup = duplicates.has(i)
+                  const isForeign = r.currency && String(r.currency).toUpperCase() !== 'EUR'
                   return (
                     <tr key={i} style={{ opacity: isDup ? .4 : (selected.has(i) ? 1 : .5) }}>
                       <td className="pp-results-td">
@@ -774,10 +793,16 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
                             background:'#fef3c7', borderRadius:4, padding:'1px 5px',
                             border:'1px solid #fcd34d', verticalAlign:'middle' }}>🔁 già importata</span>
                         )}
+                        {isForeign && (
+                          <span title="Importo in valuta estera: verifica manualmente il controvalore in euro prima di importare"
+                            style={{ marginLeft:6, fontSize:10, color:'#991b1b',
+                            background:'#fee2e2', borderRadius:4, padding:'1px 5px',
+                            border:'1px solid #fca5a5', verticalAlign:'middle' }}>⚠️ {r.currency} non convertito</span>
+                        )}
                       </td>
                       <td className="pp-results-td">{fmtDate(r.date)}</td>
                       <td className="pp-results-td" style={{ color: r.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:600 }}>
-                        {r.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(r.amount), 2)}
+                        {r.amount < 0 ? '-' : '+'}{isForeign ? `${fmtIT(Math.abs(r.amount), 2)} ${r.currency}` : `€${fmtIT(Math.abs(r.amount), 2)}`}
                       </td>
                       <td className="pp-results-td">
                         {r.cat1_suggestion && (

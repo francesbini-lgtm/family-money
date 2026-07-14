@@ -410,7 +410,7 @@ export const useStore = create((set, get) => ({
     const { userAccounts: ua, appPrefs: ap } = get()
     const newTxs = rawNew.map(t => {
       const enriched = enrichTx({...t, aiEnriched: false})
-      return { ...enriched, user: computeUser(enriched, ua, ap) || null }
+      return { ...enriched, user: computeUser(enriched, ua, ap) || null, importedAt: t.importedAt || new Date().toISOString() }
     })
     set(s=>({
       transactions: [...newTxs,...s.transactions].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
