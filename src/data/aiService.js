@@ -200,12 +200,21 @@ Rispondi SOLO con un JSON valido, nessun testo extra, in questo formato esatto:
 
 Se hai un valore singolo invece di un range, usa lo stesso numero sia per min che per max.`
 
+  // Log in chiaro nella console del browser (richiesta utente 2026-07-14: vedere
+  // prompt/output esatti per capire se un valore sembra sbagliato) — filtrabile
+  // cercando "[estimateVehicleMarketValue]" nella console DevTools.
+  console.log('[estimateVehicleMarketValue] prompt inviato:\n' + prompt)
+
   const raw = await callGemini(prompt)
+  console.log('[estimateVehicleMarketValue] risposta AI grezza:', raw)
+
   let parsed
   try { parsed = JSON.parse(raw) } catch { throw new Error('Risposta AI non valida: ' + raw.slice(0, 120)) }
   const min = Number(parsed.min), max = Number(parsed.max)
   if (!isFinite(min) || !isFinite(max)) throw new Error('Risposta AI senza valori numerici validi')
-  return Math.round((min + max) / 2)
+  const avg = Math.round((min + max) / 2)
+  console.log(`[estimateVehicleMarketValue] min=${min} max=${max} → media=${avg}`)
+  return avg
 }
 
 // ── Merchant lookup — direct OpenAI call (bypasses proxy to avoid Vercel timeout) ──
