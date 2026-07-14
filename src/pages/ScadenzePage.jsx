@@ -8,14 +8,16 @@ import { fmtIT, fmtDate } from '../utils/format'
 
 const CATS_SCD = ['Mutuo/Prestito','Assicurazione','Abbonamento','Tasse','Auto','Utenze','Altro']
 
-// ── Rinnovo automatico scadenze veicolo (richiesta utente 2026-07-13) ────────
-// Assunzione di base: assicurazione/tagliando/bollo si ripetono ogni anno,
-// revisione ogni 2 — quindi una data passata NON significa "scaduta per
-// sempre", va avanzata automaticamente alla prossima occorrenza (stesso
-// giorno/mese, anno successivo) finché non cade oggi o nel futuro. Il campo
-// originale sul veicolo (v.assicurazione/tagliando/revisione/bollo) NON viene
-// mai toccato/sovrascritto qui — l'utente può sempre correggerlo a mano
-// quando conosce la vera data di rinnovo, e da lì il calcolo riparte.
+// ── Rinnovo automatico SOLO per il Bollo (richiesta utente 2026-07-14) ──────
+// Il Bollo è una tassa fissa con cadenza nota — la data si può far avanzare
+// in automatico senza bisogno di conferma. Assicurazione/Tagliando/Revisione
+// invece dipendono da un rinnovo effettivo (con importo variabile) che
+// l'utente deve confermare esplicitamente: per questi NON si usa più
+// nextOccurrence — una data passata resta "scaduta" finché l'utente non
+// preme "✓ Rinnovato" (vedi RenewModal più sotto). Il campo originale sul
+// veicolo (v.assicurazione/tagliando/revisione/bollo) viene aggiornato SOLO
+// dal rinnovo esplicito (o, per il bollo, mai — resta il riferimento e il
+// calcolo riparte sempre da lì).
 function nextOccurrence(dateStr, years, todayStr) {
   if (!dateStr) return dateStr
   let cur = dateStr
@@ -29,6 +31,12 @@ function nextOccurrence(dateStr, years, todayStr) {
   return cur
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
 function urgencyClass(daysLeft, pagata) {
   if (pagata) return 'paid'
   if (daysLeft < 0)  return 'overdue'
@@ -37,7 +45,46 @@ function urgencyClass(daysLeft, pagata) {
   return 'ok'
 }
 
-function ScadenzaRow({ s, onToggle, onDelete }) {
+// Colore del bordo sinistro coerente con l'urgenza (prima era sempre var(--accent)
+// per le righe veicolo, nascondendo lo stato "scaduta" — bug segnalato dall'utente
+// 2026-07-14 insieme al resto).
+const URGENCY_BORDER = {
+  paid: 'var(--green)', overdue: 'var(--red)', urgent: 'var(--red)',
+  soon: 'var(--gold)', ok: 'var(--accent)',
+}
+
+// ── Rinnovo scadenza veicolo (Assicurazione/Tagliando/Revisione) ────────────
+// Chiede nuova data (default: giorno dopo la vecchia scadenza) + importo
+// pagato — aggiorna v[fieldKey] (data) e v[fieldKey+'Importo'] (ultimo pagato).
+function RenewModal({ s, onSave, onClose }) {
+  const [data, setData]       = useState(addDays(s.data, 1))
+  const [importo, setImporto] = useState(s.importo > 0 ? String(s.importo) : '')
+
+  function save() {
+    if (!data) return
+    onSave(data, parseFloat(importo) || 0)
+    onClose()
+  }
+
+  return (
+    <Modal title={`✓ Rinnova — ${s.nome}`} onClose={onClose} width={380}>
+      <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>
+        Vecchia scadenza: <strong>{fmtDate(s.data)}</strong>
+      </div>
+      <FormRow label="Nuova scadenza"><Input type="date" value={data} onChange={e=>setData(e.target.value)} autoFocus/></FormRow>
+      <FormRow label="Importo pagato (€, opzionale)">
+        <Input type="number" value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0" step="0.01"/>
+      </FormRow>
+      <ModalFooter>
+        <button className="btn btn-primary" onClick={save}>Salva rinnovo</button>
+        <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
+function ScadenzaRow({ s, onToggle, onDelete, onRenew }) {
+  const [showRenew, setShowRenew] = useState(false)
   const today   = new Date().toISOString().slice(0,10)
   const daysLeft = Math.round((new Date(s.data) - new Date(today)) / 86400000)
   const cls     = urgencyClass(daysLeft, s.pagata)
@@ -48,21 +95,35 @@ function ScadenzaRow({ s, onToggle, onDelete }) {
     daysLeft <= 30  ? `Tra ${daysLeft} giorni` :
     `${fmtDate(s.data)}`
 
-  // Vehicle-derived scadenza: read-only, distinct style
+  // Vehicle-derived scadenza: read-only date, ma rinnovabile (tranne il Bollo,
+  // che si auto-avanza da solo e non ha bisogno del bottone)
   if (s.isVehicle) {
     return (
-      <div className={'scd-row scd-'+cls} style={{borderLeft:'3px solid var(--accent)',paddingLeft:10}}>
+      <>
+      <div className={'scd-row scd-'+cls} style={{borderLeft:`3px solid ${URGENCY_BORDER[cls]}`,paddingLeft:10}}>
         <span style={{fontSize:22,lineHeight:1,flexShrink:0,marginRight:4}}>{s.vehicleIcon||'🚗'}</span>
         <div className="scd-info">
           <div className="scd-name">{s.nome}</div>
-          <div className="scd-meta">🚗 Veicolo · {s.cadenza}</div>
+          <div className="scd-meta">
+            🚗 Veicolo · {s.cadenza}
+            {s.importo > 0 && <> · ultimo pagato € {fmtIT(s.importo,0)}</>}
+          </div>
         </div>
         <div className="scd-right">
           <span className={'scd-badge scd-badge-'+cls}>{label}</span>
           <span style={{fontSize:10,color:'var(--text3)',padding:'1px 6px',background:'var(--surface2)',
             borderRadius:4,border:'1px solid var(--border)'}}>dal veicolo</span>
+          {!s.autoRenew && (
+            <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px'}}
+              onClick={()=>setShowRenew(true)}>✓ Rinnovato</button>
+          )}
         </div>
       </div>
+      {showRenew && (
+        <RenewModal s={s} onClose={()=>setShowRenew(false)}
+          onSave={(newDate, importo) => onRenew(s, newDate, importo)}/>
+      )}
+      </>
     )
   }
 
@@ -124,33 +185,43 @@ function AddModal({ onClose }) {
 }
 
 export default function ScadenzePage() {
-  const { scadenze, updateScadenza, deleteScadenza, vehicles } = useStore()
+  const { scadenze, updateScadenza, deleteScadenza, vehicles, updateVehicle } = useStore()
   const [showAdd, setShowAdd] = useState(false)
   const [filter, setFilter]   = useState('all') // all | pending | paid
 
   const today = new Date().toISOString().slice(0,10)
 
-  // Generate virtual scadenze from vehicle deadline fields
+  // Generate virtual scadenze from vehicle deadline fields.
+  // Solo il Bollo auto-avanza (autoRenew:true, via nextOccurrence) — gli altri
+  // 3 restano fermi alla data reale sul veicolo finché l'utente non conferma
+  // il rinnovo (richiesta utente 2026-07-14, vedi commento più sopra).
   const vehScadenze = (vehicles||[]).flatMap(v =>
     [
-      ['assicurazione', '🛡 Assicurazione', 'Annuale'],
-      ['tagliando',     '🔧 Tagliando',     'Annuale'],
-      ['revisione',     '🔩 Revisione',     'Biennale'],
-      ['bollo',         '📋 Bollo',         'Annuale'],
+      ['assicurazione', '🛡 Assicurazione', 'Annuale',  false],
+      ['tagliando',     '🔧 Tagliando',     'Annuale',  false],
+      ['revisione',     '🔩 Revisione',     'Biennale', false],
+      ['bollo',         '📋 Bollo',         'Annuale',  true],
     ]
     .filter(([k]) => v[k])
-    .map(([k, label, cadenza]) => ({
+    .map(([k, label, cadenza, autoRenew]) => ({
       id: `veh-${v.id}-${k}`,
       nome: `${label} — ${v.name}`,
-      data: nextOccurrence(v[k], cadenza === 'Biennale' ? 2 : 1, today),
+      data: autoRenew ? nextOccurrence(v[k], cadenza === 'Biennale' ? 2 : 1, today) : v[k],
       cat: 'Auto',
       cadenza,
-      importo: 0,
+      importo: v[`${k}Importo`] || 0,
       pagata: false,
       isVehicle: true,
       vehicleIcon: v.icon,
+      vehicleId: v.id,
+      fieldKey: k,
+      autoRenew,
     }))
   )
+
+  function handleRenew(s, newDate, importo) {
+    updateVehicle(s.vehicleId, { [s.fieldKey]: newDate, [`${s.fieldKey}Importo`]: importo })
+  }
 
   const allScadenze = [...scadenze, ...vehScadenze]
   const sorted = [...allScadenze].sort((a,b) => a.data.localeCompare(b.data))
@@ -240,6 +311,7 @@ export default function ScadenzePage() {
               key={s.id} s={s}
               onToggle={() => updateScadenza(s.id, {pagata:!s.pagata})}
               onDelete={() => deleteScadenza(s.id)}
+              onRenew={handleRenew}
             />
           ))}
         </div>
