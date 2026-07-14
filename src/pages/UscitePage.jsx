@@ -67,6 +67,66 @@ function fmtDate(dateStr) {
 
 const isSatiLinked = t => !!(t._satiLinked && t.splits?.length > 0)
 
+// ── KPI YTD + ultimi 12 mesi (richiesta utente 2026-07-14: i 4 KPI in prima
+// riga devono essere YTD esplicitamente etichettati, con accanto — piccolo,
+// stessa cella, spostato a destra — lo stesso KPI calcolato sugli ultimi 12
+// mesi) — indipendenti dalla finestra di 6 mesi mostrata nel grafico/tabella
+// sotto (months/monthOffset), quindi calcolati su TUTTE le transazioni.
+function getYTDMonthKeys() {
+  const now = new Date()
+  const y = now.getFullYear()
+  return Array.from({ length: now.getMonth() + 1 }, (_, m) => `${y}-${String(m + 1).padStart(2, '0')}`)
+}
+function getLast12MonthKeys() {
+  const now = new Date()
+  return Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+}
+function ymLabelShort(ym) {
+  if (!ym) return '—'
+  const [y, m] = ym.split('-')
+  return `${MONTH_LABELS[parseInt(m) - 1]} ${y.slice(2)}`
+}
+// Stessa logica di filtro/esplosione splits dell'useMemo `expenses` qui sotto,
+// ma parametrizzata su un set di monthKey arbitrario (non solo la finestra
+// visibile) — usata solo per i 4 KPI riassuntivi, non per grafico/tabella.
+function buildKpiAgg(transactions, monthKeySet) {
+  const byCat1 = {}   // cat1 → monthKey → totale
+  const byMonth = {}  // monthKey → totale
+  let total = 0
+  function add(cat1, ym, val) {
+    if (!val) return
+    if (!byCat1[cat1]) byCat1[cat1] = {}
+    byCat1[cat1][ym] = (byCat1[cat1][ym] || 0) + val
+    byMonth[ym] = (byMonth[ym] || 0) + val
+    total += val
+  }
+  transactions.forEach(t => {
+    if (t.excluded || t.amount >= 0 || t.cat1 === 'Entrate') return
+    const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
+    if (!monthKeySet.has(ym)) return
+    if (isSatiLinked(t)) {
+      t.splits.forEach(sp => { if (sp.amount > 0) add(sp.cat1 || 'Non Categorizzato', ym, sp.amount) })
+      return
+    }
+    add(t.cat1 || 'Non Categorizzato', ym, Math.abs(netAmt(t)))
+  })
+  return { total, byCat1, byMonth }
+}
+function summarizeKpiAgg(agg, nMonths) {
+  const avg = nMonths > 0 ? agg.total / nMonths : 0
+  let worstKey = null, worstVal = 0
+  Object.entries(agg.byMonth).forEach(([k, v]) => { if (v > worstVal) { worstVal = v; worstKey = k } })
+  let topCat = '—', topVal = 0
+  Object.entries(agg.byCat1).forEach(([cat1, months]) => {
+    const t = Object.values(months).reduce((s, v) => s + v, 0)
+    if (t > topVal) { topVal = t; topCat = cat1 }
+  })
+  return { total: agg.total, avg, worstLabel: worstKey ? ymLabelShort(worstKey) : '—', topCat }
+}
+
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 // Piccolo label che mostra SOLO la categoria/segmento sotto il mouse (non più
 // il riquadro nero con l'elenco di tutte le categorie del mese — richiesta
@@ -535,7 +595,8 @@ export default function UscitePage() {
   const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0)
   const grandAvg = grandTotal / 6
 
-  // ── KPI values ────────────────────────────────────────────────────────────
+  // ── KPI values (finestra 6 mesi visibile — usati solo internamente, non più
+  // mostrati direttamente in prima riga: vedi kpiYTD/kpi12m sotto) ───────────
   const kpiTotale6m = grandTotal
   const kpiMediaMensile = grandAvg
   const kpiMesePeggiore = useMemo(() => {
@@ -556,6 +617,16 @@ export default function UscitePage() {
     })
     return topCat
   }, [cat1List, months, dataMap])
+
+  // ── KPI YTD (prima riga) + mini KPI ultimi 12 mesi (richiesta utente 2026-07-14) ──
+  const ytdKeys    = useMemo(() => new Set(getYTDMonthKeys()), [])
+  const last12Keys = useMemo(() => new Set(getLast12MonthKeys()), [])
+  const kpiYTD  = useMemo(() => summarizeKpiAgg(buildKpiAgg(transactions, ytdKeys), new Date().getMonth() + 1), [transactions, ytdKeys])
+  const kpi12m  = useMemo(() => summarizeKpiAgg(buildKpiAgg(transactions, last12Keys), 12), [transactions, last12Keys])
+  const ytdRangeLabel = useMemo(() => {
+    const keys = getYTDMonthKeys()
+    return keys.length > 1 ? `${ymLabelShort(keys[0])} – ${ymLabelShort(keys.at(-1))}` : ymLabelShort(keys[0])
+  }, [])
 
   // ── Drag & drop state and handlers ───────────────────────────────────────
   const [dragSrc, setDragSrc] = useState(null)
@@ -651,23 +722,36 @@ export default function UscitePage() {
       {activeTab === 'altro'   && <AltroPage/>}
 
       {activeTab === 'overview' && <>
-      {/* KPI bar */}
+      {/* KPI bar — YTD in prima riga (richiesta utente 2026-07-14), con accanto
+          in piccolo lo stesso KPI calcolato sugli ultimi 12 mesi */}
       <div className="uscite-kpis">
         <div className="uscite-kpi">
-          <div className="uscite-kpi-label">{months[0].label} – {months[5].label}</div>
-          <div className="uscite-kpi-value">{fmtIT(Math.round(kpiTotale6m))} €</div>
+          <div className="uscite-kpi-label">{ytdRangeLabel} (YTD)</div>
+          <div className="uscite-kpi-value-row">
+            <div className="uscite-kpi-value">{fmtIT(Math.round(kpiYTD.total))} €</div>
+            <div className="uscite-kpi-mini">12 mesi <strong>{fmtIT(Math.round(kpi12m.total))} €</strong></div>
+          </div>
         </div>
         <div className="uscite-kpi">
-          <div className="uscite-kpi-label">Media mensile</div>
-          <div className="uscite-kpi-value">{fmtIT(Math.round(kpiMediaMensile))} €</div>
+          <div className="uscite-kpi-label">Media mensile (YTD)</div>
+          <div className="uscite-kpi-value-row">
+            <div className="uscite-kpi-value">{fmtIT(Math.round(kpiYTD.avg))} €</div>
+            <div className="uscite-kpi-mini">12 mesi <strong>{fmtIT(Math.round(kpi12m.avg))} €</strong></div>
+          </div>
         </div>
         <div className="uscite-kpi">
-          <div className="uscite-kpi-label">Mese peggiore</div>
-          <div className="uscite-kpi-value">{kpiMesePeggiore}</div>
+          <div className="uscite-kpi-label">Mese peggiore (YTD)</div>
+          <div className="uscite-kpi-value-row">
+            <div className="uscite-kpi-value">{kpiYTD.worstLabel}</div>
+            <div className="uscite-kpi-mini">12 mesi <strong>{kpi12m.worstLabel}</strong></div>
+          </div>
         </div>
         <div className="uscite-kpi">
-          <div className="uscite-kpi-label">Categoria top</div>
-          <div className="uscite-kpi-value">{kpiCategoriaTop}</div>
+          <div className="uscite-kpi-label">Categoria top (YTD)</div>
+          <div className="uscite-kpi-value-row">
+            <div className="uscite-kpi-value">{kpiYTD.topCat}</div>
+            <div className="uscite-kpi-mini">12 mesi <strong>{kpi12m.topCat}</strong></div>
+          </div>
         </div>
       </div>
 

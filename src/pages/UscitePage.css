@@ -69,9 +69,13 @@
 
 /* ── KPI bar ─────────────────────────────────────────────── */
 .uscite-kpis { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-.uscite-kpi  { flex: 1; min-width: 120px; padding: 14px 16px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
+.uscite-kpi  { flex: 1; min-width: 160px; padding: 14px 16px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
 .uscite-kpi-label { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); margin-bottom: 4px; }
 .uscite-kpi-value { font-size: 18px; font-weight: 700; color: var(--text1); font-variant-numeric: tabular-nums; }
+/* Riga valore YTD (sinistra) + mini KPI ultimi 12 mesi (destra, richiesta utente 2026-07-14) */
+.uscite-kpi-value-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.uscite-kpi-mini { font-size: 10.5px; font-weight: 500; color: var(--text3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.uscite-kpi-mini strong { color: var(--text2); font-weight: 700; }
 
 /* ── Chart title ─────────────────────────────────────────── */
 .uscite-chart-title {
