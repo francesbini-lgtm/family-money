@@ -205,10 +205,14 @@ Anno: ${anno || '—'}
 Carburante: ${carburante || '—'}
 Chilometraggio: ${km != null && km !== '' ? `${km} km` : 'non disponibile'}
 
-Rispondi SOLO con un JSON valido, nessun testo extra, in questo formato esatto:
-{"min": <numero intero in euro>, "max": <numero intero in euro>}
+Se dagli annunci trovi un range di prezzi (minimo e massimo), calcola TU STESSO la media aritmetica tra i due — non lasciarla fare a me, deve già essere un unico numero nella risposta.
 
-Se trovi un valore singolo invece di un range, usa lo stesso numero sia per min che per max.`
+Rispondi SOLO con un JSON valido, nessun testo extra, in questo formato esatto:
+{"min": <numero>, "max": <numero>, "valore": <numero>}
+
+dove "valore" è il numero finale da usare (la media, se avevi un range; lo stesso valore di min/max se avevi un prezzo singolo).
+
+IMPORTANTE sul formato dei numeri: scrivili come interi puri, SENZA separatori delle migliaia e senza simboli — es. 18500, non "18,500" né "18.500" né "€18.500".`
 
   // Log in chiaro nella console del browser (richiesta utente 2026-07-14: vedere
   // prompt/output esatti per capire se un valore sembra sbagliato) — filtrabile
@@ -248,13 +252,36 @@ Se trovi un valore singolo invece di un range, usa lo stesso numero sia per min 
   }
   console.log('[estimateVehicleMarketValue] risposta AI grezza:', raw)
 
+  // Rete di sicurezza (bug reale segnalato dall'utente 2026-07-14): anche
+  // chiedendolo esplicitamente nel prompt, l'AI a volte scrive i numeri con
+  // separatori delle migliaia (es. "15,800") che rendono il JSON non valido
+  // (JSON.parse fallisce su virgole dentro un numero). Le ripuliamo prima di
+  // fare il parse, invece di limitarci a sperare che il prompt basti.
+  const sanitized = sanitizeThousandSeparators(raw)
   let parsed
-  try { parsed = JSON.parse(raw) } catch { throw new Error('Risposta AI non valida: ' + raw.slice(0, 120)) }
-  const min = Number(parsed.min), max = Number(parsed.max)
-  if (!isFinite(min) || !isFinite(max)) throw new Error('Risposta AI senza valori numerici validi')
-  const avg = Math.round((min + max) / 2)
-  console.log(`[estimateVehicleMarketValue] min=${min} max=${max} → media=${avg}`)
+  try { parsed = JSON.parse(sanitized) }
+  catch { throw new Error('Risposta AI non valida: ' + raw.slice(0, 120)) }
+
+  const min = Number(parsed.min), max = Number(parsed.max), valore = Number(parsed.valore)
+  // "valore" è la media già calcolata dall'AI (richiesta esplicita nel prompt);
+  // se manca o non è un numero valido, la calcoliamo noi da min/max come fallback.
+  const avg = isFinite(valore) ? Math.round(valore)
+    : (isFinite(min) && isFinite(max)) ? Math.round((min + max) / 2)
+    : NaN
+  if (!isFinite(avg)) throw new Error('Risposta AI senza valori numerici validi')
+  console.log(`[estimateVehicleMarketValue] min=${min} max=${max} valore=${valore} → risultato=${avg}`)
   return avg
+}
+
+// Rimuove virgole/punti usati come separatori delle migliaia dentro numeri
+// (es. "15,800" → "15800", "18.500" → "18500") senza toccare la struttura JSON.
+function sanitizeThousandSeparators(str) {
+  let prev
+  do {
+    prev = str
+    str = str.replace(/(\d)[,.](\d{3})(?!\d)/g, '$1$2')
+  } while (str !== prev)
+  return str
 }
 
 // ── Merchant lookup — direct OpenAI call (bypasses proxy to avoid Vercel timeout) ──
