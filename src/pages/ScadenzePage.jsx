@@ -37,6 +37,27 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10)
 }
 
+// ── Ultimo importo pagato per una categoria L2 veicolo (richiesta utente
+// 2026-07-14: "lo trovi guardando quel veicolo, qual'è l'ultima spesa per
+// quella categoria" — niente più importo inserito a mano, si legge dallo
+// storico spese del veicolo in VeicoliRegistroPage: sia le spese manuali
+// (vehExpenses, es. pagate cash) sia le transazioni bancarie auto-rilevate
+// e assegnate a quel veicolo via appPrefs.vehTxVehicles). Prende la più
+// recente per data tra le due fonti.
+function lastCategoryExpense(vehicleId, catLabel, vehExpenses, transactions, vehTxVehicles) {
+  const manual = (vehExpenses||[])
+    .filter(e => e.vehicleId === vehicleId && e.cat === catLabel)
+    .map(e => ({ date: e.date || '', amount: e.amount || 0 }))
+  const auto = (transactions||[])
+    .filter(t => !t.excluded && t.amount < 0 && t.cat1 === 'Veicoli' && t.cat2 === catLabel &&
+      (vehTxVehicles||{})[t.txId] === vehicleId)
+    .map(t => ({ date: t._effDate || t.date || '', amount: Math.abs(t.amount) }))
+  const all = [...manual, ...auto].sort((a,b) => (b.date||'').localeCompare(a.date||''))
+  return all[0]?.amount || 0
+}
+
+const CAT_LABEL = { assicurazione:'Assicurazione', tagliando:'Tagliando', revisione:'Revisione', bollo:'Bollo' }
+
 function urgencyClass(daysLeft, pagata) {
   if (pagata) return 'paid'
   if (daysLeft < 0)  return 'overdue'
@@ -54,15 +75,17 @@ const URGENCY_BORDER = {
 }
 
 // ── Rinnovo scadenza veicolo (Assicurazione/Tagliando/Revisione) ────────────
-// Chiede nuova data (default: giorno dopo la vecchia scadenza) + importo
-// pagato — aggiorna v[fieldKey] (data) e v[fieldKey+'Importo'] (ultimo pagato).
+// Chiede solo la nuova data (default: giorno dopo la vecchia scadenza) —
+// aggiorna v[fieldKey]. L'importo NON si chiede più qui: viene letto in
+// automatico dall'ultima spesa registrata per quella categoria/veicolo
+// (vedi lastCategoryExpense) non appena l'utente registra la spesa in
+// Uscite › Veicoli.
 function RenewModal({ s, onSave, onClose }) {
-  const [data, setData]       = useState(addDays(s.data, 1))
-  const [importo, setImporto] = useState(s.importo > 0 ? String(s.importo) : '')
+  const [data, setData] = useState(addDays(s.data, 1))
 
   function save() {
     if (!data) return
-    onSave(data, parseFloat(importo) || 0)
+    onSave(data)
     onClose()
   }
 
@@ -72,9 +95,6 @@ function RenewModal({ s, onSave, onClose }) {
         Vecchia scadenza: <strong>{fmtDate(s.data)}</strong>
       </div>
       <FormRow label="Nuova scadenza"><Input type="date" value={data} onChange={e=>setData(e.target.value)} autoFocus/></FormRow>
-      <FormRow label="Importo pagato (€, opzionale)">
-        <Input type="number" value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0" step="0.01"/>
-      </FormRow>
       <ModalFooter>
         <button className="btn btn-primary" onClick={save}>Salva rinnovo</button>
         <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
@@ -114,8 +134,6 @@ function ScadenzaRow({ s, onToggle, onDelete, onRenew }) {
         </div>
         <div className="scd-right">
           <span className={'scd-badge scd-badge-'+cls}>{label}</span>
-          <span style={{fontSize:10,color:'var(--text3)',padding:'1px 6px',background:'var(--surface2)',
-            borderRadius:4,border:'1px solid var(--border)'}}>dal veicolo</span>
           {/* Bottone Rinnovato — solo quando è effettivamente scaduta (richiesta
               utente 2026-07-14: prima compariva sempre, anche per date future) */}
           {!s.autoRenew && cls === 'overdue' && (
@@ -126,7 +144,7 @@ function ScadenzaRow({ s, onToggle, onDelete, onRenew }) {
       </div>
       {showRenew && (
         <RenewModal s={s} onClose={()=>setShowRenew(false)}
-          onSave={(newDate, importo) => onRenew(s, newDate, importo)}/>
+          onSave={(newDate) => onRenew(s, newDate)}/>
       )}
       </>
     )
@@ -190,11 +208,12 @@ function AddModal({ onClose }) {
 }
 
 export default function ScadenzePage() {
-  const { scadenze, updateScadenza, deleteScadenza, vehicles, updateVehicle } = useStore()
+  const { scadenze, updateScadenza, deleteScadenza, vehicles, updateVehicle, vehExpenses, transactions, appPrefs } = useStore()
   const [showAdd, setShowAdd] = useState(false)
   const [filter, setFilter]   = useState('all') // all | pending | paid
 
   const today = new Date().toISOString().slice(0,10)
+  const vehTxVehicles = appPrefs?.vehTxVehicles || {}
 
   // Generate virtual scadenze from vehicle deadline fields.
   // Solo il Bollo auto-avanza (autoRenew:true, via nextOccurrence) — gli altri
@@ -214,7 +233,7 @@ export default function ScadenzePage() {
       data: autoRenew ? nextOccurrence(v[k], cadenza === 'Biennale' ? 2 : 1, today) : v[k],
       cat: 'Auto',
       cadenza,
-      importo: v[`${k}Importo`] || 0,
+      importo: lastCategoryExpense(v.id, CAT_LABEL[k], vehExpenses, transactions, vehTxVehicles),
       pagata: false,
       isVehicle: true,
       vehicleIcon: v.icon,
@@ -224,8 +243,8 @@ export default function ScadenzePage() {
     }))
   )
 
-  function handleRenew(s, newDate, importo) {
-    updateVehicle(s.vehicleId, { [s.fieldKey]: newDate, [`${s.fieldKey}Importo`]: importo })
+  function handleRenew(s, newDate) {
+    updateVehicle(s.vehicleId, { [s.fieldKey]: newDate })
   }
 
   const allScadenze = [...scadenze, ...vehScadenze]
