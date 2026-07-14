@@ -118,18 +118,34 @@ export async function mergeDocument(colName, id, data) {
   }
 }
 
-export async function loadDocument(colName, id) {
+// Retry (2026-07-14): questi sono documenti "singleton" (user_settings/app_prefs,
+// custom_cats, city_overrides) che NON hanno un realtime listener — vengono letti
+// una tantum da loadAllData(). Prima, un errore di rete transitorio (blip, tab
+// risvegliata da sleep, hiccup del token auth) faceva ritornare null qui, che
+// loadAllData() trattava come "documento non esistente" (utente nuovo) invece che
+// come "lettura fallita" — impostando comunque appPrefsLoaded:true e lasciando la
+// UI con prefs vuote per tutta la sessione, anche se i dati erano ancora salvati
+// su Firestore (causa reale sospetta di "chiave AI/Places sparita di nuovo",
+// segnalata quando l'utente NON aveva appena aperto l'app — quindi non poteva
+// essere il race di mount troppo rapido già corretto altrove). Ora riprova prima
+// di arrendersi.
+export async function loadDocument(colName, id, retries = 2) {
   if (!_householdId) return null
-  try {
-    const snap = await getDoc(doc(db, hCol(colName), String(id)))
-    if (!snap.exists()) return null
-    const data = snap.data()
-    delete data._updated
-    return data
-  } catch (e) {
-    console.warn(`loadDocument(${colName}/${id}) error:`, e.message)
-    return null
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const snap = await getDoc(doc(db, hCol(colName), String(id)))
+      if (!snap.exists()) return null
+      const data = snap.data()
+      delete data._updated
+      return data
+    } catch (e) {
+      const isLast = attempt === retries
+      console.warn(`loadDocument(${colName}/${id}) errore (tentativo ${attempt+1}/${retries+1}):`, e.message)
+      if (isLast) return null
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
+    }
   }
+  return null
 }
 
 // Batch-save multiple documents (max 500 per Firestore batch)
