@@ -511,6 +511,19 @@ function KPICard({ label, value, sub, color = 'var(--text)' }) {
 }
 
 // ── Bonus cell ────────────────────────────────────────────
+// ── Tab pill — stesso stile di UscitePage.jsx (richiesta utente 2026-07-14) ──
+function TabPill({ label, active, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      padding:'8px 16px',borderRadius:20,border:'none',cursor:'pointer',
+      fontFamily:'var(--font-sans)',fontSize:13,fontWeight:active?700:500,
+      background:active?'var(--accent)':'var(--surface)',
+      color:active?'#fff':'var(--text2)',
+      transition:'all .15s',
+    }}>{label}</button>
+  )
+}
+
 function BonusCell({ t, bonusMap, setBonusTx }) {
   const bonus = bonusMap[t.txId]
   const [editing, setEditing] = useState(false)
@@ -759,37 +772,35 @@ export default function EntratePage() {
 
   return (
     <>
-      {/* Header — sempre visibile sopra le tab, stesso ordine di Satispay (richiesta utente 2026-07-14) */}
-      <div className="en-header">
-        <div>
-          <h1 className="en-title">📈 Entrate e Stipendi</h1>
-          <div className="en-sub">
-            Solo stipendi <strong>Entrate · Fra</strong> e <strong>Entrate · Sofi</strong> — escluse altre entrate
+      {/* Header + tab pills — stesso schema padding/stile di UscitePage (richiesta utente 2026-07-14) */}
+      <div className="en-root">
+        <div className="en-header">
+          <div>
+            <h1 className="en-title">📈 Entrate e Stipendi</h1>
+            <div className="en-sub">
+              Solo stipendi <strong>Entrate · Fra</strong> e <strong>Entrate · Sofi</strong> — escluse altre entrate
+            </div>
           </div>
+          {tab === 'stipendi' && (
+            <div className="period-tabs">
+              {[
+                ['month', 'Mese',   'Andamento mensile (ultimi 12 mesi)'],
+                ['3m',    '3 Mesi', 'Andamento trimestrale (ultimi 12 trimestri)'],
+                ['year',  'Anno',   'Andamento annuale (tutti gli anni)'],
+              ].map(([v, l, title]) => (
+                <button key={v} title={title}
+                  className={'period-tab' + (period===v?' active':'')}
+                  onClick={() => setPeriod(v)}>{l}</button>
+              ))}
+            </div>
+          )}
         </div>
-        {tab === 'stipendi' && (
-          <div className="period-tabs">
-            {[
-              ['month', 'Mese',   'Andamento mensile (ultimi 12 mesi)'],
-              ['3m',    '3 Mesi', 'Andamento trimestrale (ultimi 12 trimestri)'],
-              ['year',  'Anno',   'Andamento annuale (tutti gli anni)'],
-            ].map(([v, l, title]) => (
-              <button key={v} title={title}
-                className={'period-tab' + (period===v?' active':'')}
-                onClick={() => setPeriod(v)}>{l}</button>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* Tab bar */}
-      <div className="en-tab-bar">
-        <button className={'en-tab' + (tab === 'stipendi' ? ' active' : '')} onClick={() => setTab('stipendi')}>
-          💰 Stipendi
-        </button>
-        <button className={'en-tab' + (tab === 'altre' ? ' active' : '')} onClick={() => setTab('altre')}>
-          💸 Altre Entrate
-        </button>
+        {/* Tab switcher — pill style, come in UscitePage */}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>
+          <TabPill label="💰 Stipendi"      active={tab==='stipendi'} onClick={()=>setTab('stipendi')}/>
+          <TabPill label="💸 Altre Entrate" active={tab==='altre'}    onClick={()=>setTab('altre')}/>
+        </div>
       </div>
 
       {tab === 'altre' && <AltreEntratePage />}

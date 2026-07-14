@@ -1,33 +1,11 @@
-/* ── Page-level tab bar ──────────────────────────────────── */
-.en-tab-bar {
-  display: flex;
-  gap: 2px;
-  padding: 16px 28px 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-.en-tab {
-  padding: 8px 20px;
-  border: none;
-  background: none;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  color: var(--text3);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  font-family: var(--font-sans);
-  transition: color .12s, border-color .12s;
-}
-.en-tab:hover { color: var(--text1); }
-.en-tab.active { color: var(--accent, #b8942a); border-bottom-color: var(--accent, #b8942a); }
+/* ── Outer wrapper (solo header + tab pills) — stesso padding laterale del
+   contenuto sottostante (.en-page / .ae-page usano 32px), così tutto risulta
+   allineato come in UscitePage invece di stare a filo bordo. */
+.en-root  { padding: 24px 32px 0; max-width: 1200px; }
 
 .en-page  { padding: 28px 32px; max-width: 1200px; }
-.en-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
-.en-title  { font-family:var(--font-serif); font-size:26px; font-weight:600; }
+.en-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px; flex-wrap:wrap; gap:16px; }
+.en-title  { font-family:var(--font-serif); font-size:26px; font-weight:600; margin:0 0 4px; }
 .en-sub    { font-size:13px; color:var(--text3); margin-top:3px; }
 
 .period-tabs { display:flex; gap:4px; background:var(--surface2); padding:3px; border-radius:8px; border:1px solid var(--border); }
