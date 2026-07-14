@@ -269,9 +269,9 @@ function FuelManualCostRow({ v, vehicles, fuelPriceByYear, upd }) {
 
 // ── Prezzo medio benzina per anno (appPrefs.fuelPriceByYear) ─────────────
 // Usato da FuelManualCostRow per stimare il costo Carburante da KM+consumo.
-function FuelPriceModal({ onClose }) {
-  const appPrefs = useStore(s => s.appPrefs)
-  const setAppPref = useStore(s => s.setAppPref)
+// Ora è un tab dentro VacSettingsModal (⚙️ unico), non più un modale/bottone
+// separato — vedi nota sopra VacSettingsModal.
+function FuelPricePanel({ appPrefs, setAppPref, onClose }) {
   const saved = appPrefs?.fuelPriceByYear || {}
   const [rows, setRows] = useState(() => {
     const years = Object.keys(saved).sort((a, b) => b.localeCompare(a))
@@ -291,7 +291,7 @@ function FuelPriceModal({ onClose }) {
   }
 
   return (
-    <Modal title="⛽ Prezzo medio benzina" onClose={onClose} width={380}>
+    <>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12, lineHeight: 1.5 }}>
         Prezzo medio benzina (€/litro) per anno — usato per stimare automaticamente
         il costo Carburante di una vacanza da KM percorsi + consumo del veicolo.
@@ -316,9 +316,8 @@ function FuelPriceModal({ onClose }) {
       </button>
       <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
         <button onClick={save} style={{ padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>Salva</button>
-        <button onClick={onClose} style={{ padding: '7px 14px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>Annulla</button>
       </div>
-    </Modal>
+    </>
   )
 }
 
@@ -984,12 +983,12 @@ function NeverAiDescsModal({ list, onAdd, onRemove, onClose }) {
 }
 
 // ── Impostazioni merchant vacanze (usati anche dal wizard di importazione) ──
-function VacMerchantsModal({ appPrefs, setAppPref, onClose }) {
+function VacMerchantsPanel({ appPrefs, setAppPref }) {
   const list = getVacationMerchants(appPrefs)
   const [draft, setDraft] = useState('')
   function save(next) { setAppPref('vacationMerchants', next) }
   return (
-    <Modal title="⚙️ Merchant prenotazioni vacanze" onClose={onClose} width={440}>
+    <>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
         Quando l'import trova una spesa di uno di questi merchant (Booking, Airbnb, …), il wizard
         chiede la competenza vera e a quale vacanza collegarla.
@@ -1013,6 +1012,30 @@ function VacMerchantsModal({ appPrefs, setAppPref, onClose }) {
           Aggiungi
         </button>
       </div>
+    </>
+  )
+}
+
+// ── Impostazioni Weekend e Vacanze — un solo bottone ⚙️ (richiesta utente
+// 2026-07-14: "non trovo impostazioni prezzo benzina" — c'era un secondo
+// bottone ⛽ separato, poco visibile/distinguibile dall'ingranaggio ⚙️ già
+// esistente; consolidati in UN'UNICA rotella ingranaggio con 2 tab interne) ──
+function VacSettingsModal({ appPrefs, setAppPref, onClose }) {
+  const [tab, setTab] = useState('merchant')
+  return (
+    <Modal title="⚙️ Impostazioni Weekend e Vacanze" onClose={onClose} width={440}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+        <button onClick={() => setTab('merchant')} style={{
+          padding: '6px 12px', borderRadius: 14, border: `1px solid ${tab === 'merchant' ? 'var(--accent)' : 'var(--border)'}`,
+          background: tab === 'merchant' ? 'var(--accent-l)' : 'var(--surface)', color: tab === 'merchant' ? 'var(--accent)' : 'var(--text3)',
+          fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Merchant</button>
+        <button onClick={() => setTab('fuel')} style={{
+          padding: '6px 12px', borderRadius: 14, border: `1px solid ${tab === 'fuel' ? 'var(--accent)' : 'var(--border)'}`,
+          background: tab === 'fuel' ? 'var(--accent-l)' : 'var(--surface)', color: tab === 'fuel' ? 'var(--accent)' : 'var(--text3)',
+          fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>⛽ Prezzo Benzina</button>
+      </div>
+      {tab === 'merchant' && <VacMerchantsPanel appPrefs={appPrefs} setAppPref={setAppPref}/>}
+      {tab === 'fuel'     && <FuelPricePanel appPrefs={appPrefs} setAppPref={setAppPref} onClose={onClose}/>}
     </Modal>
   )
 }
@@ -1033,8 +1056,7 @@ export default function WeekendVacanzeV2Page() {
   const [showCandidates, setShowCandidates] = useState(false)
   const [showFuori, setShowFuori] = useState(false)     // overlay spese W&V fuori periodo
   const [showReview, setShowReview] = useState(false)   // overlay spese in vacanza non allocate
-  const [showMerch, setShowMerch] = useState(false)     // impostazioni merchant vacanze
-  const [showFuelPrice, setShowFuelPrice] = useState(false) // impostazioni prezzo medio benzina/anno
+  const [showSettings, setShowSettings] = useState(false) // ⚙️ impostazioni WV2 (merchant + prezzo benzina, consolidati 2026-07-14)
   // Menu "Revisione" — i 3 bottoni Da confermare/Fuori periodo/Non allocate erano
   // separati in alto; consolidati in un unico tab a tendina (richiesta utente
   // 2026-07-13: "aggregali tutti sotto un tab dedicato, sempre lì in alto a destra")
@@ -1486,13 +1508,9 @@ export default function WeekendVacanzeV2Page() {
           <button onClick={() => setShowAdd(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
             <Plus size={14} /> Aggiungi
           </button>
-          <button onClick={() => setShowMerch(true)} title="Merchant prenotazioni vacanze (Booking, Airbnb, …) — usati dal wizard di importazione"
+          <button onClick={() => setShowSettings(true)} title="Impostazioni: merchant prenotazioni vacanze + prezzo medio benzina per anno"
             style={{ padding: '7px 10px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
             ⚙️
-          </button>
-          <button onClick={() => setShowFuelPrice(true)} title="Prezzo medio benzina per anno — usato per il calcolo automatico del costo Carburante"
-            style={{ padding: '7px 10px', background: 'var(--surface2)', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
-            ⛽
           </button>
         </div>
       </div>
@@ -1829,14 +1847,9 @@ export default function WeekendVacanzeV2Page() {
           undo={undo} setUndo={setUndo} onClose={() => setShowReview(false)} />
       )}
 
-      {/* Impostazioni merchant vacanze (Booking, Airbnb, …) */}
-      {showMerch && (
-        <VacMerchantsModal appPrefs={appPrefs} setAppPref={setAppPref} onClose={() => setShowMerch(false)} />
-      )}
-
-      {/* Impostazioni prezzo medio benzina per anno */}
-      {showFuelPrice && (
-        <FuelPriceModal onClose={() => setShowFuelPrice(false)} />
+      {/* Impostazioni WV2: merchant vacanze + prezzo medio benzina (unico ⚙️) */}
+      {showSettings && (
+        <VacSettingsModal appPrefs={appPrefs} setAppPref={setAppPref} onClose={() => setShowSettings(false)} />
       )}
 
       {/* Pannello "Vacanze da confermare" */}

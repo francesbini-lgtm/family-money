@@ -759,6 +759,29 @@ export default function EntratePage() {
 
   return (
     <>
+      {/* Header — sempre visibile sopra le tab, stesso ordine di Satispay (richiesta utente 2026-07-14) */}
+      <div className="en-header">
+        <div>
+          <h1 className="en-title">📈 Entrate e Stipendi</h1>
+          <div className="en-sub">
+            Solo stipendi <strong>Entrate · Fra</strong> e <strong>Entrate · Sofi</strong> — escluse altre entrate
+          </div>
+        </div>
+        {tab === 'stipendi' && (
+          <div className="period-tabs">
+            {[
+              ['month', 'Mese',   'Andamento mensile (ultimi 12 mesi)'],
+              ['3m',    '3 Mesi', 'Andamento trimestrale (ultimi 12 trimestri)'],
+              ['year',  'Anno',   'Andamento annuale (tutti gli anni)'],
+            ].map(([v, l, title]) => (
+              <button key={v} title={title}
+                className={'period-tab' + (period===v?' active':'')}
+                onClick={() => setPeriod(v)}>{l}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Tab bar */}
       <div className="en-tab-bar">
         <button className={'en-tab' + (tab === 'stipendi' ? ' active' : '')} onClick={() => setTab('stipendi')}>
@@ -771,26 +794,6 @@ export default function EntratePage() {
 
       {tab === 'altre' && <AltreEntratePage />}
       {tab === 'stipendi' && <div className="en-page">
-      {/* Header */}
-      <div className="en-header">
-        <div>
-          <h1 className="en-title">📈 Entrate e Stipendi</h1>
-          <div className="en-sub">
-            Solo stipendi <strong>Entrate · Fra</strong> e <strong>Entrate · Sofi</strong> — escluse altre entrate
-          </div>
-        </div>
-        <div className="period-tabs">
-          {[
-            ['month', 'Mese',   'Andamento mensile (ultimi 12 mesi)'],
-            ['3m',    '3 Mesi', 'Andamento trimestrale (ultimi 12 trimestri)'],
-            ['year',  'Anno',   'Andamento annuale (tutti gli anni)'],
-          ].map(([v, l, title]) => (
-            <button key={v} title={title}
-              className={'period-tab' + (period===v?' active':'')}
-              onClick={() => setPeriod(v)}>{l}</button>
-          ))}
-        </div>
-      </div>
 
       {isEmpty ? (
         <div className="en-empty">

@@ -611,6 +611,16 @@ export default function UscitePage() {
 
   return (
     <div className="uscite-page">
+      {/* Header — sempre visibile sopra le tab, stesso ordine di Satispay (richiesta utente 2026-07-14) */}
+      <div className="uscite-header">
+        <div>
+          <h1 className="uscite-title">📉 Uscite</h1>
+          <p className="uscite-subtitle">
+            {months[0].label} — {months[5].label}
+          </p>
+        </div>
+      </div>
+
       {/* Tab switcher */}
       <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>
         <TabPill label="📉 Overview"          active={activeTab==='overview'}  onClick={()=>setActiveTab('overview')}/>
@@ -638,16 +648,6 @@ export default function UscitePage() {
       {activeTab === 'altro'   && <AltroPage/>}
 
       {activeTab === 'overview' && <>
-      {/* Header */}
-      <div className="uscite-header">
-        <div>
-          <h1 className="uscite-title">📉 Uscite</h1>
-          <p className="uscite-subtitle">
-            {months[0].label} — {months[5].label}
-          </p>
-        </div>
-      </div>
-
       {/* KPI bar */}
       <div className="uscite-kpis">
         <div className="uscite-kpi">

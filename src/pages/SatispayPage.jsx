@@ -4,6 +4,7 @@ import { fmtIT, fmtDate } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { CATS, getMergedCats } from '../data/categories'
 import { Plus, Trash2, Edit2, Check, X, Link } from 'lucide-react'
+import { SatispayIcon } from '../components/BrandIcons'
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList
@@ -1261,6 +1262,9 @@ function FundCard({ pot, allPots }) {
   }
 
   // Compute per-voce category splits for a reconciled month
+  // _potId taggato su ogni split (fix 2026-07-14, vedi nota su linkMonth/linkOtherPot
+  // più sotto): serve a distinguere "di quale fondo è questa fetta" quando più fondi
+  // contribuiscono splits sulla stessa transazione (delta verso un altro fondo).
   function computeSatiSplits(ym, txAmt, totalLinkedAmt) {
     const voci = (pot.voci||[])
     const cells = pot.data?.[ym]?.cells || {}
@@ -1270,7 +1274,8 @@ function FundCard({ pot, allPots }) {
       .map(v => ({
         cat1: v.cat1,
         cat2: v.cat2,
-        amount: Math.round((parseFloat(cells[v.id])||0) * ratio * 100) / 100
+        amount: Math.round((parseFloat(cells[v.id])||0) * ratio * 100) / 100,
+        _potId: pot.id,
       }))
       .filter(s => s.amount > 0)
   }
@@ -1318,7 +1323,14 @@ function FundCard({ pot, allPots }) {
     txIdArr.forEach(txId => {
       const tx = transactions.find(t => t.txId === txId)
       if (!tx) return
-      const splits = computeSatiSplits(ym, tx.amount, splitDenom)
+      // Fix duplicazione (2026-07-14, segnalata dall'utente — vedi splits x3 su
+      // spesa Figli): non sovrascrivere l'INTERO array di splits, altrimenti
+      // un eventuale delta già assegnato a un altro fondo (linkOtherPot) andrebbe
+      // perso al primo re-link di QUESTO fondo. Si sostituiscono solo gli split
+      // marcati con _potId di QUESTO fondo, preservando quelli di altri fondi.
+      const foreign = (tx.splits || []).filter(s => s._potId !== pot.id)
+      const own = computeSatiSplits(ym, tx.amount, splitDenom)
+      const splits = [...foreign, ...own]
       updateTransaction(txId, {
         splits,
         descAI: 'Accantonamento Satispay',
@@ -1366,10 +1378,16 @@ function FundCard({ pot, allPots }) {
       const ratio = total > 0 ? (amt * txFraction) / total : txFraction
       const splits = voci
         .filter(v => v.cat1)
-        .map(v => ({ cat1:v.cat1, cat2:v.cat2, amount: Math.round((parseFloat(cells[v.id])||0)*ratio*100)/100 }))
+        .map(v => ({ cat1:v.cat1, cat2:v.cat2, amount: Math.round((parseFloat(cells[v.id])||0)*ratio*100)/100, _potId: otherPotId }))
         .filter(s => s.amount > 0)
-      // merge splits with existing (from main pot) if present
-      const existing = tx.splits || []
+      // Fix duplicazione (2026-07-14, segnalata dall'utente — splits x3 sulla stessa
+      // spesa Figli): questa funzione veniva richiamata più volte per lo stesso mese
+      // (es. riapertura del modale "Abbina transazioni" / autoLinkAll) e ogni volta
+      // ACCODAVA una nuova copia degli split invece di rimpiazzare la precedente
+      // contribuzione di QUESTO stesso fondo — causa reale della triplicazione.
+      // Ora si rimuovono prima gli split già taggati con _potId di QUESTO fondo,
+      // preservando quelli del fondo principale e di eventuali altri fondi.
+      const existing = (tx.splits || []).filter(s => s._potId !== otherPotId)
       const merged = [...existing, ...splits]
       updateTransaction(txId, { splits: merged.length ? merged : null, descAI: 'Accantonamento Satispay' })
     })
@@ -4848,8 +4866,8 @@ export default function SatispayPage() {
       {/* ── Header ──────────────────────────────── */}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}}>
         <div>
-          <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,margin:0}}>
-            💚 Satispay — Fondi
+          <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,margin:0,display:'flex',alignItems:'center',gap:9}}>
+            <SatispayIcon size={22}/> Satispay — Fondi
           </h1>
           <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>
             Accantonamenti mensili e riconciliazione transazioni

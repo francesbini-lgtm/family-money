@@ -9,6 +9,7 @@ import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
 import { showToast } from '../services/notifications'
 import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
+import { PaypalIcon } from '../components/BrandIcons'
 import CompDaConfermare from '../components/CompDaConfermare'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -1472,7 +1473,7 @@ export default function PaypalPage() {
       {/* Header */}
       <div className="pp-header">
         <div>
-          <div className="pp-title">💙 PayPal</div>
+          <div className="pp-title" style={{ display:'flex', alignItems:'center', gap:8 }}><PaypalIcon size={20}/> PayPal</div>
           <div className="pp-subtitle">Transazioni PayPal · ultimi 6 mesi</div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>

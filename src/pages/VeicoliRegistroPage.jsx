@@ -136,7 +136,7 @@ function uid() { return Date.now().toString(36)+Math.random().toString(36).slice
 function VehicleModal({ vehicle, onClose }) {
   const { addVehicle, updateVehicle } = useStore()
   const [form, setForm] = useState(vehicle || {
-    name:'', targa:'', marca:'', anno:'', icon:'🚗', consumo:'',
+    name:'', targa:'', marca:'', modello:'', anno:'', icon:'🚗', consumo:'', valoreMercato:'', carburante:'',
     assicurazione:'', tagliando:'', revisione:'', bollo:''
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
@@ -154,8 +154,21 @@ function VehicleModal({ vehicle, onClose }) {
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FormRow label="Targa"><Input value={form.targa} onChange={e=>set('targa',e.target.value.toUpperCase())} placeholder="AB123CD"/></FormRow>
         <FormRow label="Marca"><Input value={form.marca} onChange={e=>set('marca',e.target.value)} placeholder="BMW"/></FormRow>
+        <FormRow label="Modello"><Input value={form.modello||''} onChange={e=>set('modello',e.target.value)} placeholder="es. Renegade, X3, Model 3"/></FormRow>
         <FormRow label="Anno"><Input type="number" value={form.anno} onChange={e=>set('anno',e.target.value)} placeholder="2022"/></FormRow>
+        <FormRow label="Carburante">
+          <Select value={form.carburante||''} onChange={e=>set('carburante',e.target.value)}>
+            <option value="">—</option>
+            <option value="Benzina">Benzina</option>
+            <option value="Diesel">Diesel</option>
+            <option value="GPL">GPL</option>
+            <option value="Metano">Metano</option>
+            <option value="Elettrico">Elettrico</option>
+            <option value="Ibrido">Ibrido</option>
+          </Select>
+        </FormRow>
         <FormRow label="Consumo (km/l)"><Input type="number" step="0.1" value={form.consumo||''} onChange={e=>set('consumo',e.target.value)} placeholder="es. 15"/></FormRow>
+        <FormRow label="Valore di mercato (€)"><Input type="number" value={form.valoreMercato||''} onChange={e=>set('valoreMercato',e.target.value)} placeholder="es. 18000"/></FormRow>
         <FormRow label="Icona">
           <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
             {VEH_ICONS.map(ic=>(
@@ -635,9 +648,14 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
       <span style={{flexShrink:0,display:'flex',alignItems:'center'}}>{renderIcon(vehicle.icon, 36)}</span>
       <div style={{flex:1,minWidth:0,paddingRight:20}}>
         <div style={{fontWeight:700,fontSize:15}}>{vehicle.name}</div>
-        <div style={{fontSize:12,color:'var(--text3)',marginBottom:6}}>
-          {[vehicle.targa, vehicle.marca, vehicle.anno].filter(Boolean).join(' · ')}
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:2}}>
+          {[vehicle.targa, [vehicle.marca, vehicle.modello].filter(Boolean).join(' '), vehicle.anno, vehicle.carburante].filter(Boolean).join(' · ')}
         </div>
+        {vehicle.valoreMercato > 0 && (
+          <div style={{fontSize:12,color:'var(--text2)',fontWeight:600,marginBottom:6}}>
+            💰 {fmtIT(vehicle.valoreMercato,0)} €
+          </div>
+        )}
         {scadenze.length > 0 && (
           <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:6}}>
             {scadenze.map(s=>(

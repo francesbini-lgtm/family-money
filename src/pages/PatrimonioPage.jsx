@@ -15,6 +15,9 @@ const ASSET_COLORS = {
   'Investimenti':   '#2a7a4a',
   'Immobili':       '#b8942a',
   'Liquidità':      '#2a9aa0',
+  'Veicoli':        '#6b7a8f',
+  'Fondo Pensione': '#4a6ab8',
+  'TFR':            '#8a5ab0',
   'Altro Attivo':   '#9a4ab8',
 }
 const LIABILITY_COLORS = {
@@ -121,7 +124,7 @@ function posVal(p) {
 }
 
 export default function PatrimonioPage() {
-  const { loans, portfolios, transactions, satiPots, appPrefs } = useStore()
+  const { loans, portfolios, transactions, satiPots, appPrefs, vehicles } = useStore()
   const setAppPref = useStore(s => s.setAppPref)
   const assets      = appPrefs?.extraAssets      || []
   const liabilities = appPrefs?.extraLiabilities || []
@@ -145,6 +148,14 @@ export default function PatrimonioPage() {
     transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s, t) => s + (t.amount || 0), 0)
   , [transactions])
   const ccAsset = ccBalance > 0 ? [{ id:'auto_cc', name:'Conto Corrente', cat:'Conto Corrente', value: ccBalance, type:'asset', updatedAt: new Date().toISOString().slice(0,10), readonly:true }] : []
+
+  // Auto: veicoli, valore preso da vehicle.valoreMercato (Registro Veicoli — richiesta utente 2026-07-14)
+  const vehicleAssets = (vehicles || [])
+    .filter(v => parseFloat(v.valoreMercato) > 0)
+    .map(v => ({
+      id: 'veh_' + v.id, name: v.name, cat: 'Veicoli', value: parseFloat(v.valoreMercato),
+      type: 'asset', updatedAt: new Date().toISOString().slice(0, 10), readonly: true
+    }))
 
   // Compute Satispay net value: gross accumulated - income entries (releases)
   const satiGross = useMemo(() =>
@@ -183,7 +194,7 @@ export default function PatrimonioPage() {
       .filter(a => a.value > 0)
   }, [satiPots, satiReleases])
 
-  const allAssets      = [...ccAsset, ...satiAssets, ...portfolioAssets, ...assets]
+  const allAssets      = [...ccAsset, ...satiAssets, ...portfolioAssets, ...vehicleAssets, ...assets]
   const allLiabilities = [...loanLiabilities, ...liabilities]
 
   const totalAssets      = allAssets.reduce((s, a) => s + a.value, 0)
