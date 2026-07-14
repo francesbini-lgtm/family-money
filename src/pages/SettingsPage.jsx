@@ -1191,6 +1191,59 @@ function ExcludedTab() {
   )
 }
 
+// ── DeletedTxTab ──────────────────────────────────────────
+// Storico transazioni eliminate (richiesta utente 2026-07-15): deleteTransaction
+// (useStore.js) ora salva una copia completa di ogni tx cancellata in
+// appPrefs.deletedTxLog (capped alle ultime 300) prima di rimuoverla — questa
+// tab la mostra con un bottone "↩ Ripristina" che richiama restoreDeletedTransaction
+// (re-inserisce la tx via addTransactions e la toglie dal log). Copre solo le
+// cancellazioni fatte DOPO l'introduzione di questo log (2026-07-15) — quelle
+// precedenti non sono recuperabili, non essendo mai state registrate.
+function DeletedTxTab() {
+  const appPrefs = useStore(s => s.appPrefs)
+  const restoreDeletedTransaction = useStore(s => s.restoreDeletedTransaction)
+  const log = [...(appPrefs?.deletedTxLog || [])].sort((a,b)=>(b.deletedAt||'').localeCompare(a.deletedAt||''))
+  return (
+    <div>
+      <div style={{fontSize:13,color:'var(--text3)',marginBottom:16,lineHeight:1.5}}>
+        Transazioni eliminate. Clicca ↩ per ripristinarle. Copre solo le cancellazioni fatte dopo il 15 luglio 2026.
+      </div>
+      {log.length === 0 ? (
+        <div style={{textAlign:'center',padding:'40px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',color:'var(--text3)'}}>
+          <div style={{fontSize:32,marginBottom:10}}>🗑</div>
+          <div style={{fontWeight:700,marginBottom:6}}>Nessuna transazione eliminata di recente</div>
+        </div>
+      ) : (
+        <div className="card" style={{padding:0,overflow:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',minWidth:1050}}>
+            <thead><tr>
+              {['Data','Descrizione','Importo','Categoria','Eliminata il','Da chi',''].map(h=>(
+                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',minWidth:h===''?120:undefined}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {log.map(t=>(
+                <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',opacity:.7}}>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                  <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,45)}</td>
+                  <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',color:'var(--text3)',whiteSpace:'nowrap'}}>€ {fmtIT(Math.abs(t.amount), 2)}</td>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{t.cat1||'—'}</td>
+                  <td style={{padding:'9px 14px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtExcludedAt(t.deletedAt)}</td>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',whiteSpace:'nowrap'}}>{t.deletedBy || '—'}</td>
+                  <td style={{padding:'6px 14px',whiteSpace:'nowrap',minWidth:120}}>
+                    <button className="btn btn-ghost" style={{fontSize:12,whiteSpace:'nowrap'}} title="Ripristina"
+                      onClick={()=>restoreDeletedTransaction(t.txId)}>↩ Ripristina</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── CashCatsTab ───────────────────────────────────────────
 function CashCatsTab() {
   const { customCats } = useStore()
@@ -2369,6 +2422,7 @@ export default function SettingsPage() {
     {id:"categories",    icon:"🏷",  label:"Categorie"},
     {id:"ai-rules",      icon:"🤖", label:"Regole AI"},
     {id:"excluded",      icon:"⊘",  label:"Escluse"},
+    {id:"deleted-tx",    icon:"🗑",  label:"Eliminate"},
     {id:"cash-cats",     icon:"💵", label:"Contanti"},
     {id:"notifications", icon:"🔔", label:"Notifiche"},
     {id:"nav-sections",  icon:"📋", label:"Sezioni"},
@@ -2387,6 +2441,7 @@ export default function SettingsPage() {
       {tab==="categories"     && <CategoriesTab/>}
       {tab==="ai-rules"       && <AiRulesTab/>}
       {tab==="excluded"       && <ExcludedTab/>}
+      {tab==="deleted-tx"     && <DeletedTxTab/>}
       {tab==="cash-cats"      && <CashCatsTab/>}
       {tab==="notifications"  && <NotificationsTab/>}
       {tab==="nav-sections"   && <NavSectionsTab/>}

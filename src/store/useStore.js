@@ -496,10 +496,49 @@ export const useStore = create((set, get) => ({
           label: `Elimina ${prevTx.descAI || prevTx.description || txId}`,
         }]})
       }
+      // Storico persistente per ripristino da Impostazioni (richiesta utente
+      // 2026-07-15): l'undo locale sopra copre solo la sessione corrente (max 20
+      // voci, perso al refresh) — qui si tiene una copia completa della
+      // transazione in appPrefs.deletedTxLog, capped alle ultime 300, con
+      // data/utente di cancellazione, così è recuperabile anche giorni dopo.
+      if (get().appPrefsLoaded) {
+        const cu = get().currentUser
+        const log = get().appPrefs?.deletedTxLog || []
+        const entry = { ...prevTx, deletedAt: new Date().toISOString(), deletedBy: cu?.displayName || cu?.email || 'Sistema' }
+        get().setAppPref('deletedTxLog', [...log.slice(-299), entry])
+      }
+      // Pulizia registri collegati (bug segnalato 2026-07-15: voci "fantasma" in
+      // Altre Entrate/compensazioni che referenziano un txId non più esistente) —
+      // rimuove i riferimenti pendenti a questo txId da compLinks/aeNotes/aeCats,
+      // così non restano agganci morti dopo l'eliminazione.
+      if (get().appPrefsLoaded) {
+        const ap = get().appPrefs || {}
+        if (ap.compLinks && ap.compLinks[txId]) {
+          const next = { ...ap.compLinks }; delete next[txId]
+          get().setAppPref('compLinks', next)
+        }
+        if (ap.aeNotes && ap.aeNotes[txId] !== undefined) {
+          const next = { ...ap.aeNotes }; delete next[txId]
+          get().setAppPref('aeNotes', next)
+        }
+        if (ap.aeCats && ap.aeCats[txId] !== undefined) {
+          const next = { ...ap.aeCats }; delete next[txId]
+          get().setAppPref('aeCats', next)
+        }
+      }
     }
     set(s=>({ transactions: s.transactions.filter(t=>t.txId!==txId) }))
     deleteDocument('transactions', txId)
     get()._recomputeFiltered()
+  },
+  // Ripristina una transazione dallo storico eliminazioni (Impostazioni → Transazioni eliminate)
+  restoreDeletedTransaction: (txId) => {
+    const log = get().appPrefs?.deletedTxLog || []
+    const entry = log.find(t => t.txId === txId)
+    if (!entry) return
+    const { deletedAt, deletedBy, ...tx } = entry
+    get().addTransactions([tx])
+    get().setAppPref('deletedTxLog', log.filter(t => t.txId !== txId))
   },
   deleteAllTransactions: async () => {
     const count = get().transactions.length

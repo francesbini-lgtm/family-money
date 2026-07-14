@@ -2227,9 +2227,17 @@ function AiEnrichmentOverlay({ transactions, onDone, forceAll=false, overrideUse
             if (zr?.descAI) t.descAI = zr.descAI
             if (zr?.exclude) { t.excluded = true }
           }
-          // 3. System rule: positive amount → always Entrate L1
-          if (t.amount > 0 && t.cat1 && t.cat1 !== 'Entrate') {
+          // 3. System rule: positive amount → always Entrate L1 (e viceversa).
+          // Fix 2026-07-15: rimosso il guard `t.cat1 &&` — escludeva esattamente
+          // il caso più comune (transazione ancora senza categoria), stesso bug
+          // già corretto in ImportModal.jsx il giorno prima ma mai specchiato qui
+          // (percorso "✨ AI Enrichment" manuale su Transazioni). Aggiunta anche
+          // la regola simmetrica: un importo negativo non può restare in Entrate.
+          if (t.amount > 0 && t.cat1 !== 'Entrate') {
             t.cat1 = 'Entrate'
+            t.cat2 = ''
+          } else if (t.amount < 0 && t.cat1 === 'Entrate') {
+            t.cat1 = 'Non Categorizzato'
             t.cat2 = ''
           }
 
@@ -3361,12 +3369,23 @@ export default function TransactionsPage() {
     })
     // Sort
     txs = [...txs].sort((a,b) => {
+      // Fix 2026-07-15: il toggle "Data Valuta"/"Data Reg." (showRegDate) cambiava
+      // SOLO la data mostrata in tabella, mai l'ordinamento — la lista restava
+      // sempre ordinata su a.date/b.date anche quando l'utente chiedeva la vista
+      // per data di registrazione. Ora, quando si ordina per data, si usa lo
+      // stesso campo che il toggle sta mostrando (date_reg quando showRegDate è
+      // attivo, altrimenti date).
+      if (sortKey==='date') {
+        const ad = (showRegDate ? (a.date_reg||a.date) : a.date) || ''
+        const bd = (showRegDate ? (b.date_reg||b.date) : b.date) || ''
+        return sortDir==='asc' ? ad.localeCompare(bd) : bd.localeCompare(ad)
+      }
       const av = a[sortKey]||'', bv = b[sortKey]||''
       if (sortKey==='amount') return sortDir==='asc' ? a.amount-b.amount : b.amount-a.amount
       return sortDir==='asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return txs
-  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm, hideSmall, filterNoCat2])
+  }, [store.transactions, filters, sortKey, sortDir, colFilters, userAccounts, hideComm, hideSmall, filterNoCat2, showRegDate])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d==='asc'?'desc':'asc')
@@ -3452,7 +3471,14 @@ export default function TransactionsPage() {
             ⚙️ Colonne
           </button>
           {/* Data toggle */}
-          <div style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer'}} onClick={()=>setShowRegDate(v=>!v)}>
+          <div style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer'}} onClick={()=>{
+            const next = !showRegDate
+            const label = next ? 'Data di Registrazione' : 'Data Valuta'
+            if (window.confirm(`Vuoi mostrare e riordinare la lista per ${label}?`)) {
+              setShowRegDate(next)
+              setSortKey('date')
+            }
+          }}>
             <span style={{fontSize:12,color:'var(--text3)'}}>📅 {showRegDate ? 'Data Reg.' : 'Data Valuta'}</span>
             <div style={{width:36,height:20,borderRadius:10,background:showRegDate?'var(--accent)':'var(--border)',position:'relative',transition:'background .2s',flexShrink:0}}>
               <div style={{position:'absolute',top:2,left:showRegDate?16:2,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.2)'}}/>

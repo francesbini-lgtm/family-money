@@ -581,6 +581,12 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       // cat1==='Entrate'). La regola va applicata a QUALSIASI importo positivo
       // non ancora "Entrate", categorizzato o no.
       if (curTx.amount > 0 && cat1 !== 'Entrate') { cat1 = 'Entrate'; cat2 = ''; changed = true }
+      // Regola simmetrica (richiesta esplicita utente 2026-07-15): SOLO L1 "Entrate"
+      // può avere importo positivo — un importo negativo non può restare "Entrate"
+      // (es. un rimborso Gemini indovinato male, o una regola AI con condizione
+      // troppo larga). Riportata a "Non Categorizzato" per farla rientrare nel
+      // normale processo di revisione, mai lasciata con un abbinamento sbagliato.
+      else if (curTx.amount < 0 && cat1 === 'Entrate') { cat1 = 'Non Categorizzato'; cat2 = ''; changed = true }
 
       const effDateForVac = curTx._effDate || curTx.competenza || curTx.date
       const vacHit = curTx.amount < 0 && cat1 !== 'Weekend e Vacanze' && !notVacationDates.includes(effDateForVac)

@@ -906,6 +906,47 @@ export default function ImportWizard({ onClose }) {
     setWizUndo(null)
   }
 
+  // ── Abbinamento PayPal↔conto (richiesta utente 2026-07-15): questa conferma
+  // esisteva già ma SOLO come modale a sé nella pagina PayPal (PendingApprovalModal
+  // / handleApprovePending / handleRejectPending in PaypalPage.jsx), mai raggiungibile
+  // dal wizard — l'utente doveva ricordarsi di andare ad aprirla a mano dopo l'import.
+  // Stessa identica logica replicata qui per farla comparire subito nello step
+  // 'paypal-result' (che segue l'import PayPal), sui SOLI import non-doppione
+  // già distinti dallo status 'pending_approval' (i doppioni certi sono già
+  // 'matched' automaticamente da autoMatch, quelli impossibili da abbinare sono
+  // 'unmatched' — qui restano solo i casi dubbi che richiedono conferma umana).
+  function paypalOrigPatchWiz(txId) {
+    const tx = transactions.find(t => t.txId === txId)
+    if (!tx || tx._paypalOrig) return {}
+    return { _paypalOrig: {
+      merchant: tx.merchant ?? null, descAI: tx.descAI ?? null,
+      cat1: tx.cat1 ?? null, cat2: tx.cat2 ?? null, conf: tx.conf ?? null,
+    } }
+  }
+  function approvePendingPaypal(importId) {
+    const list = appPrefs?.paypalImports || []
+    const imp = list.find(i => i.id === importId)
+    if (!imp || !imp.pendingTxId) return
+    const patch = {
+      ...paypalOrigPatchWiz(imp.pendingTxId),
+      merchant: imp.merchant, descAI: imp.merchant, _paypalOverride: true, conf: 100,
+    }
+    if (imp.cat1_suggestion) patch.cat1 = imp.cat1_suggestion
+    if (imp.cat2_suggestion) patch.cat2 = imp.cat2_suggestion
+    updateTransaction(imp.pendingTxId, patch)
+    setAppPref('paypalImports', list.map(i =>
+      i.id === importId ? { ...i, status: 'matched', matchedTxId: imp.pendingTxId, pendingTxId: null } : i
+    ))
+    showToast('Abbinamento approvato ✅', 'success')
+  }
+  function rejectPendingPaypal(importId) {
+    const list = appPrefs?.paypalImports || []
+    setAppPref('paypalImports', list.map(i =>
+      i.id === importId ? { ...i, status: 'unmatched', pendingTxId: null } : i
+    ))
+    showToast('Abbinamento rifiutato', 'info')
+  }
+
   function buildQueue() {
     const q = []
     // 'doppioni' spostato SUBITO dopo l'import, PRIMA della rifinitura (richiesta
@@ -1305,7 +1346,12 @@ export default function ImportWizard({ onClose }) {
         {/* ── Esito PayPal (c) ── */}
         {step && step.id === 'paypal-result' && (() => {
           const pp = results.paypal
+          const pending = (appPrefs?.paypalImports || []).filter(i => i.status === 'pending_approval')
           const unmatched = (appPrefs?.paypalImports || []).filter(i => i.status === 'unmatched')
+          const dayDiff = (d1, d2) => {
+            if (!d1 || !d2) return '?'
+            return Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
+          }
           return (
             <>
               <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>💙 Esito import PayPal</div>
@@ -1322,6 +1368,47 @@ export default function ImportWizard({ onClose }) {
                   ))}
                 </div>
               ) : <div style={{fontSize:13,color:'var(--text3)',marginBottom:12}}>Nessun import PayPal effettuato.</div>}
+              {/* Abbinamenti PayPal↔conto da confermare (richiesta utente 2026-07-15:
+                  prima raggiungibili SOLO dalla pagina PayPal, mai dal wizard — questi
+                  sono i SOLI casi dubbi: i doppioni certi sono già 'matched' in automatico
+                  da autoMatch, qui restano solo le coppie "stesso importo, pochi giorni
+                  di distanza" che vanno confermate a mano). */}
+              {pending.length > 0 && (
+                <>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>🔗 Abbinamenti PayPal ↔ conto da confermare ({pending.length})</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
+                    {pending.map(imp => {
+                      const tx = transactions.find(t => t.txId === imp.pendingTxId)
+                      return (
+                        <div key={imp.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px'}}>
+                          <div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:8,fontSize:12}}>
+                            <div style={{flex:1,minWidth:200}}>
+                              <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>📱 Da PayPal</div>
+                              <div style={{fontWeight:700}}>{imp.merchant || '—'}</div>
+                              <div style={{color:'var(--text3)'}}>{fmtDate(imp.date)} · €{fmtIT(Math.abs(imp.amount),2)}</div>
+                            </div>
+                            <div style={{flex:1,minWidth:200}}>
+                              <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>🏦 Dal conto</div>
+                              {tx ? (
+                                <>
+                                  <div style={{fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tx.merchant || tx.descAI || (tx.description||'').slice(0,40)}</div>
+                                  <div style={{color:'var(--text3)'}}>{fmtDate(tx._effDate||tx.date)} · €{fmtIT(Math.abs(tx.amount),2)} · {dayDiff(imp.date, tx._effDate||tx.date)}g di distanza</div>
+                                </>
+                              ) : <div style={{color:'var(--text3)'}}>Transazione non trovata</div>}
+                            </div>
+                          </div>
+                          <div style={{display:'flex',gap:8}}>
+                            <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}}
+                              onClick={()=>approvePendingPaypal(imp.id)}>✅ Approva</button>
+                            <button className="btn btn-ghost" style={{fontSize:12,padding:'5px 12px',color:'var(--red)'}}
+                              onClick={()=>rejectPendingPaypal(imp.id)}>❌ Rifiuta</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
               {unmatched.length > 0 && (
                 <>
                   <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>Operazioni PayPal non abbinate ({unmatched.length})</div>

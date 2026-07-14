@@ -625,6 +625,15 @@ function AbbinaModal({ pot, ym, currentLinked, onClose, onLink, allPots, onLinkO
 
   function confirm() {
     if (!deltaOk) return
+    // Bug segnalato dall'utente 2026-07-15: cliccando "Conferma abbinamento" non
+    // succedeva visibilmente nulla — in realtà la funzione lavorava (linkMonth/
+    // linkOtherPot venivano chiamate), ma questo modale, a differenza di ogni
+    // altro punto di conferma abbinamento in questo stesso file, non mostrava
+    // MAI un showToast di conferma: l'utente non aveva modo di sapere se il
+    // click avesse avuto effetto. Aggiunto feedback esplicito in ogni caso.
+    if (delta > 0 && !(deltaMatchesOther && selectedOtherPot)) {
+      showToast(`⚠️ Eccedenza di €${fmtIT(delta,2)} non assegnata a nessun fondo`, 'warning')
+    }
     const txIds = [...selected]
     // Link to this pot
     if (txIds.length === 0) { onLink(null, null) }
@@ -633,6 +642,11 @@ function AbbinaModal({ pot, ym, currentLinked, onClose, onLink, allPots, onLinkO
     if (delta > 0 && deltaMatchesOther && selectedOtherPot && onLinkOther) {
       const txIdsForOther = txIds.length === 1 ? txIds[0] : txIds
       onLinkOther(selectedOtherPot.id, ym, txIdsForOther, selectedOtherPot.monthTotal)
+      showToast(`Abbinamento salvato — delta coperto da "${selectedOtherPot.name}"`, 'success')
+    } else if (txIds.length === 0) {
+      showToast('Abbinamento rimosso', 'info')
+    } else {
+      showToast('Abbinamento salvato ✅', 'success')
     }
     onClose()
   }
