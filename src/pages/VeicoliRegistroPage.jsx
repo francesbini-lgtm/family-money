@@ -700,14 +700,11 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
     return [...raw].sort((a,b) => b.date.localeCompare(a.date))[0]
   }, [appPrefs?.vehicleKmReadings, vehicle.id])
 
-  const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
-    .filter(([k]) => vehicle[k])
-    .map(([k,icon]) => {
-      const days = Math.round((new Date(vehicle[k]) - new Date()) / 86400000)
-      const color = days < 0 ? 'var(--red)' : days < 30 ? 'var(--red)' : days < 90 ? 'var(--gold)' : 'var(--green)'
-      const bg    = days < 0 ? 'var(--red-l)' : days < 30 ? 'var(--red-l)' : days < 90 ? 'var(--gold-l)' : 'var(--green-l)'
-      return { key:k, icon, color, bg, label: days < 0 ? '⚠ scaduta' : days < 90 ? `${days}gg` : '✓', date: vehicle[k] }
-    })
+  // Badge scadenze rimossi dalla card veicolo (richiesta utente 2026-07-14):
+  // sono ridondanti con la pagina Scadenze, che le mostra già in dettaglio.
+  // Il contatore "uscite" invece resta SOLO per la Barca (è l'unico veicolo
+  // per cui ha senso contare le "uscite" in mare, non i tragitti).
+  const isBoat = /barca/i.test(vehicle.name||'') || ['🚤','⛵','svg:motoscafo'].includes(vehicle.icon)
 
   const thisYear = new Date().getFullYear().toString()
   const tripsThisYear = (appPrefs?.vehicleTrips?.[vehicle.id] || []).filter(t => t.date.startsWith(thisYear)).length
@@ -746,26 +743,19 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
             💰 {fmtIT(vehicle.valoreMercato,0)} €
           </div>
         )}
-        {scadenze.length > 0 && (
-          <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:6}}>
-            {scadenze.map(s=>(
-              <span key={s.key} style={{fontSize:10,padding:'2px 7px',borderRadius:5,background:s.bg,color:s.color,fontWeight:700}}>
-                {s.icon} {s.key.slice(0,4)}: {fmtDate(s.date)} {s.label}
-              </span>
-            ))}
-          </div>
-        )}
-        {/* Uscite counter + Chilometraggio — stesso stile */}
+        {/* Uscite counter (solo Barca) + Chilometraggio (tutti) — stesso stile */}
         <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-          <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
-            style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
-              border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
-              cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
-              transition:'background .12s'}}
-            onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
-            onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
-            🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
-          </button>
+          {isBoat && (
+            <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
+              style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
+                border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
+                cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
+                transition:'background .12s'}}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
+              onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
+              🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
+            </button>
+          )}
           <button onClick={e=>{e.stopPropagation();setShowKm(true)}}
             style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
               border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
