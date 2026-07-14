@@ -192,6 +192,8 @@ function VehicleModal({ vehicle, onClose }) {
         <FormRow label="Revisione"><Input type="date" value={form.revisione||''} onChange={e=>set('revisione',e.target.value)}/></FormRow>
         <FormRow label="Bollo"><Input type="date" value={form.bollo||''} onChange={e=>set('bollo',e.target.value)}/></FormRow>
       </div>
+      {/* Chilometraggio — solo in modifica (serve l'id del veicolo già salvato) */}
+      {isEdit && <KmSection vehicle={vehicle}/>}
       <ModalFooter>
         <button className="btn btn-primary" onClick={save}>{isEdit?'Aggiorna':'Salva'}</button>
         <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
@@ -606,13 +608,14 @@ function TripsModal({ vehicle, onClose }) {
   )
 }
 
-// ── Vehicle Km Readings Modal ─────────────────────────────
+// ── Vehicle Km Readings — sezione inline (dentro il modale del veicolo) ────
 // Registro chilometraggio: l'utente inserisce data + km rilevati (es. dal
 // cruscotto). Serve a tenere traccia dell'ultima rilevazione nota, utile
 // per calcoli futuri (consumo reale, valore residuo, tagliandi per km ecc.)
-// — richiesta utente 2026-07-14: "lascia spazio per inserire quanti km ha
-// l'ultima rilevazione (utente deve mettere data)".
-function KmModal({ vehicle, onClose }) {
+// — richiesta utente 2026-07-14: prima era un bottone/modale separato sulla
+// card del veicolo, spostato dentro le impostazioni del veicolo stesso
+// (VehicleModal) perché è lì che l'utente si aspetta di trovarlo.
+function KmSection({ vehicle }) {
   const { appPrefs, setAppPref } = useStore()
   const [newDate, setNewDate] = useState(new Date().toISOString().slice(0,10))
   const [newKm,   setNewKm]   = useState('')
@@ -637,19 +640,21 @@ function KmModal({ vehicle, onClose }) {
   }
 
   return (
-    <Modal title={`🛣 Chilometraggio ${vehicle.name}`} onClose={onClose} width={420}>
+    <div>
+      <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',margin:'12px 0 8px'}}>🛣 Chilometraggio</div>
+
       {allReadings.length > 0 && (
-        <div style={{marginBottom:16,padding:'10px 14px',background:'var(--surface2)',borderRadius:8,display:'flex',alignItems:'center',gap:12}}>
-          <span style={{fontSize:28}}>{renderIcon(vehicle.icon, 28)}</span>
+        <div style={{marginBottom:12,padding:'8px 12px',background:'var(--surface2)',borderRadius:8,display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:22}}>{renderIcon(vehicle.icon, 22)}</span>
           <div>
-            <div style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtIT(allReadings[0].km,0)} km</div>
-            <div style={{fontSize:11,color:'var(--text3)'}}>ultima rilevazione: {fmtDate(allReadings[0].date)}</div>
+            <div style={{fontSize:16,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtIT(allReadings[0].km,0)} km</div>
+            <div style={{fontSize:10,color:'var(--text3)'}}>ultima rilevazione: {fmtDate(allReadings[0].date)}</div>
           </div>
         </div>
       )}
 
       {/* Add new reading */}
-      <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
+      <div style={{display:'flex',gap:8,marginBottom:10,alignItems:'center'}}>
         <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)}
           style={{flex:1,padding:'7px 10px',border:'1px solid var(--border)',borderRadius:7,
             fontSize:13,background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-sans)'}}/>
@@ -662,37 +667,35 @@ function KmModal({ vehicle, onClose }) {
       </div>
 
       {/* Readings list */}
-      {allReadings.length === 0
-        ? <div style={{textAlign:'center',padding:'20px 0',fontSize:13,color:'var(--text3)'}}>Nessuna rilevazione registrata.</div>
-        : <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:320,overflowY:'auto'}}>
-            {allReadings.map((r,i) => (
-              <div key={r.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-                padding:'7px 12px',borderRadius:7,background:'var(--surface2)'}}>
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  <span style={{fontSize:13,fontFamily:'var(--font-mono)'}}>{fmtDate(r.date)}</span>
-                  <span style={{fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtIT(r.km,0)} km</span>
-                  {i===0 && (
-                    <span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:'var(--accent-l,var(--blue-l))',color:'var(--accent)',fontWeight:700}}>ultima</span>
-                  )}
-                </div>
-                <button onClick={()=>deleteReading(r.id)} style={{background:'none',border:'none',cursor:'pointer',
-                  color:'var(--text3)',opacity:0.5,padding:2,lineHeight:1}}
-                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
-                  onMouseLeave={e=>e.currentTarget.style.opacity=0.5}>
-                  <Trash2 size={12}/>
-                </button>
+      {allReadings.length > 0 && (
+        <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:180,overflowY:'auto'}}>
+          {allReadings.map((r,i) => (
+            <div key={r.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+              padding:'6px 10px',borderRadius:7,background:'var(--surface2)'}}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:12,fontFamily:'var(--font-mono)'}}>{fmtDate(r.date)}</span>
+                <span style={{fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtIT(r.km,0)} km</span>
+                {i===0 && (
+                  <span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:'var(--accent-l,var(--blue-l))',color:'var(--accent)',fontWeight:700}}>ultima</span>
+                )}
               </div>
-            ))}
-          </div>
-      }
-    </Modal>
+              <button onClick={()=>deleteReading(r.id)} style={{background:'none',border:'none',cursor:'pointer',
+                color:'var(--text3)',opacity:0.5,padding:2,lineHeight:1}}
+                onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                onMouseLeave={e=>e.currentTarget.style.opacity=0.5}>
+                <Trash2 size={11}/>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
 function VehicleChip({ vehicle, onEdit, onDelete }) {
   const { appPrefs } = useStore()
   const [showTrips, setShowTrips] = useState(false)
-  const [showKm, setShowKm] = useState(false)
 
   const lastKmReading = useMemo(() => {
     const raw = appPrefs?.vehicleKmReadings?.[vehicle.id] || []
@@ -743,8 +746,10 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
             💰 {fmtIT(vehicle.valoreMercato,0)} €
           </div>
         )}
-        {/* Uscite counter (solo Barca) + Chilometraggio (tutti) — stesso stile */}
-        <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+        {/* Uscite counter (solo Barca) — il chilometraggio ora si aggiunge solo
+            dalle impostazioni del veicolo (✏️ in alto a destra), qui resta
+            solo un richiamo testuale all'ultima rilevazione, se presente */}
+        <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:6}}>
           {isBoat && (
             <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
               style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
@@ -756,23 +761,15 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
               🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
             </button>
           )}
-          <button onClick={e=>{e.stopPropagation();setShowKm(true)}}
-            style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
-              border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
-              cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
-              transition:'background .12s'}}
-            onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
-            onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
-            🛣 {lastKmReading
-              ? <><strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{fmtIT(lastKmReading.km,0)} km</strong> · {fmtDate(lastKmReading.date)}</>
-              : <span style={{color:'var(--text3)'}}>+ km</span>
-            }
-          </button>
+          {lastKmReading && (
+            <span style={{fontSize:11,color:'var(--text3)'}}>
+              🛣 <strong style={{color:'var(--text2)',fontFamily:'var(--font-mono)'}}>{fmtIT(lastKmReading.km,0)} km</strong> · {fmtDate(lastKmReading.date)}
+            </span>
+          )}
         </div>
       </div>
     </div>
     {showTrips && <TripsModal vehicle={vehicle} onClose={()=>setShowTrips(false)}/>}
-    {showKm && <KmModal vehicle={vehicle} onClose={()=>setShowKm(false)}/>}
     </>
   )
 }
