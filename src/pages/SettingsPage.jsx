@@ -1669,11 +1669,34 @@ function AIPromptTab() {
   const [error,   setError]   = useState('')
   const [prompts, setPrompts] = useState(() => getAIPrompts())
   const [saved,   setSaved]   = useState(false)
-  const { appPrefs, setAppPref } = useStore()
+  const { appPrefs, setAppPref, appPrefsLoaded } = useStore()
   const [apiKey,        setApiKey]        = useState(() => appPrefs?.geminiKey || localStorage.getItem('fm-gemini-key') || '')
   const [keySaved,      setKeySaved]      = useState(false)
   const [placesKey,     setPlacesKey]     = useState(() => appPrefs?.placesKey || localStorage.getItem('fm-places-key') || '')
   const [placesKeySaved,setPlacesKeySaved]= useState(false)
+
+  // ── Fix "chiave sparita" (segnalato utente 2026-07-14) ────────────────────
+  // Il campo veniva letto UNA SOLA VOLTA al mount (useState lazy init). Se
+  // questo tab si apre prima che loadAllData() abbia finito di caricare
+  // appPrefs da Firestore (o su un browser/device dove il fallback
+  // localStorage è vuoto), il campo restava bloccato su '' per SEMPRE anche
+  // dopo che appPrefs finiva di caricarsi — la chiave sembrava sparita anche
+  // se in realtà era ancora salvata su Firestore. Questi due effect
+  // risincronizzano il campo non appena appPrefs arriva, ma solo se
+  // l'utente non ha ancora toccato manualmente il campo in questa sessione
+  // (altrimenti sovrascriverebbero una modifica in corso).
+  const apiKeyTouched    = useRef(false)
+  const placesKeyTouched = useRef(false)
+  useEffect(() => {
+    if (!apiKeyTouched.current && appPrefs?.geminiKey && appPrefs.geminiKey !== apiKey) {
+      setApiKey(appPrefs.geminiKey)
+    }
+  }, [appPrefs?.geminiKey])
+  useEffect(() => {
+    if (!placesKeyTouched.current && appPrefs?.placesKey && appPrefs.placesKey !== placesKey) {
+      setPlacesKey(appPrefs.placesKey)
+    }
+  }, [appPrefs?.placesKey])
 
   function checkPin1() {
     if (pin1 === CONFIRM_PIN) { setStep('pin2'); setError(''); setPin1('') }
@@ -1758,14 +1781,20 @@ function AIPromptTab() {
           <input
             type="password"
             value={apiKey}
-            onChange={e=>{setApiKey(e.target.value);setKeySaved(false)}}
+            onChange={e=>{apiKeyTouched.current=true;setApiKey(e.target.value);setKeySaved(false)}}
             placeholder="sk-... oppure AIzaSy..."
             style={{flex:1,minWidth:240,padding:'8px 10px',border:'1px solid var(--border)',
               borderRadius:'var(--radius-sm)',fontSize:13,background:'var(--surface)',
               color:'var(--text)',outline:'none',fontFamily:'var(--font-mono)'}}
           />
           <button className="btn btn-primary" style={{fontSize:12}} onClick={()=>{
+            // Guardia (2026-07-14): setAppPref si rifiuta di scrivere se appPrefs non
+            // ha ancora finito di caricare da Firestore — prima il bottone mostrava
+            // comunque "✓ Salvata" anche in quel caso (falso positivo, localStorage.
+            // setItem partiva comunque). Ora avvisa invece di mentire.
+            if (!appPrefsLoaded) { alert('Dati non ancora caricati, riprova tra un istante.'); return }
             const k = apiKey.trim()
+            apiKeyTouched.current = true
             setAppPref('geminiKey', k)
             localStorage.setItem('fm-gemini-key', k)
             setKeySaved(true); setTimeout(()=>setKeySaved(false),2000)
@@ -1773,7 +1802,7 @@ function AIPromptTab() {
             {keySaved?'✓ Salvata':'Salva'}
           </button>
           {apiKey && <button className="btn btn-ghost" style={{fontSize:12,color:'var(--red)'}}
-            onClick={()=>{setApiKey('');setAppPref('geminiKey','');localStorage.removeItem('fm-gemini-key')}}>Rimuovi</button>}
+            onClick={()=>{apiKeyTouched.current=true;setApiKey('');setAppPref('geminiKey','');localStorage.removeItem('fm-gemini-key')}}>Rimuovi</button>}
         </div>
       </div>
 
@@ -1789,14 +1818,16 @@ function AIPromptTab() {
           <input
             type="password"
             value={placesKey}
-            onChange={e=>{setPlacesKey(e.target.value);setPlacesKeySaved(false)}}
+            onChange={e=>{placesKeyTouched.current=true;setPlacesKey(e.target.value);setPlacesKeySaved(false)}}
             placeholder="AIzaSy..."
             style={{flex:1,minWidth:240,padding:'8px 10px',border:'1px solid var(--border)',
               borderRadius:'var(--radius-sm)',fontSize:13,background:'var(--surface)',
               color:'var(--text)',outline:'none',fontFamily:'var(--font-mono)'}}
           />
           <button className="btn btn-primary" style={{fontSize:12}} onClick={()=>{
+            if (!appPrefsLoaded) { alert('Dati non ancora caricati, riprova tra un istante.'); return }
             const k = placesKey.trim()
+            placesKeyTouched.current = true
             setAppPref('placesKey', k)
             localStorage.setItem('fm-places-key', k)
             setPlacesKeySaved(true); setTimeout(()=>setPlacesKeySaved(false),2000)
@@ -1804,7 +1835,7 @@ function AIPromptTab() {
             {placesKeySaved?'✓ Salvata':'Salva'}
           </button>
           {placesKey && <button className="btn btn-ghost" style={{fontSize:12,color:'var(--red)'}}
-            onClick={()=>{setPlacesKey('');setAppPref('placesKey','');localStorage.removeItem('fm-places-key')}}>Rimuovi</button>}
+            onClick={()=>{placesKeyTouched.current=true;setPlacesKey('');setAppPref('placesKey','');localStorage.removeItem('fm-places-key')}}>Rimuovi</button>}
         </div>
       </div>
 
