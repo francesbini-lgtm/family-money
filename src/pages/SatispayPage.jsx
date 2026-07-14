@@ -1320,6 +1320,15 @@ function FundCard({ pot, allPots }) {
     // Use selectedTotal as the denominator so splits sum to totalAmt (accantonamento),
     // leaving the delta portion unattributed to any voce.
     const splitDenom = selectedTotal > 0 ? selectedTotal : totalAmt
+    // Fix duplicati residui (2026-07-14 pomeriggio, seconda ondata — segnalati
+    // ancora doppi/tripli nonostante il fix _potId sopra): quel fix confrontava
+    // SOLO s._potId !== pot.id, quindi vecchi split "legacy" salvati PRIMA che
+    // _potId esistesse (senza tag, _potId undefined) non venivano mai riconosciuti
+    // come "miei" e restavano per sempre accanto alla copia nuova taggata, invece
+    // di essere sostituiti — risultato: importi raddoppiati per le stesse identiche
+    // categorie. Ora si considera "mio" anche uno split non taggato il cui
+    // cat1+cat2 corrisponde a una voce di QUESTO fondo.
+    const ownCatKeys = new Set((pot.voci||[]).filter(v=>v.cat1&&v.cat2).map(v=>`${v.cat1}|${v.cat2}`))
     txIdArr.forEach(txId => {
       const tx = transactions.find(t => t.txId === txId)
       if (!tx) return
@@ -1328,7 +1337,11 @@ function FundCard({ pot, allPots }) {
       // un eventuale delta già assegnato a un altro fondo (linkOtherPot) andrebbe
       // perso al primo re-link di QUESTO fondo. Si sostituiscono solo gli split
       // marcati con _potId di QUESTO fondo, preservando quelli di altri fondi.
-      const foreign = (tx.splits || []).filter(s => s._potId !== pot.id)
+      const foreign = (tx.splits || []).filter(s => {
+        if (s._potId === pot.id) return false
+        if (s._potId == null && ownCatKeys.has(`${s.cat1}|${s.cat2}`)) return false
+        return true
+      })
       const own = computeSatiSplits(ym, tx.amount, splitDenom)
       const splits = [...foreign, ...own]
       updateTransaction(txId, {
@@ -1370,6 +1383,11 @@ function FundCard({ pot, allPots }) {
     const voci  = otherPot.voci || []
     const cells = otherPot.data?.[ym]?.cells || {}
     const total = voci.reduce((s,v) => s + (parseFloat(cells[v.id])||0), 0)
+    // Stesso fix di linkMonth qui sopra: riconosce come "mio" anche uno split
+    // legacy non taggato (_potId undefined) il cui cat1+cat2 corrisponde a una
+    // voce di QUESTO fondo, altrimenti resta duplicato per sempre accanto alla
+    // copia nuova taggata.
+    const ownCatKeys = new Set(voci.filter(v=>v.cat1&&v.cat2).map(v=>`${v.cat1}|${v.cat2}`))
     txIdArr.forEach(txId => {
       const tx = transactions.find(t => t.txId === txId)
       if (!tx) return
@@ -1387,7 +1405,11 @@ function FundCard({ pot, allPots }) {
       // contribuzione di QUESTO stesso fondo — causa reale della triplicazione.
       // Ora si rimuovono prima gli split già taggati con _potId di QUESTO fondo,
       // preservando quelli del fondo principale e di eventuali altri fondi.
-      const existing = (tx.splits || []).filter(s => s._potId !== otherPotId)
+      const existing = (tx.splits || []).filter(s => {
+        if (s._potId === otherPotId) return false
+        if (s._potId == null && ownCatKeys.has(`${s.cat1}|${s.cat2}`)) return false
+        return true
+      })
       const merged = [...existing, ...splits]
       updateTransaction(txId, { splits: merged.length ? merged : null, descAI: 'Accantonamento Satispay' })
     })
@@ -4800,11 +4822,63 @@ function NonAbbinateModal({ onClose }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function SatispayPage() {
-  const { satiPots, transactions, vehExpenses, appPrefs } = useStore()
+  const { satiPots, transactions, vehExpenses, appPrefs, updateTransaction } = useStore()
   const [showAdd,             setShowAdd]             = useState(false)
   const [showAccrediti,       setShowAccrediti]       = useState(false)
   const [showAccantonamenti,  setShowAccantonamenti]  = useState(false)
   const [tab, setTab]                                 = useState('overview')
+  const [cleaning, setCleaning]                       = useState(false)
+
+  // Conta/ripulisce split ESATTAMENTE duplicati (stesso cat1+cat2+amount ripetuto
+  // più volte sulla stessa transazione) — bug segnalato 2026-07-14: prima del fix
+  // _potId, un fondo ri-abbinato più volte ACCODAVA una nuova copia identica dei
+  // suoi split invece di sostituirla, quindi in Uscite (che esplode t.splits senza
+  // dedup) l'accantonamento risultava raddoppiato/triplicato, mentre le viste
+  // interne di Satispay (basate su pot.voci/cells, non su t.splits) restavano giuste.
+  // Qui si rimuove SOLO la copia ripetuta byte-per-byte (stesso importo): nessun
+  // ricalcolo, nessuna scelta su quale valore sia "giusto" — sicuro per dati reali.
+  const duplicateInfo = useMemo(() => {
+    let txCount = 0, removedCount = 0
+    transactions.forEach(t => {
+      if (!Array.isArray(t.splits) || t.splits.length < 2) return
+      const seen = new Set()
+      let dupHere = 0
+      t.splits.forEach(s => {
+        if (!s) return
+        const key = `${s.cat1||''}|${s.cat2||''}|${s.amount}`
+        if (seen.has(key)) dupHere++
+        else seen.add(key)
+      })
+      if (dupHere > 0) { txCount++; removedCount += dupHere }
+    })
+    return { txCount, removedCount }
+  }, [transactions])
+
+  function cleanExactDuplicateSplits() {
+    if (cleaning) return
+    setCleaning(true)
+    let fixed = 0
+    transactions.forEach(t => {
+      if (!Array.isArray(t.splits) || t.splits.length < 2) return
+      const seen = new Set()
+      const out = []
+      t.splits.forEach(s => {
+        if (!s) return
+        const key = `${s.cat1||''}|${s.cat2||''}|${s.amount}`
+        if (seen.has(key)) return
+        seen.add(key)
+        out.push(s)
+      })
+      if (out.length !== t.splits.length) {
+        fixed++
+        updateTransaction(t.txId, { splits: out })
+      }
+    })
+    setCleaning(false)
+    alert(fixed > 0
+      ? `✅ Ripuliti ${fixed} accantonamenti con duplicati esatti (stessa categoria e stesso importo ripetuti).`
+      : 'Nessun duplicato esatto trovato al momento.')
+  }
 
   const isSati = (t) => {
     const desc  = (t.description||'').toUpperCase()
@@ -4888,6 +4962,16 @@ export default function SatispayPage() {
                 color:'var(--gold)',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,
                 background:'rgba(200,160,0,.08)',cursor:'pointer',fontFamily:'var(--font-sans)'}}>
               ⚠️ Accantonamenti non abbinati ({accantonamentiNonAbbinati.length})
+            </button>
+          )}
+          {duplicateInfo.txCount > 0 && (
+            <button onClick={cleanExactDuplicateSplits} disabled={cleaning}
+              title="Rimuove duplicati esatti (stessa categoria e stesso importo ripetuti sulla stessa transazione) — nessun ricalcolo, solo copie identiche"
+              style={{display:'flex',alignItems:'center',gap:6,border:'1px solid var(--red)',
+                color:'var(--red)',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,
+                background:'rgba(220,40,40,.06)',cursor:cleaning?'default':'pointer',fontFamily:'var(--font-sans)',
+                opacity:cleaning?0.6:1}}>
+              🧹 Ripulisci duplicati ({duplicateInfo.txCount})
             </button>
           )}
           <button className="btn btn-primary" onClick={()=>setShowAdd(true)}
