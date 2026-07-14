@@ -16,6 +16,7 @@ import UtenzePage from './UtenzePage'
 import AltroPage from './AltroPage'
 import CeciliaPage from './CeciliaPage'
 import { NannyPage, ColfPage } from './NannyColfPage'
+import { findVacationForDate } from '../data/vacationRules'
 
 // ── Net amount after compensation ──────────────────────────
 // Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
@@ -496,6 +497,37 @@ export default function UscitePage() {
       : (dataMap[cat1]?.[monthKey]?.txs || [])
     return [...txs].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
   }, [selected, dataMap, expenses])
+
+  // ── Raggruppamento per vacanza (SOLO per "Weekend e Vacanze") ─────────────
+  // Richiesta utente 2026-07-14: cliccando una cella di questa riga, il pannello
+  // a destra deve mostrare le transazioni raggruppate per vacanza/weekend
+  // (appPrefs.calendarVacations), non la lista piatta come per le altre categorie.
+  const isWeekendVacanze = selected && !selected._nonRecurring && selected.cat1 === 'Weekend e Vacanze'
+  const [expandedVacs, setExpandedVacs] = useState(new Set())
+  const detailVacGroups = useMemo(() => {
+    if (!isWeekendVacanze) return null
+    const vacations = appPrefs?.calendarVacations || []
+    const groups = new Map() // vacId (o '_none') -> { vac, txs:[] }
+    detailTxs.filter(t => netAmt(t) < 0).forEach(t => {
+      const effDate = t._effDate || t.competenza || t.date
+      const vac = findVacationForDate(effDate, vacations)
+      const key = vac?.id || '_none'
+      if (!groups.has(key)) groups.set(key, { vac, txs: [] })
+      groups.get(key).txs.push(t)
+    })
+    return [...groups.values()]
+      .map(g => ({ ...g, total: g.txs.reduce((s, t) => s + Math.abs(netAmt(t)), 0) }))
+      .sort((a, b) => b.total - a.total)
+  }, [isWeekendVacanze, detailTxs, appPrefs?.calendarVacations])
+
+  function toggleVacGroup(key) {
+    setExpandedVacs(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+  useEffect(() => { setExpandedVacs(new Set()) }, [selected])
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function toggleCat(cat1) {
@@ -1066,17 +1098,51 @@ export default function UscitePage() {
                 <span className="uscite-detail-count">{detailTxs.filter(t => netAmt(t) < 0).length} transazioni</span>
               </div>
               <div className="uscite-detail-list">
-                {detailTxs.filter(t => netAmt(t) < 0).map((t, i) => (
-                  <div key={t.id || t.txId || i} className="uscite-detail-row"
-                    style={{ cursor: t._virtual ? 'default' : 'pointer', opacity: t._virtual ? 0.7 : 1 }}
-                    onClick={() => !t._virtual && setOpenTx(t)}>
-                    <div className="uscite-detail-date">{fmtDate(t._effDate || t.competenza || t.date)}</div>
-                    <div className="uscite-detail-desc" style={t._virtual ? {fontStyle:'italic',color:'var(--text3)'} : undefined}>
-                      {t._virtual ? `⚙ Fondo: ${t.descAI || '—'}` : (t.descAI || t.description || t.desc || '—')}
+                {isWeekendVacanze ? (
+                  detailVacGroups.map(g => {
+                    const key = g.vac?.id || '_none'
+                    const isOpen = expandedVacs.has(key)
+                    const label = g.vac ? (g.vac.city || g.vac.name || '—') : 'Non assegnate a una vacanza'
+                    const sub = g.vac ? `${fmtDate(g.vac.from)} – ${fmtDate(g.vac.to)}` : null
+                    return (
+                      <div key={key}>
+                        <div className="uscite-detail-row" style={{ cursor: 'pointer', fontWeight: 700 }}
+                          onClick={() => toggleVacGroup(key)}>
+                          <div className="uscite-detail-date" style={{ fontWeight: 400 }}>{isOpen ? '▾' : '▸'}</div>
+                          <div className="uscite-detail-desc">
+                            {g.vac ? '✈️ ' : '⚡ '}{label}
+                            {sub && <span style={{ fontWeight: 400, color: 'var(--text3)', marginLeft: 6 }}>{sub}</span>}
+                            <span style={{ fontWeight: 400, color: 'var(--text3)', marginLeft: 6 }}>· {g.txs.length} tx</span>
+                          </div>
+                          <div className="uscite-detail-amount">{fmtIT(Math.round(g.total))} €</div>
+                        </div>
+                        {isOpen && g.txs.map((t, i) => (
+                          <div key={t.id || t.txId || i} className="uscite-detail-row"
+                            style={{ cursor: t._virtual ? 'default' : 'pointer', opacity: t._virtual ? 0.7 : 1, paddingLeft: 18 }}
+                            onClick={() => !t._virtual && setOpenTx(t)}>
+                            <div className="uscite-detail-date">{fmtDate(t._effDate || t.competenza || t.date)}</div>
+                            <div className="uscite-detail-desc" style={t._virtual ? {fontStyle:'italic',color:'var(--text3)'} : undefined}>
+                              {t._virtual ? `⚙ Fondo: ${t.descAI || '—'}` : (t.descAI || t.description || t.desc || '—')}
+                            </div>
+                            <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(netAmt(t))))} €</div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })
+                ) : (
+                  detailTxs.filter(t => netAmt(t) < 0).map((t, i) => (
+                    <div key={t.id || t.txId || i} className="uscite-detail-row"
+                      style={{ cursor: t._virtual ? 'default' : 'pointer', opacity: t._virtual ? 0.7 : 1 }}
+                      onClick={() => !t._virtual && setOpenTx(t)}>
+                      <div className="uscite-detail-date">{fmtDate(t._effDate || t.competenza || t.date)}</div>
+                      <div className="uscite-detail-desc" style={t._virtual ? {fontStyle:'italic',color:'var(--text3)'} : undefined}>
+                        {t._virtual ? `⚙ Fondo: ${t.descAI || '—'}` : (t.descAI || t.description || t.desc || '—')}
+                      </div>
+                      <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(netAmt(t))))} €</div>
                     </div>
-                    <div className="uscite-detail-amount">{fmtIT(Math.round(Math.abs(netAmt(t))))} €</div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </>
           )}
