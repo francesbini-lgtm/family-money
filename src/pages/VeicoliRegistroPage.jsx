@@ -161,6 +161,8 @@ function VehicleModal({ vehicle, onClose }) {
         carburante: form.carburante, km: lastKm,
       })
       set('valoreMercato', String(value))
+      // Data dell'ultima stima AI (usata da PatrimonioPage per il refresh automatico dopo 1 mese)
+      set('valoreMercatoAggiornato', new Date().toISOString().slice(0,10))
     } catch (e) {
       setEstimateErr(e.message || 'Errore durante la stima AI')
     }

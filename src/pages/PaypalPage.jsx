@@ -1153,6 +1153,18 @@ export default function PaypalPage() {
     [transactions]
   )
 
+  // Data PayPal (quella riportata da PayPal stesso, salvata solo nel registro
+  // paypalImports) per ogni transazione abbinata — richiesta utente 2026-07-14:
+  // mostrarla in tabella accanto alla data di competenza bancaria, che spesso
+  // differisce di qualche giorno (autoMatch tollera fino a 6gg di scarto).
+  const paypalDateByTx = useMemo(() => {
+    const map = {}
+    paypalImports.forEach(imp => {
+      if (imp.status === 'matched' && imp.matchedTxId && imp.date) map[imp.matchedTxId] = imp.date
+    })
+    return map
+  }, [paypalImports])
+
   const last6 = useMemo(() => getLast6Months(), [])
   const paypalExpenses = useMemo(() =>
     paypalTxs.filter(t => {
@@ -1673,7 +1685,8 @@ export default function PaypalPage() {
                     style={{cursor:'pointer'}}
                   />
                 </th>
-                <th className="pp-th">Data</th>
+                <th className="pp-th">Data competenza</th>
+                <th className="pp-th">Data PayPal</th>
                 <th className="pp-th">Merchant</th>
                 <th className="pp-th">AI descr</th>
                 <th className="pp-th">Importo</th>
@@ -1706,6 +1719,9 @@ export default function PaypalPage() {
                       <input type="checkbox" readOnly checked={isSel} style={{cursor:'pointer',pointerEvents:'none'}}/>
                     </td>
                     <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
+                    <td className="pp-td" style={{color:'var(--text3)'}}>
+                      {paypalDateByTx[t.txId] ? fmtDate(paypalDateByTx[t.txId]) : <span style={{opacity:.4}}>—</span>}
+                    </td>
                     <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
                     <td className="pp-td" style={{ color:'var(--text3)', fontSize:12, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
                       title={t.descAI || ''}>

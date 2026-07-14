@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
+import { estimateVehicleMarketValue } from '../data/aiService'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -124,12 +125,41 @@ function posVal(p) {
 }
 
 export default function PatrimonioPage() {
-  const { loans, portfolios, transactions, satiPots, appPrefs, vehicles } = useStore()
+  const { loans, portfolios, transactions, satiPots, appPrefs, vehicles, updateVehicle } = useStore()
   const setAppPref = useStore(s => s.setAppPref)
   const assets      = appPrefs?.extraAssets      || []
   const liabilities = appPrefs?.extraLiabilities || []
   const [addModal,    setAddModal]     = useState(null) // 'asset' | 'liability' | null
   const [editItem,    setEditItem]     = useState(null)
+
+  // Auto-refresh AI del valore di mercato veicoli, se ≥1 mese dall'ultima stima
+  // (richiesta utente 2026-07-14). Guard con ref per non richiamare l'AI più
+  // volte nella stessa sessione/mount per lo stesso veicolo (l'effect può
+  // rieseguire a ogni cambio di `vehicles`); silenzioso in caso di errore
+  // (es. nessuna chiave AI configurata) — non blocca la pagina.
+  const refreshedRef = useRef(new Set())
+  useEffect(() => {
+    (vehicles || []).forEach(async v => {
+      if (!v.marca || !v.modello) return
+      if (refreshedRef.current.has(v.id)) return
+      const last = v.valoreMercatoAggiornato
+      const daysSince = last ? (Date.now() - new Date(last).getTime()) / 86400000 : Infinity
+      if (daysSince < 30) return
+      refreshedRef.current.add(v.id)
+      try {
+        const raw = appPrefs?.vehicleKmReadings?.[v.id] || []
+        const lastKm = raw.length ? [...raw].sort((a,b)=>b.date.localeCompare(a.date))[0].km : null
+        const value = await estimateVehicleMarketValue({
+          marca: v.marca, modello: v.modello, anno: v.anno, carburante: v.carburante, km: lastKm,
+        })
+        updateVehicle(v.id, { valoreMercato: value, valoreMercatoAggiornato: new Date().toISOString().slice(0,10) })
+        console.log(`[Patrimonio] valore di mercato aggiornato automaticamente per ${v.name}: €${value}`)
+      } catch (e) {
+        console.warn(`[Patrimonio] refresh automatico valore veicolo fallito per ${v.name}:`, e.message)
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicles])
 
   // Auto: loans as liabilities
   const loanLiabilities = loans.map(l => ({

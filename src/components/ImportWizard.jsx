@@ -827,8 +827,35 @@ export default function ImportWizard({ onClose }) {
   const customCats        = useStore(s => s.customCats)
   const appPrefs          = useStore(s => s.appPrefs)
   const setAppPref        = useStore(s => s.setAppPref)
+  const userAccounts      = useStore(s => s.userAccounts)
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const apiKey            = appPrefs?.geminiKey || localStorage.getItem('fm-gemini-key') || ''
+
+  // Data ultima transazione registrata per ciascuna delle 3 sorgenti (richiesta
+  // utente 2026-07-14, così l'utente sa subito se un import è indietro) —
+  // sola lettura, nessun impatto sull'import vero e proprio.
+  const lastTxDates = useMemo(() => {
+    const cardNames = new Set((userAccounts||[]).filter(a=>a.type==='carta_credito').map(a=>a.name))
+    const contoNames = new Set((userAccounts||[]).filter(a=>a.type!=='carta_credito').map(a=>a.name))
+    let lastConto = null
+    const lastByCard = {}
+    let lastPaypal = null
+    transactions.forEach(t => {
+      const d = t._effDate || t.date
+      if (!d) return
+      if (t.account && cardNames.has(t.account)) {
+        if (!lastByCard[t.account] || d > lastByCard[t.account]) lastByCard[t.account] = d
+      } else if (t.account && (contoNames.size ? contoNames.has(t.account) : true)) {
+        if (!lastConto || d > lastConto) lastConto = d
+      }
+      if (isPayPal(t)) {
+        if (!lastPaypal || d > lastPaypal) lastPaypal = d
+      }
+    })
+    const cards = Object.entries(lastByCard).map(([name,date]) => ({ name, date }))
+      .sort((a,b) => b.date.localeCompare(a.date))
+    return { conto: lastConto, cards, paypal: lastPaypal }
+  }, [transactions, userAccounts])
 
   const [sources, setSources] = useState({ conto: true, carta: false, paypal: false })
   const [queue,   setQueue]   = useState(null)   // null = schermata di selezione
@@ -1162,6 +1189,27 @@ export default function ImportWizard({ onClose }) {
                   <span>
                     <span style={{fontSize:14,fontWeight:700,display:'block'}}>{label}</span>
                     <span style={{fontSize:11,color:'var(--text3)'}}>{sub}</span>
+                    <span style={{fontSize:10.5,color:'var(--text3)',display:'block',marginTop:5,lineHeight:1.5}}>
+                      {key === 'conto' && (
+                        lastTxDates.conto
+                          ? <>📅 Ultima transazione: <strong style={{color:'var(--text2)'}}>{fmtDate(lastTxDates.conto)}</strong></>
+                          : 'Nessuna transazione registrata finora'
+                      )}
+                      {key === 'carta' && (
+                        lastTxDates.cards.length
+                          ? lastTxDates.cards.map(c => (
+                              <span key={c.name} style={{display:'block'}}>
+                                📅 {c.name}: <strong style={{color:'var(--text2)'}}>{fmtDate(c.date)}</strong>
+                              </span>
+                            ))
+                          : 'Nessuna transazione registrata finora'
+                      )}
+                      {key === 'paypal' && (
+                        lastTxDates.paypal
+                          ? <>📅 Ultima transazione: <strong style={{color:'var(--text2)'}}>{fmtDate(lastTxDates.paypal)}</strong></>
+                          : 'Nessuna transazione registrata finora'
+                      )}
+                    </span>
                   </span>
                 </label>
               ))}
