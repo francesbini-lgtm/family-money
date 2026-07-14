@@ -606,9 +606,99 @@ function TripsModal({ vehicle, onClose }) {
   )
 }
 
+// ── Vehicle Km Readings Modal ─────────────────────────────
+// Registro chilometraggio: l'utente inserisce data + km rilevati (es. dal
+// cruscotto). Serve a tenere traccia dell'ultima rilevazione nota, utile
+// per calcoli futuri (consumo reale, valore residuo, tagliandi per km ecc.)
+// — richiesta utente 2026-07-14: "lascia spazio per inserire quanti km ha
+// l'ultima rilevazione (utente deve mettere data)".
+function KmModal({ vehicle, onClose }) {
+  const { appPrefs, setAppPref } = useStore()
+  const [newDate, setNewDate] = useState(new Date().toISOString().slice(0,10))
+  const [newKm,   setNewKm]   = useState('')
+
+  const allReadings = useMemo(() => {
+    const raw = appPrefs?.vehicleKmReadings?.[vehicle.id] || []
+    return [...raw].sort((a,b) => b.date.localeCompare(a.date))
+  }, [appPrefs?.vehicleKmReadings, vehicle.id])
+
+  function addReading() {
+    if (!newDate || !newKm) return
+    const existing = appPrefs?.vehicleKmReadings?.[vehicle.id] || []
+    const reading = { id: uid(), date: newDate, km: parseFloat(newKm)||0 }
+    setAppPref('vehicleKmReadings', { ...(appPrefs?.vehicleKmReadings || {}), [vehicle.id]: [...existing, reading] })
+    setNewDate(new Date().toISOString().slice(0,10))
+    setNewKm('')
+  }
+
+  function deleteReading(id) {
+    const existing = appPrefs?.vehicleKmReadings?.[vehicle.id] || []
+    setAppPref('vehicleKmReadings', { ...(appPrefs?.vehicleKmReadings || {}), [vehicle.id]: existing.filter(r => r.id !== id) })
+  }
+
+  return (
+    <Modal title={`🛣 Chilometraggio ${vehicle.name}`} onClose={onClose} width={420}>
+      {allReadings.length > 0 && (
+        <div style={{marginBottom:16,padding:'10px 14px',background:'var(--surface2)',borderRadius:8,display:'flex',alignItems:'center',gap:12}}>
+          <span style={{fontSize:28}}>{renderIcon(vehicle.icon, 28)}</span>
+          <div>
+            <div style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtIT(allReadings[0].km,0)} km</div>
+            <div style={{fontSize:11,color:'var(--text3)'}}>ultima rilevazione: {fmtDate(allReadings[0].date)}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Add new reading */}
+      <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
+        <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)}
+          style={{flex:1,padding:'7px 10px',border:'1px solid var(--border)',borderRadius:7,
+            fontSize:13,background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-sans)'}}/>
+        <input type="number" value={newKm} onChange={e=>setNewKm(e.target.value)} placeholder="es. 42500"
+          style={{width:110,padding:'7px 10px',border:'1px solid var(--border)',borderRadius:7,
+            fontSize:13,background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-mono)'}}/>
+        <button className="btn btn-primary" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={addReading} disabled={!newDate||!newKm}>
+          + Aggiungi
+        </button>
+      </div>
+
+      {/* Readings list */}
+      {allReadings.length === 0
+        ? <div style={{textAlign:'center',padding:'20px 0',fontSize:13,color:'var(--text3)'}}>Nessuna rilevazione registrata.</div>
+        : <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:320,overflowY:'auto'}}>
+            {allReadings.map((r,i) => (
+              <div key={r.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                padding:'7px 12px',borderRadius:7,background:'var(--surface2)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <span style={{fontSize:13,fontFamily:'var(--font-mono)'}}>{fmtDate(r.date)}</span>
+                  <span style={{fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtIT(r.km,0)} km</span>
+                  {i===0 && (
+                    <span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:'var(--accent-l,var(--blue-l))',color:'var(--accent)',fontWeight:700}}>ultima</span>
+                  )}
+                </div>
+                <button onClick={()=>deleteReading(r.id)} style={{background:'none',border:'none',cursor:'pointer',
+                  color:'var(--text3)',opacity:0.5,padding:2,lineHeight:1}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=0.5}>
+                  <Trash2 size={12}/>
+                </button>
+              </div>
+            ))}
+          </div>
+      }
+    </Modal>
+  )
+}
+
 function VehicleChip({ vehicle, onEdit, onDelete }) {
   const { appPrefs } = useStore()
   const [showTrips, setShowTrips] = useState(false)
+  const [showKm, setShowKm] = useState(false)
+
+  const lastKmReading = useMemo(() => {
+    const raw = appPrefs?.vehicleKmReadings?.[vehicle.id] || []
+    if (!raw.length) return null
+    return [...raw].sort((a,b) => b.date.localeCompare(a.date))[0]
+  }, [appPrefs?.vehicleKmReadings, vehicle.id])
 
   const scadenze = [['assicurazione','🛡'],['tagliando','🔧'],['revisione','🔩'],['bollo','📋']]
     .filter(([k]) => vehicle[k])
@@ -665,19 +755,34 @@ function VehicleChip({ vehicle, onEdit, onDelete }) {
             ))}
           </div>
         )}
-        {/* Uscite counter */}
-        <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
-          style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
-            border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
-            cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
-            transition:'background .12s'}}
-          onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
-          onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
-          🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
-        </button>
+        {/* Uscite counter + Chilometraggio — stesso stile */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+          <button onClick={e=>{e.stopPropagation();setShowTrips(true)}}
+            style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
+              border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
+              cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
+              transition:'background .12s'}}
+            onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
+            onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
+            🗓 <strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{tripsThisYear}</strong> uscite {thisYear}
+          </button>
+          <button onClick={e=>{e.stopPropagation();setShowKm(true)}}
+            style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',
+              border:'1px solid var(--border)',borderRadius:6,background:'var(--surface2)',
+              cursor:'pointer',fontSize:11,color:'var(--text2)',fontFamily:'var(--font-sans)',
+              transition:'background .12s'}}
+            onMouseEnter={e=>e.currentTarget.style.background='var(--surface3,var(--border))'}
+            onMouseLeave={e=>e.currentTarget.style.background='var(--surface2)'}>
+            🛣 {lastKmReading
+              ? <><strong style={{color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{fmtIT(lastKmReading.km,0)} km</strong> · {fmtDate(lastKmReading.date)}</>
+              : <span style={{color:'var(--text3)'}}>+ km</span>
+            }
+          </button>
+        </div>
       </div>
     </div>
     {showTrips && <TripsModal vehicle={vehicle} onClose={()=>setShowTrips(false)}/>}
+    {showKm && <KmModal vehicle={vehicle} onClose={()=>setShowKm(false)}/>}
     </>
   )
 }
