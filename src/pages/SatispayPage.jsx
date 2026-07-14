@@ -4829,55 +4829,108 @@ export default function SatispayPage() {
   const [tab, setTab]                                 = useState('overview')
   const [cleaning, setCleaning]                       = useState(false)
 
-  // Conta/ripulisce split ESATTAMENTE duplicati (stesso cat1+cat2+amount ripetuto
-  // più volte sulla stessa transazione) — bug segnalato 2026-07-14: prima del fix
-  // _potId, un fondo ri-abbinato più volte ACCODAVA una nuova copia identica dei
-  // suoi split invece di sostituirla, quindi in Uscite (che esplode t.splits senza
-  // dedup) l'accantonamento risultava raddoppiato/triplicato, mentre le viste
-  // interne di Satispay (basate su pot.voci/cells, non su t.splits) restavano giuste.
-  // Qui si rimuove SOLO la copia ripetuta byte-per-byte (stesso importo): nessun
-  // ricalcolo, nessuna scelta su quale valore sia "giusto" — sicuro per dati reali.
-  const duplicateInfo = useMemo(() => {
-    let txCount = 0, removedCount = 0
-    transactions.forEach(t => {
-      if (!Array.isArray(t.splits) || t.splits.length < 2) return
-      const seen = new Set()
-      let dupHere = 0
-      t.splits.forEach(s => {
-        if (!s) return
-        const key = `${s.cat1||''}|${s.cat2||''}|${s.amount}`
-        if (seen.has(key)) dupHere++
-        else seen.add(key)
+  // ── Ricalcolo completo split Satispay (2026-07-14, seconda scoperta dello
+  // stesso giorno — l'utente ha notato che quando 2-3 bonifici Satispay reali
+  // coprono insieme UN mese, cliccando su ciascuno si vedeva lo STESSO importo
+  // pieno, non una quota proporzionale: prova diretta che alcune transazioni
+  // portano una copia INTERA della cifra invece della propria quota — bug più
+  // ampio del semplice "duplicato esatto ripulito prima, che copriva solo copie
+  // byte-identiche DENTRO la stessa transazione, non questo caso fra più tx).
+  //
+  // Fix: per ogni fondo e ogni mese già abbinato (pot.data[ym].linked), la quota
+  // corretta di CIASCUNA transazione linkata è sempre derivabile in modo unico
+  // dai dati che l'utente ha già dichiarato (fonte di verità, la stessa che rende
+  // giuste le viste interne di Satispay):
+  //   ratio_tx = (|importo tx| / totale importi delle tx linkate insieme)
+  //            × (linkedAmt del fondo per quel mese / totale voci del fondo per quel mese)
+  // Questa UNICA formula copre sia il caso "fondo principale" (linkMonth, dove
+  // linkedAmt == totale voci → il secondo fattore vale 1) sia il caso "delta verso
+  // un altro fondo" (linkOtherPot, dove linkedAmt < totale voci) — quindi non serve
+  // sapere quale delle due funzioni abbia originariamente creato il collegamento.
+  // Si sostituisce SOLO la porzione tag _potId di QUESTO fondo su ogni tx coinvolta,
+  // preservando split di altri fondi eventualmente presenti sulla stessa tx.
+  function recomputeAllSatiSplits() {
+    const perTxByPot = {} // txId -> potId -> split[]
+    ;(satiPots || []).forEach(pot => {
+      const voci = (pot.voci || []).filter(v => v.cat1 && v.cat2)
+      if (!voci.length) return
+      Object.entries(pot.data || {}).forEach(([ym, entry]) => {
+        if (!entry?.linked) return
+        const ids = Array.isArray(entry.linked) ? entry.linked : [entry.linked]
+        const cells = entry.cells || {}
+        const cellsTotal = voci.reduce((s, v) => s + (parseFloat(cells[v.id]) || 0), 0)
+        if (cellsTotal <= 0) return
+        const linkedAmt = entry.linkedAmt != null ? entry.linkedAmt : cellsTotal
+        const selectedTotal = ids.reduce((s, id) => {
+          const t = transactions.find(x => x.txId === id)
+          return s + Math.abs(t?.amount || 0)
+        }, 0)
+        if (selectedTotal <= 0) return
+        ids.forEach(txId => {
+          const tx = transactions.find(t => t.txId === txId)
+          if (!tx) return
+          const ratio = (Math.abs(tx.amount) / selectedTotal) * (linkedAmt / cellsTotal)
+          const mine = voci
+            .map(v => ({
+              cat1: v.cat1, cat2: v.cat2,
+              amount: Math.round((parseFloat(cells[v.id]) || 0) * ratio * 100) / 100,
+              _potId: pot.id,
+            }))
+            .filter(s => s.amount > 0)
+          if (!perTxByPot[txId]) perTxByPot[txId] = {}
+          perTxByPot[txId][pot.id] = mine
+        })
       })
-      if (dupHere > 0) { txCount++; removedCount += dupHere }
     })
-    return { txCount, removedCount }
-  }, [transactions])
+    return perTxByPot
+  }
 
-  function cleanExactDuplicateSplits() {
+  // Anteprima (sola lettura): quante transazioni cambierebbero e di quanto,
+  // per mostrare all'utente cosa farebbe il ricalcolo PRIMA di scriverlo.
+  const recomputePreview = useMemo(() => {
+    const perTxByPot = recomputeAllSatiSplits()
+    let txCount = 0, deltaTotal = 0
+    Object.entries(perTxByPot).forEach(([txId, byPot]) => {
+      const tx = transactions.find(t => t.txId === txId)
+      if (!tx) return
+      const recomputedPotIds = new Set(Object.keys(byPot))
+      const untouched = (tx.splits || []).filter(s => s._potId && !recomputedPotIds.has(s._potId))
+      const fresh = [...untouched, ...Object.values(byPot).flat()]
+      const before = JSON.stringify(tx.splits || [])
+      const after = JSON.stringify(fresh)
+      if (before !== after) {
+        txCount++
+        const oldSum = (tx.splits || []).reduce((s, x) => s + (x?.amount || 0), 0)
+        const newSum = fresh.reduce((s, x) => s + (x?.amount || 0), 0)
+        deltaTotal += (oldSum - newSum)
+      }
+    })
+    return { txCount, deltaTotal }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, satiPots])
+
+  function applyRecomputeAllSatiSplits() {
     if (cleaning) return
     setCleaning(true)
+    const perTxByPot = recomputeAllSatiSplits()
     let fixed = 0
-    transactions.forEach(t => {
-      if (!Array.isArray(t.splits) || t.splits.length < 2) return
-      const seen = new Set()
-      const out = []
-      t.splits.forEach(s => {
-        if (!s) return
-        const key = `${s.cat1||''}|${s.cat2||''}|${s.amount}`
-        if (seen.has(key)) return
-        seen.add(key)
-        out.push(s)
-      })
-      if (out.length !== t.splits.length) {
+    Object.entries(perTxByPot).forEach(([txId, byPot]) => {
+      const tx = transactions.find(t => t.txId === txId)
+      if (!tx) return
+      const recomputedPotIds = new Set(Object.keys(byPot))
+      const untouched = (tx.splits || []).filter(s => s._potId && !recomputedPotIds.has(s._potId))
+      const fresh = [...untouched, ...Object.values(byPot).flat()]
+      const before = JSON.stringify(tx.splits || [])
+      const after = JSON.stringify(fresh)
+      if (before !== after) {
         fixed++
-        updateTransaction(t.txId, { splits: out })
+        updateTransaction(txId, { splits: fresh.length ? fresh : null })
       }
     })
     setCleaning(false)
     alert(fixed > 0
-      ? `✅ Ripuliti ${fixed} accantonamenti con duplicati esatti (stessa categoria e stesso importo ripetuti).`
-      : 'Nessun duplicato esatto trovato al momento.')
+      ? `✅ Ricalcolati ${fixed} accantonamenti (quote proporzionali corrette quando più bonifici coprono lo stesso mese/fondo).`
+      : 'Nessuna transazione da ricalcolare al momento — già tutto coerente con voci/celle attuali.')
   }
 
   const isSati = (t) => {
@@ -4964,14 +5017,14 @@ export default function SatispayPage() {
               ⚠️ Accantonamenti non abbinati ({accantonamentiNonAbbinati.length})
             </button>
           )}
-          {duplicateInfo.txCount > 0 && (
-            <button onClick={cleanExactDuplicateSplits} disabled={cleaning}
-              title="Rimuove duplicati esatti (stessa categoria e stesso importo ripetuti sulla stessa transazione) — nessun ricalcolo, solo copie identiche"
+          {recomputePreview.txCount > 0 && (
+            <button onClick={applyRecomputeAllSatiSplits} disabled={cleaning}
+              title="Ricalcola gli split di ogni transazione abbinata a un fondo usando le voci/celle attuali — corregge sia duplicati esatti sia il caso di più bonifici nello stesso mese dove ognuno portava una copia intera invece della propria quota proporzionale"
               style={{display:'flex',alignItems:'center',gap:6,border:'1px solid var(--red)',
                 color:'var(--red)',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:700,
                 background:'rgba(220,40,40,.06)',cursor:cleaning?'default':'pointer',fontFamily:'var(--font-sans)',
                 opacity:cleaning?0.6:1}}>
-              🧹 Ripulisci duplicati ({duplicateInfo.txCount})
+              🧹 Ricalcola abbinamenti ({recomputePreview.txCount})
             </button>
           )}
           <button className="btn btn-primary" onClick={()=>setShowAdd(true)}
