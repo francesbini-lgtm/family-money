@@ -178,16 +178,26 @@ export async function callGemini(prompt) {
 
 // ── Vehicle market value estimate (AI) ────────────────────
 // Richiesta utente 2026-07-14: bottone accanto a "Valore di mercato (€)" nel
-// modale veicolo (VeicoliRegistroPage). Usa la stessa chiave AI già
-// configurata (gpt-4o-mini via callGemini, che gestisce sia chiavi OpenAI
-// che Gemini). Il prompt chiede esplicitamente una stima "da Autoscout" e
-// forza una risposta JSON con min/max — se l'AI dà un range, qui si
-// calcola la media per restituire un unico numero, come richiesto.
+// modale veicolo (VeicoliRegistroPage). Il prompt chiede esplicitamente una
+// stima "da Autoscout" e forza una risposta JSON con min/max — se l'AI dà
+// un range, qui si calcola la media per restituire un unico numero.
+//
+// Aggiornamento 2026-07-14 (stesso giorno): il primo giro usava gpt-4o-mini
+// "normale" via callGemini — SENZA accesso a internet, quindi la stima era
+// "a memoria" (poteva essere alta/sbagliata/datata, come segnalato
+// dall'utente). Ora, se la chiave è OpenAI (sk-...), si usa invece
+// gpt-4o-mini-search-preview con web_search_options — un modello che fa
+// DAVVERO una ricerca sul web prima di rispondere. Attenzione: questo
+// modello RIFIUTA temperature/top_p/frequency_penalty/presence_penalty
+// (errore invalid_request_error se inclusi), quindi la chiamata qui sotto
+// è volutamente diretta e NON passa da callGemini. Per chiavi Gemini non
+// esiste un equivalente collegato in questa app: resta la stima "a
+// memoria" via callGemini come fallback.
 export async function estimateVehicleMarketValue({ marca, modello, anno, carburante, km }) {
   const key = getApiKey()
   if (!key) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
 
-  const prompt = `Sei un esperto di mercato dell'auto e moto usate in Italia. Stima il valore di mercato attuale di questo veicolo, come se stessi consultando gli annunci di vendita su Autoscout.
+  const prompt = `Sei un esperto di mercato dell'auto e moto usate in Italia. Cerca online (es. Autoscout, subito.it, annunci simili) e stima il valore di mercato attuale di questo veicolo in base ad annunci reali e recenti.
 
 Marca: ${marca || '—'}
 Modello: ${modello || '—'}
@@ -198,14 +208,44 @@ Chilometraggio: ${km != null && km !== '' ? `${km} km` : 'non disponibile'}
 Rispondi SOLO con un JSON valido, nessun testo extra, in questo formato esatto:
 {"min": <numero intero in euro>, "max": <numero intero in euro>}
 
-Se hai un valore singolo invece di un range, usa lo stesso numero sia per min che per max.`
+Se trovi un valore singolo invece di un range, usa lo stesso numero sia per min che per max.`
 
   // Log in chiaro nella console del browser (richiesta utente 2026-07-14: vedere
   // prompt/output esatti per capire se un valore sembra sbagliato) — filtrabile
   // cercando "[estimateVehicleMarketValue]" nella console DevTools.
   console.log('[estimateVehicleMarketValue] prompt inviato:\n' + prompt)
 
-  const raw = await callGemini(prompt)
+  let raw
+  if (key.startsWith('sk-')) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini-search-preview',
+        web_search_options: {},
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        // NB: niente temperature/top_p/frequency_penalty/presence_penalty qui —
+        // i modelli *-search-preview li rifiutano con invalid_request_error.
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `OpenAI HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    raw = data.choices?.[0]?.message?.content?.trim() || ''
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    if (!raw) throw new Error('Risposta vuota dall\'AI')
+    const citations = (data.choices?.[0]?.message?.annotations || [])
+      .map(a => a?.url_citation?.url).filter(Boolean)
+    if (citations.length) console.log('[estimateVehicleMarketValue] fonti citate:', citations)
+  } else {
+    // Chiave Gemini: nessun modello "search" collegato in questa app — fallback
+    // alla stima "a memoria" (senza ricerca web reale) via callGemini.
+    console.log('[estimateVehicleMarketValue] chiave Gemini: nessuna ricerca web reale disponibile, stima "a memoria"')
+    raw = await callGemini(prompt)
+  }
   console.log('[estimateVehicleMarketValue] risposta AI grezza:', raw)
 
   let parsed
