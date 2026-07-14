@@ -68,22 +68,25 @@ function fmtDate(dateStr) {
 const isSatiLinked = t => !!(t._satiLinked && t.splits?.length > 0)
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
-function CustomTooltip({ active, payload, label }) {
+// Piccolo label che mostra SOLO la categoria/segmento sotto il mouse (non più
+// il riquadro nero con l'elenco di tutte le categorie del mese — richiesta
+// utente 2026-07-14: "label orrendo nero" + serve un hover puntuale sul
+// segmento, non sull'intera colonna). Il comportamento "un solo segmento"
+// dipende dalla prop `shared={false}` sul <Tooltip/> qui sotto.
+function CustomTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
-  const total = payload.reduce((s, p) => s + (p.value || 0), 0)
+  const p = payload[0]
+  if (!p || !p.value) return null
   return (
-    <div className="uscite-tooltip">
-      <div className="uscite-tooltip-title">{label}</div>
-      <div className="uscite-tooltip-total">{fmtIT(Math.round(total))} €</div>
-      <div className="uscite-tooltip-rows">
-        {[...payload].reverse().map(p => p.value > 0 ? (
-          <div key={p.dataKey} className="uscite-tooltip-row">
-            <span className="uscite-tooltip-dot" style={{ background: p.fill }}/>
-            <span className="uscite-tooltip-cat">{p.dataKey}</span>
-            <span className="uscite-tooltip-val">{fmtIT(Math.round(p.value))} €</span>
-          </div>
-        ) : null)}
-      </div>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6,
+      background: 'var(--surface, #fff)', border: '1px solid var(--border)',
+      borderRadius: 8, padding: '5px 10px', fontSize: 12,
+      boxShadow: '0 4px 14px rgba(0,0,0,.14)', whiteSpace: 'nowrap',
+    }}>
+      <span style={{ width: 8, height: 8, borderRadius: 2, background: p.fill, flexShrink: 0 }}/>
+      <span style={{ color: 'var(--text2)' }}>{p.dataKey}</span>
+      <span style={{ fontWeight: 700, color: 'var(--text1)' }}>{fmtIT(Math.round(p.value))} €</span>
     </div>
   )
 }
@@ -718,7 +721,7 @@ export default function UscitePage() {
                 tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
                 width={38}
               />
-              <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(0,0,0,.04)' }}/>
+              <Tooltip content={<CustomTooltip/>} cursor={{ fill: 'rgba(0,0,0,.04)' }} shared={false}/>
               {cat1List.map((cat1, idx) => {
                 const isLast = idx === cat1List.length - 1
                 return (

@@ -105,67 +105,8 @@
   min-width: 0;
 }
 
-/* ── Tooltip ────────────────────────────────────────────── */
-.uscite-tooltip {
-  background: var(--sidebar, #1a1512);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-size: 12px;
-  min-width: 180px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.35);
-}
-
-.uscite-tooltip-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: var(--text3);
-  margin-bottom: 4px;
-}
-
-.uscite-tooltip-total {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--text1);
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.uscite-tooltip-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.uscite-tooltip-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.uscite-tooltip-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-.uscite-tooltip-cat {
-  flex: 1;
-  color: var(--text2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.uscite-tooltip-val {
-  font-weight: 600;
-  color: var(--text1);
-  font-variant-numeric: tabular-nums;
-}
+/* Tooltip del grafico "Andamento mensile" — ora reso inline in CustomTooltip
+   (UscitePage.jsx), piccolo box chiaro per singolo segmento (2026-07-14). */
 
 /* ── Body layout ────────────────────────────────────────── */
 .uscite-body {
