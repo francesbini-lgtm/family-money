@@ -14,6 +14,8 @@ import VeicoliRegistroPage from './VeicoliRegistroPage'
 import WeekendVacanzeV2Page from './WeekendVacanzeV2Page'
 import UtenzePage from './UtenzePage'
 import AltroPage from './AltroPage'
+import CeciliaPage from './CeciliaPage'
+import { NannyPage, ColfPage } from './NannyColfPage'
 
 // ── Net amount after compensation ──────────────────────────
 // Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
@@ -615,6 +617,9 @@ export default function UscitePage() {
         <TabPill label="🏡 Casa"               active={activeTab==='casa'}       onClick={()=>setActiveTab('casa')}/>
         <TabPill label="🚗 Veicoli"            active={activeTab==='veicoli'}    onClick={()=>setActiveTab('veicoli')}/>
         <TabPill label="🛒 Spesa"              active={activeTab==='spesa'}      onClick={()=>setActiveTab('spesa')}/>
+        <TabPill label="👧 Cecilia"            active={activeTab==='cecilia'}    onClick={()=>setActiveTab('cecilia')}/>
+        <TabPill label="👩 Nanny"              active={activeTab==='nanny'}      onClick={()=>setActiveTab('nanny')}/>
+        <TabPill label="🧹 Colf"               active={activeTab==='colf'}       onClick={()=>setActiveTab('colf')}/>
         {/* Tab "Weekend e Vacanze" v1 rimossa su richiesta utente (2026-07-12) — resta solo la v2 */}
         <TabPill label="✈️ Weekend e Vacanze" active={activeTab==='weekendv2'} onClick={()=>setActiveTab('weekendv2')}/>
         <TabPill label="⚡ Utenze"             active={activeTab==='utenze'}     onClick={()=>setActiveTab('utenze')}/>
@@ -625,6 +630,9 @@ export default function UscitePage() {
       {activeTab === 'casa'    && <CategoryPage cat1="Casa" icon="🏡" title="Casa" description="Affitto, utenze, condominio e spese domestiche"/>}
       {activeTab === 'veicoli' && <VeicoliRegistroPage/>}
       {activeTab === 'spesa'   && <CategoryPage cat1="Spesa e Alimentari" icon="🛒" title="Spesa e Alimentari" description="Spesa supermercato e pasti di lavoro"/>}
+      {activeTab === 'cecilia' && <CeciliaPage/>}
+      {activeTab === 'nanny'   && <NannyPage/>}
+      {activeTab === 'colf'    && <ColfPage/>}
       {activeTab === 'weekendv2' && <WeekendVacanzeV2Page/>}
       {activeTab === 'utenze'  && <UtenzePage/>}
       {activeTab === 'altro'   && <AltroPage/>}

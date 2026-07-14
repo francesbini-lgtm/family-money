@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 // ── Hardcoded git log (updated with each push) ────────────
 const DEVLOG = [
+  { date:'2026-07-14 01:15', desc:"Correzione: Cecilia/Nanny/Colf spostate da voci sidebar a tab pill dentro Uscite (insieme a Casa/Veicoli/Spesa già esistenti lì) — rimosse le 6 voci ridondanti dalla sidebar" },
   { date:'2026-07-14 01:00', desc:"Sidebar: Casa/Veicoli/Spesa aggiunte sotto gruppo Uscite; nuova emoji Risparmio (🪙); icone Satispay/PayPal sostituite con piccoli SVG custom che ricreano i loghi reali (solo simbolo, non scritta)" },
   { date:'2026-07-14 00:32', desc:"Sidebar dinamica: drag&drop voci/sezioni, sezioni creabili/rinominabili/cancellabili, voci nascondibili — attivabile da ⚙ Personalizza menu in fondo alla sidebar; icona app v2 fedele all'immagine fornita dall'utente (anello aperto + famiglia di 4 + ingranaggio + plus); log Sviluppo riportato aggiornato (era fermo al 23/06) con data e ora" },
   { date:'2026-07-14 00:19', desc:"Nuova icona app: famiglia (2 adulti + bambino) + ingranaggio + plus, line-art bianco su nero" },
