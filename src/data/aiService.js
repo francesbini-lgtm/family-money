@@ -176,6 +176,38 @@ export async function callGemini(prompt) {
   }
 }
 
+// ── Vehicle market value estimate (AI) ────────────────────
+// Richiesta utente 2026-07-14: bottone accanto a "Valore di mercato (€)" nel
+// modale veicolo (VeicoliRegistroPage). Usa la stessa chiave AI già
+// configurata (gpt-4o-mini via callGemini, che gestisce sia chiavi OpenAI
+// che Gemini). Il prompt chiede esplicitamente una stima "da Autoscout" e
+// forza una risposta JSON con min/max — se l'AI dà un range, qui si
+// calcola la media per restituire un unico numero, come richiesto.
+export async function estimateVehicleMarketValue({ marca, modello, anno, carburante, km }) {
+  const key = getApiKey()
+  if (!key) throw new Error('Nessuna chiave AI configurata nelle impostazioni')
+
+  const prompt = `Sei un esperto di mercato dell'auto e moto usate in Italia. Stima il valore di mercato attuale di questo veicolo, come se stessi consultando gli annunci di vendita su Autoscout.
+
+Marca: ${marca || '—'}
+Modello: ${modello || '—'}
+Anno: ${anno || '—'}
+Carburante: ${carburante || '—'}
+Chilometraggio: ${km != null && km !== '' ? `${km} km` : 'non disponibile'}
+
+Rispondi SOLO con un JSON valido, nessun testo extra, in questo formato esatto:
+{"min": <numero intero in euro>, "max": <numero intero in euro>}
+
+Se hai un valore singolo invece di un range, usa lo stesso numero sia per min che per max.`
+
+  const raw = await callGemini(prompt)
+  let parsed
+  try { parsed = JSON.parse(raw) } catch { throw new Error('Risposta AI non valida: ' + raw.slice(0, 120)) }
+  const min = Number(parsed.min), max = Number(parsed.max)
+  if (!isFinite(min) || !isFinite(max)) throw new Error('Risposta AI senza valori numerici validi')
+  return Math.round((min + max) / 2)
+}
+
 // ── Merchant lookup — direct OpenAI call (bypasses proxy to avoid Vercel timeout) ──
 export async function lookupMerchantInfo(merchant, description, amount) {
   const key = getApiKey()

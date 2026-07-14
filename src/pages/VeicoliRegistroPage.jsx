@@ -12,6 +12,7 @@ import { Plus, Trash2, Link } from 'lucide-react'
 import './VeicoliRegistroPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
+import { estimateVehicleMarketValue } from '../data/aiService'
 
 const VEH_ICONS = ['🚗','🚙','🚕','🏎','🚐','🛻','🏍','🚤','⛵','🚁','🛵','🚌',
   'svg:motocross','svg:motoscafo','svg:bmw1','svg:jeep']
@@ -134,13 +135,37 @@ function uid() { return Date.now().toString(36)+Math.random().toString(36).slice
 
 // ── Add/Edit Vehicle Modal ────────────────────────────────
 function VehicleModal({ vehicle, onClose }) {
-  const { addVehicle, updateVehicle } = useStore()
+  const { addVehicle, updateVehicle, appPrefs } = useStore()
   const [form, setForm] = useState(vehicle || {
     name:'', targa:'', marca:'', modello:'', anno:'', icon:'🚗', consumo:'', valoreMercato:'', carburante:'',
     assicurazione:'', tagliando:'', revisione:'', bollo:''
   })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
   const isEdit = !!vehicle
+
+  // ── Stima AI valore di mercato (richiesta utente 2026-07-14) ─────────────
+  const [estimating,  setEstimating]  = useState(false)
+  const [estimateErr, setEstimateErr] = useState('')
+  const lastKm = useMemo(() => {
+    if (!isEdit) return null
+    const raw = appPrefs?.vehicleKmReadings?.[vehicle.id] || []
+    if (!raw.length) return null
+    return [...raw].sort((a,b) => b.date.localeCompare(a.date))[0].km
+  }, [appPrefs?.vehicleKmReadings, vehicle, isEdit])
+
+  async function estimateValue() {
+    setEstimating(true); setEstimateErr('')
+    try {
+      const value = await estimateVehicleMarketValue({
+        marca: form.marca, modello: form.modello, anno: form.anno,
+        carburante: form.carburante, km: lastKm,
+      })
+      set('valoreMercato', String(value))
+    } catch (e) {
+      setEstimateErr(e.message || 'Errore durante la stima AI')
+    }
+    setEstimating(false)
+  }
 
   function save() {
     if (!form.name) return
@@ -168,7 +193,21 @@ function VehicleModal({ vehicle, onClose }) {
           </Select>
         </FormRow>
         <FormRow label="Consumo (km/l)"><Input type="number" step="0.1" value={form.consumo||''} onChange={e=>set('consumo',e.target.value)} placeholder="es. 15"/></FormRow>
-        <FormRow label="Valore di mercato (€)"><Input type="number" value={form.valoreMercato||''} onChange={e=>set('valoreMercato',e.target.value)} placeholder="es. 18000"/></FormRow>
+        <FormRow label="Valore di mercato (€)">
+          <div>
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              <Input type="number" value={form.valoreMercato||''} onChange={e=>set('valoreMercato',e.target.value)} placeholder="es. 18000" style={{flex:1}}/>
+              <button type="button" onClick={estimateValue} disabled={estimating || !form.marca || !form.modello}
+                title="Stima il valore di mercato con l'AI (marca, modello, anno, carburante, km)"
+                style={{padding:'8px 10px',border:'1px solid var(--border)',borderRadius:7,
+                  background:'var(--surface2)',cursor:estimating?'default':'pointer',fontSize:13,
+                  color:'var(--text2)',whiteSpace:'nowrap',flexShrink:0,opacity:(!form.marca||!form.modello)?0.5:1}}>
+                {estimating ? '⏳' : '✨'}
+              </button>
+            </div>
+            {estimateErr && <div style={{fontSize:11,color:'var(--red)',marginTop:4}}>{estimateErr}</div>}
+          </div>
+        </FormRow>
         <FormRow label="Icona">
           <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
             {VEH_ICONS.map(ic=>(
