@@ -104,16 +104,21 @@ function ScadenzaRow({ s, onToggle, onDelete, onRenew }) {
         <span style={{fontSize:22,lineHeight:1,flexShrink:0,marginRight:4}}>{s.vehicleIcon||'🚗'}</span>
         <div className="scd-info">
           <div className="scd-name">{s.nome}</div>
-          <div className="scd-meta">
-            🚗 Veicolo · {s.cadenza}
-            {s.importo > 0 && <> · ultimo pagato € {fmtIT(s.importo,0)}</>}
-          </div>
+          <div className="scd-meta">🚗 Veicolo · {s.cadenza}</div>
+        </div>
+        {/* Colonna costo — sempre visibile (ultimo importo pagato), tra nome e data
+            (richiesta utente 2026-07-14) */}
+        <div className="scd-amount" style={{minWidth:76,textAlign:'right',
+          color: s.importo > 0 ? 'var(--text1)' : 'var(--text3)', fontWeight: s.importo > 0 ? 700 : 400}}>
+          {s.importo > 0 ? `€ ${fmtIT(s.importo,0)}` : '—'}
         </div>
         <div className="scd-right">
           <span className={'scd-badge scd-badge-'+cls}>{label}</span>
           <span style={{fontSize:10,color:'var(--text3)',padding:'1px 6px',background:'var(--surface2)',
             borderRadius:4,border:'1px solid var(--border)'}}>dal veicolo</span>
-          {!s.autoRenew && (
+          {/* Bottone Rinnovato — solo quando è effettivamente scaduta (richiesta
+              utente 2026-07-14: prima compariva sempre, anche per date future) */}
+          {!s.autoRenew && cls === 'overdue' && (
             <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px'}}
               onClick={()=>setShowRenew(true)}>✓ Rinnovato</button>
           )}
