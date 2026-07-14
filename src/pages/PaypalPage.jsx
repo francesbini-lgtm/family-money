@@ -1153,17 +1153,12 @@ export default function PaypalPage() {
     [transactions]
   )
 
-  // Data PayPal (quella riportata da PayPal stesso, salvata solo nel registro
-  // paypalImports) per ogni transazione abbinata — richiesta utente 2026-07-14:
-  // mostrarla in tabella accanto alla data di competenza bancaria, che spesso
-  // differisce di qualche giorno (autoMatch tollera fino a 6gg di scarto).
-  const paypalDateByTx = useMemo(() => {
-    const map = {}
-    paypalImports.forEach(imp => {
-      if (imp.status === 'matched' && imp.matchedTxId && imp.date) map[imp.matchedTxId] = imp.date
-    })
-    return map
-  }, [paypalImports])
+  // NOTA (corretta 2026-07-14, seconda ondata): la colonna "Data PayPal" è
+  // stata sostituita da "Data competenza" — l'utente ha chiarito che qui serve
+  // t.competenza (lo stesso campo esistente per conto/carta, visibile anche in
+  // Transazioni quando l'utente sovrascrive la data di una spesa), non la data
+  // riportata da PayPal stessa. Se non c'è un override, la colonna deve comunque
+  // essere sempre valorizzata clonando la data valuta (t._effDate = t.competenza||t.date).
 
   const last6 = useMemo(() => getLast6Months(), [])
   const paypalExpenses = useMemo(() =>
@@ -1686,7 +1681,7 @@ export default function PaypalPage() {
                   />
                 </th>
                 <th className="pp-th">Data valuta</th>
-                <th className="pp-th">Data PayPal</th>
+                <th className="pp-th">Data competenza</th>
                 <th className="pp-th">Merchant</th>
                 <th className="pp-th">AI descr</th>
                 <th className="pp-th">Importo</th>
@@ -1719,8 +1714,8 @@ export default function PaypalPage() {
                       <input type="checkbox" readOnly checked={isSel} style={{cursor:'pointer',pointerEvents:'none'}}/>
                     </td>
                     <td className="pp-td">{fmtDate(t.date)}</td>
-                    <td className="pp-td" style={{color:'var(--text3)'}}>
-                      {paypalDateByTx[t.txId] ? fmtDate(paypalDateByTx[t.txId]) : <span style={{opacity:.4}}>—</span>}
+                    <td className="pp-td" style={{color: t.competenza ? 'var(--red)' : 'var(--text3)'}}>
+                      {fmtDate(t._effDate || t.competenza || t.date)}
                     </td>
                     <td className="pp-td">{t.merchant || t.descAI || t.description?.slice(0,40)}</td>
                     <td className="pp-td" style={{ color:'var(--text3)', fontSize:12, maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
