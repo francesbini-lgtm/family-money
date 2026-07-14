@@ -864,7 +864,7 @@ export default function UscitePage() {
               <tr>
                 <th className="uscite-th-cat">Categoria (€)</th>
                 {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
-                <th className="uscite-th-total">Media/mese *</th>
+                <th className="uscite-th-total">Media/mese (*)</th>
                 <th className="uscite-th-total">%</th>
               </tr>
             </thead>
@@ -1035,7 +1035,7 @@ export default function UscitePage() {
             </tbody>
           </table>
           <div style={{padding:'6px 14px 10px',fontSize:11,color:'var(--text3)',borderTop:'1px solid var(--border)'}}>
-            * Media/mese = totale periodo ÷ 6
+            Nota (*): Media/mese = totale periodo ÷ 6
             {adjVacanze && <><br/>Nota (**): Carburante e Autostrada sono al netto delle vacanze</>}
           </div>
         </div>

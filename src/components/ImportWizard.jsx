@@ -841,7 +841,10 @@ export default function ImportWizard({ onClose }) {
     const lastByCard = {}
     let lastPaypal = null
     transactions.forEach(t => {
-      const d = t._effDate || t.date
+      // Data valuta (t.date), non competenza/_effDate: qui interessa sapere
+      // fino a quando arrivano davvero i dati bancari, non la vista contabile
+      // (richiesta utente 2026-07-14, stessa correzione fatta in PaypalPage).
+      const d = t.date
       if (!d) return
       if (t.account && cardNames.has(t.account)) {
         if (!lastByCard[t.account] || d > lastByCard[t.account]) lastByCard[t.account] = d

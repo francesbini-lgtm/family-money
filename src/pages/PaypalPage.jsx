@@ -1685,7 +1685,7 @@ export default function PaypalPage() {
                     style={{cursor:'pointer'}}
                   />
                 </th>
-                <th className="pp-th">Data competenza</th>
+                <th className="pp-th">Data valuta</th>
                 <th className="pp-th">Data PayPal</th>
                 <th className="pp-th">Merchant</th>
                 <th className="pp-th">AI descr</th>
@@ -1718,7 +1718,7 @@ export default function PaypalPage() {
                     }}>
                       <input type="checkbox" readOnly checked={isSel} style={{cursor:'pointer',pointerEvents:'none'}}/>
                     </td>
-                    <td className="pp-td">{fmtDate(t._effDate||t.date)}</td>
+                    <td className="pp-td">{fmtDate(t.date)}</td>
                     <td className="pp-td" style={{color:'var(--text3)'}}>
                       {paypalDateByTx[t.txId] ? fmtDate(paypalDateByTx[t.txId]) : <span style={{opacity:.4}}>—</span>}
                     </td>

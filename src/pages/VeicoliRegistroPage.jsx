@@ -160,6 +160,9 @@ function VehicleModal({ vehicle, onClose }) {
         marca: form.marca, modello: form.modello, anno: form.anno,
         carburante: form.carburante, km: lastKm,
       })
+      // Valore precedente (usato da PatrimonioPage per mostrare +x%/-x% accanto
+      // al valore ogni volta che viene aggiornato — richiesta utente 2026-07-14)
+      set('valoreMercatoPrev', form.valoreMercato || '')
       set('valoreMercato', String(value))
       // Data dell'ultima stima AI (usata da PatrimonioPage per il refresh automatico dopo 1 mese)
       set('valoreMercatoAggiornato', new Date().toISOString().slice(0,10))

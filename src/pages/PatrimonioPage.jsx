@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 import { Plus, Trash2, TrendingUp, TrendingDown, DollarSign } from 'lucide-react'
 import './PatrimonioPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtITSigned } from '../utils/format'
 
 // ── Store extensions (patrimonio uses inline state + store loans/portfolios)
 const ASSET_COLORS = {
@@ -91,7 +91,17 @@ function ItemRow({ item, color, onEdit, onDelete }) {
         <div className="pat-row-cat">{item.cat}{item.note ? ' · ' + item.note : ''}</div>
       </div>
       <div className="pat-row-right">
-        <div className="pat-row-value">€ {fmtIT(item.value, 0)}</div>
+        <div className="pat-row-value">
+          € {fmtIT(item.value, 0)}
+          {item.pctChange != null && (
+            <span style={{
+              marginLeft: 6, fontSize: 11, fontWeight: 700,
+              color: item.pctChange >= 0 ? 'var(--green)' : 'var(--red)',
+            }}>
+              {item.pctChange >= 0 ? '+' : ''}{fmtITSigned(item.pctChange, 1)}%
+            </span>
+          )}
+        </div>
         <div className="pat-row-date">{item.updatedAt}</div>
         <button className="btn btn-ghost pat-edit" onClick={onEdit}>✏️</button>
         <button className="btn btn-ghost" style={{ color: 'var(--red)' }} onClick={onDelete}><Trash2 size={12} /></button>
@@ -152,7 +162,9 @@ export default function PatrimonioPage() {
         const value = await estimateVehicleMarketValue({
           marca: v.marca, modello: v.modello, anno: v.anno, carburante: v.carburante, km: lastKm,
         })
-        updateVehicle(v.id, { valoreMercato: value, valoreMercatoAggiornato: new Date().toISOString().slice(0,10) })
+        // Richiesta utente 2026-07-14: tenere traccia del valore precedente per
+        // mostrare la variazione % accanto al valore in Attivi.
+        updateVehicle(v.id, { valoreMercato: value, valoreMercatoPrev: v.valoreMercato, valoreMercatoAggiornato: new Date().toISOString().slice(0,10) })
         console.log(`[Patrimonio] valore di mercato aggiornato automaticamente per ${v.name}: €${value}`)
       } catch (e) {
         console.warn(`[Patrimonio] refresh automatico valore veicolo fallito per ${v.name}:`, e.message)
@@ -180,12 +192,21 @@ export default function PatrimonioPage() {
   const ccAsset = ccBalance > 0 ? [{ id:'auto_cc', name:'Conto Corrente', cat:'Conto Corrente', value: ccBalance, type:'asset', updatedAt: new Date().toISOString().slice(0,10), readonly:true }] : []
 
   // Auto: veicoli, valore preso da vehicle.valoreMercato (Registro Veicoli — richiesta utente 2026-07-14)
+  // pctChange: variazione % rispetto a valoreMercatoPrev (impostato sia dal
+  // refresh automatico sia dal bottone ✨ manuale ogni volta che il valore
+  // viene aggiornato — richiesta utente 2026-07-14).
   const vehicleAssets = (vehicles || [])
     .filter(v => parseFloat(v.valoreMercato) > 0)
-    .map(v => ({
-      id: 'veh_' + v.id, name: v.name, cat: 'Veicoli', value: parseFloat(v.valoreMercato),
-      type: 'asset', updatedAt: new Date().toISOString().slice(0, 10), readonly: true
-    }))
+    .map(v => {
+      const cur = parseFloat(v.valoreMercato)
+      const prev = parseFloat(v.valoreMercatoPrev)
+      const pctChange = (prev > 0 && cur !== prev) ? ((cur - prev) / prev) * 100 : null
+      return {
+        id: 'veh_' + v.id, name: v.name, cat: 'Veicoli', value: cur,
+        type: 'asset', updatedAt: new Date().toISOString().slice(0, 10), readonly: true,
+        pctChange,
+      }
+    })
 
   // Compute Satispay net value: gross accumulated - income entries (releases)
   const satiGross = useMemo(() =>
