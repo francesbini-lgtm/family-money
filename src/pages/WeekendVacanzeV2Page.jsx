@@ -1020,11 +1020,86 @@ function VacMerchantsPanel({ appPrefs, setAppPref }) {
 // 2026-07-14: "non trovo impostazioni prezzo benzina" — c'era un secondo
 // bottone ⛽ separato, poco visibile/distinguibile dall'ingranaggio ⚙️ già
 // esistente; consolidati in UN'UNICA rotella ingranaggio con 2 tab interne) ──
-function VacSettingsModal({ appPrefs, setAppPref, onClose }) {
+// Tab di sicurezza (richiesta utente 2026-07-16, punto 2): verifica che la
+// colonna "Tipo" di ogni vacanza/weekend dichiarato corrisponda davvero alla L2
+// delle transazioni assegnate — non dovrebbe MAI servire, dato che upd() (sopra)
+// propaga subito il cambio, ma resta un controllo di sicurezza indipendente
+// (es. per dati storici da prima di questo fix, o edit fatti direttamente su
+// Firestore/altrove).
+function VerificaL2Panel({ vacations, transactions, updateTransaction, onClose }) {
+  const [result, setResult] = useState(null) // null = non ancora eseguito
+
+  function runCheck() {
+    const mismatches = []
+    ;(vacations || []).forEach(v => {
+      const expected = vacationType(v, transactions)
+      const affected = transactions.filter(t =>
+        !t.excluded && t.cat1 === 'Weekend e Vacanze' && t.amount < 0 &&
+        (t._effDate || t.date) >= v.from && (t._effDate || t.date) <= v.to &&
+        t.cat2 !== expected
+      )
+      if (affected.length) mismatches.push({ v, expected, txs: affected })
+    })
+    setResult(mismatches)
+  }
+
+  function fixAll() {
+    if (!result?.length) return
+    const totalTx = result.reduce((s, m) => s + m.txs.length, 0)
+    if (!window.confirm(`Correggere la L2 di ${totalTx} transazioni in ${result.length} period${result.length===1?'o':'i'}?`)) return
+    result.forEach(m => m.txs.forEach(t => updateTransaction(t.txId, { cat2: m.expected })))
+    setResult([])
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14, lineHeight: 1.5 }}>
+        Controlla che la L2 (Weekend/Vacanze) di ogni spesa assegnata corrisponda al "Tipo" dichiarato
+        del periodo. Non dovrebbe mai servire — il cambio di tipo si propaga subito — ma è un controllo
+        di sicurezza indipendente, utile anche per dati vecchi.
+      </div>
+      {result === null ? (
+        <button className="btn btn-primary" onClick={runCheck} style={{ fontSize: 13, padding: '8px 18px', fontWeight: 700 }}>
+          🔎 Verifica ora
+        </button>
+      ) : result.length === 0 ? (
+        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
+          ✅ Nessun errore trovato — tutto allineato
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: '#b45309' }}>
+            ⚠️ {result.reduce((s, m) => s + m.txs.length, 0)} spes{result.reduce((s, m) => s + m.txs.length, 0) === 1 ? 'a' : 'e'} disallineat{result.reduce((s, m) => s + m.txs.length, 0) === 1 ? 'a' : 'e'} in {result.length} period{result.length === 1 ? 'o' : 'i'}
+          </div>
+          <div style={{ maxHeight: '40vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+            {result.map((m, i) => (
+              <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  {m.v.city || m.v.name || 'Periodo'} ({fmtDate(m.v.from)}–{fmtDate(m.v.to)}) — Tipo: <span style={{ color: 'var(--blue)' }}>{m.expected}</span>
+                </div>
+                {m.txs.map(t => (
+                  <div key={t.txId} style={{ color: 'var(--text3)', display: 'flex', gap: 8 }}>
+                    <span>{t.descAI || t.description?.slice(0, 40)}</span>
+                    <span>L2 attuale: <strong style={{ color: 'var(--red)' }}>{t.cat2 || '—'}</strong></span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-primary" onClick={fixAll} style={{ fontSize: 13, padding: '8px 18px', fontWeight: 700 }}>
+            🔧 Correggi tutti
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function VacSettingsModal({ appPrefs, setAppPref, vacations, transactions, updateTransaction, onClose }) {
   const [tab, setTab] = useState('merchant')
   return (
     <Modal title="⚙️ Impostazioni Weekend e Vacanze" onClose={onClose} width={440}>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
         <button onClick={() => setTab('merchant')} style={{
           padding: '6px 12px', borderRadius: 14, border: `1px solid ${tab === 'merchant' ? 'var(--accent)' : 'var(--border)'}`,
           background: tab === 'merchant' ? 'var(--accent-l)' : 'var(--surface)', color: tab === 'merchant' ? 'var(--accent)' : 'var(--text3)',
@@ -1033,9 +1108,14 @@ function VacSettingsModal({ appPrefs, setAppPref, onClose }) {
           padding: '6px 12px', borderRadius: 14, border: `1px solid ${tab === 'fuel' ? 'var(--accent)' : 'var(--border)'}`,
           background: tab === 'fuel' ? 'var(--accent-l)' : 'var(--surface)', color: tab === 'fuel' ? 'var(--accent)' : 'var(--text3)',
           fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>⛽ Prezzo Benzina</button>
+        <button onClick={() => setTab('verifica')} style={{
+          padding: '6px 12px', borderRadius: 14, border: `1px solid ${tab === 'verifica' ? 'var(--accent)' : 'var(--border)'}`,
+          background: tab === 'verifica' ? 'var(--accent-l)' : 'var(--surface)', color: tab === 'verifica' ? 'var(--accent)' : 'var(--text3)',
+          fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✅ Verifica L2</button>
       </div>
       {tab === 'merchant' && <VacMerchantsPanel appPrefs={appPrefs} setAppPref={setAppPref}/>}
       {tab === 'fuel'     && <FuelPricePanel appPrefs={appPrefs} setAppPref={setAppPref} onClose={onClose}/>}
+      {tab === 'verifica' && <VerificaL2Panel vacations={vacations} transactions={transactions} updateTransaction={updateTransaction} onClose={onClose}/>}
     </Modal>
   )
 }
@@ -1245,8 +1325,38 @@ export default function WeekendVacanzeV2Page() {
   // Conteggio totale per il badge del tab "Revisione" consolidato
   const revisionTotal = candidates.length + fuoriTxs.length + reviewRows.length
 
+  // Riallinea la L2 (Weekend/Vacanze) di TUTTE le spese GIÀ assegnate a questo
+  // periodo — richiesta utente 2026-07-16: la colonna "Tipo" va trattata come se
+  // fosse essa stessa la L2 di ogni transazione L1 "Weekend e Vacanze" del
+  // periodo, quindi cambiarla deve propagarsi subito, non solo cambiare
+  // l'etichetta del periodo lasciando le spese già assegnate disallineate.
+  function applyTypeToTransactions(v, newType) {
+    const affected = transactions.filter(t =>
+      !t.excluded && t.cat1 === 'Weekend e Vacanze' && t.amount < 0 &&
+      (t._effDate || t.date) >= v.from && (t._effDate || t.date) <= v.to &&
+      t.cat2 !== newType
+    )
+    const prevValues = affected.map(t => ({ txId: t.txId, prevCat2: t.cat2 }))
+    affected.forEach(t => updateTransaction(t.txId, { cat2: newType }))
+    return { count: affected.length, prevValues }
+  }
+
   function upd(v, field, value) {
+    const prevFieldValue = v[field]
     update(v.id, { [field]: value })
+    if (field === 'typeOverride' && (value === 'Weekend' || value === 'Vacanze')) {
+      const { count, prevValues } = applyTypeToTransactions(v, value)
+      if (count > 0) {
+        setUndo({
+          label: `Tipo cambiato in "${value}" — L2 aggiornata su ${count} spes${count === 1 ? 'a' : 'e'}`,
+          onUndo: () => {
+            update(v.id, { typeOverride: prevFieldValue })
+            prevValues.forEach(({ txId, prevCat2 }) => updateTransaction(txId, { cat2: prevCat2 }))
+            setUndo(null)
+          },
+        })
+      }
+    }
   }
 
   // "Elimina" = segna tutti i giorni del periodo come "non vacanza" (flagga le eventuali
@@ -1849,7 +1959,7 @@ export default function WeekendVacanzeV2Page() {
 
       {/* Impostazioni WV2: merchant vacanze + prezzo medio benzina (unico ⚙️) */}
       {showSettings && (
-        <VacSettingsModal appPrefs={appPrefs} setAppPref={setAppPref} onClose={() => setShowSettings(false)} />
+        <VacSettingsModal appPrefs={appPrefs} setAppPref={setAppPref} vacations={vacations} transactions={transactions} updateTransaction={updateTransaction} onClose={() => setShowSettings(false)} />
       )}
 
       {/* Pannello "Vacanze da confermare" */}
