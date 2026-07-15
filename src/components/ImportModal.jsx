@@ -97,6 +97,18 @@ function computeSaldoConto(transactions) {
   return transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s, t) => s + t.amount, 0)
 }
 
+// Saldo di UN singolo conto (non l'aggregato globale di computeSaldoConto) — usato
+// dal controllo "nuovo saldo" per l'import conto corrente (richiesta utente
+// 2026-07-15): l'utente dichiara il saldo vero letto dalla propria banca DOPO
+// l'estratto; qui serve isolare SOLO le transazioni di QUEL conto già nel DB,
+// altrimenti il confronto con un saldo che si riferisce a un singolo conto non
+// avrebbe senso se l'utente ha anche altri conti/carte/Satispay.
+function computeSaldoAccount(transactions, accountName) {
+  return transactions
+    .filter(t => (!t.excluded || t._forcedBalance) && t.account === accountName)
+    .reduce((s, t) => s + t.amount, 0)
+}
+
 // Regola precisa (confermata dall'utente): l'estratto di un mese di spesa "ym" (es.
 // "2026-04") gira SEMPRE e SOLO nel mese immediatamente successivo (es. i primi giorni
 // di maggio) — mai nello stesso mese, mai due mesi dopo. Usato per NON abbinare in
@@ -340,6 +352,14 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
     return allAccounts
   }, [allAccounts, accountFilter])
   const [account, setAccount] = useState(userAccounts[0]?.name || 'Conto Corrente')
+  // "Nuovo saldo" (richiesta utente 2026-07-15, SOLO import conto corrente — le carte
+  // hanno già la propria riconciliazione mensile via CardImportReconcileModal): il saldo
+  // vero che l'utente legge dalla propria banca DOPO aver scaricato questo estratto.
+  // Confrontato con quanto calcola il sistema (saldo attuale + somma di tutte le righe
+  // appena lette dal CSV, doppioni compresi) permette di sapere ESATTAMENTE quanti euro
+  // di doppioni ci si aspetta di trovare — vedi targetGapDoppioni più sotto. Opzionale:
+  // se lasciato vuoto, lo step Doppioni si comporta come oggi (nessun blocco).
+  const [nuovoSaldo, setNuovoSaldo] = useState('')
 
   // Build display label for each account: name · *card4 · owner nickname
   function accountLabel(a) {
@@ -678,6 +698,22 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       message:`✓ Lette ${allParsed.length} transazioni dal CSV`
         + (summaryRowsDropped > 0 ? ` (scartate ${summaryRowsDropped} righe di riepilogo mensile)` : '') })
 
+    // ── Controllo "nuovo saldo" (SOLO conto corrente, richiesta utente 2026-07-15) ──
+    // saldo attuale = quello che il sistema ha già (somma delle transazioni di QUESTO
+    // conto già nel DB) + somma di TUTTE le righe appena lette dal CSV (compresi gli
+    // eventuali doppioni, calcolata QUI, prima che addTransactions ne scarti alcuni) =
+    // "nuovo saldo sistema". Se l'utente ha dichiarato un "nuovo saldo" (quello vero,
+    // preso dalla banca), la differenza deve essere spiegata ESATTAMENTE dalla somma
+    // delle transazioni doppione — questo è il targetGapDoppioni che lo step Doppioni
+    // userà per bloccare l'avanzamento finché non torna a zero.
+    let targetGapDoppioni = null
+    if (accountFilter === 'conto' && nuovoSaldo !== '' && !isNaN(parseFloat(nuovoSaldo))) {
+      const saldoAttuale   = computeSaldoAccount(useStore.getState().transactions, account)
+      const rawParsedTotal = allParsed.reduce((s, t) => s + t.amount, 0)
+      const saldoSistema   = saldoAttuale + rawParsedTotal
+      targetGapDoppioni = Math.round((saldoSistema - parseFloat(nuovoSaldo)) * 100) / 100
+    }
+
     // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──
     // NOTA: solo "carta_credito" — è l'unico tipo con un estratto conto mensile
     // aggregato da riconciliare; una carta di debito addebita in tempo reale,
@@ -719,6 +755,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         total: saveResult.total, dupes: saveResult.dupes,
         aiCount: enrichResult.enrichedCount,
         rulesAppliedCount: rulesResult.rulesAppliedCount,
+        targetGapDoppioni,
       }), 1500)
     } else {
       setTimeout(onClose, 2500)
@@ -944,6 +981,21 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
                 <option key={a.id} value={a.name}>{accountLabel(a)}</option>
               ))}
             </select>
+
+            {accountFilter === 'conto' && (
+              <>
+                <label className="form-label" style={{marginTop:14}}>
+                  Nuovo saldo (dal tuo conto in banca, dopo questo estratto) — opzionale
+                </label>
+                <input type="number" step="0.01" className="form-select" placeholder="es. 3245,50"
+                  value={nuovoSaldo} onChange={e=>setNuovoSaldo(e.target.value)}/>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>
+                  Se lo inserisci, nello step Doppioni ti diremo esattamente quanti euro di doppioni
+                  cercare (differenza tra il saldo che dichiari e quello che il sistema calcola dalle
+                  righe del CSV) e non si potrà proseguire finché non torna a zero.
+                </div>
+              </>
+            )}
 
             <label className="form-label" style={{marginTop:14}}>File CSV o Excel</label>
             <input type="file" accept=".csv,.txt,.xls,.xlsx" multiple className="form-file"

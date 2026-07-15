@@ -766,7 +766,7 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   return results
 }
 
-function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
+function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const [handled, setHandled] = useState({})
@@ -775,6 +775,54 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
     () => findDuplicatesForSource(src, srcTxs, transactions).filter(d => !handled[d.t.txId]),
     [src, srcTxs, transactions, handled]
   )
+
+  // ── Controllo saldo → target doppioni (richiesta utente 2026-07-15, solo conto,
+  // solo se l'utente ha dichiarato il "nuovo saldo" durante l'import — vedi
+  // ImportModal.jsx targetGapDoppioni). A differenza del comportamento "elimina
+  // subito" di sotto, qui NULLA viene cancellato finché l'utente non conferma:
+  // si selezionano/deselezionano le righe (quelle rilevate automaticamente sono
+  // pre-selezionate, ma l'utente può marcarne altre non rilevate, o togliere
+  // quelle rilevate se ritiene non siano doppioni veri) finché la somma di quelle
+  // selezionate non coincide esattamente con lo scarto di saldo atteso.
+  const reconciling = targetGapDoppioni != null
+  const [selected, setSelected] = useState(() => new Set())
+  const [showAll, setShowAll] = useState(false)
+  const [committed, setCommitted] = useState(false)
+
+  // Pre-seleziona i doppioni rilevati automaticamente al primo render di questo step
+  const seededRef = useRef(false)
+  if (reconciling && !seededRef.current) {
+    seededRef.current = true
+    setSelected(new Set(dupes.map(d => d.t.txId)))
+  }
+
+  const dupeIdsSet = useMemo(() => new Set(dupes.map(d => d.t.txId)), [dupes])
+  const selectedSum = useMemo(() => {
+    if (!reconciling) return 0
+    return srcTxs.filter(t => selected.has(t.txId)).reduce((s, t) => s + t.amount, 0)
+  }, [reconciling, srcTxs, selected])
+  const remaining = Math.round((targetGapDoppioni - selectedSum) * 100) / 100
+  const resolved = reconciling && Math.abs(remaining) < 0.01
+
+  function toggleSelected(txId) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(txId) ? next.delete(txId) : next.add(txId)
+      return next
+    })
+  }
+
+  function confirmReconcile() {
+    if (!resolved || committed) return
+    setCommitted(true)
+    selected.forEach(txId => deleteTransaction(txId))
+    if (selected.size > 0) {
+      registerUndo?.(`${selected.size} doppioni eliminati`, () => {
+        for (let i = 0; i < selected.size; i++) useStore.getState().undoLastTx?.()
+      })
+    }
+    onNext?.()
+  }
 
   function removeDupe(d) {
     deleteTransaction(d.t.txId)
@@ -795,11 +843,29 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
         di una transazione già presente nel database, nella stessa categoria ({src === 'carta' ? 'carte contro carte' : 'conto contro conto'}).
         Controllo più severo di quello automatico in import (che confronta anche l'importo e scarta senza chiedere).
       </div>
-      {dupes.length === 0 ? (
+
+      {reconciling && (
+        <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14,
+          background: resolved ? 'var(--green-l)' : 'rgba(245,158,11,.08)',
+          border: `1px solid ${resolved ? 'var(--green)' : '#f59e0b'}` }}>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+            {resolved ? '✅ Il saldo torna — puoi proseguire' : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
+          </div>
+          <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(targetGapDoppioni), 2)}</strong></span>
+            <span>Selezionati: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></span>
+            <span style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>
+              Differenza: € {fmtIT(Math.abs(remaining), 2)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {dupes.length === 0 && !reconciling ? (
         <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
           ✅ Nessun doppione trovato in questo import
         </div>
-      ) : (
+      ) : !reconciling ? (
         <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
           {dupes.map(d => (
             <div key={d.t.txId} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
@@ -827,10 +893,64 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo }) {
             </div>
           ))}
         </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Rilevati automaticamente ({dupes.length})</div>
+          {dupes.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>Nessun doppione rilevato automaticamente — se il saldo non torna, cercalo qui sotto fra tutte le transazioni.</div>
+          )}
+          <div style={{ maxHeight: '28vh', overflow: 'auto', marginBottom: 12 }}>
+            {dupes.map(d => (
+              <label key={d.t.txId} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12,
+                border: '1px solid var(--border)', borderRadius: 8, padding: '7px 12px', marginBottom: 6, cursor: 'pointer' }}>
+                <input type="checkbox" checked={selected.has(d.t.txId)} onChange={() => toggleSelected(d.t.txId)}/>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(d.t.date)}</span>
+                <span style={{ flex: 1, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {d.t.descAI || d.t.description?.slice(0, 50)}
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--red)' }}>−€ {fmtIT(Math.abs(d.t.amount), 2)}</span>
+              </label>
+            ))}
+          </div>
+          <button onClick={() => setShowAll(v => !v)}
+            style={{ fontSize: 12, background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, marginBottom: 8 }}>
+            {showAll ? '▾' : '▸'} Non hai trovato il doppione che cerchi? Sfoglia tutte le transazioni di questo import ({srcTxs.length})
+          </button>
+          {showAll && (
+            <div style={{ maxHeight: '32vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+              {srcTxs.map(t => (
+                <label key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '5px 6px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={selected.has(t.txId)} onChange={() => toggleSelected(t.txId)}/>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(t.date)}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.descAI || t.description?.slice(0, 50)}
+                  </span>
+                  {dupeIdsSet.has(t.txId) && <span style={{ fontSize: 10, color: 'var(--gold)' }}>🔁 rilevato</span>}
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: t.amount < 0 ? 'var(--red)' : 'var(--green)' }}>
+                    {t.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(t.amount), 2)}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </>
       )}
-      {!embedded && (
+
+      {!embedded && !reconciling && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
           <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }} onClick={onNext}>
+            Avanti →
+          </button>
+        </div>
+      )}
+      {reconciling && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
+          <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+            {selected.size} transazion{selected.size===1?'e':'i'} selezionat{selected.size===1?'a':'e'} verrann{selected.size===1?'o':'o'} eliminate al click su "Avanti"
+          </span>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
+            disabled={!resolved || committed} onClick={confirmReconcile}
+            title={resolved ? 'Conferma ed elimina i doppioni selezionati' : `Il saldo non torna ancora (differenza € ${fmtIT(Math.abs(remaining),2)})`}>
             Avanti →
           </button>
         </div>
@@ -1336,12 +1456,16 @@ export default function ImportWizard({ onClose }) {
 
         {/* ── Doppioni (richiesta utente 2026-07-13, punto 4): subito dopo la
             rifinitura della sorgente, verifica contro il DB della stessa categoria ── */}
-        {step && step.id === 'doppioni' && (
-          <>
-            <DoppioniStep src={step.src} srcTxs={importedTxs(step.src)} embedded registerUndo={registerUndo} />
-            <StepNav/>
-          </>
-        )}
+        {step && step.id === 'doppioni' && (() => {
+          const targetGapDoppioni = step.src === 'conto' ? (results.conto?.targetGapDoppioni ?? null) : null
+          return (
+            <>
+              <DoppioniStep src={step.src} srcTxs={importedTxs(step.src)} embedded registerUndo={registerUndo}
+                targetGapDoppioni={targetGapDoppioni} onNext={next} />
+              {targetGapDoppioni == null && <StepNav/>}
+            </>
+          )
+        })()}
 
         {/* ── Esito PayPal (c) ── */}
         {step && step.id === 'paypal-result' && (() => {
