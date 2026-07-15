@@ -7,7 +7,7 @@ import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
-import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException } from '../pages/TransactionsPage'
+import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException, SALDO_PIN } from '../pages/TransactionsPage'
 import { getVacationMerchants, isHomeCityTx, normDesc } from '../pages/WeekendVacanzeV2Page'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
 import { computeCandidateVacations, findVacationForDate, allDatesBetween, vacationType } from '../data/vacationRules'
@@ -766,9 +766,10 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   return results
 }
 
-function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni }) {
+function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
+  const addTransactions   = useStore(s => s.addTransactions)
   const [handled, setHandled] = useState({})
 
   const dupes = useMemo(
@@ -801,8 +802,15 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
     if (!reconciling) return 0
     return srcTxs.filter(t => selected.has(t.txId)).reduce((s, t) => s + t.amount, 0)
   }, [reconciling, srcTxs, selected])
-  const remaining = Math.round((targetGapDoppioni - selectedSum) * 100) / 100
+  // Possibilità estrema (richiesta utente 2026-07-15): se l'utente non riesce a
+  // trovare doppioni sufficienti a spiegare TUTTO lo scarto, può creare un "tappo"
+  // (rettifica nascosta, stesso spirito del Saldo Forzato in Transazioni, stesso
+  // PIN) per SOLO il residuo che non riesce a scovare — non l'intero gap, solo
+  // quello che resta dopo aver selezionato tutti i doppioni reali che trova.
+  const [tappoCovered, setTappoCovered] = useState(0) // quota di gap coperta dal tappo
+  const remaining = Math.round((targetGapDoppioni - selectedSum - tappoCovered) * 100) / 100
   const resolved = reconciling && Math.abs(remaining) < 0.01
+  const hasTappo = Math.abs(tappoCovered) > 0.005
 
   function toggleSelected(txId) {
     setSelected(prev => {
@@ -812,10 +820,44 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
     })
   }
 
+  function createTappo() {
+    const gapNow = Math.round((targetGapDoppioni - selectedSum - tappoCovered) * 100) / 100
+    if (Math.abs(gapNow) < 0.01) return
+    if (!window.confirm(
+      `Stai per creare una rettifica nascosta di € ${fmtIT(Math.abs(gapNow), 2)} per il residuo che non riesci a spiegare come doppione. ` +
+      `Verrà creata SOLO quando confermi "Avanti" — puoi ancora annullarla prima. Continuare?`
+    )) return
+    const pin = window.prompt('Inserisci il codice per confermare la rettifica di saldo:')
+    if (pin == null) return
+    if (pin !== SALDO_PIN) { window.alert('Codice errato — rettifica non creata.'); return }
+    setTappoCovered(c => Math.round((c + gapNow) * 100) / 100)
+  }
+
+  function removeTappo() {
+    setTappoCovered(0)
+  }
+
   function confirmReconcile() {
     if (!resolved || committed) return
     setCommitted(true)
     selected.forEach(txId => deleteTransaction(txId))
+    if (hasTappo && reconcileAccount) {
+      const tappoTxId = '0000-' + Date.now().toString(36).toUpperCase()
+      addTransactions([{
+        txId: tappoTxId,
+        date: srcTxs.reduce((m, t) => (!m || (t.date||'') < m) ? (t.date||m) : m, null) || new Date().toISOString().slice(0,10),
+        amount: Math.round(-tappoCovered * 100) / 100,
+        description: `Rettifica doppioni non trovati — import del ${fmtDate(new Date().toISOString().slice(0,10))}`,
+        descAI: 'Rettifica doppioni non trovati',
+        cat1: 'Altro', cat2: 'Altro',
+        account: reconcileAccount, conf: 100, aiEnriched: true,
+        excluded: true,
+        excludedAt: new Date().toISOString(),
+        excludedType: 'manual',
+        excludedReason: 'Rettifica saldo — doppioni non trovati durante import (protetta da PIN)',
+        _doppioniTappo: true,
+      }])
+    }
     if (selected.size > 0) {
       registerUndo?.(`${selected.size} doppioni eliminati`, () => {
         for (let i = 0; i < selected.size; i++) useStore.getState().undoLastTx?.()
@@ -851,13 +893,31 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
             {resolved ? '✅ Il saldo torna — puoi proseguire' : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
           </div>
-          <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
             <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(targetGapDoppioni), 2)}</strong></span>
             <span>Selezionati: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></span>
+            {hasTappo && (
+              <span>Rettifica: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></span>
+            )}
             <span style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>
               Differenza: € {fmtIT(Math.abs(remaining), 2)}
             </span>
           </div>
+          {!resolved && reconcileAccount && (
+            <div style={{ marginTop: 8 }}>
+              <button onClick={createTappo}
+                style={{ fontSize: 11, background: 'none', border: '1px solid #f59e0b', color: '#92400e',
+                  borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
+                ⚠️ Non trovo altri doppioni — crea rettifica per il residuo (protetta da PIN)
+              </button>
+            </div>
+          )}
+          {hasTappo && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              🧾 Rettifica di € {fmtIT(Math.abs(tappoCovered), 2)} pronta (verrà creata solo confermando "Avanti")
+              <button onClick={removeTappo} style={{ border: 'none', background: 'transparent', color: 'var(--red)', cursor: 'pointer', fontSize: 11, padding: 0 }}>Annulla rettifica</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1458,10 +1518,11 @@ export default function ImportWizard({ onClose }) {
             rifinitura della sorgente, verifica contro il DB della stessa categoria ── */}
         {step && step.id === 'doppioni' && (() => {
           const targetGapDoppioni = step.src === 'conto' ? (results.conto?.targetGapDoppioni ?? null) : null
+          const reconcileAccount = step.src === 'conto' ? results.conto?.account : null
           return (
             <>
               <DoppioniStep src={step.src} srcTxs={importedTxs(step.src)} embedded registerUndo={registerUndo}
-                targetGapDoppioni={targetGapDoppioni} onNext={next} />
+                targetGapDoppioni={targetGapDoppioni} reconcileAccount={reconcileAccount} onNext={next} />
               {targetGapDoppioni == null && <StepNav/>}
             </>
           )

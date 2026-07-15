@@ -5,7 +5,7 @@ import { Plus, Trash2, Link, TrendingUp, RefreshCw } from 'lucide-react'
 import './AltreEntratePage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
-import { getCompLinks, saveCompLinks, getLinksArray, availableAmount, removeCompensationGroup } from '../data/compensation'
+import { getCompLinks, saveCompLinks, getLinksArray, availableAmount, removeCompensationGroup, isCompensated } from '../data/compensation'
 
 const ENTRY_TYPES = ['Rimborso Costo','Prestito Ricevuto','Trasferimento','Entrata Generica']
 const TYPE_COLORS  = {
@@ -838,13 +838,24 @@ export default function AltreEntratePage() {
   // come succedeva prima (bastava un solo link, anche minimo, per azzerarla).
   function entryResidual(e) {
     const compLink = compLinks[e.txId || e.id]
-    if (!compLink) return e.amount || 0
-    const totalUsed = getAeLinksArray(compLink).reduce((s, l) => {
-      const expTx = transactions.find(t => t.txId === l.expTxId)
-      const expAmt = expTx ? Math.abs(expTx.amount) : null
-      return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
-    }, 0)
-    return Math.max(0, (e.amount||0) - totalUsed)
+    if (compLink) {
+      const totalUsed = getAeLinksArray(compLink).reduce((s, l) => {
+        const expTx = transactions.find(t => t.txId === l.expTxId)
+        const expAmt = expTx ? Math.abs(expTx.amount) : null
+        return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
+      }, 0)
+      return Math.max(0, (e.amount||0) - totalUsed)
+    }
+    // Bug segnalato dall'utente 2026-07-15: un'entrata può risultare già
+    // compensata SENZA passare da compLinks — es. Satispay scrive _compensatedAmt
+    // direttamente sulla transazione con un proprio registro separato
+    // (satiMatches), che questa pagina non consultava affatto. Risultato: la riga
+    // mostrava ancora "🔗 Abbina" (residuo = importo lordo) anche quando l'importo
+    // era già stato interamente usato altrove — e tentare di abbinarla a mano
+    // falliva perché la spesa candidata risultava già "presa" da availableAmount().
+    // Qui si controlla anche _compensatedAmt diretto, non solo il registro compLinks.
+    if (isCompensated(e)) return Math.max(0, (e.amount||0) - (e._compensatedAmt||0))
+    return e.amount || 0
   }
   const thisMonthTotal = allEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+entryResidual(e),0)
   const rimborsiTotal  = autoEntries.filter(e=>e.cat2==='Prestiti').reduce((s,e)=>s+entryResidual(e),0)
@@ -976,11 +987,22 @@ export default function AltreEntratePage() {
                       <AeCat2Cell entry={e} updateTransaction={updateTransaction} customCats={customCats}/>
                     </td>
                     <td style={{padding:'9px 14px'}}>
-                      {!compLink && (
+                      {!compLink && !isCompensated(e) && (
                         <button className="btn btn-ghost" style={{fontSize:11,color:'var(--blue)',border:'1px solid var(--blue)',borderRadius:6,padding:'2px 8px'}}
                           onClick={()=>setCompensaEntry(e)}>
                           🔗 Abbina
                         </button>
+                      )}
+                      {/* Bug 2026-07-15: compensata direttamente (es. da Satispay, che scrive
+                          _compensatedAmt col proprio registro satiMatches, MAI su compLinks) —
+                          senza questo controllo la riga mostrava ancora "Abbina" pur essendo
+                          già risolta altrove, e il tentativo di abbinarla a mano falliva perché
+                          la spesa candidata risultava già presa (availableAmount()==0). */}
+                      {!compLink && isCompensated(e) && (
+                        <span title="Questa entrata risulta già compensata (probabilmente da Satispay o da un'altra pagina), anche se non appare nel registro Abbinamenti di questa pagina."
+                          style={{fontSize:11,color:'var(--gold)',fontWeight:600}}>
+                          ✓ Compensata altrove
+                        </span>
                       )}
                       {compLink && (
                         <div style={{display:'flex',alignItems:'center',gap:5}}>

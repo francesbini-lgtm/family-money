@@ -104,8 +104,15 @@ function computeSaldoConto(transactions) {
 // altrimenti il confronto con un saldo che si riferisce a un singolo conto non
 // avrebbe senso se l'utente ha anche altri conti/carte/Satispay.
 function computeSaldoAccount(transactions, accountName) {
+  // _doppioniTappo: rettifiche create dall'utente nello step Doppioni quando non
+  // riesce a trovare il doppione reale che spiega tutto lo scarto di saldo (vedi
+  // ImportWizard.jsx DoppioniStep) — vanno sempre incluse nel calcolo del saldo
+  // di questo conto, come _forcedBalance, ma sono un flag SEPARATO apposta: il
+  // "Saldo forzato" globale (ForcedBalanceModal) assume un'UNICA transazione
+  // _forcedBalance in tutto il DB — usare lo stesso flag qui romperebbe quella
+  // assunzione con rettifiche multiple per conto/import diversi.
   return transactions
-    .filter(t => (!t.excluded || t._forcedBalance) && t.account === accountName)
+    .filter(t => (!t.excluded || t._forcedBalance || t._doppioniTappo) && t.account === accountName)
     .reduce((s, t) => s + t.amount, 0)
 }
 
@@ -756,6 +763,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         aiCount: enrichResult.enrichedCount,
         rulesAppliedCount: rulesResult.rulesAppliedCount,
         targetGapDoppioni,
+        account,
       }), 1500)
     } else {
       setTimeout(onClose, 2500)

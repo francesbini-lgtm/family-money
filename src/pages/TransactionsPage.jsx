@@ -21,7 +21,9 @@ const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov
 // fmtDate imported from utils/format
 
 // ── KPI bar ───────────────────────────────────────────────
-const SALDO_PIN = '182218'
+// Esportato: riusato anche dal wizard di import (ImportWizard.jsx, DoppioniStep)
+// per il "tappo" di riconciliazione saldo — stessa protezione, stesso PIN.
+export const SALDO_PIN = '182218'
 
 // ── Forced balance modal ──────────────────────────────────
 // Esportato: riusato anche nella sezione dedicata "Saldo forzato" in
@@ -1374,6 +1376,110 @@ const ALL_COLUMNS = [
 ]
 const DEFAULT_VISIBLE = new Set(['date','emoji','descAI','note','city','time','card','user','cat','amount'])
 const DEFAULT_ORDER   = ALL_COLUMNS.map(c=>c.id)
+
+// ── Scansione doppioni su tutto il DB (richiesta utente 2026-07-15) ─────────
+// A differenza del controllo doppioni del wizard di import (che confronta solo
+// le transazioni di UN import appena fatto contro il DB, stessa data+descrizione),
+// questo cerca su TUTTO lo storico, raggruppando per descrizione originale
+// ESATTA + importo esatto (senza vincolo di data — richiesta più larga per
+// scovare doppioni vecchi, es. da import sovrapposti fatti mesi fa).
+function DuplicateScannerModal({ onClose }) {
+  const transactions      = useStore(s => s.transactions)
+  const deleteTransaction = useStore(s => s.deleteTransaction)
+  const [scanning, setScanning] = useState(true)
+  const [clusters, setClusters] = useState(null)
+  const [selected, setSelected] = useState({})
+
+  useEffect(() => {
+    setScanning(true)
+    const timer = setTimeout(() => {
+      const map = new Map()
+      transactions.forEach(t => {
+        const desc = (t.description || '').trim()
+        if (!desc) return
+        const key = `${desc}|${Math.round(Math.abs(t.amount || 0) * 100)}`
+        if (!map.has(key)) map.set(key, [])
+        map.get(key).push(t)
+      })
+      const found = [...map.values()]
+        .filter(group => group.length > 1)
+        .sort((a, b) => (b[0]._effDate || b[0].date || '').localeCompare(a[0]._effDate || a[0].date || ''))
+      const initSel = {}
+      // Pre-seleziona tutte tranne la prima di ogni gruppo (ordinata per data) —
+      // propone di tenere una copia ed eliminare le altre, l'utente resta libero
+      // di deselezionare/selezionare come preferisce prima di confermare.
+      found.forEach(group => {
+        const sortedGroup = [...group].sort((a, b) => (a._effDate || a.date || '').localeCompare(b._effDate || b.date || ''))
+        sortedGroup.slice(1).forEach(t => { initSel[t.txId] = true })
+      })
+      setClusters(found)
+      setSelected(initSel)
+      setScanning(false)
+    }, 900) // piccolo ritardo intenzionale: la scansione copre tutto lo storico, non solo un import
+    return () => clearTimeout(timer)
+  }, [transactions])
+
+  function toggle(txId) {
+    setSelected(prev => ({ ...prev, [txId]: !prev[txId] }))
+  }
+  const totalSelected = Object.values(selected).filter(Boolean).length
+  function confirmDelete() {
+    Object.entries(selected).forEach(([txId, on]) => { if (on) deleteTransaction(txId) })
+    onClose()
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.4)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:'var(--surface)',borderRadius:12,padding:24,width:640,maxWidth:'92vw',boxShadow:'0 8px 32px rgba(0,0,0,.2)',maxHeight:'86vh',display:'flex',flexDirection:'column'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+          <div style={{fontWeight:700,fontSize:16}}>🔁 Scansione doppioni</div>
+          <button onClick={onClose} style={{border:'none',background:'transparent',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
+        </div>
+        <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
+          Cerca in tutto lo storico transazioni con la stessa descrizione originale e lo stesso importo (non serve la stessa data).
+        </div>
+        {scanning ? (
+          <div style={{padding:'40px 20px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
+            🔎 Sto confrontando {transactions.length} transazioni…
+          </div>
+        ) : clusters.length === 0 ? (
+          <div style={{padding:'40px 20px',textAlign:'center',color:'var(--green)',fontSize:13,fontWeight:600}}>
+            ✅ Nessun doppione trovato in tutto lo storico
+          </div>
+        ) : (
+          <>
+            <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>{clusters.length} possibili gruppi di doppioni</div>
+            <div style={{flex:1,overflowY:'auto',display:'flex',flexDirection:'column',gap:10}}>
+              {clusters.map((group, gi) => (
+                <div key={gi} style={{border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:6}}>
+                    {group.length} transazioni identiche — {group[0].description?.slice(0,60)}
+                  </div>
+                  {[...group].sort((a,b)=>(a._effDate||a.date||'').localeCompare(b._effDate||b.date||'')).map(t => (
+                    <label key={t.txId} style={{display:'flex',alignItems:'center',gap:8,fontSize:12,padding:'4px 0',cursor:'pointer'}}>
+                      <input type="checkbox" checked={!!selected[t.txId]} onChange={()=>toggle(t.txId)}/>
+                      <span style={{fontFamily:'var(--font-mono)',color:'var(--text3)'}}>{fmtDate(t._effDate||t.date)}</span>
+                      <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI || t.description?.slice(0,50)}</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontWeight:700}}>{t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+              <span style={{fontSize:11,color:'var(--text3)'}}>{totalSelected} selezionate per l'eliminazione</span>
+              <button className="btn btn-primary" disabled={totalSelected===0} onClick={confirmDelete}
+                style={{fontSize:13,padding:'8px 18px',fontWeight:700}}>
+                🗑️ Elimina selezionate
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function EditColonneModal({ visibleCols, colOrder, onApply, onClose }) {
   const [draft,    setDraft]    = useState(new Set(visibleCols))
@@ -3282,6 +3388,7 @@ export default function TransactionsPage() {
   const [openCatTxId,    setOpenCatTxId]    = useState(null)
   const [showRegDate,    setShowRegDate]    = useState(false)
   const [colsOpen,       setColsOpen]       = useState(false)
+  const [dupScanOpen,    setDupScanOpen]    = useState(false)
   const [visibleCols,    setVisibleCols]    = useState(() => DEFAULT_VISIBLE)
   const [colOrder,       setColOrder]       = useState(() => DEFAULT_ORDER)
   const [sortKey,        setSortKey]        = useState('date')
@@ -3469,6 +3576,15 @@ export default function TransactionsPage() {
           <button className="btn btn-ghost" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px'}}
             onClick={()=>setColsOpen(true)}>
             ⚙️ Colonne
+          </button>
+          {/* Scansione doppioni su tutto il DB (richiesta utente 2026-07-15) —
+              diverso dal controllo doppioni del wizard di import (che guarda solo
+              le transazioni di UN import appena fatto): qui si cerca su TUTTO lo
+              storico, stessa descrizione originale + stesso importo (non serve
+              stessa data, a differenza del wizard — richiesta esplicita più larga). */}
+          <button className="btn btn-ghost" style={{fontSize:12,border:'1px solid var(--border)',borderRadius:6,padding:'4px 10px'}}
+            onClick={()=>setDupScanOpen(true)}>
+            🔁 Doppioni
           </button>
           {/* Data toggle */}
           <div style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer'}} onClick={()=>{
@@ -3707,6 +3823,7 @@ export default function TransactionsPage() {
       {addManualOpen   && <AddManualTxModal onClose={()=>setAddManualOpen(false)}/>}
       {feedbackTx      && <AiFeedbackModal tx={feedbackTx} onClose={()=>setFeedbackTx(null)}/>}
       {colsOpen        && <EditColonneModal visibleCols={visibleCols} colOrder={colOrder} onApply={(cols,order)=>{setVisibleCols(cols);setColOrder(order)}} onClose={()=>setColsOpen(false)}/>}
+      {dupScanOpen     && <DuplicateScannerModal onClose={()=>setDupScanOpen(false)}/>}
       {enriching       && <AiEnrichmentOverlay transactions={store.transactions} onDone={()=>setEnriching(false)}/>}
       {reenriching     && <AiEnrichmentOverlay forceAll={true} transactions={store.transactions} onDone={()=>setReenriching(false)}/>}
       {enrichingSelected && <AiEnrichmentOverlay forceAll={true} overrideUserEdits={true} transactions={store.transactions.filter(t=>selected.has(t.txId))} onDone={()=>{setEnrichingSelected(false);setSelected(new Set())}}/>}
