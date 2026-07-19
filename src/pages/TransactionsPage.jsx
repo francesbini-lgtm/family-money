@@ -1397,7 +1397,7 @@ function DuplicateScannerModal({ onClose }) {
       transactions.forEach(t => {
         const desc = (t.description || '').trim()
         if (!desc) return
-        const key = `${desc}|${Math.round(Math.abs(t.amount || 0) * 100)}`
+        const key = `${desc}|${Math.round(Math.abs(t.amount || 0) * 100)}|${t.date || ''}`
         if (!map.has(key)) map.set(key, [])
         map.get(key).push(t)
       })
@@ -1437,7 +1437,7 @@ function DuplicateScannerModal({ onClose }) {
           <button onClick={onClose} style={{border:'none',background:'transparent',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
         </div>
         <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
-          Cerca in tutto lo storico transazioni con la stessa descrizione originale e lo stesso importo (non serve la stessa data).
+          Cerca in tutto lo storico transazioni con la stessa descrizione originale, lo stesso importo e la stessa data valuta.
         </div>
         {scanning ? (
           <div style={{padding:'40px 20px',textAlign:'center',color:'var(--text3)',fontSize:13}}>

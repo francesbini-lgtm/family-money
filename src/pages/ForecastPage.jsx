@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import './ForecastPage.css'
-import { fmtIT } from '../utils/format'
+import { fmtIT, fmtDate } from '../utils/format'
 // Importi NETTI post-compensazione (fix 2026-07-13: questa pagina era rimasta
 // indietro rispetto a UscitePage/RisparmioPage, che già usano netAmt — vedi
 // audit richiesto dall'utente sulla coerenza dei totali Uscite tra le 3 pagine)
@@ -93,6 +93,23 @@ function calcMortgage(capital, rateAnnual, durationYears) {
     residuals.push(Math.round(balance))
   }
   return { rata: Math.round(rata * 100) / 100, residuals }
+}
+
+// ── Money field with thousands separator (visual only, valore numerico puro) ──
+function MoneyField({ label, value, onChange, placeholder, hint }) {
+  function handleChange(e) {
+    const digits = e.target.value.replace(/[^\d]/g, '')
+    onChange(digits ? parseInt(digits, 10) : 0)
+  }
+  const display = value ? Number(value).toLocaleString('it-IT') : ''
+  return (
+    <div className="fc-mortgage-field">
+      <label className="form-lbl-sm">{label}</label>
+      <input className="fc-input" type="text" inputMode="numeric" value={display}
+        onChange={handleChange} placeholder={placeholder}/>
+      {hint && <div className="fc-input-hint">{hint}</div>}
+    </div>
+  )
 }
 
 // ── Slider ────────────────────────────────────────────────
@@ -208,7 +225,7 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function ForecastPage() {
-  const { transactions, customCats, appPrefs, setAppPref } = useStore()
+  const { transactions, customCats, appPrefs, setAppPref, ceciliaGoals } = useStore()
   const excludedMonths = appPrefs?.forecastExcludedMonths || []
 
   const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
@@ -501,6 +518,21 @@ export default function ForecastPage() {
     ? forecastData.findIndex(d => (d.residual ?? Infinity) <= d.forecast)
     : -1
 
+  // ── Fondo Cecilia: andamento saldo (versamenti cumulati nel tempo) ──
+  const ceciliaFund = (ceciliaGoals || []).find(g => (g.name || '').toLowerCase().includes('cecilia'))
+  const ceciliaChartData = useMemo(() => {
+    if (!ceciliaFund) return []
+    const hist = [...(ceciliaFund.history || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    let running = 0
+    const pts = hist.map(h => {
+      running += (h.amount || 0)
+      return { label: fmtDate(h.date), saldo: Math.round(running) }
+    })
+    // Allinea l'ultimo punto al saldo attuale reale (nel caso di rettifiche manuali)
+    if (pts.length && ceciliaFund.current != null) pts[pts.length - 1].saldo = Math.round(ceciliaFund.current)
+    return pts
+  }, [ceciliaFund])
+
   const now = new Date()
   const sourceLabel = transactions.some(t =>
     !t.excluded && t.amount > 0 && t.cat1 === 'Entrate' &&
@@ -555,7 +587,7 @@ export default function ForecastPage() {
                   borderRadius:8,border:`1px solid ${detailPopup==='income'?'var(--green)':'var(--border)'}`,
                   cursor:'pointer',userSelect:'none'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
-                  <span>Entrate (totale / 12)</span><span style={{opacity:.5}}>▼</span>
+                  <span>Entrate<br/>(totale / 12)</span><span style={{opacity:.5}}>▼</span>
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgIncome)}</div>
               </div>
@@ -565,7 +597,7 @@ export default function ForecastPage() {
                   borderRadius:8,border:`1px solid ${detailPopup==='expense'?'var(--red)':'var(--border)'}`,
                   cursor:'pointer',userSelect:'none'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',marginBottom:3,display:'flex',justifyContent:'space-between'}}>
-                  <span>Spese (totale / 12)</span><span style={{opacity:.5}}>▼</span>
+                  <span>Spese<br/>(totale / 12)</span><span style={{opacity:.5}}>▼</span>
                 </div>
                 <div style={{fontSize:16,fontWeight:800,color:'var(--red)',fontFamily:'var(--font-mono)'}}>{fmtFull(avgExpense)}</div>
               </div>
@@ -712,22 +744,14 @@ export default function ForecastPage() {
                 </label>
 
                 <div className="fc-mortgage-fields">
-                  <div className="fc-mortgage-field">
-                    <label className="form-lbl-sm">Importo (€)</label>
-                    <input className="fc-input" type="number" value={mortgageAmt}
-                      onChange={e=>setMortgageAmt(Number(e.target.value))} placeholder="200000"/>
-                  </div>
+                  <MoneyField label="Importo (€)" value={mortgageAmt} onChange={setMortgageAmt} placeholder="200.000"/>
                   <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">TAEG (%)</label>
                     <input className="fc-input" type="number" value={mortgageTaeg}
                       onChange={e=>setMortgageTaeg(Number(e.target.value))} step="0.1" placeholder="3.5"/>
                   </div>
-                  <div className="fc-mortgage-field">
-                    <label className="form-lbl-sm">Anticipo (€)</label>
-                    <input className="fc-input" type="number" value={mortgageAnticipo}
-                      onChange={e=>setMortgageAnticipo(Number(e.target.value))} placeholder="0"/>
-                    <div className="fc-input-hint">Dedotto dal saldo</div>
-                  </div>
+                  <MoneyField label="Anticipo (€)" value={mortgageAnticipo} onChange={setMortgageAnticipo}
+                    placeholder="0" hint="Dedotto dal saldo il giorno prima dell'inizio del mutuo"/>
                   <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">Durata (anni)</label>
                     <input className="fc-input" type="number" value={mortgageYears}
@@ -768,7 +792,7 @@ export default function ForecastPage() {
                       </div>
                     )}
                     {breakeven >= 0 && (
-                      <div className="fc-preview-item">
+                      <div className="fc-preview-item" style={{gridColumn:'1 / -1'}}>
                         <span>Saldo {'>'} Debito dal</span>
                         <strong style={{color:'var(--green)'}}>{forecastData[breakeven]?.label || '—'}</strong>
                       </div>
@@ -878,6 +902,31 @@ export default function ForecastPage() {
             </ResponsiveContainer>
           </div>
 
+          {/* Fondo Cecilia: andamento saldo */}
+          {ceciliaFund && ceciliaChartData.length > 0 && (
+            <div className="card" style={{padding:'18px 20px'}}>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>
+                {ceciliaFund.icon || '⭐'} Fondo {ceciliaFund.name} — Andamento Saldo
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <ComposedChart data={ceciliaChartData} margin={{top:4,right:8,left:0,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                  <XAxis dataKey="label" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                  <YAxis
+                    tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={64}
+                    tickFormatter={v => {
+                      const a = Math.abs(v)
+                      return a >= 1_000 ? `€${(v/1_000).toFixed(0)}K` : `€${v}`
+                    }}
+                  />
+                  <Tooltip content={<CustomTooltip/>}/>
+                  <Line type="monotone" dataKey="saldo" name="Saldo Fondo Cecilia"
+                    stroke="var(--gold)" strokeWidth={2.5} dot={{r:3}} connectNulls/>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
           {/* KPI row */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
             {[
@@ -885,7 +934,7 @@ export default function ForecastPage() {
               ['Risparmio / mese', (monthlySavings>=0?'+':'')+fmtFull(Math.round(monthlySavings)), monthlySavings>=0?'var(--green)':'var(--red)'],
               ['Tasso risparmio', savingsRate+'%', savingsRate>=20?'var(--green)':savingsRate>=10?'var(--gold)':'var(--red)'],
               mortgageOn && mortgage
-                ? ['Mutuo estinto', breakeven>=0 ? (forecastData[breakeven]?.label||'—') : '> orizzonte', 'var(--blue)']
+                ? ['Mutuo estinto', mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—', 'var(--blue)']
                 : ['Orizzonte', years+' anni', 'var(--text2)'],
             ].map(([l,v,color])=>(
               <div key={l} className="card" style={{padding:'12px 16px'}}>
@@ -911,6 +960,7 @@ export default function ForecastPage() {
                   {[
                     'Anno','Entrate annue','Spese annue',
                     mortgageOn ? 'Rata mutuo annua' : null,
+                    mortgageOn && mortgageAnticipo > 0 ? 'Anticipo' : null,
                     'Cash flow','Saldo previsto',
                     mortgageOn ? 'Debito residuo' : null,
                   ].filter(Boolean).map(h=>(
@@ -937,6 +987,7 @@ export default function ForecastPage() {
                         € {fmtIT(d.exp, 0)}
                       </td>
                       {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                      {mortgageOn && mortgageAnticipo > 0 && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                         color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
                         {cf>=0?'+':''}€ {fmtIT(Math.abs(cf), 0)}
@@ -949,9 +1000,8 @@ export default function ForecastPage() {
                     </tr>
                   )
                 })}
-                {/* Forecast rows */}
+                {/* Forecast rows — una riga per ogni anno, nessun anno saltato */}
                 {forecastData
-                  .filter((_,i) => i % Math.max(1, Math.floor(years / 8)) === 0 || i === forecastData.length - 1)
                   .map((d) => {
                     const year = parseInt(d.label)
                     const yOffset = year - now.getFullYear()
@@ -972,6 +1022,11 @@ export default function ForecastPage() {
                         {mortgageOn && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12}}>
                             {rataAnnua > 0 ? `€ ${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
+                          </td>
+                        )}
+                        {mortgageOn && mortgageAnticipo > 0 && (
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                            {year === mortgageStartYear ? `−€ ${fmtIT(mortgageAnticipo, 0)}` : '—'}
                           </td>
                         )}
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',

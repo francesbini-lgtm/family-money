@@ -6,6 +6,7 @@ import { useFinancials } from '../hooks/useFinancials'
 import { SavingsChart } from '../components/Charts'
 import { getMergedCats, getMergedCatNames } from '../data/categories'
 import { fmtIT } from '../utils/format'
+import { getMonthCloseInfo } from '../data/monthStatus'
 import {
   BarChart, Bar, LineChart, Line, ComposedChart,
   PieChart, Pie, Cell,
@@ -324,8 +325,11 @@ export default function RisparmioPage() {
   function mSav(ym)  { return mInc(ym) - mExp(ym) }
   function mRate(ym) { const i=mInc(ym); return i>0 ? Math.round(mSav(ym)/i*100) : null }
 
-  // Monthly savings for last 12 months
-  const last12 = monthsBack(12)
+  // Monthly savings for last 12 months — esclude SEMPRE l'ultimo mese se non
+  // chiuso (regola condivisa: chiuso = mancano al massimo 4gg di dati, vedi
+  // data/monthStatus.js), per non falsare grafico/medie/tabella con dati
+  // parziali. Genera un buffer di mesi extra per compensare l'esclusione.
+  const last12 = monthsBack(14).filter(ym => getMonthCloseInfo(transactions, ym).closed).slice(-12)
   const savingsMonthly = useMemo(()=>
     last12.map(ym=>({
       label: ymLabel(ym),
@@ -343,7 +347,7 @@ export default function RisparmioPage() {
     for(let i=1;i<=n;i++){
       const d=new Date(now.getFullYear(),now.getMonth()-i,1)
       const ym=ymOf(d)
-      if(ym >= thisYM) continue // skip current or future months (safety guard)
+      if(!getMonthCloseInfo(transactions, ym).closed) continue // salta mesi non chiusi (max 4gg mancanti)
       const inc=mInc(ym)
       if(inc>0){total+=mSav(ym);count++}
     }
@@ -353,7 +357,7 @@ export default function RisparmioPage() {
     let totalInc = 0, totalExp = 0
     for (let m = 0; m < 12; m++) {
       const ym = `${y}-${String(m+1).padStart(2,'0')}`
-      if (ym >= thisYM) break
+      if (!getMonthCloseInfo(transactions, ym).closed) continue
       totalInc += mInc(ym)
       totalExp += mExp(ym)
     }
@@ -362,7 +366,7 @@ export default function RisparmioPage() {
   }
 
   const avg12m   = savgMonths(12)
-  const total12  = Math.round(monthsBack(13).filter(ym => ym < thisYM).slice(-12).reduce((s,ym) => s+mSav(ym), 0))
+  const total12  = Math.round(last12.reduce((s,ym) => s+mSav(ym), 0))
 
   // Cumulative savings chart
   let cumulative = 0
@@ -384,10 +388,13 @@ export default function RisparmioPage() {
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:24}}>
         <div>
           <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600,margin:0}}>
-            🐷 Risparmio
+            🪙 Risparmio
           </h1>
           <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>
             Analisi del risparmio mensile e tasso di risparmio
+            <span style={{display:'block',fontSize:11,marginTop:2,opacity:.8}}>
+              ℹ️ Il mese in corso, se non ancora chiuso (mancano più di 4 giorni di dati), è escluso da grafici, tabella e medie.
+            </span>
             {excludedCats.size>0 && (
               <span style={{marginLeft:8,padding:'2px 8px',borderRadius:10,background:'var(--gold-l)',
                 color:'var(--gold)',fontWeight:700,fontSize:11}}>

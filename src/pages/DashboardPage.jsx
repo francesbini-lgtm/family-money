@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { hasGeminiKey } from '../data/aiService'
 import { navigateRef } from '../utils/navigate'
+import { getMonthCloseInfo } from '../data/monthStatus'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar,
@@ -980,14 +981,14 @@ export default function DashboardPage() {
         const prevSav  = prevInc - prevExp
         const prevRate = prevInc>0?Math.round(prevSav/prevInc*100):0
 
-        // Is the previous month fully covered by transactions?
-        const lastDayOfPrevMonth = new Date(prevD.getFullYear(), prevD.getMonth()+1, 0).getDate() // e.g. 30 for June
-        const prevMonthTxDates = transactions
-          .filter(t => !t.excluded && (t._effDate||(t.date||'')).startsWith(prevYM))
-          .map(t => parseInt((t._effDate||t.date||'').slice(8,10),10))
-          .filter(d => !isNaN(d))
-        const lastTxDay = prevMonthTxDates.length > 0 ? Math.max(...prevMonthTxDates) : 0
-        const prevMonthClosed = lastTxDay >= lastDayOfPrevMonth - 2 // allow 2-day tolerance
+        // Is the previous month fully covered by transactions? (regola condivisa:
+        // chiuso = mancano al massimo 4 giorni rispetto alla fine del mese — vedi data/monthStatus.js)
+        const { closed: prevMonthClosed, lastTxDay, lastDayOfMonth: lastDayOfPrevMonth } = getMonthCloseInfo(transactions, prevYM)
+
+        // Il mese corrente, per definizione di calendario, è quasi sempre "non chiuso"
+        // (chiude solo negli ultimi giorni del mese) — stessa regola dei 4 giorni.
+        const curYM = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`
+        const { closed: curMonthClosed } = getMonthCloseInfo(transactions, curYM)
 
         // Savings averages
         const savgMonths = (n) => {
@@ -1024,7 +1025,7 @@ export default function DashboardPage() {
             {/* Row 1 — mese corrente */}
             <div style={{marginBottom:6}}>
               <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',marginBottom:8,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-                <span style={{color:'var(--text3)'}}>📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE</span>
+                <span style={{color:'var(--text3)'}}>📅 {new Date().toLocaleDateString('it-IT',{month:'long',year:'numeric'}).toUpperCase()} — MESE CORRENTE{!curMonthClosed ? ' (mese non chiuso)' : ''}</span>
                 {thisIncome === 0 && thisExpense === 0 && (
                   <span style={{color:'var(--red)',fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:6,background:'rgba(220,50,50,.08)',border:'1px solid rgba(220,50,50,.25)'}}>
                     ⚠️ Dati mancanti

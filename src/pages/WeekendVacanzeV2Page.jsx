@@ -1398,7 +1398,15 @@ export default function WeekendVacanzeV2Page() {
     // Date modificabili nel pannello (richiesta utente 2026-07-12)
     const from = candDateOverride[cand.id]?.from || cand.from
     const to   = candDateOverride[cand.id]?.to   || cand.to
-    add({ name: 'Weekend e Vacanze', from, to, city })
+    const rec = add({ name: 'Weekend e Vacanze', from, to, city })
+    // Forza la L2 (Weekend/Vacanza) sulle transazioni del cluster appena confermato,
+    // in linea col tipo REALE del periodo (durata) — richiesta utente 2026-07-19:
+    // "quando conferma appartenenza di una spesa a una vacanza/weekend, deve essere
+    // forzata la L2". Prima la conferma creava solo il record vacanza senza toccare
+    // la L2 delle transazioni, che poteva restare disallineata (es. vuota o "Weekend"
+    // su un periodo di 10gg che vacationType() classifica come "Vacanza").
+    const newCat2 = vacationType(rec, transactions)
+    candTxs(cand).forEach(t => { if (t.cat2 !== newCat2) updateTransaction(t.txId, { cat2: newCat2 }) })
     setCandCityOverride(o => { const n = { ...o }; delete n[cand.id]; return n })
     setCandDateOverride(o => { const n = { ...o }; delete n[cand.id]; return n })
   }
@@ -1419,7 +1427,11 @@ export default function WeekendVacanzeV2Page() {
     if (sel.length < 2 || !mergeName.trim()) return
     const from = sel.reduce((m, c) => (!m || c.from < m) ? c.from : m, null)
     const to = sel.reduce((m, c) => (!m || c.to > m) ? c.to : m, null)
-    add({ name: mergeName.trim(), from, to, city: mergeName.trim() })
+    const rec = add({ name: mergeName.trim(), from, to, city: mergeName.trim() })
+    // Come in confirmCandidate: forza la L2 su tutte le transazioni delle candidate
+    // unite, in base al tipo REALE del periodo risultante dalla fusione.
+    const newCat2 = vacationType(rec, transactions)
+    sel.forEach(c => candTxs(c).forEach(t => { if (t.cat2 !== newCat2) updateTransaction(t.txId, { cat2: newCat2 }) }))
     setSelectedCand(new Set())
     setMergeName('')
   }
