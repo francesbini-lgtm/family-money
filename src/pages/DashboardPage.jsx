@@ -125,13 +125,18 @@ function SaldoChart({ transactions }) {
   const maxVal = Math.max(...chartData.map(d=>d.saldoPrec + d.delta), 0)
   const pad = (maxVal - minVal) * 0.12
 
+  // Richiesta utente 2026-07-19: unità di misura €/000 — niente simbolo "€",
+  // i valori sono divisi per mille (es. "€50.000" diventa "50"), indicato nel
+  // titolo della card (vedi "Andamento Saldo (€/000)") e qui nel chart stesso.
+  function to000(v) { return Math.round(v / 1000) }
+
   // ── LabelList: totale (saldo reale di fine periodo) sopra la barra ────────
   function SaldoTotalLabel({ x, y, width, index }) {
     if (index == null || !chartData[index]) return null
     return (
       <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10}
         fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
-        € {fmtIT(Math.round(chartData[index].saldo))}
+        {fmtIT(to000(chartData[index].saldo))}
       </text>
     )
   }
@@ -144,7 +149,7 @@ function SaldoChart({ transactions }) {
     return (
       <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle"
         fontSize={9} fill="#fff" style={{ pointerEvents: 'none' }}>
-        {chartData[index].isGrowth ? '+' : '−'}{fmtIT(Math.round(v))}
+        {chartData[index].isGrowth ? '+' : '−'}{fmtIT(to000(v))}
       </text>
     )
   }
@@ -179,17 +184,17 @@ function SaldoChart({ transactions }) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
           <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}
             interval={chartData.length>24?Math.floor(chartData.length/12):0}/>
-          <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={58}
-            tickFormatter={v=>Math.abs(v)>=1000?`€${(v/1000).toFixed(0)}K`:`€${v}`}
+          <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={44}
+            tickFormatter={v=>fmtIT(to000(v))}
             domain={[minVal-pad, maxVal+pad]}/>
           <Tooltip
             formatter={(v,name,props)=>{
-              if (name==='saldoPrec') return [`€ ${fmtIT(props.payload.saldoPrec,2)}`, 'Saldo mese precedente']
-              return [`${props.payload.isGrowth?'+':'−'}€ ${fmtIT(v,2)}`, props.payload.isGrowth ? 'Risparmiato questo mese' : 'Calo questo mese']
+              if (name==='saldoPrec') return [fmtIT(to000(props.payload.saldoPrec)), 'Saldo mese precedente (€/000)']
+              return [`${props.payload.isGrowth?'+':'−'}${fmtIT(to000(v))}`, (props.payload.isGrowth ? 'Risparmiato questo mese' : 'Calo questo mese') + ' (€/000)']
             }}
-            labelFormatter={(label,payload)=> payload?.[0] ? `${label} — Saldo: € ${fmtIT(payload[0].payload.saldo,2)}` : label}
+            labelFormatter={(label,payload)=> payload?.[0] ? `${label} — Saldo: ${fmtIT(to000(payload[0].payload.saldo))} (€/000)` : label}
             contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
-          <Bar dataKey="saldoPrec" stackId="a" fill="#94a3b8" isAnimationActive={false} radius={[0,0,0,0]}/>
+          <Bar dataKey="saldoPrec" stackId="a" fill="var(--blue,#3b82f6)" isAnimationActive={false} radius={[0,0,0,0]}/>
           <Bar dataKey="delta" stackId="a" isAnimationActive={false} radius={[4,4,0,0]}>
             {chartData.map((d,i)=>(
               <Cell key={i} fill={d.isGrowth ? '#22c55e' : '#ef4444'}/>
@@ -201,7 +206,7 @@ function SaldoChart({ transactions }) {
       </ResponsiveContainer>
       <div style={{display:'flex',gap:14,marginTop:8,fontSize:10,color:'var(--text3)'}}>
         <span style={{display:'flex',alignItems:'center',gap:4}}>
-          <span style={{width:9,height:9,borderRadius:2,background:'#94a3b8',display:'inline-block'}}/> Saldo mese precedente
+          <span style={{width:9,height:9,borderRadius:2,background:'var(--blue,#3b82f6)',display:'inline-block'}}/> Saldo mese precedente
         </span>
         <span style={{display:'flex',alignItems:'center',gap:4}}>
           <span style={{width:9,height:9,borderRadius:2,background:'#22c55e',display:'inline-block'}}/> Aumento (risparmio)
@@ -1136,7 +1141,7 @@ export default function DashboardPage() {
       {/* ── Saldo Conto ── */}
       <div className="card" style={{ marginBottom: 20, padding: '18px 20px' }}>
         <div className="card-title-row" style={{ marginBottom: 14 }}>
-          <span className="card-title">Andamento Saldo</span>
+          <span className="card-title">Andamento Saldo (€/000)</span>
         </div>
         <SaldoChart transactions={transactions} />
       </div>

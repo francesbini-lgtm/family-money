@@ -60,12 +60,26 @@ export function ForcedBalanceModal({ currentSaldo, onClose }) {
     const targetNum = parseFloat(target.replace(',', '.'))
     if (isNaN(targetNum)) return
     const delta = Math.round((targetNum - currentSaldo) * 100) / 100
-    // Date = 1 day before the oldest real (non-forced) transaction
-    const realTxs = allTxs.filter(t => !t._forcedBalance && t.date).map(t => t.date).sort()
+    // Date = 1 day before the oldest real (non-forced) transaction — richiede
+    // una data ISO ben formata (YYYY-MM-DD). Bug reale segnalato dall'utente
+    // 2026-07-19: senza questo filtro, un singolo record con `date` corrotto/
+    // malformato (non un vero "YYYY-MM-DD") ordinava PRIMA di qualunque data
+    // reale (confronto stringa), diventando il falso "più vecchio" e spingendo
+    // il tappo a una data assurda (finiva sempre vicino a 1 gennaio 2000, che è
+    // quello che produce `new Date(...)` quando riceve una stringa non valida
+    // tipo un anno nudo o simile). Ora si scartano le date malformate a monte.
+    // Uso 'T12:00:00' (mezzogiorno) invece di mezzanotte per evitare che
+    // l'aritmetica giorno-prima scivoli di un giorno per via del fuso orario
+    // locale rispetto a UTC.
+    const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+    const realTxs = allTxs
+      .filter(t => !t._forcedBalance && ISO_DATE_RE.test(t.date))
+      .map(t => t.date)
+      .sort()
     const oldest = realTxs[0]
     let tappoDate
     if (oldest) {
-      const d = new Date(oldest); d.setDate(d.getDate() - 1)
+      const d = new Date(oldest + 'T12:00:00'); d.setDate(d.getDate() - 1)
       tappoDate = d.toISOString().slice(0, 10)
     } else {
       tappoDate = new Date().toISOString().slice(0, 10)
@@ -152,11 +166,24 @@ export function ForcedBalanceModal({ currentSaldo, onClose }) {
               </div>
             )}
             <div style={{display:'flex',gap:8}}>
-              <button className="btn btn-primary" style={{flex:1}} onClick={save} disabled={!delta||delta===0}>
+              <button className="btn btn-primary" style={{flex:1}} onClick={save}
+                disabled={delta===null || (delta===0 && !existingForced)}>
                 {existingForced?'Aggiorna rettifica':'Inserisci rettifica'}
               </button>
               <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
             </div>
+            {/* Richiesta utente 2026-07-19: bug data — il tappo veniva datato in modo
+                assurdo (vicino a 1 gen 2000) quando una transazione con data malformata
+                "vinceva" come falso minimo. Fix nel calcolo di tappoDate in save() (ora
+                filtra date non ISO valide); per una rettifica GIÀ salvata basta premere
+                "Aggiorna rettifica" — anche senza cambiare l'importo — per ricalcolare e
+                correggere la data salvata (delta=0 ora è permesso quando esiste già). */}
+            {existingForced && delta===0 && (
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:8,lineHeight:1.5}}>
+                💡 Premi "Aggiorna rettifica" anche senza cambiare l'importo per ricalcolare
+                e correggere la data della rettifica salvata.
+              </div>
+            )}
             {existingForced && (
               <button className="btn btn-ghost" style={{width:'100%',marginTop:8,color:'var(--red)'}} onClick={remove}>
                 🗑️ Rimuovi rettifica
