@@ -707,10 +707,12 @@ export default function EntratePage() {
   // "Tutte le transazioni" più sotto (BonusCell/bonusMap) indipendentemente da questo toggle.
   const chartDataDisplay = useMemo(() => {
     if (chartBonusSeparate) return chartData
+    // Richiesta utente 2026-07-19 (correzione): "con bonus" OFF non deve fondere
+    // il bonus dentro Fra/Sofi — deve escluderlo del tutto dal chart (solo stipendio base)
     return chartData.map(row => ({
       label: row.label,
-      Fra:  (row['Fra']  || 0) + (row['Fra-Bonus']  || 0),
-      Sofi: (row['Sofi'] || 0) + (row['Sofi-Bonus'] || 0),
+      Fra:  row['Fra']  || 0,
+      Sofi: row['Sofi'] || 0,
     }))
   }, [chartData, chartBonusSeparate])
 
@@ -784,6 +786,10 @@ export default function EntratePage() {
 
   const activeCats = INCOME_CATS.filter(c => chartDataDisplay.some(m => m[c] > 0))
   const topCat     = activeCats.at(-1)
+  // Richiesta utente 2026-07-19 (correzione): la legenda mostra solo le persone
+  // base (Fra/Sofi) — niente voce separata per il bonus, anche quando è
+  // scorporato nel chart (si distingue lì solo per tonalità più chiara)
+  const legendCats = activeCats.filter(c => c === 'Fra' || c === 'Sofi')
 
   // Richiesta utente 2026-07-19: totale in alto su ogni colonna dell'istogramma
   // "Entrate per fonte (Fra + Sofi)", in formato breve (es. "50k" non "€50.000")
@@ -912,7 +918,7 @@ export default function EntratePage() {
                         era in fondo al chart via <Legend/> di recharts) */}
                     <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
                       <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                        {activeCats.map(cat => (
+                        {legendCats.map(cat => (
                           <span key={cat} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,color:'var(--text2)'}}>
                             <span style={{width:8,height:8,borderRadius:'50%',background:COLORS[cat],display:'inline-block'}}/>
                             {cat}
