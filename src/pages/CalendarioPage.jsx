@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import './CalendarioPage.css'
 import { fmtIT } from '../utils/format'
 import { useVacations, useNotVacationDates } from '../hooks/useCalendarVacations'
-import { groupConsecutiveDates, labelToEmoji, destCategoryLabel, findVacationForDate, vacationTotalCost } from '../data/vacationRules'
+import { groupConsecutiveDates, labelToEmoji, destCategoryLabel, findVacationForDate, vacationTotalCost, vacationType } from '../data/vacationRules'
 
 // ── Net amount after compensation ──────────────────────────
 // Consolidamento 2026-07-12: si usa il modulo condiviso (compensation.js) —
@@ -311,10 +311,17 @@ function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, 
 
   const firstDateStr = rangeDates[0]
   const label = vacation.name || vacation.city || '—'
+  // Colore cella per TIPO di periodo (richiesta utente 2026-07-19: "fai i weekend
+  // arancioni, invece vacanze lasciale così blu") — vacationType() è la stessa
+  // funzione condivisa usata ovunque nell'app (WeekendVacanzeV2Page, Forecast…),
+  // rispetta anche il typeOverride scelto a mano dall'utente. Da non confondere
+  // con isWeekendCell qui sotto, che indica solo "questi giorni cadono di sabato/
+  // domenica" (tratteggio), non il TIPO del periodo dichiarato.
+  const periodType = useMemo(() => vacationType(vacation, transactions), [vacation, transactions])
 
   return (
     <td
-      className={`cal-cell cal-merged-cell vacation${isWeekendCell ? ' weekend' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
+      className={`cal-cell cal-merged-cell vacation${periodType==='Weekend' ? ' period-weekend' : ''}${isWeekendCell ? ' weekend' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
       colSpan={colspan}
       onClick={() => { if (!selectMode) onClick(firstDateStr) }}
       onMouseDown={selectMode ? (e => { e.preventDefault(); onCellMouseDown(rangeDates) }) : undefined}
@@ -833,8 +840,9 @@ export default function CalendarioPage() {
 
       {/* Legend */}
       <div className="cal-legend">
-        <span className="cal-legend-item weekend-eg">Weekend</span>
-        <span className="cal-legend-item vacation-eg">🌴/⛰️ Vacanza</span>
+        <span className="cal-legend-item weekend-eg">Sab/Dom</span>
+        <span className="cal-legend-item vacation-eg">🌴/⛰️ Vacanza (periodo)</span>
+        <span className="cal-legend-item period-weekend-eg">🏖️ Weekend (periodo)</span>
         <span className="cal-legend-item today-eg">Oggi</span>
         <span className="cal-legend-item positive-eg">+Entrate</span>
         <span className="cal-legend-item negative-eg">−Uscite</span>

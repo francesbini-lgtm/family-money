@@ -1426,7 +1426,10 @@ function DangerZoneTab() {
   }
 
   return (
-    <div style={{maxWidth:580}}>
+    // maxWidth rimosso (richiesta utente 2026-07-19: header/tab-bar largo ma corpo
+    // stretto e diverso fra tab) — riempie l'intero wrapper esterno della pagina
+    // (SettingsPage.jsx, maxWidth condiviso), come già fanno Profilo/Categorie.
+    <div>
 
       {/* ── Migrazione codici TX ── */}
       <div style={{
@@ -1823,7 +1826,9 @@ function AIPromptTab() {
   ]
 
   return (
-    <div style={{maxWidth:860}}>
+    // maxWidth rimosso (era 860, disallineato dal wrapper condiviso — richiesta
+    // utente 2026-07-19 sull'allineamento fra header e corpo dei vari tab)
+    <div>
       {/* API Key section */}
       <div className="card" style={{padding:'18px 20px',marginBottom:20}}>
         <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>🔑 API Key AI</div>
@@ -2107,7 +2112,9 @@ function SecurityTab() {
   const row  = {display:'flex', alignItems:'center', gap:12, marginBottom:8}
 
   return (
-    <div style={{maxWidth:520}}>
+    // maxWidth rimosso (era 520 — richiesta utente 2026-07-19 sull'allineamento
+    // fra header e corpo dei vari tab di Impostazioni)
+    <div>
       <h2 style={{fontSize:17,fontWeight:700,marginBottom:20}}>🔐 Sicurezza</h2>
 
       <div style={card}>
@@ -2251,7 +2258,9 @@ function AIEnrichmentTab() {
   }
 
   return (
-    <div style={{maxWidth:580}}>
+    // maxWidth rimosso (era 580 — richiesta utente 2026-07-19 sull'allineamento
+    // fra header e corpo dei vari tab di Impostazioni)
+    <div>
       {/* Enable/disable */}
       <div className="card" style={{padding:'18px 20px',marginBottom:16}}>
         <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>✨ AI Enrichment</div>

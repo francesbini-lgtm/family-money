@@ -127,19 +127,24 @@ function ScadenzaRow({ s, onToggle, onDelete, onRenew }) {
           <div className="scd-meta">🚗 Veicolo · {s.cadenza}</div>
         </div>
         {/* Colonna costo — sempre visibile (ultimo importo pagato), tra nome e data
-            (richiesta utente 2026-07-14) */}
-        <div className="scd-amount" style={{minWidth:76,textAlign:'right',
+            (richiesta utente 2026-07-14). Larghezza/allineamento ora definiti dalla
+            classe .scd-amount condivisa (richiesta utente 2026-07-19: layout tabellare) */}
+        <div className="scd-amount" style={{
           color: s.importo > 0 ? 'var(--text1)' : 'var(--text3)', fontWeight: s.importo > 0 ? 700 : 400}}>
           {s.importo > 0 ? `€ ${fmtIT(s.importo,0)}` : '—'}
         </div>
         <div className="scd-right">
-          <span className={'scd-badge scd-badge-'+cls}>{label}</span>
-          {/* Bottone Rinnovato — solo quando è effettivamente scaduta (richiesta
-              utente 2026-07-14: prima compariva sempre, anche per date future) */}
-          {!s.autoRenew && cls === 'overdue' && (
-            <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px'}}
-              onClick={()=>setShowRenew(true)}>✓ Rinnovato</button>
-          )}
+          <div className="scd-badge-col"><span className={'scd-badge scd-badge-'+cls}>{label}</span></div>
+          {/* Bottone Rinnovato? — solo quando è effettivamente scaduta (richiesta
+              utente 2026-07-14: prima compariva sempre, anche per date future).
+              Colonna azione sempre riservata (scd-action-col) anche quando vuota,
+              così l'allineamento resta identico fra tutte le righe. */}
+          <div className="scd-action-col">
+            {!s.autoRenew && cls === 'overdue' && (
+              <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px',whiteSpace:'nowrap'}}
+                onClick={()=>setShowRenew(true)}>✓ Rinnovato?</button>
+            )}
+          </div>
         </div>
       </div>
       {showRenew && (
@@ -160,11 +165,11 @@ function ScadenzaRow({ s, onToggle, onDelete, onRenew }) {
         <div className="scd-meta">{s.cat} · {s.cadenza}</div>
       </div>
       <div className="scd-right">
-        {s.importo > 0 && (
-          <div className="scd-amount">€ {fmtIT(s.importo, 0)}</div>
-        )}
-        <span className={'scd-badge scd-badge-'+cls}>{label}</span>
-        <button className="btn btn-ghost" onClick={onDelete}><Trash2 size={13}/></button>
+        <div className="scd-amount">{s.importo > 0 ? `€ ${fmtIT(s.importo, 0)}` : '—'}</div>
+        <div className="scd-badge-col"><span className={'scd-badge scd-badge-'+cls}>{label}</span></div>
+        <div className="scd-action-col">
+          <button className="btn btn-ghost" onClick={onDelete}><Trash2 size={13}/></button>
+        </div>
       </div>
     </div>
   )

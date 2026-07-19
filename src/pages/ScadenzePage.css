@@ -26,7 +26,16 @@
 .scd-name  { font-size:14px; font-weight:600; }
 .scd-meta  { font-size:11px; color:var(--text3); margin-top:2px; }
 .scd-right { display:flex; align-items:center; gap:10px; }
-.scd-amount { font-family:var(--font-mono); font-size:14px; font-weight:700; }
+/* Layout tabellare (richiesta utente 2026-07-19): costo, stato e azione
+   rinnovato/elimina devono allinearsi in colonna fra tutte le righe, sia
+   quelle "manuali" che quelle derivate da un veicolo — prima ogni riga aveva
+   larghezze diverse (a seconda della lunghezza del testo o della presenza/
+   assenza del bottone), quindi le colonne non erano mai allineate fra loro. */
+.scd-amount { font-family:var(--font-mono); font-size:14px; font-weight:700;
+  min-width:84px; text-align:right; flex-shrink:0; }
+
+.scd-badge-col { min-width:118px; display:flex; justify-content:flex-end; flex-shrink:0; }
+.scd-action-col { min-width:100px; display:flex; justify-content:flex-end; flex-shrink:0; }
 
 .scd-badge { padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }
 .scd-badge-paid    { background:var(--green-l); color:var(--green); }

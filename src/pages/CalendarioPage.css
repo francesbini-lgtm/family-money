@@ -58,6 +58,7 @@
   );
 }
 .vacation-eg::before { background: #dbeafe; border: 1px solid #93c5fd; }
+.period-weekend-eg::before { background: #ffedd5; border: 1px solid #fdba74; }
 .today-eg::before    { background: var(--accent-l); border: 2px solid var(--accent); }
 .positive-eg::before { background: #dcfce7; border: 1px solid #86efac; }
 .negative-eg::before { background: #fee2e2; border: 1px solid #fca5a5; }
@@ -125,6 +126,11 @@
   );
 }
 .cal-cell.vacation  { background-color: #dbeafe; }
+/* Weekend (periodo dichiarato di tipo Weekend, non il tratteggio sab/dom) —
+   richiesta utente 2026-07-19: "fai i weekend arancioni, invece vacanze
+   lasciale così blu". Il selettore combinato .vacation.period-weekend serve
+   a vincere la specificità sulla regola .vacation blu qui sopra. */
+.cal-cell.vacation.period-weekend { background-color: #ffedd5; }
 .cal-cell.today     { outline: 2px solid var(--accent); outline-offset: -2px; }
 .cal-cell.has-data  { }
 
@@ -206,7 +212,13 @@
   width: auto !important;
   min-width: 0 !important;
   max-width: none !important;
-  overflow: visible;
+  /* overflow:hidden (era 'visible') — richiesta utente 2026-07-19: "le celle non
+     sono omogenee, sono più larghe per via del testo". Con table-layout:fixed la
+     griglia delle colonne resta sempre uniforme, ma con overflow:visible il testo
+     del titolo (vacanza/weekend) poteva SPILLARE visivamente oltre i bordi della
+     cella quando più lungo dello spazio disponibile, dando l'impressione di celle
+     disomogenee anche se la struttura sottostante era già corretta. */
+  overflow: hidden;
   border-right: 2px solid var(--accent) !important;
   border-left: 2px solid var(--accent) !important;
 }
