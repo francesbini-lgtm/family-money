@@ -5,7 +5,7 @@ import { netAmt } from '../data/compensation'
 import { useFinancials, getYM, ymLabel } from '../hooks/useFinancials'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, LineChart, Line, Legend
+  Tooltip, ResponsiveContainer, LineChart, Line, Legend, LabelList
 } from 'recharts'
 import './EntratePage.css'
 import { fmtIT, fmtDate } from '../utils/format'
@@ -770,6 +770,24 @@ export default function EntratePage() {
   const activeCats = INCOME_CATS.filter(c => chartData.some(m => m[c] > 0))
   const topCat     = activeCats.at(-1)
 
+  // Richiesta utente 2026-07-19: totale in alto su ogni colonna dell'istogramma
+  // "Entrate per fonte (Fra + Sofi)", in formato breve (es. "50k" non "€50.000")
+  function fmtCompactK(n) {
+    if (!n) return ''
+    return Math.abs(n) >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`
+  }
+  function IncomeBarTotalLabel({ x, y, width, index }) {
+    if (index == null || !chartData[index]) return null
+    const total = activeCats.reduce((s, c) => s + (chartData[index][c] || 0), 0)
+    if (!total) return null
+    return (
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10}
+        fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+        {fmtCompactK(total)}
+      </text>
+    )
+  }
+
   return (
     <>
       {/* Header + tab pills — stesso schema padding/stile di UscitePage (richiesta utente 2026-07-14) */}
@@ -871,7 +889,7 @@ export default function EntratePage() {
                     <span style={{fontSize:11,color:'var(--text3)'}}>{chartSubLabel(period)}</span>
                   </div>
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={chartData} barCategoryGap="35%" margin={{bottom:20}}>
+                    <BarChart data={chartData} barCategoryGap="35%" margin={{top:16,bottom:20}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                       <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
                         interval={0} angle={-35} textAnchor="end" height={44}/>
@@ -883,7 +901,9 @@ export default function EntratePage() {
                         formatter={v => <span style={{fontSize:11,color:'var(--text2)'}}>{v}</span>}/>
                       {activeCats.map(cat => (
                         <Bar key={cat} dataKey={cat} name={cat} fill={COLORS[cat]} stackId="a"
-                          radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}/>
+                          radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}>
+                          {cat === topCat && <LabelList content={<IncomeBarTotalLabel/>}/>}
+                        </Bar>
                       ))}
                     </BarChart>
                   </ResponsiveContainer>
