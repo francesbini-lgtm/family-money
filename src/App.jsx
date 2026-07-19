@@ -234,6 +234,14 @@ function AppShell() {
   const avatarColor = isFemale(firstName) ? '#c8628a' : '#2a5c8a'
   const PageComp   = PAGE_MAP[page]
 
+  // Scroll to top ad ogni cambio sezione — richiesta utente 2026-07-19: rimaneva
+  // sempre un piccolo scarto in alto (la vista non ripartiva mai dalla cima),
+  // costringendo a scrollare manualmente. Il contenitore scrollabile reale è
+  // .main-content (flex:1; overflow-y:auto — vedi App.css), non la window.
+  useEffect(() => {
+    document.querySelector('.main-content')?.scrollTo(0, 0)
+  }, [page])
+
   function navigate(id) { setPage(id); setMenu(false) }
   // Expose navigate globally for use in pages
   navigateRef.current = navigate

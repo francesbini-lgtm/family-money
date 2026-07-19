@@ -263,7 +263,7 @@ export const useStore = create((set, get) => ({
         const filtered = sorted.filter(t => {
           if(t.excluded) return false
           if(filters.search){const q=filters.search.toLowerCase();if(!(t.description||'').toLowerCase().includes(q)&&!(t.descAI||'').toLowerCase().includes(q))return false}
-          if(filters.cat1 && t.cat1!==filters.cat1) return false
+          if(filters.cat1 && (filters.cat1==='Non Categorizzato' ? !(!t.cat1 || t.cat1==='Non Categorizzato') : t.cat1!==filters.cat1)) return false
           if(filters.accounts.length>0 && !filters.accounts.includes(t.account)) return false
           if(filters.dateFrom && (t._effDate||t.date||'')<filters.dateFrom) return false
           if(filters.dateTo   && (t._effDate||t.date||'')>filters.dateTo)   return false
@@ -1576,7 +1576,11 @@ export const useStore = create((set, get) => ({
         const q=filters.search.toLowerCase()
         if(!(t.description||'').toLowerCase().includes(q)&&!(t.descAI||'').toLowerCase().includes(q)) return false
       }
-      if(filters.cat1 && t.cat1!==filters.cat1) return false
+      // "Non Categorizzato" deve includere anche le transazioni con cat1 vuoto/assente
+      // (mai passate da un enrichment/regola), non solo quelle taggate col valore
+      // letterale — richiesta utente 2026-07-19, stesso criterio già usato altrove
+      // (es. MobileDiscovery.jsx filtro 'nocat': !t.cat1 || t.cat1==='Non Categorizzato')
+      if(filters.cat1 && (filters.cat1==='Non Categorizzato' ? !(!t.cat1 || t.cat1==='Non Categorizzato') : t.cat1!==filters.cat1)) return false
       if((filters.accounts||[]).length>0 && !filters.accounts.includes(t.account)) return false
       if(filters.dateFrom && (t._effDate||t.date||'')<filters.dateFrom) return false
       if(filters.dateTo   && (t._effDate||t.date||'')>filters.dateTo)   return false

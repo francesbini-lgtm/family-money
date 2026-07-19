@@ -187,12 +187,20 @@ function KPIBar({ txs }) {
   const fmt = n => '€ ' + fmtIT(Math.abs(Math.round(n)), 0)
   const [showForce, setShowForce] = useState(false)
   const hasForced = allTxs.some(t => t._forcedBalance)
+  // "Saldo filtrato" — richiesta utente 2026-07-19: quando il DB è filtrato (ricerca,
+  // categoria, data, conto…) mostra anche il saldo delle sole transazioni ATTUALMENTE
+  // visibili (txs = già filtrate dal chiamante), in piccolo, senza toccare le dimensioni
+  // del box (posizionato in absolute in basso a destra, non partecipa al layout normale).
+  const filters = useStore(s => s.filters)
+  const hasFilters = !!(filters.search || filters.cat1 || filters.type || filters.dateFrom || filters.dateTo ||
+    filters.conf || filters.flagged || filters.reviewCompetenza || (filters.accounts||[]).length > 0)
+  const saldoFiltrato = txs.filter(t => !t.excluded || t._forcedBalance).reduce((s,t)=>s+t.amount,0)
   return (
     <>
       <div className="tx-kpi-bar">
         <div className="tx-kpi"><TrendingUp size={16} color="var(--green)"/><div><div className="tx-kpi-label">Entrate <span style={{fontSize:9,opacity:.6}}>mese corrente</span></div><div className="tx-kpi-value" style={{color:'var(--green)'}}>{fmt(income)}</div></div></div>
         <div className="tx-kpi"><TrendingDown size={16} color="var(--red)"/><div><div className="tx-kpi-label">Uscite <span style={{fontSize:9,opacity:.6}}>mese corrente</span></div><div className="tx-kpi-value" style={{color:'var(--red)'}}>{fmt(expense)}</div></div></div>
-        <div className="tx-kpi" style={{cursor:'pointer'}} onClick={()=>setShowForce(true)}>
+        <div className="tx-kpi" style={{cursor:'pointer',position:'relative'}} onClick={()=>setShowForce(true)}>
           <Banknote size={16} color={saldoConto>=0?'var(--blue)':'var(--red)'}/>
           <div>
             <div className="tx-kpi-label">
@@ -202,6 +210,11 @@ function KPIBar({ txs }) {
             </div>
             <div className="tx-kpi-value" style={{color:saldoConto>=0?'var(--blue)':'var(--red)'}}>{saldoConto>=0?'+':'-'}{fmt(saldoConto)}</div>
           </div>
+          {hasFilters && (
+            <div style={{position:'absolute',right:10,bottom:4,fontSize:9,color:'var(--text3)',textAlign:'right',whiteSpace:'nowrap'}}>
+              saldo filtrato {saldoFiltrato>=0?'+':'-'}{fmt(saldoFiltrato)}
+            </div>
+          )}
         </div>
         <div className="tx-kpi"><Tag size={16} color="var(--gold)"/><div><div className="tx-kpi-label">Transazioni</div><div className="tx-kpi-value">{txs.filter(t=>!t.excluded).length}</div></div></div>
       </div>
@@ -3439,7 +3452,8 @@ export default function TransactionsPage() {
     }
     if (filters.type === 'Income')  txs = txs.filter(t => t.amount > 0)
     if (filters.type === 'Expense') txs = txs.filter(t => t.amount < 0)
-    if (filters.cat1) txs = txs.filter(t => t.cat1 === filters.cat1)
+    // "Non Categorizzato" include anche cat1 vuoto/assente, non solo il valore letterale
+    if (filters.cat1) txs = txs.filter(t => filters.cat1==='Non Categorizzato' ? (!t.cat1 || t.cat1==='Non Categorizzato') : t.cat1 === filters.cat1)
     if (filters.dateFrom) txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) >= filters.dateFrom)
     if (filters.dateTo)   txs = txs.filter(t => (t._effDate||(t._effDate||t.date||'')) <= filters.dateTo)
     if (filters.conf === 'low') txs = txs.filter(t => (t.conf||0) < 70)
@@ -3632,7 +3646,9 @@ export default function TransactionsPage() {
 
       {/* Uncategorized alert banner */}
       {(() => {
-        const uncatCount = store.transactions.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
+        // Include anche cat1 vuoto/assente (transazione mai passata da enrichment/regole),
+        // non solo quelle taggate col valore letterale "Non Categorizzato" — richiesta utente 2026-07-19
+        const uncatCount = store.transactions.filter(t => !t.excluded && (!t.cat1 || t.cat1 === 'Non Categorizzato')).length
         if (!uncatCount) return null
         return (
           <div style={{

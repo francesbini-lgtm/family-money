@@ -280,14 +280,19 @@
   padding: 8px;
   border-right: 1px solid var(--border);
   min-width: 180px;
-  max-height: 320px;
+  /* Allungato in verticale (richiesta utente 2026-07-19): con la modale centrata
+     a schermo (vedi regola .cat-dropdown position:fixed più sopra, maxHeight 90vh)
+     il vecchio limite di 320px costringeva la lista L1 a scrollare internamente
+     anche quando c'era ampio spazio libero nella modale — ora cresce fino al 78%
+     dell'altezza dello schermo prima di scrollare, per mostrare tutte le categorie. */
+  max-height: 78vh;
   overflow-y: auto;
 }
 
 .cat-dropdown-l2 {
   padding: 8px;
   min-width: 160px;
-  max-height: 320px;
+  max-height: 78vh;
   overflow-y: auto;
 }
 
