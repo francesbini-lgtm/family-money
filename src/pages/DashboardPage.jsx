@@ -11,8 +11,8 @@ import { hasGeminiKey } from '../data/aiService'
 import { navigateRef } from '../utils/navigate'
 import { getMonthCloseInfo } from '../data/monthStatus'
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar,
+  ResponsiveContainer, XAxis, YAxis,
+  CartesianGrid, Tooltip, BarChart, Bar, LabelList,
   PieChart, Pie, Cell, Legend
 } from 'recharts'
 
@@ -84,6 +84,13 @@ function SaldoChart({ transactions }) {
     return [...yrs].sort()
   }, [sorted])
 
+  // Richiesta utente 2026-07-19: da line chart a istogramma — ogni barra è
+  // divisa in 2 segmenti: "saldoPrec" (saldo di fine periodo precedente,
+  // colore base) + "delta" (variazione di questo periodo rispetto al
+  // precedente, verde se il saldo è cresciuto/risparmio, rosso se è calato).
+  // L'altezza totale della barra rappresenta sempre max(saldoPrec, saldo) —
+  // nel caso normale (saldo in crescita) coincide col saldo reale di fine
+  // periodo, mostrato come label sopra la barra.
   const chartData = useMemo(() => {
     const buckets = {}
     sorted.forEach(tx => {
@@ -96,18 +103,51 @@ function SaldoChart({ transactions }) {
     const keys = Object.keys(buckets).sort()
     let running = 0
     const full = keys.map(k => {
+      const prevRunning = running
       running += buckets[k].net
       const label = view==='M'
         ? MONTHS_SHORT[parseInt(k.slice(5,7))-1]+' '+k.slice(2,4)
         : view==='Q' ? k.replace(/(\d{4})-/,'$1 ') : k
-      return { label, saldo: Math.round(running*100)/100, key:k }
+      const saldo = Math.round(running*100)/100
+      const saldoPrecRounded = Math.round(prevRunning*100)/100
+      const delta = Math.round((running - prevRunning)*100)/100
+      return {
+        label, key:k, saldo,
+        saldoPrec: Math.min(saldoPrecRounded, saldo),
+        delta: Math.abs(delta),
+        isGrowth: delta >= 0,
+      }
     })
     return year==='all' ? full : full.filter(d=>d.key.startsWith(year))
   }, [sorted, view, year])
 
-  const minVal = Math.min(...chartData.map(d=>d.saldo), 0)
-  const maxVal = Math.max(...chartData.map(d=>d.saldo), 0)
-  const pad = (maxVal - minVal) * 0.08
+  const minVal = Math.min(...chartData.map(d=>Math.min(d.saldo, d.saldoPrec)), 0)
+  const maxVal = Math.max(...chartData.map(d=>d.saldoPrec + d.delta), 0)
+  const pad = (maxVal - minVal) * 0.12
+
+  // ── LabelList: totale (saldo reale di fine periodo) sopra la barra ────────
+  function SaldoTotalLabel({ x, y, width, index }) {
+    if (index == null || !chartData[index]) return null
+    return (
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10}
+        fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+        € {fmtIT(Math.round(chartData[index].saldo))}
+      </text>
+    )
+  }
+
+  // ── LabelList: valore del segmento delta dentro la barra (solo se abbastanza spazio) ──
+  function SaldoDeltaLabel({ x, y, width, height, index }) {
+    if (index == null || !chartData[index]) return null
+    const v = chartData[index].delta
+    if (!v || height <= 16) return null
+    return (
+      <text x={x + width / 2} y={y + height / 2 + 4} textAnchor="middle"
+        fontSize={9} fill="#fff" style={{ pointerEvents: 'none' }}>
+        {chartData[index].isGrowth ? '+' : '−'}{fmtIT(Math.round(v))}
+      </text>
+    )
+  }
 
   return (
     <div>
@@ -134,26 +174,42 @@ function SaldoChart({ transactions }) {
           ))}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={180}>
-        <AreaChart data={chartData} margin={{top:8,right:4,bottom:0,left:4}}>
-          <defs>
-            <linearGradient id="saldoGradDB" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.2}/>
-              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-            </linearGradient>
-          </defs>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={chartData} margin={{top:20,right:4,bottom:0,left:4}} barCategoryGap="28%">
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
           <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}
             interval={chartData.length>24?Math.floor(chartData.length/12):0}/>
           <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={58}
             tickFormatter={v=>Math.abs(v)>=1000?`€${(v/1000).toFixed(0)}K`:`€${v}`}
             domain={[minVal-pad, maxVal+pad]}/>
-          <Tooltip formatter={v=>[`€ ${fmtIT(v,2)}`,'Saldo']}
+          <Tooltip
+            formatter={(v,name,props)=>{
+              if (name==='saldoPrec') return [`€ ${fmtIT(props.payload.saldoPrec,2)}`, 'Saldo mese precedente']
+              return [`${props.payload.isGrowth?'+':'−'}€ ${fmtIT(v,2)}`, props.payload.isGrowth ? 'Risparmiato questo mese' : 'Calo questo mese']
+            }}
+            labelFormatter={(label,payload)=> payload?.[0] ? `${label} — Saldo: € ${fmtIT(payload[0].payload.saldo,2)}` : label}
             contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
-          <Area type="monotone" dataKey="saldo" stroke="#3b82f6" strokeWidth={2}
-            fill="url(#saldoGradDB)" dot={false} activeDot={{r:4,fill:'#3b82f6'}}/>
-        </AreaChart>
+          <Bar dataKey="saldoPrec" stackId="a" fill="#94a3b8" isAnimationActive={false} radius={[0,0,0,0]}/>
+          <Bar dataKey="delta" stackId="a" isAnimationActive={false} radius={[4,4,0,0]}>
+            {chartData.map((d,i)=>(
+              <Cell key={i} fill={d.isGrowth ? '#22c55e' : '#ef4444'}/>
+            ))}
+            <LabelList content={<SaldoDeltaLabel/>}/>
+            <LabelList content={<SaldoTotalLabel/>}/>
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
+      <div style={{display:'flex',gap:14,marginTop:8,fontSize:10,color:'var(--text3)'}}>
+        <span style={{display:'flex',alignItems:'center',gap:4}}>
+          <span style={{width:9,height:9,borderRadius:2,background:'#94a3b8',display:'inline-block'}}/> Saldo mese precedente
+        </span>
+        <span style={{display:'flex',alignItems:'center',gap:4}}>
+          <span style={{width:9,height:9,borderRadius:2,background:'#22c55e',display:'inline-block'}}/> Aumento (risparmio)
+        </span>
+        <span style={{display:'flex',alignItems:'center',gap:4}}>
+          <span style={{width:9,height:9,borderRadius:2,background:'#ef4444',display:'inline-block'}}/> Calo
+        </span>
+      </div>
     </div>
   )
 }

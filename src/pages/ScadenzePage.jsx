@@ -37,6 +37,12 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10)
 }
 
+function addYears(dateStr, n) {
+  const d = new Date(dateStr)
+  d.setFullYear(d.getFullYear() + n)
+  return d.toISOString().slice(0, 10)
+}
+
 // ── Ultimo importo pagato per una categoria L2 veicolo (richiesta utente
 // 2026-07-14: "lo trovi guardando quel veicolo, qual'è l'ultima spesa per
 // quella categoria" — niente più importo inserito a mano, si legge dallo
@@ -75,13 +81,15 @@ const URGENCY_BORDER = {
 }
 
 // ── Rinnovo scadenza veicolo (Assicurazione/Tagliando/Revisione) ────────────
-// Chiede solo la nuova data (default: giorno dopo la vecchia scadenza) —
+// Chiede solo la nuova data (default: un anno dopo la vecchia scadenza, dato
+// che queste scadenze — assicurazione/bollo/tagliando — sono tutte annuali;
+// corretto 2026-07-19, prima suggeriva erroneamente +1 giorno) —
 // aggiorna v[fieldKey]. L'importo NON si chiede più qui: viene letto in
 // automatico dall'ultima spesa registrata per quella categoria/veicolo
 // (vedi lastCategoryExpense) non appena l'utente registra la spesa in
 // Uscite › Veicoli.
 function RenewModal({ s, onSave, onClose }) {
-  const [data, setData] = useState(addDays(s.data, 1))
+  const [data, setData] = useState(addYears(s.data, 1))
 
   function save() {
     if (!data) return

@@ -323,6 +323,7 @@ export default function UscitePage() {
   const [selected, setSelected] = useState(null) // { cat1, cat2|null, monthKey } | { _nonRecurring: true, monthKey }
   const [showNonRecurring, setShowNonRecurring] = useState(false) // toggle riga non ricorrenti
   const [adjVacanze, setAdjVacanze] = useState(true) // toggle: netto carburante/autostrada imputati manualmente nelle vacanze — sempre attivo di default
+  const [showEntrate, setShowEntrate] = useState(false) // richiesta utente 2026-07-19: tabella Entrate + riconciliazione risparmio
   const [openTx, setOpenTx] = useState(null)
 
   // ── Build expense list ────────────────────────────────────────────────────
@@ -598,6 +599,92 @@ export default function UscitePage() {
     return t
   }, [expenses, months])
 
+  // ── Entrate per persona (Fra/Sofi) + riconciliazione col risparmio reale ──
+  // Richiesta utente 2026-07-19: checkbox "Mostra Entrate" apre una tabella
+  // sotto quella di Uscite con la scomposizione delle entrate per persona e
+  // un delta rispetto al risparmio "reale" (stessa logica di RisparmioPage:
+  // TUTTE le entrate nette positive meno TUTTE le uscite nette non-Entrate,
+  // indipendente da adjVacanze/showNonRecurring) — per far emergere scostamenti
+  // dovuti ad altre entrate (Prestiti/Altro) o a importi non ancora categorizzati.
+  const incomeByPersonMonth = useMemo(() => {
+    const map = {} // cat2 -> monthKey -> total
+    const monthKeys = new Set(months.map(m => m.key))
+    transactions.forEach(t => {
+      if (t.excluded && !t._forcedBalance) return
+      if (!(t.amount > 0) || t.cat1 !== 'Entrate') return
+      const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
+      if (!monthKeys.has(ym)) return
+      const cat2 = t.cat2 || 'Altro'
+      if (!map[cat2]) map[cat2] = {}
+      map[cat2][ym] = (map[cat2][ym] || 0) + netAmt(t)
+    })
+    return map
+  }, [transactions, months])
+
+  const entrateTotalByMonth = useMemo(() => {
+    const t = {}
+    months.forEach(m => {
+      t[m.key] = ['Fra', 'Sofi'].reduce((s, p) => s + (incomeByPersonMonth[p]?.[m.key] || 0), 0)
+    })
+    return t
+  }, [months, incomeByPersonMonth])
+
+  // Risparmiato secondo QUESTA tabella = Entrate (Fra+Sofi) − Uscite (stesso
+  // totale mostrato sopra, rispettando showNonRecurring)
+  const risparmiatoByMonth = useMemo(() => {
+    const t = {}
+    months.forEach(m => {
+      const usc = showNonRecurring
+        ? Math.max(0, (monthTotals[m.key] || 0) - (nonRecurringByMonth[m.key] || 0))
+        : (monthTotals[m.key] || 0)
+      t[m.key] = (entrateTotalByMonth[m.key] || 0) - usc
+    })
+    return t
+  }, [months, entrateTotalByMonth, monthTotals, nonRecurringByMonth, showNonRecurring])
+
+  // Risparmio REALE dello sheet Risparmio (stessa formula di RisparmioPage.mSav):
+  // tutte le transazioni con importo positivo (netto) meno tutte quelle negative
+  // non-Entrate (netto, con esplosione split Satispay come nelle Uscite sopra) —
+  // ignora completamente cat2/persona e adjVacanze/showNonRecurring.
+  const realSavingByMonth = useMemo(() => {
+    const t = {}
+    const activeTxs = transactions.filter(tx => !tx.excluded || tx._forcedBalance)
+    months.forEach(m => {
+      const ym = m.key
+      let inc = 0, exp = 0
+      activeTxs.forEach(tx => {
+        const txYm = (tx._effDate || tx.competenza || tx.date || '').slice(0, 7)
+        if (txYm !== ym) return
+        if (tx.amount > 0) { inc += netAmt(tx); return }
+        if (tx.cat1 === 'Entrate') return
+        if (isSatiLinked(tx)) {
+          tx.splits.forEach(sp => { if (sp.amount > 0) exp += sp.amount })
+        } else {
+          exp += Math.abs(netAmt(tx))
+        }
+      })
+      t[ym] = inc - exp
+    })
+    return t
+  }, [transactions, months])
+
+  const deltaByMonth = useMemo(() => {
+    const t = {}
+    months.forEach(m => { t[m.key] = (risparmiatoByMonth[m.key] || 0) - (realSavingByMonth[m.key] || 0) })
+    return t
+  }, [months, risparmiatoByMonth, realSavingByMonth])
+
+  function avg6(obj) {
+    const vals = months.map(m => obj[m.key] || 0)
+    return vals.reduce((s, v) => s + v, 0) / 6
+  }
+
+  function eurSigned(n) {
+    const r = Math.round(n || 0)
+    if (Math.abs(r) < 1) return '—'
+    return `${r >= 0 ? '+' : '−'}${fmtIT(Math.abs(r))}`
+  }
+
   const nonRecurringDataMap = useMemo(() => {
     const map = {}
     expenses.filter(t => t._nonRecurring).forEach(t => {
@@ -862,8 +949,10 @@ export default function UscitePage() {
         <div style={{display:'flex',alignItems:'center',gap:4,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:'3px 6px'}}>
           <button onClick={() => setMonthOffset(o => o - 1)}
             style={{border:'none',background:'none',cursor:'pointer',fontSize:16,color:'var(--text2)',padding:'0 4px',lineHeight:1}}>‹</button>
-          <span style={{fontSize:11,fontWeight:600,color:'var(--text3)',minWidth:90,textAlign:'center'}}>
-            {monthOffset === 0 ? 'ultimi 6 mesi' : `${Math.abs(monthOffset)} mes${Math.abs(monthOffset)===1?'e':'i'} fa`}
+          {/* Richiesta utente 2026-07-19: range mesi esplicito (es. "NOV25 - APR26")
+              invece di "ultimi 6 mesi"/"N mesi fa" — più leggibile su ogni offset */}
+          <span style={{fontSize:11,fontWeight:600,color:'var(--text3)',minWidth:110,textAlign:'center',fontFamily:'var(--font-mono)'}}>
+            {months[0].label.replace(' ','').toUpperCase()} - {months[months.length-1].label.replace(' ','').toUpperCase()}
           </span>
           <button onClick={() => setMonthOffset(o => Math.min(0, o + 1))}
             disabled={monthOffset === 0}
@@ -885,6 +974,14 @@ export default function UscitePage() {
         >
           <span className="uscite-sati-dot" style={{background: adjVacanze ? '#6366f1' : undefined}}/>
           Adj vacanze
+        </button>
+        <button
+          className={'uscite-sati-toggle' + (showEntrate ? ' active' : '')}
+          onClick={() => setShowEntrate(v => !v)}
+          title="Mostra sotto la tabella una scomposizione delle Entrate per persona e il confronto col risparmio reale"
+        >
+          <span className="uscite-sati-dot" style={{background: showEntrate ? '#2a7a4a' : undefined}}/>
+          💰 Mostra Entrate
         </button>
       </div>
 
@@ -1070,6 +1167,86 @@ export default function UscitePage() {
             Nota (*): Media/mese = totale periodo ÷ 6
             {adjVacanze && <><br/>Nota (**): Carburante e Autostrada sono al netto delle vacanze</>}
           </div>
+
+          {/* Tabella Entrate + riconciliazione risparmio — richiesta utente 2026-07-19,
+              apribile col toggle "💰 Mostra Entrate" nella barra sopra */}
+          {showEntrate && (
+            <div style={{marginTop:16,borderTop:'2px solid var(--border)',paddingTop:14}}>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:8,color:'var(--text2)',padding:'0 14px'}}>
+                💰 Entrate e riconciliazione risparmio
+              </div>
+              <table className="uscite-table">
+                <thead>
+                  <tr>
+                    <th className="uscite-th-cat">Categoria (€)</th>
+                    {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
+                    <th className="uscite-th-total">Media/mese (*)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="uscite-tr-l1">
+                    <td className="uscite-td-cat l1">
+                      <span className="uscite-cat-dot" style={{ background: '#2a7a4a' }}/>
+                      <span className="uscite-cat-name">Entrate</span>
+                    </td>
+                    {months.map(m => (
+                      <td key={m.key} className="uscite-td-val l1">{eur(entrateTotalByMonth[m.key] || 0)}</td>
+                    ))}
+                    <td className="uscite-td-val l1 row-total">{eur(avg6(entrateTotalByMonth))}</td>
+                  </tr>
+                  {['Fra', 'Sofi'].map(person => (
+                    <tr key={person} className="uscite-tr-l2">
+                      <td className="uscite-td-cat l2">
+                        <span className="uscite-l2-label">
+                          {CATS['Entrate']?.subEmojis?.[person] || ''} {person}
+                        </span>
+                      </td>
+                      {months.map(m => (
+                        <td key={m.key} className="uscite-td-val l2">{eur(incomeByPersonMonth[person]?.[m.key] || 0)}</td>
+                      ))}
+                      <td className="uscite-td-val l2 row-total">{eur(avg6(incomeByPersonMonth[person] || {}))}</td>
+                    </tr>
+                  ))}
+                  <tr className="uscite-tr-grand">
+                    <td className="uscite-td-cat">Totale risparmiato</td>
+                    {months.map(m => {
+                      const v = risparmiatoByMonth[m.key] || 0
+                      return (
+                        <td key={m.key} className="uscite-td-val grand"
+                          style={{ color: v >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {eurSigned(v)}
+                        </td>
+                      )
+                    })}
+                    <td className="uscite-td-val grand">{eurSigned(avg6(risparmiatoByMonth))}</td>
+                  </tr>
+                  <tr>
+                    <td className="uscite-td-cat" style={{ fontStyle: 'italic', fontWeight: 400, color: 'var(--text3)' }}>
+                      Δ vs risparmio reale (sheet Risparmio)
+                    </td>
+                    {months.map(m => {
+                      const d = deltaByMonth[m.key] || 0
+                      const ok = Math.abs(d) < 1
+                      return (
+                        <td key={m.key} className="uscite-td-val"
+                          style={{ fontStyle: 'italic', fontWeight: 400, color: ok ? 'var(--text3)' : (d >= 0 ? 'var(--green)' : 'var(--red)') }}>
+                          {ok ? '✓' : eurSigned(d)}
+                        </td>
+                      )
+                    })}
+                    <td className="uscite-td-val" style={{ fontStyle: 'italic', fontWeight: 400 }}>
+                      {eurSigned(avg6(deltaByMonth))}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{ padding: '8px 14px 0', fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>
+                Il delta (Δ) confronta il risparmiato Fra+Sofi con il risparmio reale calcolato come nella sezione Risparmio
+                (tutte le entrate meno tutte le uscite, indipendentemente dalla persona) — uno scostamento diverso da zero
+                indica altre entrate (Prestiti/Altro) o importi non ancora categorizzati come "Entrate".
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Detail panel */}

@@ -228,10 +228,13 @@ function Message({ msg }) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function AIChatPage() {
+  // Richiesta utente 2026-07-19: rimossa la sub-tab "Chat" — l'esperienza
+  // chat era già interamente presente (colonna centrale) dentro "Insights",
+  // quindi la tab standalone era ridondante; ora la pagina mostra sempre
+  // il layout a 3 colonne, senza più bisogno di uno switch di tab.
   const { transactions, aiChatHistory, addChatMessage, clearChat } = useStore()
   const [input,   setInput]   = useState('')
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState('chat') // 'insights' | 'chat'
   const bottomRef = useRef(null)
   const inputRef  = useRef(null)
 
@@ -245,7 +248,6 @@ export default function AIChatPage() {
     const msg = text || input.trim()
     if (!msg || loading) return
     setInput('')
-    if (activeTab !== 'chat') setActiveTab('chat')
     addChatMessage({ role: 'user', content: msg })
     setLoading(true)
     try {
@@ -261,7 +263,7 @@ export default function AIChatPage() {
   }
 
   return (
-    <div className="chat-page" style={activeTab==='insights' ? {maxWidth:'100%',margin:0} : {}}>
+    <div className="chat-page" style={{maxWidth:'100%',margin:0}}>
       {/* Header */}
       <div className="chat-header">
         <div className="chat-header-left">
@@ -280,24 +282,6 @@ export default function AIChatPage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{display:'flex',borderBottom:'1px solid var(--border)',flexShrink:0}}>
-        {[{id:'insights',label:'✨ Insights'},{id:'chat',label:'💬 Chat'}].map(t=>(
-          <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{
-            padding:'10px 20px',border:'none',background:'none',cursor:'pointer',
-            fontSize:13,fontWeight:600,fontFamily:'var(--font-sans)',
-            color:activeTab===t.id?'var(--accent)':'var(--text3)',
-            borderBottom:activeTab===t.id?'2px solid var(--accent)':'2px solid transparent',
-          }}>{t.label}
-            {t.id==='chat'&&aiChatHistory.length>0&&(
-              <span style={{marginLeft:6,background:'var(--accent)',color:'#fff',borderRadius:10,fontSize:10,padding:'1px 6px',fontWeight:700}}>
-                {aiChatHistory.length}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
       {isEmpty ? (
         <div className="chat-empty">
           <Sparkles size={32} color="var(--gold)" />
@@ -308,8 +292,8 @@ export default function AIChatPage() {
         </div>
       ) : (
         <>
-          {/* INSIGHTS TAB — 3 col layout */}
-          {activeTab === 'insights' && (
+          {/* Layout unico a 3 colonne (era la tab "Insights") */}
+          {(
             <div style={{flex:1,display:'grid',gridTemplateColumns:'260px 1fr 260px',overflow:'hidden'}}>
 
               {/* LEFT — insight cards */}
@@ -381,51 +365,7 @@ export default function AIChatPage() {
               </div>
             </div>
           )}
-
-          {/* CHAT TAB */}
-          {activeTab === 'chat' && (
-            <div className="chat-messages">
-              {aiChatHistory.length === 0 && (
-                <div className="chat-welcome">
-                  <div className="chat-welcome-icon">💬</div>
-                  <div className="chat-welcome-title">Chiedimi qualsiasi cosa</div>
-                  <div className="chat-welcome-sub">
-                    Ho accesso alle tue {transactions.length} transazioni. Vai su <strong>Insights</strong> per idee su cosa chiedermi.
-                  </div>
-                </div>
-              )}
-              {aiChatHistory.map((msg, i) => <Message key={i} msg={msg} />)}
-              {loading && (
-                <div className="chat-msg chat-msg-ai">
-                  <div className="chat-avatar"><Sparkles size={14} color="var(--gold)" /></div>
-                  <div className="chat-bubble bubble-ai bubble-loading"><span /><span /><span /></div>
-                </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-          )}
         </>
-      )}
-
-      {/* Input — only for chat tab (insights has its own embedded input) */}
-      {!isEmpty && activeTab === 'chat' && (
-        <div className="chat-input-wrap">
-          <div className="chat-input-bar">
-            <input
-              ref={inputRef}
-              className="chat-input"
-              placeholder="Chiedi qualcosa sulle tue finanze…"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              disabled={loading}
-            />
-            <button className="btn btn-primary chat-send" onClick={() => sendMessage()} disabled={loading || !input.trim()}>
-              <Send size={14} />
-            </button>
-          </div>
-          <div className="chat-input-hint">Invio per inviare · Gemini AI · dati privati su Firebase</div>
-        </div>
       )}
     </div>
   )
