@@ -1181,9 +1181,13 @@ export default function UscitePage() {
                     <th className="uscite-th-cat">Categoria (€)</th>
                     {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
                     <th className="uscite-th-total">Media/mese (*)</th>
+                    <th className="uscite-th-total">%</th>
                   </tr>
                 </thead>
                 <tbody>
+                  {(() => {
+                    const entrateAvg = avg6(entrateTotalByMonth)
+                    return (
                   <tr className="uscite-tr-l1">
                     <td className="uscite-td-cat l1">
                       <span className="uscite-cat-dot" style={{ background: '#2a7a4a' }}/>
@@ -1192,9 +1196,15 @@ export default function UscitePage() {
                     {months.map(m => (
                       <td key={m.key} className="uscite-td-val l1">{eur(entrateTotalByMonth[m.key] || 0)}</td>
                     ))}
-                    <td className="uscite-td-val l1 row-total">{eur(avg6(entrateTotalByMonth))}</td>
+                    <td className="uscite-td-val l1 row-total">{eur(entrateAvg)}</td>
+                    <td className="uscite-td-pct">{entrateAvg > 0 ? '100%' : '—'}</td>
                   </tr>
-                  {['Fra', 'Sofi'].map(person => (
+                    )
+                  })()}
+                  {['Fra', 'Sofi'].map(person => {
+                    const entrateAvg = avg6(entrateTotalByMonth)
+                    const personAvg  = avg6(incomeByPersonMonth[person] || {})
+                    return (
                     <tr key={person} className="uscite-tr-l2">
                       <td className="uscite-td-cat l2">
                         <span className="uscite-l2-label">
@@ -1204,9 +1214,11 @@ export default function UscitePage() {
                       {months.map(m => (
                         <td key={m.key} className="uscite-td-val l2">{eur(incomeByPersonMonth[person]?.[m.key] || 0)}</td>
                       ))}
-                      <td className="uscite-td-val l2 row-total">{eur(avg6(incomeByPersonMonth[person] || {}))}</td>
+                      <td className="uscite-td-val l2 row-total">{eur(personAvg)}</td>
+                      <td className="uscite-td-pct">{entrateAvg > 0 ? Math.round(personAvg / entrateAvg * 100) + '%' : '—'}</td>
                     </tr>
-                  ))}
+                    )
+                  })}
                   <tr className="uscite-tr-grand">
                     <td className="uscite-td-cat">Totale risparmiato</td>
                     {months.map(m => {
@@ -1219,6 +1231,7 @@ export default function UscitePage() {
                       )
                     })}
                     <td className="uscite-td-val grand">{eurSigned(avg6(risparmiatoByMonth))}</td>
+                    <td className="uscite-td-pct">—</td>
                   </tr>
                   <tr>
                     <td className="uscite-td-cat" style={{ fontStyle: 'italic', fontWeight: 400, color: 'var(--text3)' }}>
@@ -1237,6 +1250,7 @@ export default function UscitePage() {
                     <td className="uscite-td-val" style={{ fontStyle: 'italic', fontWeight: 400 }}>
                       {eurSigned(avg6(deltaByMonth))}
                     </td>
+                    <td className="uscite-td-pct" style={{ fontStyle: 'italic' }}>—</td>
                   </tr>
                 </tbody>
               </table>

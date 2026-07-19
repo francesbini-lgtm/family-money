@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 // Importi NETTI post-compensazione (consolidamento 2026-07-12)
 import { netAmt } from '../data/compensation'
@@ -639,6 +639,16 @@ export default function EntratePage() {
   const [monthOffset, setMonthOffset]           = useState(0)
   const [chartBonusSeparate, setChartBonusSeparate] = useState(true)
   useEffect(() => { setMonthOffset(0) }, [period])
+  // Richiesta utente 2026-07-19: click sull'anno in "📅 Storico per Anno" apre
+  // sotto il breakdown mensile di quell'anno
+  const [expandedYears, setExpandedYears] = useState(new Set())
+  function toggleYear(year) {
+    setExpandedYears(prev => {
+      const next = new Set(prev)
+      next.has(year) ? next.delete(year) : next.add(year)
+      return next
+    })
+  }
 
   // RAL / Netto chart state — read directly from appPrefs (reactive via Zustand)
   const ralData     = appPrefs?.ralData     || DEFAULT_RAL_DATA
@@ -747,6 +757,21 @@ export default function EntratePage() {
     })
   , [allYears, incomeTxs, bonusMap])
 
+  // Breakdown mensile per un dato anno — usato quando si espande una riga in
+  // "📅 Storico per Anno" (richiesta utente 2026-07-19)
+  function monthlyBreakdownForYear(year) {
+    const rows = []
+    for (let m = 1; m <= 12; m++) {
+      const ym = `${year}-${String(m).padStart(2, '0')}`
+      const txs = incomeTxs.filter(t => (t._effDate||t.date).startsWith(ym))
+      if (txs.length === 0) continue
+      const fra  = txs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + netAmt(t), 0)
+      const sofi = txs.filter(t => t.cat2 === 'Sofi').reduce((s,t) => s + netAmt(t), 0)
+      rows.push({ ym, label: MON_IT[m-1], fra, sofi, total: fra + sofi })
+    }
+    return rows
+  }
+
   // ── Transactions by year (all, newest first) ──────────
   const txsByYear = useMemo(() => {
     const sorted = [...incomeTxs].sort((a, b) => b.date.localeCompare(a.date))
@@ -790,6 +815,20 @@ export default function EntratePage() {
   // base (Fra/Sofi) — niente voce separata per il bonus, anche quando è
   // scorporato nel chart (si distingue lì solo per tonalità più chiara)
   const legendCats = activeCats.filter(c => c === 'Fra' || c === 'Sofi')
+
+  // Richiesta utente 2026-07-19 (bug in modalità "con bonus"): il totale non
+  // compariva più sopra le colonne perché era agganciato SEMPRE alla stessa
+  // categoria globale (l'ultima di activeCats, es. "Sofi-Bonus") — quando quella
+  // categoria vale 0 in un dato mese (il bonus non è mensile, capita 1-2 volte
+  // l'anno), la label si posiziona in modo inaffidabile. Ora si sceglie, PER OGNI
+  // colonna, l'ultima categoria con valore > 0 in quella colonna specifica —
+  // garantisce sempre un segmento con altezza reale a cui agganciare la label.
+  function topCatForIndex(index) {
+    for (let i = activeCats.length - 1; i >= 0; i--) {
+      if ((chartDataDisplay[index]?.[activeCats[i]] || 0) > 0) return activeCats[i]
+    }
+    return topCat
+  }
 
   // Richiesta utente 2026-07-19: totale in alto su ogni colonna dell'istogramma
   // "Entrate per fonte (Fra + Sofi)", in formato breve (es. "50k" non "€50.000")
@@ -962,7 +1001,10 @@ export default function EntratePage() {
                       {activeCats.map(cat => (
                         <Bar key={cat} dataKey={cat} name={cat} fill={COLORS[cat]} stackId="a"
                           radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}>
-                          {cat === topCat && <LabelList content={<IncomeBarTotalLabel/>}/>}
+                          <LabelList content={(props) =>
+                            (props.index != null && topCatForIndex(props.index) === cat)
+                              ? <IncomeBarTotalLabel {...props}/> : null
+                          }/>
                         </Bar>
                       ))}
                     </BarChart>
@@ -1083,10 +1125,15 @@ export default function EntratePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {yearlyHistory.map((y, i) => (
-                    <tr key={y.year} style={{borderBottom:'1px solid var(--border)',
+                  {yearlyHistory.map((y, i) => {
+                    const expanded = expandedYears.has(y.year)
+                    return (
+                    <Fragment key={y.year}>
+                    <tr onClick={() => toggleYear(y.year)}
+                      style={{borderBottom:'1px solid var(--border)',cursor:'pointer',
                       background: i===0 ? 'var(--accent-l)' : 'transparent'}}>
                       <td style={{padding:'10px 12px',fontWeight:700,fontSize:14}}>
+                        <span style={{display:'inline-block',width:14,fontSize:11,color:'var(--text3)'}}>{expanded?'▾':'▸'}</span>
                         {y.year}
                         {i===0 && <span style={{marginLeft:6,fontSize:10,padding:'1px 6px',
                           borderRadius:10,background:'var(--accent)',color:'#fff'}}>Corrente</span>}
@@ -1105,7 +1152,25 @@ export default function EntratePage() {
                       </td>
                       <td style={{padding:'10px 12px',fontSize:12,color:'var(--text3)'}}>{y.months}</td>
                     </tr>
-                  ))}
+                    {expanded && monthlyBreakdownForYear(y.year).map(mr => (
+                      <tr key={mr.ym} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+                        <td style={{padding:'6px 12px 6px 32px',fontSize:12,color:'var(--text3)'}}>{mr.label}</td>
+                        <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12}}>
+                          <span style={{color:COLORS.Fra}}>€ {fmtIT(mr.fra,0)}</span>
+                        </td>
+                        <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12}}>
+                          <span style={{color:COLORS.Sofi}}>€ {fmtIT(mr.sofi,0)}</span>
+                        </td>
+                        <td style={{padding:'6px 12px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:600}}>
+                          € {fmtIT(mr.total,0)}
+                        </td>
+                        <td/>
+                        <td/>
+                      </tr>
+                    ))}
+                    </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
