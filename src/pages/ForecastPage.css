@@ -55,7 +55,15 @@
 .fc-mortgage-toggle input { display: none; }
 
 .fc-mortgage-fields {
-  display: grid; grid-template-columns: 1fr 1fr;
+  /* Un campo per riga (era una griglia 2 colonne) — richiesta utente 2026-07-19
+     con screenshot: anche con grid-template-columns:1fr 1fr le celle TAEG/Durata
+     restavano troppo strette per contenere comodamente il valore, perché la
+     colonna sinistra (Importo/Anticipo) ha un min-content maggiore (placeholder
+     "200.000") che nella pratica si "mangiava" spazio da quella di destra dentro
+     la sidebar a larghezza fissa (.fc-layout, 300px). Un solo campo per riga dà a
+     TUTTI i campi la piena larghezza disponibile, niente più competizione fra colonne.
+  */
+  display: flex; flex-direction: column;
   gap: 12px; margin-bottom: 14px;
 }
 

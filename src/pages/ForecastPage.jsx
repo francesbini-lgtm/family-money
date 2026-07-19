@@ -75,7 +75,7 @@ function calcMortgage(capital, rateAnnual, durationYears) {
   if (!Number.isFinite(capital) || capital <= 0 ||
       !Number.isFinite(durationYears) || durationYears <= 0 ||
       !Number.isFinite(rateAnnual)) {
-    return { rata: 0, residuals: [] }
+    return { rata: 0, residuals: [], monthlyResiduals: [] }
   }
   const r = rateAnnual / 100 / 12
   const n = durationYears * 12
@@ -83,16 +83,20 @@ function calcMortgage(capital, rateAnnual, durationYears) {
     ? capital / n
     : capital * r * Math.pow(1+r, n) / (Math.pow(1+r, n) - 1)
   const residuals = []
+  // Residuo mese per mese (oltre a quello annuale già esistente) — richiesta
+  // utente 2026-07-19 per la vista "Proiezione Mensile" del piano ammortamento.
+  const monthlyResiduals = []
   let balance = capital
   for (let y = 0; y < durationYears; y++) {
     for (let m = 0; m < 12; m++) {
       const interest  = balance * r
       const principal = rata - interest
       balance = Math.max(0, balance - principal)
+      monthlyResiduals.push(Math.round(balance))
     }
     residuals.push(Math.round(balance))
   }
-  return { rata: Math.round(rata * 100) / 100, residuals }
+  return { rata: Math.round(rata * 100) / 100, residuals, monthlyResiduals }
 }
 
 // ── Money field with thousands separator (visual only, valore numerico puro) ──
@@ -229,6 +233,9 @@ export default function ForecastPage() {
   const excludedMonths = appPrefs?.forecastExcludedMonths || []
 
   const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
+  // Vista tabella "Proiezione" — richiesta utente 2026-07-19: poter scegliere fra
+  // proiezione annuale (una riga per anno) o mensile (una riga per mese)
+  const [projectionView, setProjectionView] = useState('annuale') // 'annuale' | 'mensile'
 
   // Adjustable parameters
   const [growth,    setGrowth]    = useState(2)
@@ -486,6 +493,57 @@ export default function ForecastPage() {
     }
     return pts
   }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAnticipo])
+
+  // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
+  // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
+  // stessa logica di forecastData ma un punto per mese invece che per anno.
+  // Crescita/inflazione composte mensilmente (tasso annuo elevato a 1/12) così
+  // il valore di fine anno resta coerente con quello della vista annuale.
+  const forecastDataMonthly = useMemo(() => {
+    const now = new Date()
+    const totalMonths = years * 12
+    const pts = []
+    let saldo = currentSaldo
+    let inc   = avgIncomeEffective
+    let exp   = effectiveExpense
+    const gMonthly = Math.pow(1 + growth / 100, 1 / 12)
+    const iMonthly = Math.pow(1 + inflation / 100, 1 / 12)
+    const mortgageStartYM = mortgageStart || null
+    let anticipoApplied = false
+
+    for (let m = 0; m <= totalMonths; m++) {
+      const d  = new Date(now.getFullYear(), now.getMonth() + m, 1)
+      const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+      const mortgageActive  = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM
+      const mortgageMonthly = mortgageActive ? mortgage.rata : 0
+
+      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageStartYM && ym >= mortgageStartYM) {
+        saldo -= mortgageAnticipo
+        anticipoApplied = true
+      }
+      saldo += (inc - exp - mortgageMonthly)
+
+      let monthsIntoMortgage = -1
+      if (mortgageActive && mortgageStartYM) {
+        const [sy, sm] = mortgageStartYM.split('-').map(Number)
+        monthsIntoMortgage = (d.getFullYear() - sy) * 12 + (d.getMonth() + 1 - sm)
+      }
+      const residual = (mortgageActive && monthsIntoMortgage >= 0 && monthsIntoMortgage < mortgage.monthlyResiduals.length)
+        ? mortgage.monthlyResiduals[monthsIntoMortgage]
+        : (mortgageOn && mortgageStartYM && ym >= mortgageStartYM ? 0 : null)
+
+      pts.push({
+        label:    ymToLabel(ym),
+        ym,
+        forecast: Math.round(saldo),
+        residual: residual !== null ? residual : undefined,
+      })
+
+      inc *= gMonthly
+      exp *= iMonthly
+    }
+    return pts
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -946,20 +1004,35 @@ export default function ForecastPage() {
 
           {/* Projection table */}
           <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',fontSize:14,fontWeight:700,background:'var(--surface2)',display:'flex',alignItems:'center',gap:10}}>
-              📋 Proiezione Annuale
+            <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',fontSize:14,fontWeight:700,background:'var(--surface2)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              📋 Proiezione {projectionView === 'annuale' ? 'Annuale' : 'Mensile'}
               {savedPerMonth > 0 && (
                 <span style={{fontSize:11,fontWeight:500,color:'var(--green)',padding:'2px 8px',background:'rgba(50,180,100,.1)',borderRadius:5}}>
                   🤔 what if incluso
                 </span>
               )}
+              {/* Toggle Annuale/Mensile — richiesta utente 2026-07-19 */}
+              <div style={{marginLeft:'auto',display:'flex',gap:4,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
+                {[{v:'annuale',l:'Annuale'},{v:'mensile',l:'Mensile'}].map(opt=>(
+                  <button key={opt.v} onClick={()=>setProjectionView(opt.v)}
+                    style={{padding:'4px 12px',borderRadius:6,border:'none',
+                      background:projectionView===opt.v?'var(--accent)':'none',
+                      color:projectionView===opt.v?'#fff':'var(--text3)',
+                      fontWeight:projectionView===opt.v?700:500,cursor:'pointer',fontSize:11,
+                      fontFamily:'var(--font-sans)'}}>
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
             </div>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr>
                   {[
-                    'Anno','Entrate annue','Spese annue',
-                    mortgageOn ? 'Rata mutuo annua' : null,
+                    projectionView === 'annuale' ? 'Anno' : 'Mese',
+                    projectionView === 'annuale' ? 'Entrate annue' : 'Entrate mensili',
+                    projectionView === 'annuale' ? 'Spese annue' : 'Spese mensili',
+                    mortgageOn ? (projectionView === 'annuale' ? 'Rata mutuo annua' : 'Rata mutuo') : null,
                     mortgageOn && mortgageAnticipo > 0 ? 'Anticipo' : null,
                     'Cash flow','Saldo previsto',
                     mortgageOn ? 'Debito residuo' : null,
@@ -967,13 +1040,14 @@ export default function ForecastPage() {
                     <th key={h} style={{padding:'8px 12px',fontSize:10,fontWeight:700,
                       letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',
                       background:'var(--surface2)',borderBottom:'1px solid var(--border)',
-                      textAlign: h==='Anno' ? 'left' : 'right', whiteSpace:'nowrap'}}>{h}</th>
+                      textAlign: (h==='Anno'||h==='Mese') ? 'left' : 'right', whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {/* Historical years (real data) */}
-                {historicalTableData.map(d => {
+                {/* Storico reale — solo nella vista Annuale (i dati storici mensili
+                    non sono calcolati in questa pagina) */}
+                {projectionView === 'annuale' && historicalTableData.map(d => {
                   const cf = d.inc - d.exp
                   return (
                     <tr key={d.label} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
@@ -1000,8 +1074,8 @@ export default function ForecastPage() {
                     </tr>
                   )
                 })}
-                {/* Forecast rows — una riga per ogni anno, nessun anno saltato */}
-                {forecastData
+                {/* Forecast rows — vista Annuale: una riga per ogni anno, nessun anno saltato */}
+                {projectionView === 'annuale' && forecastData
                   .map((d) => {
                     const year = parseInt(d.label)
                     const yOffset = year - now.getFullYear()
@@ -1027,6 +1101,50 @@ export default function ForecastPage() {
                         {mortgageOn && mortgageAnticipo > 0 && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
                             {year === mortgageStartYear ? `−€ ${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                          </td>
+                        )}
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                          color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
+                          {cf>=0?'+':''}€ {fmtIT(Math.abs(Math.round(cf)), 0)}
+                        </td>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                          fontWeight:700,color:'var(--accent)',fontSize:12}}>
+                          € {fmtIT(d.forecast, 0)}
+                        </td>
+                        {mortgageOn && (
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                            color:'var(--blue)',fontSize:12}}>
+                            {d.residual != null ? `€ ${fmtIT(d.residual, 0)}` : '—'}
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                {/* Forecast rows — vista Mensile: una riga per ogni mese proiettato */}
+                {projectionView === 'mensile' && forecastDataMonthly
+                  .map((d) => {
+                    const mortgageActive = mortgageOn && mortgageStart && d.ym >= mortgageStart
+                    const rataMese = mortgageActive ? mortgage.rata : 0
+                    const inc = avgIncomeEffective
+                    const exp = effectiveExpense
+                    const cf = (inc - exp) - rataMese
+                    return (
+                      <tr key={d.ym} style={{borderBottom:'1px solid var(--border)'}}>
+                        <td style={{padding:'8px 12px',fontWeight:700}}>{d.label}</td>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
+                          € {fmtIT(Math.round(inc), 0)}
+                        </td>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                          € {fmtIT(Math.round(exp), 0)}
+                        </td>
+                        {mortgageOn && (
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12}}>
+                            {rataMese > 0 ? `€ ${fmtIT(Math.round(rataMese), 0)}` : '—'}
+                          </td>
+                        )}
+                        {mortgageOn && mortgageAnticipo > 0 && (
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                            {mortgageStart && d.ym === mortgageStart ? `−€ ${fmtIT(mortgageAnticipo, 0)}` : '—'}
                           </td>
                         )}
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',

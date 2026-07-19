@@ -202,8 +202,11 @@ export default function PatrimonioPage() {
       const prev = parseFloat(v.valoreMercatoPrev)
       const pctChange = (prev > 0 && cur !== prev) ? ((cur - prev) / prev) * 100 : null
       return {
+        // updatedAt = data reale dell'ultima stima valore (AI auto mensile o
+        // manuale ✨), NON la data odierna — richiesta utente 2026-07-19:
+        // "la data deve essere la data di aggiornamento del valore"
         id: 'veh_' + v.id, name: v.name, cat: 'Veicoli', value: cur,
-        type: 'asset', updatedAt: new Date().toISOString().slice(0, 10), readonly: true,
+        type: 'asset', updatedAt: v.valoreMercatoAggiornato || '—', readonly: true,
         pctChange,
       }
     })
