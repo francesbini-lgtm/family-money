@@ -450,7 +450,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
       <div style={{background:'var(--surface)',borderRadius:14,padding:'24px 28px',maxWidth:640,width:'94%',
         boxShadow:'0 16px 48px rgba(0,0,0,.25)',maxHeight:'90vh',display:'flex',flexDirection:'column'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-          <div style={{fontSize:16,fontWeight:800}}>🔗 Abbina a Transazione</div>
+          <div style={{fontSize:16,fontWeight:800}}>🔗 Compensa con Transazione</div>
           <button onClick={onClose} style={{border:'none',background:'transparent',cursor:'pointer',fontSize:18,color:'var(--text3)'}}>✕</button>
         </div>
 
@@ -587,11 +587,11 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
           </div>
         )}
 
-        {saved && <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,marginBottom:12,fontSize:12,color:'var(--green)',fontWeight:600}}>✅ Abbinamento salvato!</div>}
+        {saved && <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,marginBottom:12,fontSize:12,color:'var(--green)',fontWeight:600}}>✅ Compensazione salvata!</div>}
 
         <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
           <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
-          <button className="btn btn-primary" onClick={confirm} disabled={!selected||saved}>Conferma abbinamento</button>
+          <button className="btn btn-primary" onClick={confirm} disabled={!selected||saved}>Conferma compensazione</button>
         </div>
       </div>
     </div>
@@ -990,23 +990,28 @@ export default function AltreEntratePage() {
                       {!compLink && !isCompensated(e) && (
                         <button className="btn btn-ghost" style={{fontSize:11,color:'var(--blue)',border:'1px solid var(--blue)',borderRadius:6,padding:'2px 8px'}}
                           onClick={()=>setCompensaEntry(e)}>
-                          🔗 Abbina
+                          🔗 Compensa
                         </button>
                       )}
                       {/* Bug 2026-07-15: compensata direttamente (es. da Satispay, che scrive
                           _compensatedAmt col proprio registro satiMatches, MAI su compLinks) —
                           senza questo controllo la riga mostrava ancora "Abbina" pur essendo
                           già risolta altrove, e il tentativo di abbinarla a mano falliva perché
-                          la spesa candidata risultava già presa (availableAmount()==0). */}
+                          la spesa candidata risultava già presa (availableAmount()==0).
+                          Corretto 2026-07-19: rimossa la parola "altrove" — non è sempre vero,
+                          l'utente ha segnalato casi in cui la compensazione era stata fatta
+                          proprio qui in Altre Entrate (dato storico senza un compLink associato,
+                          probabilmente scritto da una versione precedente del flusso). Il flag
+                          resta neutro: dice solo CHE è compensata, non DOVE. */}
                       {!compLink && isCompensated(e) && (
-                        <span title="Questa entrata risulta già compensata (probabilmente da Satispay o da un'altra pagina), anche se non appare nel registro Abbinamenti di questa pagina."
+                        <span title="Questa entrata risulta già compensata (registrato direttamente sulla transazione — potrebbe non comparire nel registro Abbinamenti di questa pagina se il collegamento è stato creato altrove o in una versione precedente)."
                           style={{fontSize:11,color:'var(--gold)',fontWeight:600}}>
-                          ✓ Compensata altrove
+                          ✓ Compensato
                         </span>
                       )}
                       {compLink && (
                         <div style={{display:'flex',alignItems:'center',gap:5}}>
-                          <span style={{fontSize:11,color:'var(--green)',fontWeight:600}}>✓ {getAeLinksArray(compLink).length > 1 ? `${getAeLinksArray(compLink).length} abbinate` : 'Abbinata'}</span>
+                          <span style={{fontSize:11,color:'var(--green)',fontWeight:600}}>✓ {getAeLinksArray(compLink).length > 1 ? `${getAeLinksArray(compLink).length} compensate` : 'Compensata'}</span>
                           <button onClick={()=>{
                             // removeCompensationGroup ripulisce compLinks E i campi
                             // _compensatedAmt/_compensatedBy su tutti i lati coinvolti,
@@ -1020,20 +1025,29 @@ export default function AltreEntratePage() {
                       +€ {fmtIT(e.amount||0, 2)}
                     </td>
                     <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                      {compLink ? (() => {
+                      {(() => {
+                        // Bug segnalato dall'utente 2026-07-19: questa colonna mostrava sempre
+                        // "—" quando non c'era un compLink, anche se l'entrata era SOLO
+                        // parzialmente compensata altrove (isCompensated ma niente compLink) —
+                        // in quel caso entryResidual() calcola comunque il residuo reale mancante
+                        // via _compensatedAmt diretto, ora usato SEMPRE (non solo col compLink).
+                        // Questo è anche il valore corretto da usare per il calcolo del saldo:
+                        // il residuo, non l'importo lordo, perché la parte già compensata è già
+                        // stata "usata" per coprire una spesa altrove e non va contata due volte.
                         const residuo = entryResidual(e)
-                        return residuo > 0.005
-                          ? (
-                            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3}}>
-                              <span style={{fontSize:13,fontWeight:700,color:'var(--green)'}}>+€ {fmtIT(residuo,2)}</span>
+                        if (residuo <= 0.005) return <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
+                        return (
+                          <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3}}>
+                            <span style={{fontSize:13,fontWeight:700,color:'var(--green)'}}>+€ {fmtIT(residuo,2)}</span>
+                            {compLink && (
                               <button className="btn btn-ghost" style={{fontSize:10,color:'var(--blue)',border:'1px solid rgba(60,120,220,.4)',borderRadius:5,padding:'1px 6px',fontFamily:'var(--font-sans)'}}
                                 onClick={()=>setCompensaEntry(e)}>
-                                + Abbina
+                                + Compensa
                               </button>
-                            </div>
-                          )
-                          : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
-                      })() : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>}
+                            )}
+                          </div>
+                        )
+                      })()}
                     </td>
                     <td style={{padding:'6px 10px',textAlign:'center'}}>
                       {(() => {

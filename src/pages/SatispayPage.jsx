@@ -635,9 +635,11 @@ function AbbinaModal({ pot, ym, currentLinked, onClose, onLink, allPots, onLinkO
       showToast(`⚠️ Eccedenza di €${fmtIT(delta,2)} non assegnata a nessun fondo`, 'warning')
     }
     const txIds = [...selected]
-    // Link to this pot
+    const deltaResolved = delta > 0 && deltaMatchesOther && !!selectedOtherPot
+    // Link to this pot — deltaResolved=true azzera l'eccedenza mostrata su QUESTA
+    // riga quando viene coperta da un altro fondo (vedi nota in linkMonth più sotto)
     if (txIds.length === 0) { onLink(null, null) }
-    else { onLink(txIds.length === 1 ? txIds[0] : txIds, totalCell) }
+    else { onLink(txIds.length === 1 ? txIds[0] : txIds, totalCell, deltaResolved) }
     // If delta assigned to another pot, link same txs there too
     if (delta > 0 && deltaMatchesOther && selectedOtherPot && onLinkOther) {
       const txIdsForOther = txIds.length === 1 ? txIds[0] : txIds
@@ -1113,7 +1115,26 @@ function FundCard({ pot, allPots }) {
       const linkedAmt = pot.data?.[ym]?.linkedAmt
       const mt = monthTotal(ym)
       const exact = linkedAmt!=null ? Math.abs(linkedAmt-mt)<0.01 : true
-      const delta = pot.data?.[ym]?.linkedDelta || 0
+      let delta = pot.data?.[ym]?.linkedDelta || 0
+      // Auto-guarigione per dati già salvati PRIMA del fix del 2026-07-19: il
+      // pallino arancione con l'eccedenza (es. "792 ✓ +435,00") poteva restare
+      // per sempre anche dopo che l'utente aveva assegnato quel delta a un altro
+      // fondo, perché linkedDelta veniva scritto una volta e mai più ricalcolato.
+      // Qui si deriva lo stato reale: se le STESSE transazioni collegate a questo
+      // fondo per questo mese sono collegate ANCHE a un altro fondo per lo stesso
+      // mese, il delta è già "spiegato" altrove e va trattato come risolto —
+      // niente bisogno di rifare l'abbinamento a mano per dati storici.
+      if (delta > 0.01 && Array.isArray(allPots)) {
+        const linkedIds = new Set(Array.isArray(linked) ? linked : [linked])
+        const explainedElsewhere = allPots.some(p => {
+          if (p.id === pot.id) return false
+          const otherLinked = p.data?.[ym]?.linked
+          if (!otherLinked) return false
+          const otherIds = new Set(Array.isArray(otherLinked) ? otherLinked : [otherLinked])
+          return [...linkedIds].some(id => otherIds.has(id))
+        })
+        if (explainedElsewhere) delta = 0
+      }
       return { linked, exact, delta }
     }
 
@@ -1294,7 +1315,7 @@ function FundCard({ pot, allPots }) {
       .filter(s => s.amount > 0)
   }
 
-  function linkMonth(ym, txIds, amt) {
+  function linkMonth(ym, txIds, amt, deltaResolved = false) {
     // If re-linking to new txs, clear splits/_satiLinked from the previously linked txs first
     if (txIds && pot.data?.[ym]?.linked) {
       const prevLinked = pot.data[ym].linked
@@ -1312,9 +1333,17 @@ function FundCard({ pot, allPots }) {
       const tx = transactions.find(t => t.txId === id)
       return s + Math.abs(tx?.amount || 0)
     }, 0)
-    const linkedDelta = selectedTotal > totalAmt + 0.01
+    // Bug segnalato dall'utente 2026-07-19 (screenshot "792 / ✓ / +435,00" che non
+    // si risolveva mai): linkedDelta veniva sempre ricalcolato dalla semplice
+    // differenza selectedTotal-totalAmt, ANCHE quando l'utente aveva già assegnato
+    // quell'eccedenza a un altro fondo tramite AbbinaModal (onLinkOther/linkOtherPot)
+    // — quindi il pallino restava arancione con l'eccedenza per sempre, anche dopo
+    // averla "spiegata" altrove, dando l'impressione che la conferma non avesse
+    // avuto effetto. Il chiamante (AbbinaModal.confirm) ora passa deltaResolved=true
+    // quando il delta è stato coperto da un altro fondo, così qui si azzera davvero.
+    const linkedDelta = deltaResolved ? 0 : (selectedTotal > totalAmt + 0.01
       ? Math.round((selectedTotal - totalAmt) * 100) / 100
-      : 0
+      : 0)
 
     // Save the link on the pot
     const prev = pot.data?.[ym] || {}
@@ -1817,8 +1846,9 @@ function FundCard({ pot, allPots }) {
                         const match = autoSuggestions[ym]
                         const txIds = Array.isArray(match) ? match : match.txIds
                         const txArg = txIds.length===1 ? txIds[0] : txIds
-                        linkMonth(ym, txArg, total)
-                        if (!Array.isArray(match) && match.otherPotId) linkOtherPot(match.otherPotId, ym, txArg, match.otherAmt)
+                        const hasOther = !Array.isArray(match) && match.otherPotId
+                        linkMonth(ym, txArg, total, !!hasOther)
+                        if (hasOther) linkOtherPot(match.otherPotId, ym, txArg, match.otherAmt)
                       }}
                       title={`Match automatico trovato${!Array.isArray(autoSuggestions[ym])?' (multi-fondo)':''} — clicca per abbinare`}
                       style={{display:'flex',alignItems:'center',justifyContent:'center',gap:2,
@@ -1878,7 +1908,7 @@ function FundCard({ pot, allPots }) {
           ym={abbina}
           currentLinked={pot.data?.[abbina]?.linked}
           onClose={()=>setAbbina(null)}
-          onLink={(txId, amt)=>linkMonth(abbina, txId, amt)}
+          onLink={(txId, amt, deltaResolved)=>linkMonth(abbina, txId, amt, deltaResolved)}
           allPots={allPots}
           onLinkOther={(otherPotId, ym, txIds, amt)=>linkOtherPot(otherPotId, ym, txIds, amt)}
         />

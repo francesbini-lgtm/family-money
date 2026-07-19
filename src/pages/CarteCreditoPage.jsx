@@ -46,7 +46,7 @@ function CardChartTooltip({ active, payload, label }) {
         <div style={{color:'var(--accent)'}}>Importato: € {fmtIT(importato,2)}</div>
       )}
       {daAbbinare > 0 && (
-        <div style={{color:'var(--gold)'}}>Da abbinare: € {fmtIT(daAbbinare,2)}</div>
+        <div style={{color:'var(--gold)'}}>Da compensare: € {fmtIT(daAbbinare,2)}</div>
       )}
       <div style={{marginTop:4,paddingTop:4,borderTop:'1px solid var(--border)',fontWeight:700}}>
         Totale: € {fmtIT(daAbbinare+importato,2)}
@@ -131,7 +131,7 @@ function CardTxRow({ t, allCats, updateTransaction, userAccounts, appPrefs, sele
         fontSize:13,fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
         {t.amount>=0?'+':'−'}€ {fmtIT(displayAmt,2)}{isComp && '*'}
         {isComp && (
-          <button onClick={()=>onRemoveComp(t)} title="Rimuovi abbinamento/compensazione"
+          <button onClick={()=>onRemoveComp(t)} title="Rimuovi compensazione"
             style={{marginLeft:6,background:'none',border:'none',cursor:'pointer',
               color:'var(--gold)',fontSize:11,fontWeight:700,verticalAlign:'middle'}}>
             🔗✕
@@ -233,12 +233,12 @@ export default function CarteCreditoPage() {
       return
     }
     setSelectedIds(new Set())
-    showToast(`✅ ${sel.length} transazioni abbinate e compensate`, 'success')
+    showToast(`✅ ${sel.length} transazioni compensate`, 'success')
   }
 
   function handleRemoveComp(t) {
     removeCompensationGroup(t, updateTransaction)
-    showToast('Abbinamento rimosso', 'info')
+    showToast('Compensazione rimossa', 'info')
   }
 
   // Righe di estratto conto carta ancora NON abbinate/riconciliate (non ancora escluse
@@ -286,7 +286,7 @@ export default function CarteCreditoPage() {
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12,marginBottom:24}}>
         {[
           ['Utilizzo medio/mese', avgMensile > 0 ? `€ ${fmtIT(avgMensile,0)}` : '—', 'var(--accent)'],
-          ['Estratti da abbinare', lumpTxs.length > 0 ? `${lumpTxs.length} (€ ${fmtIT(lumpTotal,0)})` : '0', lumpTxs.length > 0 ? 'var(--gold)' : 'var(--text2)'],
+          ['Estratti da compensare', lumpTxs.length > 0 ? `${lumpTxs.length} (€ ${fmtIT(lumpTotal,0)})` : '0', lumpTxs.length > 0 ? 'var(--gold)' : 'var(--text2)'],
           // "Carte rilevate" sostituito su richiesta utente (2026-07-11) con i rimborsi
           // (transazioni positive della tabella) non ancora abbinati/compensati
           ['Rimborsi non accoppiati', refundTxs.length > 0 ? `${refundTxs.length} (€ ${fmtIT(refundTotal,2)})` : '0', refundTxs.length > 0 ? 'var(--green)' : 'var(--text2)'],
@@ -306,7 +306,7 @@ export default function CarteCreditoPage() {
             <span style={{fontSize:14,fontWeight:700}}>Utilizzo carte per mese</span>
             <div style={{display:'flex',gap:14,fontSize:11,color:'var(--text3)'}}>
               <span><span style={{display:'inline-block',width:9,height:9,borderRadius:2,background:'var(--accent)',marginRight:5}}/>Importato</span>
-              <span><span style={{display:'inline-block',width:9,height:9,borderRadius:2,background:'var(--gold)',marginRight:5}}/>Da abbinare</span>
+              <span><span style={{display:'inline-block',width:9,height:9,borderRadius:2,background:'var(--gold)',marginRight:5}}/>Da compensare</span>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={220}>
@@ -330,7 +330,7 @@ export default function CarteCreditoPage() {
           <div style={{fontSize:36,marginBottom:12}}>💳</div>
           <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Nessuna transazione importata</div>
           <div style={{fontSize:13,color:'var(--text3)'}}>
-            Le transazioni appariranno qui dopo aver importato ed abbinato l'estratto conto carta tramite CSV/XLS.
+            Le transazioni appariranno qui dopo aver importato e compensato l'estratto conto carta tramite CSV/XLS.
           </div>
         </div>
       ) : (
@@ -352,13 +352,13 @@ export default function CarteCreditoPage() {
                   border:`1px solid ${onlyDaAbbinare?'var(--green)':'var(--border)'}`,
                   color:onlyDaAbbinare?'var(--green)':'var(--text3)',
                   background:onlyDaAbbinare?'rgba(22,163,74,0.08)':'transparent'}}>
-                💶 Da abbinare {refundTxs.length > 0 ? `(${refundTxs.length})` : ''}
+                💶 Da compensare {refundTxs.length > 0 ? `(${refundTxs.length})` : ''}
               </button>
               {selectedIds.size >= 2 ? (
                 <>
                   <span style={{fontSize:12,color:'var(--text3)'}}>{selectedIds.size} selezionate</span>
                   <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}} onClick={handleAbbina}>
-                    🔗 Abbina e compensa
+                    🔗 Compensa
                   </button>
                   <button className="btn btn-ghost" style={{fontSize:12,padding:'5px 12px'}} onClick={()=>setSelectedIds(new Set())}>
                     Annulla selezione
