@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 // Importi NETTI post-compensazione (consolidamento 2026-07-12)
 import { netAmt } from '../data/compensation'
 import { useFinancials, getYM, ymLabel } from '../hooks/useFinancials'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, LineChart, Line, Legend, LabelList
+  Tooltip, ResponsiveContainer, LineChart, Line, LabelList
 } from 'recharts'
 import './EntratePage.css'
 import { fmtIT, fmtDate } from '../utils/format'
@@ -454,10 +454,12 @@ function RalConfigModal({ ralData, ralSettings, onSaveData, onSaveSettings, onCl
 }
 
 // ── Date helpers ──────────────────────────────────────────
-function getLastNMonths(n, now = new Date()) {
+// offsetMonths: richiesta utente 2026-07-19 — permette di sfogliare la
+// finestra a blocchi di 12 mesi (0 = i 12 mesi correnti, 12 = i 12 precedenti, ecc.)
+function getLastNMonths(n, now = new Date(), offsetMonths = 0) {
   const months = []
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const d = new Date(now.getFullYear(), now.getMonth() - i - offsetMonths, 1)
     months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
   return months
@@ -492,12 +494,6 @@ function shortDate(dateStr) {
   return `${MON_IT[parseInt(mo) - 1]} ${yr.slice(2)}`
 }
 
-// ── Chart subtitle helper ─────────────────────────────────
-function chartSubLabel(period) {
-  if (period === 'month') return 'Ultimi 12 mesi'
-  if (period === '3m')    return 'Ultimi 12 trimestri'
-  return 'Per anno (tutti)'
-}
 
 // ── KPI card ──────────────────────────────────────────────
 function KPICard({ label, value, sub, color = 'var(--text)' }) {
@@ -638,6 +634,11 @@ export default function EntratePage() {
   const { fmt }      = useFinancials()
   const [period, setPeriod] = useState('month')
   const [tab, setTab]       = useState('stipendi')
+  // Richiesta utente 2026-07-19: sfoglia a blocchi di 12 mesi (solo period==='month')
+  // e toggle per scorporare/fondere il bonus nel chart "Entrate per fonte"
+  const [monthOffset, setMonthOffset]           = useState(0)
+  const [chartBonusSeparate, setChartBonusSeparate] = useState(true)
+  useEffect(() => { setMonthOffset(0) }, [period])
 
   // RAL / Netto chart state — read directly from appPrefs (reactive via Zustand)
   const ralData     = appPrefs?.ralData     || DEFAULT_RAL_DATA
@@ -676,10 +677,11 @@ export default function EntratePage() {
   }, [incomeTxs])
 
   // ── Chart data — depends on toggle ────────────────────
+  const chartMonths = useMemo(() => getLastNMonths(12, now, monthOffset), [monthOffset])
   const chartData = useMemo(() => {
     if (period === 'month') {
-      // Last 12 months — monthly bars
-      return getLastNMonths(12, now).map(ym => {
+      // 12 mesi — sfogliabili a blocchi di 12 tramite monthOffset
+      return chartMonths.map(ym => {
         const txs = incomeTxs.filter(t => (t._effDate||t.date).startsWith(ym))
         return buildRow(ymLabel(ym), txs, bonusMap)
       })
@@ -697,7 +699,20 @@ export default function EntratePage() {
       const txs = incomeTxs.filter(t => (t._effDate||t.date).startsWith(String(year)))
       return buildRow(String(year), txs, bonusMap)
     })
-  }, [period, incomeTxs, bonusMap, allYears])
+  }, [period, incomeTxs, bonusMap, allYears, chartMonths])
+
+  // Richiesta utente 2026-07-19: toggle "con bonus" — fonde Fra-Bonus/Sofi-Bonus
+  // dentro Fra/Sofi quando disattivato (i totali non cambiano, solo la scomposizione
+  // visiva); il flag bonus per singola transazione resta gestito nella tabella
+  // "Tutte le transazioni" più sotto (BonusCell/bonusMap) indipendentemente da questo toggle.
+  const chartDataDisplay = useMemo(() => {
+    if (chartBonusSeparate) return chartData
+    return chartData.map(row => ({
+      label: row.label,
+      Fra:  (row['Fra']  || 0) + (row['Fra-Bonus']  || 0),
+      Sofi: (row['Sofi'] || 0) + (row['Sofi-Bonus'] || 0),
+    }))
+  }, [chartData, chartBonusSeparate])
 
   // ── KPIs — always YTD ─────────────────────────────────
   const yearStr = now.getFullYear().toString()
@@ -767,7 +782,7 @@ export default function EntratePage() {
 
   const isEmpty = incomeTxs.length === 0
 
-  const activeCats = INCOME_CATS.filter(c => chartData.some(m => m[c] > 0))
+  const activeCats = INCOME_CATS.filter(c => chartDataDisplay.some(m => m[c] > 0))
   const topCat     = activeCats.at(-1)
 
   // Richiesta utente 2026-07-19: totale in alto su ogni colonna dell'istogramma
@@ -777,8 +792,8 @@ export default function EntratePage() {
     return Math.abs(n) >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`
   }
   function IncomeBarTotalLabel({ x, y, width, index }) {
-    if (index == null || !chartData[index]) return null
-    const total = activeCats.reduce((s, c) => s + (chartData[index][c] || 0), 0)
+    if (index == null || !chartDataDisplay[index]) return null
+    const total = activeCats.reduce((s, c) => s + (chartDataDisplay[index][c] || 0), 0)
     if (!total) return null
     return (
       <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10}
@@ -787,6 +802,13 @@ export default function EntratePage() {
       </text>
     )
   }
+
+  // Richiesta utente 2026-07-19: 3 KPI (Media/Max/Min) sotto il chart, calcolati
+  // sui totali per barra ATTUALMENTE mostrati (rispettano period/monthOffset/toggle bonus)
+  const chartTotals = chartDataDisplay.map(row => activeCats.reduce((s, c) => s + (row[c] || 0), 0)).filter(v => v > 0)
+  const chartAvg = chartTotals.length ? chartTotals.reduce((s, v) => s + v, 0) / chartTotals.length : 0
+  const chartMax = chartTotals.length ? Math.max(...chartTotals) : 0
+  const chartMin = chartTotals.length ? Math.min(...chartTotals) : 0
 
   return (
     <>
@@ -884,12 +906,46 @@ export default function EntratePage() {
               <div className="en-charts">
                 {/* Chart 1 — Entrate per fonte */}
                 <div className="card en-chart-card">
-                  <div className="en-chart-header">
+                  <div className="en-chart-header" style={{flexWrap:'wrap',rowGap:8}}>
                     <span className="en-chart-title">Entrate per fonte (Fra + Sofi)</span>
-                    <span style={{fontSize:11,color:'var(--text3)'}}>{chartSubLabel(period)}</span>
+                    {/* Legenda spostata qui in linea col titolo (richiesta utente 2026-07-19,
+                        era in fondo al chart via <Legend/> di recharts) */}
+                    <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+                      <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                        {activeCats.map(cat => (
+                          <span key={cat} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,color:'var(--text2)'}}>
+                            <span style={{width:8,height:8,borderRadius:'50%',background:COLORS[cat],display:'inline-block'}}/>
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Toggle "con bonus" — scorpora Fra-Bonus/Sofi-Bonus (default) oppure li fonde in Fra/Sofi */}
+                      <button onClick={()=>setChartBonusSeparate(v=>!v)}
+                        title="Scorpora/fondi il bonus dentro Fra e Sofi"
+                        style={{padding:'3px 10px',border:`1px solid ${chartBonusSeparate?'var(--gold,#b8942a)':'var(--border)'}`,
+                          borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,transition:'all .15s',
+                          background:chartBonusSeparate?'rgba(184,148,42,.15)':'transparent',
+                          color:chartBonusSeparate?'var(--gold,#b8942a)':'var(--text3)'}}>
+                        🎯 con bonus
+                      </button>
+                      {/* Sfoglia a blocchi di 12 mesi — solo vista Mese */}
+                      {period==='month' && (
+                        <div style={{display:'flex',alignItems:'center',gap:2,background:'var(--surface2)',
+                          border:'1px solid var(--border)',borderRadius:8,padding:'2px 4px'}}>
+                          <button onClick={()=>setMonthOffset(o=>o+12)} title="12 mesi indietro"
+                            style={{border:'none',background:'none',cursor:'pointer',fontSize:14,color:'var(--text2)',padding:'0 4px',lineHeight:1}}>‹</button>
+                          <span style={{fontSize:10,fontWeight:600,color:'var(--text3)',minWidth:74,textAlign:'center',fontFamily:'var(--font-mono)'}}>
+                            {chartMonths.length ? `${shortDate(chartMonths[0]).replace(' ','').toUpperCase()}-${shortDate(chartMonths[chartMonths.length-1]).replace(' ','').toUpperCase()}` : ''}
+                          </span>
+                          <button onClick={()=>setMonthOffset(o=>Math.max(0,o-12))} disabled={monthOffset===0} title="12 mesi avanti"
+                            style={{border:'none',background:'none',cursor:monthOffset===0?'default':'pointer',fontSize:14,
+                              color:monthOffset===0?'var(--border)':'var(--text2)',padding:'0 4px',lineHeight:1}}>›</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={chartData} barCategoryGap="35%" margin={{top:16,bottom:20}}>
+                    <BarChart data={chartDataDisplay} barCategoryGap="35%" margin={{top:16,bottom:20}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                       <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
                         interval={0} angle={-35} textAnchor="end" height={44}/>
@@ -897,8 +953,6 @@ export default function EntratePage() {
                         tickFormatter={v => v>=1000 ? `€${(v/1000).toFixed(0)}K` : `€${v}`}/>
                       <Tooltip formatter={(v,n) => [`€ ${fmtIT(v,0)}`, n]}
                         contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
-                      <Legend iconType="circle" iconSize={8}
-                        formatter={v => <span style={{fontSize:11,color:'var(--text2)'}}>{v}</span>}/>
                       {activeCats.map(cat => (
                         <Bar key={cat} dataKey={cat} name={cat} fill={COLORS[cat]} stackId="a"
                           radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}>
@@ -907,6 +961,22 @@ export default function EntratePage() {
                       ))}
                     </BarChart>
                   </ResponsiveContainer>
+                  {/* 3 KPI richiesti dall'utente 2026-07-19: Media/Max/Min sui totali per
+                      barra ATTUALMENTE mostrati (rispettano period/sfoglia/toggle bonus) */}
+                  <div style={{display:'flex',gap:10,marginTop:12}}>
+                    <div style={{flex:1,textAlign:'center',padding:'8px 6px',background:'var(--surface2)',borderRadius:8}}>
+                      <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Media</div>
+                      <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)'}}>€ {fmtIT(Math.round(chartAvg),0)}</div>
+                    </div>
+                    <div style={{flex:1,textAlign:'center',padding:'8px 6px',background:'var(--surface2)',borderRadius:8}}>
+                      <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Max</div>
+                      <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--green)'}}>€ {fmtIT(Math.round(chartMax),0)}</div>
+                    </div>
+                    <div style={{flex:1,textAlign:'center',padding:'8px 6px',background:'var(--surface2)',borderRadius:8}}>
+                      <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Min</div>
+                      <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--red)'}}>€ {fmtIT(Math.round(chartMin),0)}</div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Chart 2 — Stipendio RAL vs Netto */}
