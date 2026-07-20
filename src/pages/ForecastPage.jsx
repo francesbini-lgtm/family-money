@@ -232,6 +232,24 @@ export default function ForecastPage() {
   const { transactions, customCats, appPrefs, setAppPref, ceciliaGoals } = useStore()
   const excludedMonths = appPrefs?.forecastExcludedMonths || []
 
+  // Base forecast: storico (media 12 mesi reali) o teoriche (valori editabili manualmente) —
+  // richiesta utente 2026-07-20
+  const forecastBasis = appPrefs?.forecastBasis || 'storico' // 'storico' | 'teoriche'
+  function setForecastBasis(v) { setAppPref('forecastBasis', v) }
+  const [teoricheTab, setTeoricheTab] = useState('entrate') // 'entrate' | 'spese' (sub-tab locale)
+  const teoricheEntrate = appPrefs?.forecastTeoricheEntrate || {} // { Fra: number, Sofi: number }
+  const teoricheBonus   = appPrefs?.forecastTeoricheBonus   || {} // { Fra: {has13,has14}, Sofi: {...} }
+  const teoricheSpese   = appPrefs?.forecastTeoricheSpese   || {} // { [cat1]: number }
+  function setTeoricheEntrata(person, val) {
+    setAppPref('forecastTeoricheEntrate', { ...teoricheEntrate, [person]: val })
+  }
+  function setTeoricheBonusFlag(person, key, val) {
+    setAppPref('forecastTeoricheBonus', { ...teoricheBonus, [person]: { ...(teoricheBonus[person]||{}), [key]: val } })
+  }
+  function setTeoricheSpesa(cat1, val) {
+    setAppPref('forecastTeoricheSpese', { ...teoricheSpese, [cat1]: val })
+  }
+
   const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
   // Vista tabella "Proiezione" — richiesta utente 2026-07-19: poter scegliere fra
   // proiezione annuale (una riga per anno) o mensile (una riga per mese)
@@ -389,11 +407,22 @@ export default function ForecastPage() {
     }
   }, [transactions, customCats])
 
-  // Effective income avg excluding deselected months
+  // Effective income avg excluding deselected months (base storico)
   const effectiveIncomeMths = incomeByMonth.filter(m => !excludedMonths.includes(m.ym))
-  const avgIncomeEffective = effectiveIncomeMths.length > 0
+  const avgIncomeStorico = effectiveIncomeMths.length > 0
     ? Math.round(effectiveIncomeMths.reduce((s, m) => s + m.fra + m.sofi + m.other, 0) / effectiveIncomeMths.length)
     : avgIncome
+
+  // Valori "Teoriche" — default: Entrate = ultimo mese reale per persona, Spese = media 12 mesi per categoria L1
+  const lastMonthIncome = incomeByMonth[incomeByMonth.length - 1] || { fra: 0, sofi: 0 }
+  const teoricheFraVal  = teoricheEntrate.Fra  ?? Math.round(lastMonthIncome.fra  || 0)
+  const teoricheSofiVal = teoricheEntrate.Sofi ?? Math.round(lastMonthIncome.sofi || 0)
+  const teoricheIncomeTotal = teoricheFraVal + teoricheSofiVal
+  const teoricheExpenseTotal = Object.keys(catStats).reduce(
+    (s, c1) => s + (teoricheSpese[c1] ?? catStats[c1].avg), 0
+  )
+
+  const avgIncomeEffective = forecastBasis === 'teoriche' ? teoricheIncomeTotal : avgIncomeStorico
 
   // ── Historical yearly data for proiezione table ──────────
   const historicalTableData = useMemo(() => {
@@ -436,7 +465,7 @@ export default function ForecastPage() {
     return saved
   }, [excludedCats, catStats])
 
-  const effectiveExpense = avgExpense - savedPerMonth
+  const effectiveExpense = forecastBasis === 'teoriche' ? teoricheExpenseTotal : (avgExpense - savedPerMonth)
 
   // ── Mortgage calculation ──────────────────────────────────
   const mortgage = useMemo(() => {
@@ -521,7 +550,20 @@ export default function ForecastPage() {
         saldo -= mortgageAnticipo
         anticipoApplied = true
       }
-      saldo += (inc - exp - mortgageMonthly)
+      // 13ma/14ma (solo in modalità Teoriche) — richiesta utente 2026-07-20: nei mesi in
+      // cui una persona ha la 14esima (dicembre) o la 13esima (giugno), il suo stipendio
+      // in quel mese raddoppia. d.getMonth() è 0-based: 5 = giugno, 11 = dicembre.
+      let bonusExtra = 0
+      if (forecastBasis === 'teoriche') {
+        const mon = d.getMonth()
+        ;['Fra','Sofi'].forEach(person => {
+          const flags = teoricheBonus[person] || {}
+          const val   = person === 'Fra' ? teoricheFraVal : teoricheSofiVal
+          if (mon === 11 && flags.has14) bonusExtra += val // dicembre → 14esima
+          if (mon === 5  && flags.has13) bonusExtra += val // giugno   → 13esima
+        })
+      }
+      saldo += (inc - exp - mortgageMonthly + bonusExtra)
 
       let monthsIntoMortgage = -1
       if (mortgageActive && mortgageStartYM) {
@@ -543,7 +585,7 @@ export default function ForecastPage() {
       exp *= iMonthly
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -635,9 +677,27 @@ export default function ForecastPage() {
           {/* Real data summary */}
           <div className="card fc-controls" style={{position:'relative'}}>
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:14,fontWeight:700}}>📈 Dati Reali (Ultimi 12 mesi)</div>
-              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>somma ultimi 12 mesi ÷ 12</div>
+              <div style={{fontSize:14,fontWeight:700}}>📈 Dati Base Previsione</div>
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>
+                {forecastBasis === 'storico' ? 'somma ultimi 12 mesi ÷ 12' : 'valori teorici modificabili manualmente'}
+              </div>
             </div>
+
+            {/* Tab Storico / Teoriche */}
+            <div style={{display:'flex',gap:4,background:'var(--surface2)',borderRadius:8,padding:3,marginBottom:14}}>
+              {[['storico','📊 Storico'],['teoriche','✏️ Teoriche']].map(([v,l]) => (
+                <button key={v} onClick={()=>setForecastBasis(v)}
+                  style={{flex:1,padding:'6px 10px',borderRadius:6,border:'none',cursor:'pointer',
+                    fontFamily:'var(--font-sans)',fontSize:12,fontWeight:700,
+                    background:forecastBasis===v?'var(--surface)':'none',
+                    color:forecastBasis===v?'var(--text)':'var(--text3)',
+                    boxShadow:forecastBasis===v?'0 1px 4px rgba(0,0,0,.08)':'none',transition:'all .15s'}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {forecastBasis === 'storico' && (<>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
               {/* Entrate — clickable */}
               <div onClick={()=>setDetailPopup(detailPopup==='income'?null:'income')}
@@ -762,6 +822,98 @@ export default function ForecastPage() {
                   onToggle={toggleExcludedCat}
                 />
               </>
+            )}
+            </>)}
+
+            {forecastBasis === 'teoriche' && (
+              <div>
+                {/* Sub-tab Entrate / Spese */}
+                <div style={{display:'flex',gap:6,marginBottom:12}}>
+                  {[['entrate','📥 Entrate'],['spese','📤 Spese']].map(([v,l]) => (
+                    <button key={v} onClick={()=>setTeoricheTab(v)}
+                      style={{padding:'5px 12px',borderRadius:6,cursor:'pointer',fontFamily:'var(--font-sans)',
+                        fontSize:11,fontWeight:700,
+                        border:`1px solid ${teoricheTab===v?'var(--border)':'transparent'}`,
+                        background:teoricheTab===v?'var(--surface2)':'none',
+                        color:teoricheTab===v?'var(--text)':'var(--text3)'}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {teoricheTab === 'entrate' && (
+                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                    {['Fra','Sofi'].map(person => {
+                      const val   = person === 'Fra' ? teoricheFraVal : teoricheSofiVal
+                      const flags = teoricheBonus[person] || {}
+                      return (
+                        <div key={person} style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                            <div style={{fontSize:12,fontWeight:700}}>{person==='Fra' ? '👨 Fra' : '👩 Sofi'}</div>
+                            <div style={{display:'flex',alignItems:'center',gap:4}}>
+                              <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
+                              <input type="number" value={val}
+                                onChange={e=>setTeoricheEntrata(person, Number(e.target.value)||0)}
+                                style={{width:90,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
+                                  background:'var(--surface)',color:'var(--green)',fontWeight:700,
+                                  fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
+                              <span style={{fontSize:11,color:'var(--text3)'}}>/mese</span>
+                            </div>
+                          </div>
+                          <div style={{display:'flex',gap:14}}>
+                            <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text2)',cursor:'pointer'}}>
+                              <input type="checkbox" checked={!!flags.has13}
+                                onChange={e=>setTeoricheBonusFlag(person,'has13',e.target.checked)}/>
+                              13ª (giugno)
+                            </label>
+                            <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text2)',cursor:'pointer'}}>
+                              <input type="checkbox" checked={!!flags.has14}
+                                onChange={e=>setTeoricheBonusFlag(person,'has14',e.target.checked)}/>
+                              14ª (dicembre)
+                            </label>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <div style={{fontSize:10,color:'var(--text3)',marginTop:2,lineHeight:1.4}}>
+                      Default: ultimo mese registrato. Con 13ª/14ª attiva, lo stipendio raddoppia nel mese indicato nella "📋 Proiezione Mensile".
+                    </div>
+                  </div>
+                )}
+
+                {teoricheTab === 'spese' && (
+                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                    <div style={{maxHeight:280,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
+                      {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => {
+                        const val = teoricheSpese[c1] ?? data.avg
+                        return (
+                          <div key={c1} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                            padding:'8px 10px',background:'var(--surface2)',borderRadius:7,border:'1px solid var(--border)'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600}}>
+                              <span style={{width:8,height:8,borderRadius:'50%',background:data.color,display:'inline-block'}}/>
+                              {c1}
+                            </div>
+                            <div style={{display:'flex',alignItems:'center',gap:4}}>
+                              <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
+                              <input type="number" value={val}
+                                onChange={e=>setTeoricheSpesa(c1, Number(e.target.value)||0)}
+                                style={{width:80,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
+                                  background:'var(--surface)',color:'var(--red)',fontWeight:700,
+                                  fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
+                              <span style={{fontSize:11,color:'var(--text3)'}}>/mese</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'8px 10px',marginTop:2,
+                      borderTop:'2px solid var(--border)',fontSize:12,fontWeight:800}}>
+                      <span>Totale</span>
+                      <span style={{fontFamily:'var(--font-mono)',color:'var(--red)'}}>{fmtFull(teoricheExpenseTotal)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
