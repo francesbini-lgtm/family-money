@@ -26,6 +26,32 @@ function isAtmWithdrawal(t) {
   )
 }
 
+const MESI = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+function meseLabel(ym) {
+  if (!ym) return '—'
+  const [y,m] = ym.split('-')
+  return `${MESI[parseInt(m)-1]} ${String(y).slice(2)}`
+}
+
+// Somma dei residui prelievi (post abbinamento a Nanny/Colf/Contanti) raggruppati per mese —
+// richiesta utente 2026-07-20: colonna "Prelievi nel mese" + box laterale storico.
+// Il residuo di ogni prelievo usa computeAtmUsed (store), che già somma nannyRecon+colfRecon
+// +cashEntries+atmMeta.links, quindi riflette TUTTO quello già assegnato, non solo Nanny/Colf.
+function computePrelieviByMonth(transactions, store) {
+  const map = {}
+  transactions.forEach(t => {
+    if (!isAtmWithdrawal(t)) return
+    const mese = (t._effDate || t.date || '').slice(0,7)
+    if (!mese) return
+    const used   = store.computeAtmUsed(t.txId)
+    const residuo = Math.round((Math.abs(t.amount) - used) * 100) / 100
+    if (!map[mese]) map[mese] = { mese, totale:0, count:0 }
+    map[mese].totale += residuo
+    map[mese].count  += 1
+  })
+  return map
+}
+
 function reconcileStatus(entry, transactions, reconKey=NANNY_RECON_KEY) {
   const recon = getRecon(reconKey)
   if (recon[entry.id]) return { status:'ok', recon: recon[entry.id] }
@@ -42,31 +68,59 @@ function reconcileStatus(entry, transactions, reconKey=NANNY_RECON_KEY) {
   return { status:'missing', found:0 }
 }
 
+// Allocazioni di una riga recon (nuovo formato multi-prelievo o vecchio formato singolo)
+function reconAllocations(r) {
+  if (!r) return []
+  if (Array.isArray(r.allocations)) return r.allocations
+  return r.txId ? [{ txId: r.txId, amt: r.nannyAmt }] : []
+}
+
 function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', reconKey=NANNY_RECON_KEY }) {
   const [tab, setTab]         = useState('atm')    // 'atm' | 'code'
-  const [selected, setSelected] = useState(null)   // { txId, amount, desc, date }
+  const [selectedIds, setSelectedIds] = useState(() => {
+    const existing = getRecon(reconKey)[entry.id]
+    return new Set(reconAllocations(existing).map(a => a.txId))
+  })
   const [codeInput, setCodeInput] = useState('')
   const [codeResult, setCodeResult] = useState(null) // found tx or 'not-found'
   const [saved, setSaved] = useState(false)
 
   const existingRecon = getRecon(reconKey)[entry.id] || null
+  const nannyAmt = entry.totale
 
-  // All ATM withdrawals, not already assigned to another entry
-  const allRecons = getRecon(reconKey)
-  const usedTxIds = new Set(
-    Object.entries(allRecons)
-      .filter(([id]) => id !== String(entry.id))
-      .map(([, r]) => r.txId)
-  )
+  // Residuo disponibile di un prelievo — esclude l'allocazione CORRENTE di questa
+  // stessa entry (così ri-aprendo la riconciliazione si rivede il suo pieno residuo),
+  // ma tiene conto di tutto ciò che è abbinato altrove (altre entry Nanny/Colf, Contanti) —
+  // richiesta utente: "questi devono essere gli importi residuo post abbinamenti,
+  // altrimenti va in overlap con altri già abbinati per altro"
+  function residuoOf(txId) {
+    const used = useStore.getState().computeAtmUsedExcluding(txId, entry.id, reconKey)
+    const tx = transactions.find(t => t.txId === txId)
+    if (!tx) return 0
+    return Math.round((Math.abs(tx.amount) - used) * 100) / 100
+  }
 
+  // Solo prelievi fatti nel mese di competenza o in mesi precedenti (non futuri
+  // rispetto al mese dell'entry) — richiesta utente 2026-07-20
+  const meseCutoff = entry.mese // 'YYYY-MM'
   const atmTxs = transactions
-    .filter(t => isAtmWithdrawal(t) && !usedTxIds.has(t.txId))
+    .filter(t => isAtmWithdrawal(t) && (t._effDate||t.date||'').slice(0,7) <= meseCutoff)
+    .map(t => ({ ...t, _residuo: residuoOf(t.txId) }))
+    .filter(t => t._residuo > 0.01 || selectedIds.has(t.txId)) // nascondi quelli già esauriti altrove
     .sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
 
-  const nannyAmt = entry.totale
-  const selectedAmt = selected ? Math.abs(selected.amount) : null
-  const isSplit = selectedAmt !== null && selectedAmt > nannyAmt + 0.01
-  const splitContanti = isSplit ? selectedAmt - nannyAmt : 0
+  const selectedTxs = atmTxs.filter(t => selectedIds.has(t.txId))
+  const totalSelected = Math.round(selectedTxs.reduce((s,t)=>s+t._residuo,0)*100)/100
+  const isCovered = totalSelected >= nannyAmt - 0.01
+  const excess = isCovered ? Math.round((totalSelected - nannyAmt)*100)/100 : 0
+
+  function toggleSelect(txId) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(txId)) next.delete(txId); else next.add(txId)
+      return next
+    })
+  }
 
   function searchByCode() {
     const code = codeInput.trim()
@@ -77,19 +131,33 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
       (t.description||'').toLowerCase().includes(code.toLowerCase())
     )
     setCodeResult(found || 'not-found')
-    if (found) setSelected(found)
+    if (found) setSelectedIds(prev => new Set(prev).add(found.txId))
   }
 
   function confirm() {
-    if (!selected) return
+    if (selectedIds.size === 0) return
+    // Alloca in ordine di visualizzazione (più recente prima), fino a coprire nannyAmt;
+    // ciò che resta libero su un prelievo NON viene registrato — resta automaticamente
+    // disponibile per altri usi (Contanti/altra entry), niente overlap.
+    let remaining = nannyAmt
+    const allocations = []
+    for (const t of atmTxs) {
+      if (!selectedIds.has(t.txId)) continue
+      if (remaining <= 0.005) break
+      const amt = Math.min(t._residuo, remaining)
+      if (amt <= 0) continue
+      allocations.push({ txId: t.txId, amt: Math.round(amt*100)/100 })
+      remaining -= amt
+    }
     const recon = { ...getRecon(reconKey) }
     recon[entry.id] = {
-      txId:      selected.txId,
-      txAmt:     Math.abs(selected.amount),
+      allocations,
+      txId:  allocations[0]?.txId || null,   // compat: sync/lookup legacy che leggono .txId
+      txAmt: allocations[0]?.amt  || 0,
       nannyAmt,
-      contantiAmt: isSplit ? Math.round(splitContanti*100)/100 : 0,
-      split:     isSplit,
-      date:      new Date().toISOString(),
+      contantiAmt: 0,
+      split: allocations.length > 1,
+      date:  new Date().toISOString(),
     }
     saveRecon(reconKey, recon)
     setSaved(true)
@@ -100,7 +168,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
     delete recon[entry.id]
     saveRecon(reconKey, recon)
     setSaved(false)
-    setSelected(null)
+    setSelectedIds(new Set())
     setCodeResult(null)
     setCodeInput('')
   }
@@ -112,19 +180,23 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
 
   if (saved) {
     const r = getRecon(reconKey)[entry.id]
-    const tx = transactions.find(t=>t.txId===r?.txId)
+    const allocs = reconAllocations(r)
     return (
       <Modal title={`Riconciliazione salvata — ${entry.mese}`} onClose={onClose} width={520}>
         <div style={{padding:14,background:'var(--green-l,#e8f5e9)',borderRadius:'var(--radius-sm)',marginBottom:16,fontSize:13}}>
           <div style={{fontWeight:700,color:'var(--green)',marginBottom:6}}>✅ Riconciliazione registrata</div>
-          {tx && <div style={{color:'var(--text2)'}}>Transazione: <strong>{tx.txId}</strong> — {tx.descAI||(tx.description||'').slice(0,40)}</div>}
-          <div style={{color:'var(--text2)',marginTop:4}}>Prelievo ATM: <strong>€ {fmtIT(r.txAmt,2)}</strong></div>
-          <div style={{color:'var(--text2)'}}>Importo {entityLabel}: <strong>€ {fmtIT(r.nannyAmt,2)}</strong></div>
+          {allocs.map(a => {
+            const tx = transactions.find(t=>t.txId===a.txId)
+            return (
+              <div key={a.txId} style={{color:'var(--text2)',marginTop:4}}>
+                {tx ? <>Transazione: <strong>{tx.txId}</strong> — {tx.descAI||(tx.description||'').slice(0,32)}</> : a.txId} — usato <strong>€ {fmtIT(a.amt,2)}</strong>
+              </div>
+            )
+          })}
+          <div style={{color:'var(--text2)',marginTop:6}}>Importo {entityLabel}: <strong>€ {fmtIT(r.nannyAmt,2)}</strong></div>
           {r.split && (
             <div style={{marginTop:8,padding:'8px 10px',background:'var(--surface2)',borderRadius:6,fontSize:12}}>
-              <div style={{fontWeight:700,marginBottom:4}}>🔀 Split automatico</div>
-              <div>Parte {entityLabel}: <strong>€ {fmtIT(r.nannyAmt,2)}</strong></div>
-              <div>Parte Contanti: <strong>€ {fmtIT(r.contantiAmt,2)}</strong></div>
+              <div style={{fontWeight:700}}>🔀 Coperto da {allocs.length} prelievi diversi</div>
             </div>
           )}
         </div>
@@ -147,7 +219,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
         {existingRecon && (
           <div style={{flex:1,padding:'10px 14px',background:'var(--green-l,#e8f5e9)',borderRadius:'var(--radius-sm)',fontSize:13}}>
             <div style={{color:'var(--green)',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:3}}>Già riconciliato</div>
-            <div style={{fontWeight:700,fontSize:13}}>TX: {existingRecon.txId}</div>
+            <div style={{fontWeight:700,fontSize:13}}>{reconAllocations(existingRecon).length} prelievo/i</div>
             <button style={{fontSize:11,color:'var(--red)',background:'none',border:'none',cursor:'pointer',padding:0,marginTop:3}} onClick={removeRecon}>Rimuovi</button>
           </div>
         )}
@@ -167,28 +239,33 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
       {tab==='atm' && (
         atmTxs.length === 0 ? (
           <div style={{padding:'20px 14px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
-            Nessun prelievo ATM trovato nelle transazioni.<br/>
+            Nessun prelievo ATM disponibile (fino al mese di {entry.mese}).<br/>
             <span style={{fontSize:12}}>Usa la scheda "Inserisci Codice" per assegnare manualmente.</span>
           </div>
         ) : (
-          <div style={{maxHeight:280,overflowY:'auto',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',marginBottom:14}}>
+          <div style={{maxHeight:280,overflowY:'auto',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',marginBottom:10}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr>
                 <th style={thStyle}>Data</th>
                 <th style={thStyle}>Descrizione</th>
-                <th style={{...thStyle,textAlign:'right'}}>Importo</th>
+                <th style={{...thStyle,textAlign:'right'}}>Residuo</th>
                 <th style={thStyle}></th>
               </tr></thead>
               <tbody>
                 {atmTxs.map(t=>{
-                  const isSelected = selected?.txId === t.txId
+                  const isSelected = selectedIds.has(t.txId)
                   return (
-                    <tr key={t.txId} style={{background:isSelected?'var(--accent-l,#f0f4ff)':'',cursor:'pointer'}} onClick={()=>setSelected(isSelected?null:t)}>
+                    <tr key={t.txId} style={{background:isSelected?'var(--accent-l,#f0f4ff)':'',cursor:'pointer'}} onClick={()=>toggleSelect(t.txId)}>
                       <td style={{...tdStyle,fontFamily:'var(--font-mono)',color:'var(--text3)'}}>{fmtDate(t._effDate||t.date)}</td>
                       <td style={tdStyle}>{t.descAI||(t.description||'').slice(0,38)}</td>
-                      <td style={{...tdStyle,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>€ {fmtIT(Math.abs(t.amount),2)}</td>
+                      <td style={{...tdStyle,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>
+                        € {fmtIT(t._residuo,2)}
+                        {t._residuo < Math.abs(t.amount) - 0.01 && (
+                          <div style={{fontSize:10,fontWeight:400,color:'var(--text3)'}}>di € {fmtIT(Math.abs(t.amount),2)}</div>
+                        )}
+                      </td>
                       <td style={{...tdStyle,textAlign:'center'}}>
-                        <div style={{width:16,height:16,borderRadius:'50%',border:`2px solid ${isSelected?'var(--accent)':'var(--border)'}`,background:isSelected?'var(--accent)':'',display:'inline-block'}}/>
+                        <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(t.txId)} onClick={e=>e.stopPropagation()}/>
                       </td>
                     </tr>
                   )
@@ -225,33 +302,24 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
         </div>
       )}
 
-      {/* Selected transaction + split preview */}
-      {selected && (
-        <div style={{padding:'12px 14px',background:'var(--surface2)',borderRadius:'var(--radius-sm)',marginBottom:14,fontSize:13}}>
-          <div style={{fontWeight:700,marginBottom:6}}>📌 Prelievo selezionato: <span style={{fontFamily:'var(--font-mono)',color:'var(--red)'}}>€ {fmtIT(Math.abs(selected.amount),2)}</span></div>
-          {isSplit ? (
-            <div style={{padding:'10px 12px',background:'var(--gold-l,#fffbe6)',borderRadius:6,border:'1px solid var(--gold)'}}>
-              <div style={{fontWeight:700,color:'var(--gold)',marginBottom:6}}>🔀 Il prelievo supera il costo — verrà suddiviso:</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                <div style={{padding:'8px 12px',background:'var(--surface)',borderRadius:6,textAlign:'center'}}>
-                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>{entityLabel}</div>
-                  <div style={{fontWeight:700,fontSize:16,fontFamily:'var(--font-mono)'}}>€ {fmtIT(nannyAmt,2)}</div>
-                </div>
-                <div style={{padding:'8px 12px',background:'var(--surface)',borderRadius:6,textAlign:'center'}}>
-                  <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>💵 Contanti residui</div>
-                  <div style={{fontWeight:700,fontSize:16,fontFamily:'var(--font-mono)'}}>€ {fmtIT(Math.round(splitContanti*100)/100,2)}</div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div style={{color:'var(--green)',fontWeight:600}}>✅ Importo corrispondente — nessun split necessario</div>
-          )}
+      {/* Riepilogo selezione — più prelievi possono coprire insieme il pagamento */}
+      <div style={{padding:'12px 14px',background: isCovered?'var(--green-l,#e8f5e9)':'var(--surface2)',borderRadius:'var(--radius-sm)',marginBottom:14,fontSize:13}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>Selezionati: <strong>{selectedTxs.length}</strong> prelievo/i — totale residuo <strong style={{fontFamily:'var(--font-mono)'}}>€ {fmtIT(totalSelected,2)}</strong></span>
+          <span style={{fontWeight:700,color:isCovered?'var(--green)':'var(--red)'}}>
+            {isCovered ? '✅ Coperto' : `Mancano € ${fmtIT(nannyAmt-totalSelected,2)}`}
+          </span>
         </div>
-      )}
+        {isCovered && excess > 0.01 && (
+          <div style={{marginTop:6,fontSize:12,color:'var(--text3)'}}>
+            🔀 Verrà usato solo il necessario da ciascun prelievo — € {fmtIT(excess,2)} resterà libero per altri usi.
+          </div>
+        )}
+      </div>
 
       <ModalFooter>
         <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
-        <button className="btn btn-primary" onClick={confirm} disabled={!selected}>
+        <button className="btn btn-primary" onClick={confirm} disabled={selectedIds.size===0}>
           Conferma riconciliazione
         </button>
       </ModalFooter>
@@ -294,8 +362,14 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
 
   const StatusIcon=({status})=>status==='ok'?<CheckCircle size={14} color="var(--green)"/>:status==='partial'?<AlertCircle size={14} color="var(--gold)"/>:<XCircle size={14} color="var(--red)"/>
 
+  // Prelievi ATM raggruppati per mese, con residuo post-abbinamento — richiesta
+  // utente 2026-07-20: colonna "Prelievi nel mese" in tabella + box storico a destra
+  const prelieviByMonth = computePrelieviByMonth(transactions, store)
+  const prelieviList = Object.values(prelieviByMonth).sort((a,b)=>b.mese.localeCompare(a.mese))
+
   return (
-    <div style={{padding:'28px 32px',maxWidth:860}}>
+    <div style={{padding:'28px 32px',display:'flex',gap:24,alignItems:'flex-start'}}>
+    <div style={{flex:1,maxWidth:860,minWidth:0}}>
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:16}}>
         <div>
           <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600}}>{icon} {displayTitle}</h1>
@@ -345,23 +419,22 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo',''].map(h=>(
-                <th key={h} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale'].includes(h)?'right':'left'}}>{h}</th>
+              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Prelievi nel mese',''].map(h=>(
+                <th key={h} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Prelievi nel mese'].includes(h)?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {[...entries].sort((a,b)=>b.mese.localeCompare(a.mese)).map(e=>{
                 const r=reconcileStatus(e,transactions,reconKey)
-                const atmTx = r.status==='ok' && r.recon?.txId
-                  ? transactions.find(t=>t.txId===r.recon.txId)
-                  : null
-                const atmDate = atmTx ? (atmTx.date||'').slice(0,10) : null
+                const allocs = r.status==='ok' ? reconAllocations(r.recon) : []
+                const firstTx = allocs[0] ? transactions.find(t=>t.txId===allocs[0].txId) : null
+                const atmDate = firstTx ? (firstTx.date||'').slice(0,10) : null
                 const fmtAtmDate = d => {
                   if (!d) return '—'
                   const [,m,day] = d.match(/\d{4}-(\d{2})-(\d{2})/) || []
-                  const MESI=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
                   return m ? `${parseInt(day)} ${MESI[parseInt(m)-1]}` : d
                 }
+                const mesePrelievi = prelieviByMonth[e.mese]
                 return (
                   <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'10px 14px',fontWeight:600}}>{e.mese}</td>
@@ -376,10 +449,14 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
                     </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:atmDate?'var(--text2)':'var(--text3)',fontFamily:atmDate?'var(--font-mono)':'inherit'}}>
                       {atmDate ? (
-                        <span title={`Prelievo del ${atmDate} — € ${r.recon?.txAmt?.toLocaleString('it-IT')}`}>
-                          📅 {fmtAtmDate(atmDate)}
+                        <span title={allocs.map(a=>`€ ${a.amt?.toLocaleString('it-IT')}`).join(' + ')}>
+                          📅 {fmtAtmDate(atmDate)}{allocs.length>1 ? ` +${allocs.length-1}` : ''}
                         </span>
                       ) : '—'}
+                    </td>
+                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,color:mesePrelievi?'var(--text2)':'var(--text3)'}}
+                      title="Somma dei residui prelievi non ancora assegnati, fatti in questo mese">
+                      {mesePrelievi ? `€ ${fmtIT(mesePrelievi.totale,0)}` : '—'}
                     </td>
                     <td style={{padding:'6px 10px'}}><button className="btn btn-ghost" onClick={()=>store[deleteFn](e.id)}><Trash2 size={12}/></button></td>
                   </tr>
@@ -410,6 +487,34 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
         </Modal>
       )}
       {reconEntry && <ReconcileModal entry={reconEntry} transactions={transactions} onClose={()=>setReconEntry(null)} entityLabel={title} reconKey={reconKey}/>}
+    </div>
+
+      {/* Box laterale — storico prelievi per mese, sfogliabile in verticale.
+          Importo mostrato = residuo POST abbinamento (quello ancora libero) —
+          richiesta utente 2026-07-20 */}
+      <aside className="card" style={{width:240,flexShrink:0,position:'sticky',top:20,padding:0,overflow:'hidden'}}>
+        <div style={{padding:'12px 14px',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+          <div style={{fontSize:12,fontWeight:700}}>💵 Storico Prelievi</div>
+          <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Residuo post abbinamento, per mese</div>
+        </div>
+        {prelieviList.length === 0 ? (
+          <div style={{padding:'20px 14px',textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessun prelievo trovato</div>
+        ) : (
+          <div style={{maxHeight:520,overflowY:'auto'}}>
+            {prelieviList.map(p=>(
+              <div key={p.mese} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
+                <div style={{fontSize:11,fontWeight:700,color:'var(--text2)'}}>{meseLabel(p.mese)}</div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:2}}>
+                  <span style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</span>
+                  <span style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:p.totale>0.01?'var(--red)':'var(--text3)'}}>
+                    € {fmtIT(p.totale,0)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </aside>
     </div>
   )
 }

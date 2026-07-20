@@ -24,6 +24,15 @@ function getAllMembers() {
   } catch { return [] }
 }
 
+// Allocazioni di una riga recon su un dato txId — supporta sia il nuovo formato
+// multi-prelievo (r.allocations, richiesta utente 2026-07-20: selezionare più
+// prelievi per coprire un pagamento) sia il vecchio formato singolo (r.txId/r.nannyAmt).
+function allocationsForTx(r, txId) {
+  if (!r) return []
+  if (Array.isArray(r.allocations)) return r.allocations.filter(a => a.txId === txId)
+  return r.txId === txId ? [{ txId: r.txId, amt: r.nannyAmt }] : []
+}
+
 // Get auto-links from nanny/colf reconciliation
 function getAutoLinks(txId) {
   const links = []
@@ -31,18 +40,26 @@ function getAutoLinks(txId) {
     const appPrefs   = useStore.getState()?.appPrefs || {}
     const nannyRecon = appPrefs.nannyRecon || {}
     const nannyName  = appPrefs.nannyName || 'Nanny'
-    Object.entries(nannyRecon).forEach(([,r]) => {
-      if (r.txId === txId) {
-        links.push({ id:'nanny-'+r.txId, cat1:'Famiglia', cat2:nannyName, amount:r.nannyAmt, note:nannyName, source:'nanny', readonly:true })
-        if (r.split && r.contantiAmt>0) links.push({ id:'nanny-split-'+r.txId, cat1:'Contanti', cat2:'', amount:r.contantiAmt, note:'Residuo contanti', source:'nanny-split', readonly:true })
+    Object.entries(nannyRecon).forEach(([entryId,r]) => {
+      const allocs = allocationsForTx(r, txId)
+      const multi  = Array.isArray(r.allocations) && r.allocations.length > 1
+      allocs.forEach(a => {
+        links.push({ id:'nanny-'+entryId+'-'+a.txId, cat1:'Famiglia', cat2:nannyName, amount:a.amt, note: multi ? `${nannyName} (parziale)` : nannyName, source:'nanny', readonly:true })
+      })
+      if (allocs.length && r.split && r.contantiAmt>0 && r.allocations?.[0]?.txId === txId) {
+        links.push({ id:'nanny-split-'+entryId, cat1:'Contanti', cat2:'', amount:r.contantiAmt, note:'Residuo contanti', source:'nanny-split', readonly:true })
       }
     })
     const colfRecon = appPrefs.colfRecon || {}
     const colfName  = appPrefs.colfName || 'Colf'
-    Object.entries(colfRecon).forEach(([,r]) => {
-      if (r.txId === txId) {
-        links.push({ id:'colf-'+r.txId, cat1:'Famiglia', cat2:colfName, amount:r.nannyAmt, note:colfName, source:'colf', readonly:true })
-        if (r.split && r.contantiAmt>0) links.push({ id:'colf-split-'+r.txId, cat1:'Contanti', cat2:'', amount:r.contantiAmt, note:'Residuo contanti', source:'colf-split', readonly:true })
+    Object.entries(colfRecon).forEach(([entryId,r]) => {
+      const allocs = allocationsForTx(r, txId)
+      const multi  = Array.isArray(r.allocations) && r.allocations.length > 1
+      allocs.forEach(a => {
+        links.push({ id:'colf-'+entryId+'-'+a.txId, cat1:'Famiglia', cat2:colfName, amount:a.amt, note: multi ? `${colfName} (parziale)` : colfName, source:'colf', readonly:true })
+      })
+      if (allocs.length && r.split && r.contantiAmt>0 && r.allocations?.[0]?.txId === txId) {
+        links.push({ id:'colf-split-'+entryId, cat1:'Contanti', cat2:'', amount:r.contantiAmt, note:'Residuo contanti', source:'colf-split', readonly:true })
       }
     })
   } catch {}

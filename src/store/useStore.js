@@ -868,19 +868,51 @@ export const useStore = create((set, get) => ({
   },
 
   // ── Cash logic helpers ───────────────────────────────────
+  // Quanto di una riconciliazione Nanny/Colf (recon entry) è allocato su un
+  // dato txId — supporta sia il formato nuovo multi-prelievo (r.allocations,
+  // richiesta utente 2026-07-20: poter selezionare più prelievi per coprire
+  // un pagamento) sia il vecchio formato singolo (r.txId/r.nannyAmt).
+  _reconAmountForTx: (r, txId, fallbackAmt) => {
+    if (!r) return 0
+    if (Array.isArray(r.allocations)) {
+      return r.allocations.reduce((s,a) => s + (a.txId === txId ? (a.amt||0) : 0), 0)
+    }
+    return r.txId === txId ? (r.nannyAmt || fallbackAmt || 0) : 0
+  },
   // Total amount used/assigned from a specific ATM withdrawal txId
   computeAtmUsed: (txId) => {
     const { appPrefs, nannyTS, colfTS, cashEntries } = get()
     const nannyRecon = appPrefs?.nannyRecon || {}
     const colfRecon  = appPrefs?.colfRecon  || {}
     const atmMeta    = appPrefs?.atmMeta    || {}
+    const reconAmt   = get()._reconAmountForTx
+    let total = 0
+    ;(atmMeta[txId]?.links || []).forEach(l => { total += (l.amount || 0) })
+    ;(nannyTS || []).forEach(e => { total += reconAmt(nannyRecon[e.id], txId, e.totale) })
+    ;(colfTS  || []).forEach(e => { total += reconAmt(colfRecon[e.id],  txId, e.totale) })
+    ;(cashEntries || []).forEach(e => {
+      if (e.atmTxId === txId) total += (e.amount || 0)
+    })
+    return Math.round(total * 100) / 100
+  },
+  // Come computeAtmUsed, ma esclude l'allocazione di UNA specifica riga Nanny/Colf
+  // (usato dal modale di riconciliazione per mostrare quanto è "davvero" ancora
+  // disponibile su un prelievo, ignorando l'allocazione che si sta per riscrivere)
+  computeAtmUsedExcluding: (txId, excludeEntryId, excludeReconKey) => {
+    const { appPrefs, nannyTS, colfTS, cashEntries } = get()
+    const nannyRecon = appPrefs?.nannyRecon || {}
+    const colfRecon  = appPrefs?.colfRecon  || {}
+    const atmMeta    = appPrefs?.atmMeta    || {}
+    const reconAmt   = get()._reconAmountForTx
     let total = 0
     ;(atmMeta[txId]?.links || []).forEach(l => { total += (l.amount || 0) })
     ;(nannyTS || []).forEach(e => {
-      if (nannyRecon[e.id]?.txId === txId) total += (nannyRecon[e.id].nannyAmt || e.totale || 0)
+      if (excludeReconKey === 'nannyRecon' && e.id === excludeEntryId) return
+      total += reconAmt(nannyRecon[e.id], txId, e.totale)
     })
     ;(colfTS || []).forEach(e => {
-      if (colfRecon[e.id]?.txId === txId) total += (colfRecon[e.id].nannyAmt || e.totale || 0)
+      if (excludeReconKey === 'colfRecon' && e.id === excludeEntryId) return
+      total += reconAmt(colfRecon[e.id], txId, e.totale)
     })
     ;(cashEntries || []).forEach(e => {
       if (e.atmTxId === txId) total += (e.amount || 0)
@@ -915,13 +947,14 @@ export const useStore = create((set, get) => ({
     const nannyRecon = appPrefs?.nannyRecon || {}
     const colfRecon  = appPrefs?.colfRecon  || {}
     const atmMeta    = appPrefs?.atmMeta    || {}
+    const reconAmt   = get()._reconAmountForTx
     // Base usage per ATM (from non-auto sources)
     const baseUsed = new Map()
     atmTxs.forEach(tx => {
       let total = 0
       ;(atmMeta[tx.txId]?.links || []).forEach(l => { total += (l.amount || 0) })
-      ;(nannyTS || []).forEach(e => { if (nannyRecon[e.id]?.txId === tx.txId) total += (nannyRecon[e.id].nannyAmt || e.totale || 0) })
-      ;(colfTS || []).forEach(e => { if (colfRecon[e.id]?.txId === tx.txId) total += (colfRecon[e.id].nannyAmt || e.totale || 0) })
+      ;(nannyTS || []).forEach(e => { total += reconAmt(nannyRecon[e.id], tx.txId, e.totale) })
+      ;(colfTS  || []).forEach(e => { total += reconAmt(colfRecon[e.id],  tx.txId, e.totale) })
       cashEntries.filter(e => e.atmSource !== 'auto' && e.atmTxId === tx.txId)
         .forEach(e => { total += (e.amount || 0) })
       baseUsed.set(tx.txId, Math.round(total * 100) / 100)
