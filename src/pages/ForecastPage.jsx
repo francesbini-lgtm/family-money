@@ -241,6 +241,12 @@ export default function ForecastPage() {
   const teoricheEntrate = appPrefs?.forecastTeoricheEntrate || {} // { Fra: number, Sofi: number }
   const teoricheBonus   = appPrefs?.forecastTeoricheBonus   || {} // { Fra: {has13,has14}, Sofi: {...} }
   const teoricheSpese   = appPrefs?.forecastTeoricheSpese   || {} // { [cat1]: number }
+  // Mese di pagamento 13ª/14ª (1-based: 6=giugno, 12=dicembre) — richiesta utente
+  // 2026-07-20: rendere modificabile (non tutte le aziende le pagano negli stessi mesi)
+  const bonusMonths = appPrefs?.forecastBonusMonths || { m13: 6, m14: 12 }
+  function setBonusMonth(key, val) {
+    setAppPref('forecastBonusMonths', { ...bonusMonths, [key]: val })
+  }
   function setTeoricheEntrata(person, val) {
     setAppPref('forecastTeoricheEntrate', { ...teoricheEntrate, [person]: val })
   }
@@ -552,16 +558,16 @@ export default function ForecastPage() {
         anticipoApplied = true
       }
       // 13ma/14ma (solo in modalità Teoriche) — richiesta utente 2026-07-20: nei mesi in
-      // cui una persona ha la 14esima (dicembre) o la 13esima (giugno), il suo stipendio
-      // in quel mese raddoppia. d.getMonth() è 0-based: 5 = giugno, 11 = dicembre.
+      // cui una persona ha la 14esima o la 13esima, il suo stipendio in quel mese
+      // raddoppia. Mese configurabile via bonusMonths (1-based); d.getMonth() è 0-based.
       let bonusExtra = 0
       if (forecastBasis === 'teoriche') {
-        const mon = d.getMonth()
+        const mon = d.getMonth() + 1
         ;['Fra','Sofi'].forEach(person => {
           const flags = teoricheBonus[person] || {}
           const val   = person === 'Fra' ? teoricheFraVal : teoricheSofiVal
-          if (mon === 11 && flags.has14) bonusExtra += val // dicembre → 14esima
-          if (mon === 5  && flags.has13) bonusExtra += val // giugno   → 13esima
+          if (mon === bonusMonths.m14 && flags.has14) bonusExtra += val
+          if (mon === bonusMonths.m13 && flags.has13) bonusExtra += val
         })
       }
       saldo += (inc - exp - mortgageMonthly + bonusExtra)
@@ -592,7 +598,7 @@ export default function ForecastPage() {
       exp *= iMonthly
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -850,6 +856,26 @@ export default function ForecastPage() {
 
                 {teoricheTab === 'entrate' && (
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                    {/* Mese di pagamento 13ª/14ª — condiviso fra Fra e Sofi */}
+                    <div style={{padding:'8px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',
+                      display:'flex',gap:16}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{fontSize:11,color:'var(--text2)'}}>13ª pagata a:</span>
+                        <select value={bonusMonths.m13} onChange={e=>setBonusMonth('m13', Number(e.target.value))}
+                          style={{padding:'3px 6px',borderRadius:5,border:'1px solid var(--border)',
+                            background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-sans)',fontSize:11}}>
+                          {MON.map((m,i) => <option key={m} value={i+1}>{m}</option>)}
+                        </select>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{fontSize:11,color:'var(--text2)'}}>14ª pagata a:</span>
+                        <select value={bonusMonths.m14} onChange={e=>setBonusMonth('m14', Number(e.target.value))}
+                          style={{padding:'3px 6px',borderRadius:5,border:'1px solid var(--border)',
+                            background:'var(--surface)',color:'var(--text)',fontFamily:'var(--font-sans)',fontSize:11}}>
+                          {MON.map((m,i) => <option key={m} value={i+1}>{m}</option>)}
+                        </select>
+                      </div>
+                    </div>
                     {['Fra','Sofi'].map(person => {
                       const val   = person === 'Fra' ? teoricheFraVal : teoricheSofiVal
                       const flags = teoricheBonus[person] || {}
@@ -901,12 +927,12 @@ export default function ForecastPage() {
                             <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text2)',cursor:'pointer'}}>
                               <input type="checkbox" checked={!!flags.has13}
                                 onChange={e=>setTeoricheBonusFlag(person,'has13',e.target.checked)}/>
-                              13ª (giugno)
+                              13ª ({MON[bonusMonths.m13-1]})
                             </label>
                             <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text2)',cursor:'pointer'}}>
                               <input type="checkbox" checked={!!flags.has14}
                                 onChange={e=>setTeoricheBonusFlag(person,'has14',e.target.checked)}/>
-                              14ª (dicembre)
+                              14ª ({MON[bonusMonths.m14-1]})
                             </label>
                           </div>
                         </div>
