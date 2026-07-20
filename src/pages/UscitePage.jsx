@@ -1162,105 +1162,96 @@ export default function UscitePage() {
                 </>
               )}
             </tbody>
+
+            {/* Sezione Entrate + riconciliazione risparmio — richiesta utente 2026-07-19,
+                apribile col toggle "💰 Mostra Entrate" nella barra sopra. STESSA <table>
+                della sezione Uscite (nuovo <tbody>, non una <table> separata): un utente
+                ha segnalato che due <table> distinte non restano allineate in colonna
+                (ognuna calcola la propria larghezza colonne indipendentemente) — un
+                secondo <tbody> nella stessa tabella condivide invece le stesse colonne
+                per costruzione, garantendo l'allineamento senza dover inseguire i CSS. */}
+            {showEntrate && (() => {
+              const entrateAvg = avg6(entrateTotalByMonth)
+              return (
+              <tbody>
+                <tr>
+                  <td colSpan={months.length + 3} style={{padding:'10px 14px 6px',fontSize:13,fontWeight:700,
+                    color:'var(--text2)',borderTop:'2px solid var(--border)',background:'var(--surface2)'}}>
+                    💰 Entrate e riconciliazione risparmio
+                  </td>
+                </tr>
+                <tr className="uscite-tr-l1">
+                  <td className="uscite-td-cat l1">
+                    <span className="uscite-cat-dot" style={{ background: '#2a7a4a' }}/>
+                    <span className="uscite-cat-name">Entrate</span>
+                  </td>
+                  {months.map(m => (
+                    <td key={m.key} className="uscite-td-val l1">{eur(entrateTotalByMonth[m.key] || 0)}</td>
+                  ))}
+                  <td className="uscite-td-val l1 row-total">{eur(entrateAvg)}</td>
+                  <td className="uscite-td-pct">{entrateAvg > 0 ? '100%' : '—'}</td>
+                </tr>
+                {['Fra', 'Sofi'].map(person => {
+                  const personAvg = avg6(incomeByPersonMonth[person] || {})
+                  return (
+                  <tr key={person} className="uscite-tr-l2">
+                    <td className="uscite-td-cat l2">
+                      <span className="uscite-l2-label">
+                        {CATS['Entrate']?.subEmojis?.[person] || ''} {person}
+                      </span>
+                    </td>
+                    {months.map(m => (
+                      <td key={m.key} className="uscite-td-val l2">{eur(incomeByPersonMonth[person]?.[m.key] || 0)}</td>
+                    ))}
+                    <td className="uscite-td-val l2 row-total">{eur(personAvg)}</td>
+                    <td className="uscite-td-pct">{entrateAvg > 0 ? Math.round(personAvg / entrateAvg * 100) + '%' : '—'}</td>
+                  </tr>
+                  )
+                })}
+                <tr className="uscite-tr-grand">
+                  <td className="uscite-td-cat">Totale risparmiato</td>
+                  {months.map(m => {
+                    const v = risparmiatoByMonth[m.key] || 0
+                    return (
+                      <td key={m.key} className="uscite-td-val grand"
+                        style={{ color: v >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {eurSigned(v)}
+                      </td>
+                    )
+                  })}
+                  <td className="uscite-td-val grand">{eurSigned(avg6(risparmiatoByMonth))}</td>
+                  <td className="uscite-td-pct">—</td>
+                </tr>
+                <tr>
+                  <td className="uscite-td-cat" style={{ fontStyle: 'italic', fontWeight: 400, color: 'var(--text3)' }}>
+                    Δ vs risparmio reale (sheet Risparmio)
+                  </td>
+                  {months.map(m => {
+                    const d = deltaByMonth[m.key] || 0
+                    const ok = Math.abs(d) < 1
+                    return (
+                      <td key={m.key} className="uscite-td-val"
+                        style={{ fontStyle: 'italic', fontWeight: 400, color: ok ? 'var(--text3)' : (d >= 0 ? 'var(--green)' : 'var(--red)') }}>
+                        {ok ? '✓' : eurSigned(d)}
+                      </td>
+                    )
+                  })}
+                  <td className="uscite-td-val" style={{ fontStyle: 'italic', fontWeight: 400 }}>
+                    {eurSigned(avg6(deltaByMonth))}
+                  </td>
+                  <td className="uscite-td-pct" style={{ fontStyle: 'italic' }}>—</td>
+                </tr>
+              </tbody>
+              )
+            })()}
           </table>
           <div style={{padding:'6px 14px 10px',fontSize:11,color:'var(--text3)',borderTop:'1px solid var(--border)'}}>
             Nota (*): Media/mese = totale periodo ÷ 6
             {adjVacanze && <><br/>Nota (**): Carburante e Autostrada sono al netto delle vacanze</>}
+            {showEntrate && <><br/>Il delta (Δ) confronta il risparmiato Fra+Sofi con il risparmio reale calcolato come nella sezione Risparmio
+              (tutte le entrate meno tutte le uscite, indipendentemente dalla persona) — uno scostamento diverso da zero
+              indica altre entrate (Prestiti/Altro) o importi non ancora categorizzati come "Entrate".</>}
           </div>
-
-          {/* Tabella Entrate + riconciliazione risparmio — richiesta utente 2026-07-19,
-              apribile col toggle "💰 Mostra Entrate" nella barra sopra */}
-          {showEntrate && (
-            <div style={{marginTop:16,borderTop:'2px solid var(--border)',paddingTop:14}}>
-              <div style={{fontSize:13,fontWeight:700,marginBottom:8,color:'var(--text2)',padding:'0 14px'}}>
-                💰 Entrate e riconciliazione risparmio
-              </div>
-              <table className="uscite-table">
-                <thead>
-                  <tr>
-                    <th className="uscite-th-cat">Categoria (€)</th>
-                    {months.map(m => <th key={m.key} className="uscite-th-month">{m.label}</th>)}
-                    <th className="uscite-th-total">Media/mese (*)</th>
-                    <th className="uscite-th-total">%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const entrateAvg = avg6(entrateTotalByMonth)
-                    return (
-                  <tr className="uscite-tr-l1">
-                    <td className="uscite-td-cat l1">
-                      <span className="uscite-cat-dot" style={{ background: '#2a7a4a' }}/>
-                      <span className="uscite-cat-name">Entrate</span>
-                    </td>
-                    {months.map(m => (
-                      <td key={m.key} className="uscite-td-val l1">{eur(entrateTotalByMonth[m.key] || 0)}</td>
-                    ))}
-                    <td className="uscite-td-val l1 row-total">{eur(entrateAvg)}</td>
-                    <td className="uscite-td-pct">{entrateAvg > 0 ? '100%' : '—'}</td>
-                  </tr>
-                    )
-                  })()}
-                  {['Fra', 'Sofi'].map(person => {
-                    const entrateAvg = avg6(entrateTotalByMonth)
-                    const personAvg  = avg6(incomeByPersonMonth[person] || {})
-                    return (
-                    <tr key={person} className="uscite-tr-l2">
-                      <td className="uscite-td-cat l2">
-                        <span className="uscite-l2-label">
-                          {CATS['Entrate']?.subEmojis?.[person] || ''} {person}
-                        </span>
-                      </td>
-                      {months.map(m => (
-                        <td key={m.key} className="uscite-td-val l2">{eur(incomeByPersonMonth[person]?.[m.key] || 0)}</td>
-                      ))}
-                      <td className="uscite-td-val l2 row-total">{eur(personAvg)}</td>
-                      <td className="uscite-td-pct">{entrateAvg > 0 ? Math.round(personAvg / entrateAvg * 100) + '%' : '—'}</td>
-                    </tr>
-                    )
-                  })}
-                  <tr className="uscite-tr-grand">
-                    <td className="uscite-td-cat">Totale risparmiato</td>
-                    {months.map(m => {
-                      const v = risparmiatoByMonth[m.key] || 0
-                      return (
-                        <td key={m.key} className="uscite-td-val grand"
-                          style={{ color: v >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {eurSigned(v)}
-                        </td>
-                      )
-                    })}
-                    <td className="uscite-td-val grand">{eurSigned(avg6(risparmiatoByMonth))}</td>
-                    <td className="uscite-td-pct">—</td>
-                  </tr>
-                  <tr>
-                    <td className="uscite-td-cat" style={{ fontStyle: 'italic', fontWeight: 400, color: 'var(--text3)' }}>
-                      Δ vs risparmio reale (sheet Risparmio)
-                    </td>
-                    {months.map(m => {
-                      const d = deltaByMonth[m.key] || 0
-                      const ok = Math.abs(d) < 1
-                      return (
-                        <td key={m.key} className="uscite-td-val"
-                          style={{ fontStyle: 'italic', fontWeight: 400, color: ok ? 'var(--text3)' : (d >= 0 ? 'var(--green)' : 'var(--red)') }}>
-                          {ok ? '✓' : eurSigned(d)}
-                        </td>
-                      )
-                    })}
-                    <td className="uscite-td-val" style={{ fontStyle: 'italic', fontWeight: 400 }}>
-                      {eurSigned(avg6(deltaByMonth))}
-                    </td>
-                    <td className="uscite-td-pct" style={{ fontStyle: 'italic' }}>—</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div style={{ padding: '8px 14px 0', fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>
-                Il delta (Δ) confronta il risparmiato Fra+Sofi con il risparmio reale calcolato come nella sezione Risparmio
-                (tutte le entrate meno tutte le uscite, indipendentemente dalla persona) — uno scostamento diverso da zero
-                indica altre entrate (Prestiti/Altro) o importi non ancora categorizzati come "Entrate".
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Detail panel */}

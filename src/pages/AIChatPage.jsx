@@ -208,6 +208,22 @@ function AIInsights({ transactions }) {
   )
 }
 
+// ── Rendering minimale markdown per i messaggi AI ─────────
+// Richiesta utente 2026-07-19: il testo **grassetto** veniva mostrato con gli
+// asterischi letterali invece che in grassetto vero — l'AI (Gemini) risponde
+// spesso in markdown ma il messaggio era renderizzato come testo puro. Qui si
+// gestisce solo **grassetto** (il caso segnalato); il div `.chat-bubble` ha già
+// `white-space:pre-wrap` quindi gli a-capo del testo restano invariati senza
+// bisogno di ricostruire paragrafi/<br/> a mano.
+function renderChatContent(text) {
+  if (!text) return null
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') && part.length > 4
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>
+  )
+}
+
 // ── Message ───────────────────────────────────────────────
 function Message({ msg }) {
   const isUser = msg.role === 'user'
@@ -219,7 +235,7 @@ function Message({ msg }) {
         </div>
       )}
       <div className={'chat-bubble ' + (isUser ? 'bubble-user' : 'bubble-ai')}>
-        {msg.content}
+        {isUser ? msg.content : renderChatContent(msg.content)}
         {msg.error && <div className="chat-error">⚠️ {msg.error}</div>}
       </div>
     </div>
