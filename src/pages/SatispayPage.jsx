@@ -3482,7 +3482,7 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
                         onChange={e => setSelectedRows(prev => { const n = new Set(prev); e.target.checked ? n.add(t.txId) : n.delete(t.txId); return n })}
                         style={{cursor:'pointer'}}/>
                     </td>
-                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>
+                    <td style={{padding:'10px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                       {fmtDate(t._effDate||t.date)}
                     </td>
                     <td style={{padding:'10px 14px',fontSize:12}}>
