@@ -237,6 +237,7 @@ export default function ForecastPage() {
   const forecastBasis = appPrefs?.forecastBasis || 'storico' // 'storico' | 'teoriche'
   function setForecastBasis(v) { setAppPref('forecastBasis', v) }
   const [teoricheTab, setTeoricheTab] = useState('entrate') // 'entrate' | 'spese' (sub-tab locale)
+  const [teoricheDetailPerson, setTeoricheDetailPerson] = useState(null) // 'Fra' | 'Sofi' | null — storico 12 mesi in tab Teoriche
   const teoricheEntrate = appPrefs?.forecastTeoricheEntrate || {} // { Fra: number, Sofi: number }
   const teoricheBonus   = appPrefs?.forecastTeoricheBonus   || {} // { Fra: {has13,has14}, Sofi: {...} }
   const teoricheSpese   = appPrefs?.forecastTeoricheSpese   || {} // { [cat1]: number }
@@ -579,6 +580,12 @@ export default function ForecastPage() {
         ym,
         forecast: Math.round(saldo),
         residual: residual !== null ? residual : undefined,
+        // Entrate/Spese effettive DI QUESTO mese (con crescita/inflazione già composte
+        // e, in modalità Teoriche, la 13ª/14ª già sommata) — usate dalla tabella
+        // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto
+        income:  Math.round(inc + bonusExtra),
+        expense: Math.round(exp),
+        bonusExtra: Math.round(bonusExtra),
       })
 
       inc *= gMonthly
@@ -846,10 +853,15 @@ export default function ForecastPage() {
                     {['Fra','Sofi'].map(person => {
                       const val   = person === 'Fra' ? teoricheFraVal : teoricheSofiVal
                       const flags = teoricheBonus[person] || {}
+                      const isOpen = teoricheDetailPerson === person
                       return (
                         <div key={person} style={{padding:'10px 12px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
                           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                            <div style={{fontSize:12,fontWeight:700}}>{person==='Fra' ? '👨 Fra' : '👩 Sofi'}</div>
+                            <div onClick={()=>setTeoricheDetailPerson(isOpen?null:person)}
+                              style={{fontSize:12,fontWeight:700,cursor:'pointer',userSelect:'none',display:'flex',alignItems:'center',gap:5}}>
+                              {person==='Fra' ? '👨 Fra' : '👩 Sofi'}
+                              <span style={{fontSize:9,opacity:.5}}>{isOpen?'▲':'▼'}</span>
+                            </div>
                             <div style={{display:'flex',alignItems:'center',gap:4}}>
                               <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
                               <input type="number" value={val}
@@ -860,6 +872,31 @@ export default function ForecastPage() {
                               <span style={{fontSize:11,color:'var(--text3)'}}>/mese</span>
                             </div>
                           </div>
+                          {isOpen && (
+                            <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginBottom:8}}>
+                              <tbody>
+                                {incomeByMonth.map(m => {
+                                  const v = person==='Fra' ? m.fra : m.sofi
+                                  return (
+                                    <tr key={m.ym} style={{borderBottom:'1px solid var(--border)'}}>
+                                      <td style={{padding:'3px 0',color:'var(--text2)'}}>{m.label}</td>
+                                      <td style={{padding:'3px 0',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)'}}>
+                                        {fmtFull(Math.round(v))}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{borderTop:'2px solid var(--border)'}}>
+                                  <td style={{padding:'4px 0',fontWeight:700,fontSize:10,color:'var(--text3)'}}>Media /12</td>
+                                  <td style={{padding:'4px 0',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:800,color:'var(--green)'}}>
+                                    {fmtFull(Math.round(incomeByMonth.reduce((s,m)=>s+(person==='Fra'?m.fra:m.sofi),0)/12))}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          )}
                           <div style={{display:'flex',gap:14}}>
                             <label style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text2)',cursor:'pointer'}}>
                               <input type="checkbox" checked={!!flags.has13}
@@ -876,7 +913,7 @@ export default function ForecastPage() {
                       )
                     })}
                     <div style={{fontSize:10,color:'var(--text3)',marginTop:2,lineHeight:1.4}}>
-                      Default: ultimo mese registrato. Con 13ª/14ª attiva, lo stipendio raddoppia nel mese indicato nella "📋 Proiezione Mensile".
+                      Default: ultimo mese registrato. Clicca sul nome per vedere lo storico ultimi 12 mesi. Con 13ª/14ª attiva, lo stipendio raddoppia nel mese indicato nella "📋 Proiezione Mensile".
                     </div>
                   </div>
                 )}
@@ -1277,14 +1314,17 @@ export default function ForecastPage() {
                   .map((d) => {
                     const mortgageActive = mortgageOn && mortgageStart && d.ym >= mortgageStart
                     const rataMese = mortgageActive ? mortgage.rata : 0
-                    const inc = avgIncomeEffective
-                    const exp = effectiveExpense
+                    const inc = d.income
+                    const exp = d.expense
                     const cf = (inc - exp) - rataMese
                     return (
                       <tr key={d.ym} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>{d.label}</td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
                           € {fmtIT(Math.round(inc), 0)}
+                          {d.bonusExtra > 0 && (
+                            <span title="13ª/14ª inclusa" style={{marginLeft:5,fontSize:10,color:'var(--accent)'}}>★</span>
+                          )}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
                           € {fmtIT(Math.round(exp), 0)}
