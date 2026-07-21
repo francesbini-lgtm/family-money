@@ -43,11 +43,13 @@ function computePrelieviByMonth(transactions, store) {
     if (!isAtmWithdrawal(t)) return
     const mese = (t._effDate || t.date || '').slice(0,7)
     if (!mese) return
-    const used   = store.computeAtmUsed(t.txId)
-    const residuo = Math.round((Math.abs(t.amount) - used) * 100) / 100
-    if (!map[mese]) map[mese] = { mese, totale:0, count:0 }
-    map[mese].totale += residuo
-    map[mese].count  += 1
+    const used    = store.computeAtmUsed(t.txId)
+    const importo = Math.abs(t.amount)
+    const residuo = Math.round((importo - used) * 100) / 100
+    if (!map[mese]) map[mese] = { mese, importo:0, totale:0, count:0 }
+    map[mese].importo += importo
+    map[mese].totale  += residuo
+    map[mese].count   += 1
   })
   return map
 }
@@ -490,25 +492,37 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
     </div>
 
       {/* Box laterale — storico prelievi per mese, sfogliabile in verticale.
-          Importo mostrato = residuo POST abbinamento (quello ancora libero) —
-          richiesta utente 2026-07-20 */}
-      <aside className="card" style={{width:240,flexShrink:0,position:'sticky',top:20,padding:0,overflow:'hidden'}}>
+          Mostra sia l'importo prelevato che il residuo POST abbinamento (quello
+          ancora libero) — richiesta utente 2026-07-20 */}
+      <aside className="card" style={{width:280,flexShrink:0,position:'sticky',top:20,padding:0,overflow:'hidden'}}>
         <div style={{padding:'12px 14px',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
           <div style={{fontSize:12,fontWeight:700}}>💵 Storico Prelievi</div>
-          <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Residuo post abbinamento, per mese</div>
+          <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Importo prelevato e residuo, per mese</div>
         </div>
         {prelieviList.length === 0 ? (
           <div style={{padding:'20px 14px',textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessun prelievo trovato</div>
         ) : (
           <div style={{maxHeight:520,overflowY:'auto'}}>
+            <div style={{display:'flex',justifyContent:'space-between',padding:'4px 14px',fontSize:9,fontWeight:700,
+              letterSpacing:'.05em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)'}}>
+              <span>Mese</span>
+              <span style={{display:'flex',gap:14}}><span style={{minWidth:52,textAlign:'right'}}>Importo</span><span style={{minWidth:52,textAlign:'right'}}>Residuo</span></span>
+            </div>
             {prelieviList.map(p=>(
               <div key={p.mese} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
-                <div style={{fontSize:11,fontWeight:700,color:'var(--text2)'}}>{meseLabel(p.mese)}</div>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginTop:2}}>
-                  <span style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</span>
-                  <span style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:p.totale>0.01?'var(--red)':'var(--text3)'}}>
-                    € {fmtIT(p.totale,0)}
-                  </span>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--text2)'}}>{meseLabel(p.mese)}</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</div>
+                  </div>
+                  <div style={{display:'flex',gap:14}}>
+                    <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>
+                      € {fmtIT(p.importo,0)}
+                    </span>
+                    <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:p.totale>0.01?'var(--red)':'var(--text3)'}}>
+                      € {fmtIT(p.totale,0)}
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}
