@@ -552,6 +552,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead><tr>
                   <th style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',textAlign:'left',borderBottom:'1px solid var(--border)'}}>Data</th>
+                  <th style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',textAlign:'right',borderBottom:'1px solid var(--border)'}}>Importo originale</th>
                   <th style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',textAlign:'right',borderBottom:'1px solid var(--border)'}}>Importo usato</th>
                 </tr></thead>
                 <tbody>
@@ -560,6 +561,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                     return (
                       <tr key={a.txId} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'6px 10px',fontFamily:'var(--font-mono)',color:'var(--text2)'}}>{tx ? fmtDate(tx._effDate||tx.date) : '—'}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text3)'}}>{tx ? `€ ${fmtIT(Math.abs(tx.amount)||0,2)}` : '—'}</td>
                         <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>€ {fmtIT(a.amt||0,2)}</td>
                       </tr>
                     )
