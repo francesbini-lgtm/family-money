@@ -459,8 +459,8 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Prelievi nel mese','',''].map((h,hi)=>(
-                <th key={h+hi} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Prelievi nel mese'].includes(h)?'right':'left'}}>{h}</th>
+              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Residuo Prelievi Mese','',''].map((h,hi)=>(
+                <th key={h+hi} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Residuo Prelievi Mese'].includes(h)?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
