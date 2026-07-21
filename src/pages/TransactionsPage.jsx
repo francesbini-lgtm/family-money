@@ -2793,6 +2793,9 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
   const compensatingByFirst = Array.isArray(tx._compensatedBy) ? tx._compensatedBy[0] : tx._compensatedBy
   const compensatingTx    = compensatingByFirst ? allTxs.find(t=>t.txId===compensatingByFirst) : null
   const compensatedLabel  = compensatingTx?.cat2?.toLowerCase()==='satispay' ? 'Compensato Satispay' : 'Compensato'
+  // Tutti i codici transazione coinvolti — richiesta utente 2026-07-20: mostrarli
+  // nel popup "Importo rettificato" per poter identificare/verificare l'abbinamento
+  const compensatingByAll = Array.isArray(tx._compensatedBy) ? tx._compensatedBy : (tx._compensatedBy ? [tx._compensatedBy] : [])
   const catOpen = openCatTxId === tx.txId
   const setCatOpen = (v) => setOpenCatTxId?.(v ? tx.txId : null)
   const [descOpen,    setDescOpen]    = useState(false)
@@ -3063,6 +3066,12 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                       <span style={{color:'var(--text2)'}}>{compensatedLabel}</span>
                       <span style={{fontWeight:600,color:'var(--gold)'}}>− {fmtIT(tx._compensatedAmt,2)} €</span>
                     </div>
+                    {compensatingByAll.length > 0 && (
+                      <div style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:4}}>
+                        <span style={{color:'var(--text2)'}}>{compensatingByAll.length>1 ? 'Codici transazione' : 'Codice transazione'}</span>
+                        <span style={{fontWeight:600,color:'var(--text1)',fontFamily:'var(--font-mono)',fontSize:11}}>{compensatingByAll.join(', ')}</span>
+                      </div>
+                    )}
                     <div style={{borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,display:'flex',justifyContent:'space-between',gap:16}}>
                       <span style={{color:'var(--text2)'}}>Netto</span>
                       <span style={{fontWeight:700,color:'var(--text1)'}}>{fmtIT(Math.abs(tx.amount)-tx._compensatedAmt,2)} €</span>
