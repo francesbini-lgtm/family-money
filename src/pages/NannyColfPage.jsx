@@ -46,11 +46,18 @@ function computePrelieviByMonth(transactions, store) {
     const used    = store.computeAtmUsed(t.txId)
     const importo = Math.abs(t.amount)
     const residuo = Math.round((importo - used) * 100) / 100
-    if (!map[mese]) map[mese] = { mese, importo:0, totale:0, count:0 }
+    if (!map[mese]) map[mese] = { mese, importo:0, totale:0, count:0, items:[] }
     map[mese].importo += importo
     map[mese].totale  += residuo
     map[mese].count   += 1
+    map[mese].items.push({
+      txId: t.txId,
+      date: (t._effDate || t.date || '').slice(0,10),
+      importo,
+      residuo,
+    })
   })
+  Object.values(map).forEach(m => m.items.sort((a,b)=>b.date.localeCompare(a.date)))
   return map
 }
 
@@ -335,6 +342,8 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
   const transactions = useStore(s=>s.transactions)
   const [showAdd, setShowAdd] = useState(false)
   const [reconEntry, setReconEntry] = useState(null)
+  const [prelievoDetailEntry, setPrelievoDetailEntry] = useState(null) // entry per popup data+importo prelievi
+  const [expandedPrelievoMese, setExpandedPrelievoMese] = useState(null) // mese espanso nel box Storico Prelievi
   const [form, setForm] = useState({ mese:new Date().toISOString().slice(0,7), ore:'', rate:defaultRate, note:'' })
   const set=(k,v)=>setForm(f=>({...f,[k]:v}))
 
@@ -350,13 +359,24 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
   }
   const displayTitle = personName ? `${title} — ${personName}` : title
 
+  // €/ora precompilato con l'ultimo usato (mese più recente registrato), non un
+  // valore fisso — richiesta utente 2026-07-20, vale sia per Nanny che Colf
+  function lastUsedRate() {
+    if (!entries.length) return defaultRate
+    return [...entries].sort((a,b)=>b.mese.localeCompare(a.mese))[0].rate || defaultRate
+  }
+  function openAdd() {
+    setForm(f => ({ ...f, rate: lastUsedRate() }))
+    setShowAdd(true)
+  }
+
   function save(){
     if(!form.ore) return
     const ore=parseFloat(form.ore), rate=parseFloat(form.rate)||defaultRate
     const totale=ore*rate
     store[addFn]({ mese:form.mese, ore, rate, totale, note:form.note, pagato:false })
     setShowAdd(false)
-    setForm({ mese:new Date().toISOString().slice(0,7), ore:'', rate:defaultRate, note:'' })
+    setForm({ mese:new Date().toISOString().slice(0,7), ore:'', rate, note:'' })
   }
 
   const yearEntries = entries.filter(e=>e.mese.startsWith(new Date().getFullYear().toString()))
@@ -377,7 +397,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
           <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600}}>{icon} {displayTitle}</h1>
           <div style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Registro mensile ore, compensi e riconciliazione</div>
         </div>
-        <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={14}/> Aggiungi Mese</button>
+        <button className="btn btn-primary" onClick={openAdd}><Plus size={14}/> Aggiungi Mese</button>
       </div>
 
       {/* Name field */}
@@ -451,9 +471,11 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
                     </td>
                     <td style={{padding:'10px 14px',fontSize:12,color:atmDate?'var(--text2)':'var(--text3)',fontFamily:atmDate?'var(--font-mono)':'inherit'}}>
                       {atmDate ? (
-                        <span title={allocs.map(a=>`€ ${a.amt?.toLocaleString('it-IT')}`).join(' + ')}>
+                        <button onClick={()=>setPrelievoDetailEntry(e)}
+                          title="Clicca per vedere data e importo"
+                          style={{border:'none',background:'none',cursor:'pointer',padding:0,fontFamily:'inherit',fontSize:'inherit',color:'inherit'}}>
                           📅 {fmtAtmDate(atmDate)}{allocs.length>1 ? ` +${allocs.length-1}` : ''}
-                        </span>
+                        </button>
                       ) : '—'}
                     </td>
                     <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,color:mesePrelievi?'var(--text2)':'var(--text3)'}}
@@ -489,6 +511,38 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
         </Modal>
       )}
       {reconEntry && <ReconcileModal entry={reconEntry} transactions={transactions} onClose={()=>setReconEntry(null)} entityLabel={title} reconKey={reconKey}/>}
+      {prelievoDetailEntry && (() => {
+        const r = reconcileStatus(prelievoDetailEntry, transactions, reconKey)
+        const allocs = r.status==='ok' ? reconAllocations(r.recon) : []
+        return (
+          <Modal title={`Prelievi — ${prelievoDetailEntry.mese}`} onClose={()=>setPrelievoDetailEntry(null)} width={420}>
+            {allocs.length === 0 ? (
+              <div style={{padding:'10px 4px',fontSize:13,color:'var(--text3)'}}>Nessun prelievo abbinato.</div>
+            ) : (
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead><tr>
+                  <th style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',textAlign:'left',borderBottom:'1px solid var(--border)'}}>Data</th>
+                  <th style={{padding:'6px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',textAlign:'right',borderBottom:'1px solid var(--border)'}}>Importo usato</th>
+                </tr></thead>
+                <tbody>
+                  {allocs.map(a => {
+                    const tx = transactions.find(t=>t.txId===a.txId)
+                    return (
+                      <tr key={a.txId} style={{borderBottom:'1px solid var(--border)'}}>
+                        <td style={{padding:'6px 10px',fontFamily:'var(--font-mono)',color:'var(--text2)'}}>{tx ? fmtDate(tx._effDate||tx.date) : '—'}</td>
+                        <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--red)'}}>€ {fmtIT(a.amt||0,2)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+            <ModalFooter>
+              <button className="btn btn-secondary" onClick={()=>setPrelievoDetailEntry(null)}>Chiudi</button>
+            </ModalFooter>
+          </Modal>
+        )
+      })()}
     </div>
 
       {/* Box laterale — storico prelievi per mese, sfogliabile in verticale.
@@ -508,24 +562,47 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
               <span>Mese</span>
               <span style={{display:'flex',gap:14}}><span style={{minWidth:52,textAlign:'right'}}>Importo</span><span style={{minWidth:52,textAlign:'right'}}>Residuo</span></span>
             </div>
-            {prelieviList.map(p=>(
-              <div key={p.mese} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:'var(--text2)'}}>{meseLabel(p.mese)}</div>
-                    <div style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</div>
+            {prelieviList.map(p=>{
+              const isExpandable = p.count > 1
+              const isOpen = expandedPrelievoMese === p.mese
+              return (
+                <div key={p.mese} style={{borderBottom:'1px solid var(--border)'}}>
+                  <div onClick={()=>isExpandable && setExpandedPrelievoMese(isOpen?null:p.mese)}
+                    style={{padding:'10px 14px',display:'flex',justifyContent:'space-between',alignItems:'baseline',
+                      cursor:isExpandable?'pointer':'default',userSelect:'none'}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:'var(--text2)',display:'flex',alignItems:'center',gap:4}}>
+                        {meseLabel(p.mese)}
+                        {isExpandable && <span style={{fontSize:9,opacity:.5}}>{isOpen?'▲':'▼'}</span>}
+                      </div>
+                      <div style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</div>
+                    </div>
+                    <div style={{display:'flex',gap:14}}>
+                      <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>
+                        € {fmtIT(p.importo,0)}
+                      </span>
+                      <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:p.totale>0.01?'var(--red)':'var(--text3)'}}>
+                        € {fmtIT(p.totale,0)}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{display:'flex',gap:14}}>
-                    <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>
-                      € {fmtIT(p.importo,0)}
-                    </span>
-                    <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:p.totale>0.01?'var(--red)':'var(--text3)'}}>
-                      € {fmtIT(p.totale,0)}
-                    </span>
-                  </div>
+                  {isOpen && (
+                    <div style={{padding:'0 14px 8px 14px',background:'var(--surface2)'}}>
+                      {p.items.map(it=>(
+                        <div key={it.txId} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',
+                          borderTop:'1px solid var(--border)',fontSize:11}}>
+                          <span style={{color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{fmtDate(it.date)}</span>
+                          <span style={{display:'flex',gap:14}}>
+                            <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text2)'}}>€ {fmtIT(it.importo,0)}</span>
+                            <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:it.residuo>0.01?'var(--red)':'var(--text3)'}}>€ {fmtIT(it.residuo,0)}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </aside>
