@@ -348,6 +348,9 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
   // presente), non occupa colonna in tabella — popup con textarea
   const [noteEntry, setNoteEntry] = useState(null)
   const [noteDraft, setNoteDraft] = useState('')
+  // richiesta utente 2026-07-21: modificare righe già aggiunte manualmente —
+  // riusa lo stesso modale "Aggiungi Mese", precompilato; editingId!=null → save() aggiorna invece di creare
+  const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState({ mese:new Date().toISOString().slice(0,7), ore:'', rate:defaultRate, note:'' })
   const set=(k,v)=>setForm(f=>({...f,[k]:v}))
 
@@ -370,7 +373,13 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
     return [...entries].sort((a,b)=>b.mese.localeCompare(a.mese))[0].rate || defaultRate
   }
   function openAdd() {
-    setForm(f => ({ ...f, rate: lastUsedRate() }))
+    setEditingId(null)
+    setForm(f => ({ ...f, mese:new Date().toISOString().slice(0,7), ore:'', rate: lastUsedRate() }))
+    setShowAdd(true)
+  }
+  function openEdit(e) {
+    setEditingId(e.id)
+    setForm({ mese:e.mese, ore:String(e.ore), rate:e.rate||defaultRate, note:e.note||'' })
     setShowAdd(true)
   }
 
@@ -378,8 +387,13 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
     if(!form.ore) return
     const ore=parseFloat(form.ore), rate=parseFloat(form.rate)||defaultRate
     const totale=ore*rate
-    store[addFn]({ mese:form.mese, ore, rate, totale, note:form.note, pagato:false })
+    if (editingId != null && updateFn) {
+      store[updateFn](editingId, { mese:form.mese, ore, rate, totale, note:form.note })
+    } else {
+      store[addFn]({ mese:form.mese, ore, rate, totale, note:form.note, pagato:false })
+    }
     setShowAdd(false)
+    setEditingId(null)
     setForm({ mese:new Date().toISOString().slice(0,7), ore:'', rate, note:'' })
   }
 
@@ -495,7 +509,10 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                           border:`1.5px solid ${e.note?.trim() ? 'var(--text1,#222)' : 'var(--border)'}`}}/>
                       </button>
                     </td>
-                    <td style={{padding:'6px 10px'}}><button className="btn btn-ghost" onClick={()=>store[deleteFn](e.id)}><Trash2 size={12}/></button></td>
+                    <td style={{padding:'6px 10px',whiteSpace:'nowrap'}}>
+                      <button className="btn btn-ghost" title="Modifica" onClick={()=>openEdit(e)} style={{marginRight:2}}>✏️</button>
+                      <button className="btn btn-ghost" onClick={()=>store[deleteFn](e.id)}><Trash2 size={12}/></button>
+                    </td>
                   </tr>
                 )
               })}
@@ -505,7 +522,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
       )}
 
       {showAdd && (
-        <Modal title={`+ Aggiungi Mese — ${title}`} onClose={()=>setShowAdd(false)}>
+        <Modal title={editingId!=null ? `✏️ Modifica Mese — ${title}` : `+ Aggiungi Mese — ${title}`} onClose={()=>{setShowAdd(false);setEditingId(null)}}>
           <FormRow label="Mese"><Input type="month" value={form.mese} onChange={e=>set('mese',e.target.value)}/></FormRow>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
             <FormRow label="Ore lavorate"><Input type="number" value={form.ore} onChange={e=>set('ore',e.target.value)} placeholder="es. 88"/></FormRow>
@@ -518,8 +535,8 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
             </div>
           )}
           <ModalFooter>
-            <button className="btn btn-primary" onClick={save}>Salva</button>
-            <button className="btn btn-secondary" onClick={()=>setShowAdd(false)}>Annulla</button>
+            <button className="btn btn-primary" onClick={save}>{editingId!=null ? 'Salva modifiche' : 'Salva'}</button>
+            <button className="btn btn-secondary" onClick={()=>{setShowAdd(false);setEditingId(null)}}>Annulla</button>
           </ModalFooter>
         </Modal>
       )}
