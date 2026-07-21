@@ -442,7 +442,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
       )}
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:20}}>
-        {[['Mesi registrati',entries.length],['Totale anno',`€ ${fmtIT(totalYear, 0)}`],['Media mensile',yearEntries.length?`€ ${fmtIT(totalYear/yearEntries.length, 0)}`:'—']].map(([l,v])=>(
+        {[['Mesi registrati',entries.length],['Totale anno',`€ ${fmtIT(totalYear, 2)}`],['Media mensile',yearEntries.length?`€ ${fmtIT(totalYear/yearEntries.length, 2)}`:'—']].map(([l,v])=>(
           <div key={l} className="card" style={{padding:'14px 18px'}}>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:6}}>{l}</div>
             <div style={{fontSize:22,fontWeight:700,fontFamily:'var(--font-mono)'}}>{v}</div>
@@ -480,7 +480,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                     <td style={{padding:'10px 14px',fontWeight:600}}>{e.mese}</td>
                     <td style={{padding:'10px 14px',color:'var(--text3)'}}>{e.ore}h</td>
                     <td style={{padding:'10px 14px',color:'var(--text3)',fontFamily:'var(--font-mono)'}}>€ {fmtIT(e.rate||0,2)}</td>
-                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>€ {fmtIT(e.totale, 0)}</td>
+                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>€ {fmtIT(e.totale, 2)}</td>
                     <td style={{padding:'10px 14px'}}>
                       <button onClick={()=>setReconEntry(e)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text2)'}}>
                         <StatusIcon status={r.status}/>
