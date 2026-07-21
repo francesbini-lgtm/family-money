@@ -2832,11 +2832,29 @@ function SatiIncomeSection({ satiIncome, transactions, vehExpenses = [], pot }) 
 
     // 2) Broad historical fix: ANY excluded expense with _compensatedBy set
     //    (old applyMatch excluded fully-covered expenses — undo that)
+    //    BUG REALE segnalato dall'utente 2026-07-20: questo forEach non aveva NESSUNO
+    //    scoping a Satispay (a differenza del punto 1b sopra, che richiede
+    //    descAI==='Accredito Satispay') — scattava per QUALSIASI spesa esclusa con
+    //    _compensatedBy, anche quando il riferimento era a una compensazione
+    //    Altre Entrate/Carte/PayPal non-Satispay (dati storici da prima che esistesse
+    //    compLinks, vedi commento in src/data/compensation.js: "prima Carte usava solo
+    //    i campi diretti senza scrivere qui"). Scriveva _compensatedAmt SOLO sul lato
+    //    spesa, mai sul lato entrata né su compLinks — risultato: la spesa appariva
+    //    "compensata" in Transazioni, ma l'entrata corrispondente restava "da
+    //    compensare" in Altre Entrate (nessun compLinks[key], _compensatedAmt proprio
+    //    mai impostato). Ora limitato a spese il cui _compensatedBy punta DAVVERO a
+    //    un'entrata Satispay — le altre vengono lasciate stare (non è compito di
+    //    questa pagina "aggiustarle").
+    const isSatiTx = t => {
+      const d = (t.description||'').toUpperCase(), m = (t.merchant||'').toUpperCase()
+      return t.cat1 === 'Satispay' || d.includes('SATISPAY') || m.includes('SATISPAY') || t.descAI === 'Accredito Satispay'
+    }
     transactions.forEach(t => {
       if (t.excluded && t.amount < 0 && t._compensatedBy) {
         // Find the matching income to get compensatedAmt
         const incTx = transactions.find(i => i.txId === t._compensatedBy)
-        const comp = t._compensatedAmt || (incTx ? Math.min(Math.abs(incTx.amount), Math.abs(t.amount)) : Math.abs(t.amount))
+        if (!incTx || !isSatiTx(incTx)) return
+        const comp = t._compensatedAmt || Math.min(Math.abs(incTx.amount), Math.abs(t.amount))
         updateTransaction(t.txId, { excluded: false, _compensatedAmt: comp })
       }
     })
