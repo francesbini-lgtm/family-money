@@ -657,6 +657,12 @@ export const useStore = create((set, get) => ({
     set(s=>({ nannyTS: s.nannyTS.filter(x=>x.id!==id) }))
     deleteDocument('nanny_ts', id)
   },
+  // richiesta utente 2026-07-21: nota editabile via pallino in tabella
+  updateNannyMonth: (id, patch) => {
+    set(s=>({ nannyTS: s.nannyTS.map(x => x.id===id ? {...x,...patch} : x) }))
+    const item = get().nannyTS.find(x=>x.id===id)
+    if (item) saveDocument('nanny_ts', id, item)
+  },
   addColfMonth: (m) => {
     const item = {...m, id: uid()}
     set(s=>({ colfTS: [item,...s.colfTS] }))
@@ -665,6 +671,11 @@ export const useStore = create((set, get) => ({
   deleteColfMonth: (id) => {
     set(s=>({ colfTS: s.colfTS.filter(x=>x.id!==id) }))
     deleteDocument('colf_ts', id)
+  },
+  updateColfMonth: (id, patch) => {
+    set(s=>({ colfTS: s.colfTS.map(x => x.id===id ? {...x,...patch} : x) }))
+    const item = get().colfTS.find(x=>x.id===id)
+    if (item) saveDocument('colf_ts', id, item)
   },
 
   // ── Portfolios ────────────────────────────────────────

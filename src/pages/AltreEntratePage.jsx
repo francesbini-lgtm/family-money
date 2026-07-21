@@ -957,7 +957,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','💬','Note',''].map(h=>(
+              {['Codice Transazione','Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','💬','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr></thead>
@@ -967,6 +967,9 @@ export default function AltreEntratePage() {
                 const compLink = compLinks[e.txId || e.id]
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
+                    <td style={{padding:'9px 14px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                      {e.txId ? e.txId : <span title="Entrata manuale — non ha un codice transazione">—</span>}
+                    </td>
                     <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</td>
                     <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
                       {(() => {

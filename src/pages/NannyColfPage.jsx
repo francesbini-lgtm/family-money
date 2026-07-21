@@ -336,7 +336,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
   )
 }
 
-function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, nameKey, reconKey=NANNY_RECON_KEY }) {
+function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultRate=10, nameKey, reconKey=NANNY_RECON_KEY }) {
   const store = useStore()
   const entries = store[tsKey] || []
   const transactions = useStore(s=>s.transactions)
@@ -344,6 +344,10 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
   const [reconEntry, setReconEntry] = useState(null)
   const [prelievoDetailEntry, setPrelievoDetailEntry] = useState(null) // entry per popup data+importo prelievi
   const [expandedPrelievoMese, setExpandedPrelievoMese] = useState(null) // mese espanso nel box Storico Prelievi
+  // richiesta utente 2026-07-21: nota per riga via pallino cliccabile (nero se
+  // presente), non occupa colonna in tabella — popup con textarea
+  const [noteEntry, setNoteEntry] = useState(null)
+  const [noteDraft, setNoteDraft] = useState('')
   const [form, setForm] = useState({ mese:new Date().toISOString().slice(0,7), ore:'', rate:defaultRate, note:'' })
   const set=(k,v)=>setForm(f=>({...f,[k]:v}))
 
@@ -441,8 +445,8 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Prelievi nel mese',''].map(h=>(
-                <th key={h} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Prelievi nel mese'].includes(h)?'right':'left'}}>{h}</th>
+              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Prelievi nel mese','',''].map((h,hi)=>(
+                <th key={h+hi} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Prelievi nel mese'].includes(h)?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -482,6 +486,15 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
                       title="Somma dei residui prelievi non ancora assegnati, fatti in questo mese">
                       {mesePrelievi ? `€ ${fmtIT(mesePrelievi.totale,0)}` : '—'}
                     </td>
+                    <td style={{padding:'10px 6px',textAlign:'center'}}>
+                      <button onClick={()=>{setNoteDraft(e.note||''); setNoteEntry(e)}}
+                        title={e.note ? e.note : 'Aggiungi nota'}
+                        style={{border:'none',background:'none',cursor:'pointer',padding:4,display:'inline-flex',alignItems:'center',justifyContent:'center'}}>
+                        <span style={{display:'inline-block',width:9,height:9,borderRadius:'50%',
+                          background:e.note?.trim() ? 'var(--text1,#222)' : 'transparent',
+                          border:`1.5px solid ${e.note?.trim() ? 'var(--text1,#222)' : 'var(--border)'}`}}/>
+                      </button>
+                    </td>
                     <td style={{padding:'6px 10px'}}><button className="btn btn-ghost" onClick={()=>store[deleteFn](e.id)}><Trash2 size={12}/></button></td>
                   </tr>
                 )
@@ -501,7 +514,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
           <FormRow label="Note"><Input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="Opzionale"/></FormRow>
           {form.ore && (
             <div style={{padding:'10px 14px',background:'var(--blue-l)',borderRadius:'var(--radius-sm)',fontSize:13,marginTop:4}}>
-              Totale: <strong>€ {Math.round((parseFloat(form.ore)||0)*(parseFloat(form.rate)||0)).toLocaleString('it-IT')}</strong>
+              Totale: <strong>€ {fmtIT((parseFloat(form.ore)||0)*(parseFloat(form.rate)||0), 2)}</strong>
             </div>
           )}
           <ModalFooter>
@@ -543,6 +556,23 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
           </Modal>
         )
       })()}
+      {noteEntry && (
+        <Modal title={`Nota — ${noteEntry.mese}`} onClose={()=>setNoteEntry(null)} width={420}>
+          <FormRow label="Nota">
+            <textarea value={noteDraft} onChange={e=>setNoteDraft(e.target.value)} autoFocus
+              placeholder="Scrivi una nota per questo mese…" rows={4}
+              style={{width:'100%',padding:'8px 10px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border)',
+                fontSize:13,fontFamily:'var(--font-sans)',background:'var(--bg)',color:'var(--text)',resize:'vertical'}}/>
+          </FormRow>
+          <ModalFooter>
+            <button className="btn btn-primary" onClick={()=>{
+              if (updateFn) store[updateFn](noteEntry.id, { note: noteDraft })
+              setNoteEntry(null)
+            }}>Salva</button>
+            <button className="btn btn-secondary" onClick={()=>setNoteEntry(null)}>Annulla</button>
+          </ModalFooter>
+        </Modal>
+      )}
     </div>
 
       {/* Box laterale — storico prelievi per mese, sfogliabile in verticale.
@@ -610,5 +640,5 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, defaultRate=10, na
   )
 }
 
-export function NannyPage() { return <TimesheetPage title="Nanny" icon="👩‍🍼" tsKey="nannyTS" addFn="addNannyMonth" deleteFn="deleteNannyMonth" defaultRate={12} nameKey="fm-nanny-name" reconKey={NANNY_RECON_KEY}/> }
-export function ColfPage()  { return <TimesheetPage title="Colf"  icon="🧹"    tsKey="colfTS"  addFn="addColfMonth"  deleteFn="deleteColfMonth"  defaultRate={10} nameKey="fm-colf-name"  reconKey={COLF_RECON_KEY}/> }
+export function NannyPage() { return <TimesheetPage title="Nanny" icon="👩‍🍼" tsKey="nannyTS" addFn="addNannyMonth" deleteFn="deleteNannyMonth" updateFn="updateNannyMonth" defaultRate={12} nameKey="fm-nanny-name" reconKey={NANNY_RECON_KEY}/> }
+export function ColfPage()  { return <TimesheetPage title="Colf"  icon="🧹"    tsKey="colfTS"  addFn="addColfMonth"  deleteFn="deleteColfMonth"  updateFn="updateColfMonth"  defaultRate={10} nameKey="fm-colf-name"  reconKey={COLF_RECON_KEY}/> }
