@@ -477,10 +477,10 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                 const mesePrelievi = prelieviByMonth[e.mese]
                 return (
                   <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'10px 14px',fontWeight:600}}>{e.mese}</td>
-                    <td style={{padding:'10px 14px',color:'var(--text3)'}}>{e.ore}h</td>
-                    <td style={{padding:'10px 14px',color:'var(--text3)',fontFamily:'var(--font-mono)'}}>€ {fmtIT(e.rate||0,2)}</td>
-                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)'}}>€ {fmtIT(e.totale, 2)}</td>
+                    <td style={{padding:'10px 14px',fontWeight:600,whiteSpace:'nowrap'}}>{e.mese}</td>
+                    <td style={{padding:'10px 14px',color:'var(--text3)',whiteSpace:'nowrap'}}>{e.ore}h</td>
+                    <td style={{padding:'10px 14px',color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>€ {fmtIT(e.rate||0,2)}</td>
+                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap'}}>€ {fmtIT(e.totale, 2)}</td>
                     <td style={{padding:'10px 14px'}}>
                       <button onClick={()=>setReconEntry(e)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text2)'}}>
                         <StatusIcon status={r.status}/>
