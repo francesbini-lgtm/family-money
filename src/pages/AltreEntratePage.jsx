@@ -792,6 +792,8 @@ export default function AltreEntratePage() {
   const updateTransaction = useStore(s => s.updateTransaction)
   const customCats        = useStore(s => s.customCats)
   const [showAdd, setShowAdd] = useState(false)
+  // Filtro "solo non compensate" — richiesta utente 2026-07-20
+  const [onlyUncompensated, setOnlyUncompensated] = useState(false)
   // Manual entries + links/notes/cats read directly from appPrefs (reactive via Zustand)
   const entries   = appPrefs?.altreEntrateManual || []
   const compLinks = appPrefs?.compLinks || {}
@@ -857,6 +859,11 @@ export default function AltreEntratePage() {
     if (isCompensated(e)) return Math.max(0, (e.amount||0) - (e._compensatedAmt||0))
     return e.amount || 0
   }
+
+  // "Non compensate" = hanno ancora un residuo da abbinare (parziali incluse)
+  const uncompensatedCount = allEntries.filter(e => entryResidual(e) > 0.005).length
+  const visibleEntries = onlyUncompensated ? allEntries.filter(e => entryResidual(e) > 0.005) : allEntries
+
   const thisMonthTotal = allEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+entryResidual(e),0)
   const rimborsiTotal  = autoEntries.filter(e=>e.cat2==='Prestiti').reduce((s,e)=>s+entryResidual(e),0)
   const ytdTotal       = allEntries.filter(e=>(e.date||'').startsWith(now.getFullYear().toString())).reduce((s,e)=>s+entryResidual(e),0)
@@ -917,7 +924,19 @@ export default function AltreEntratePage() {
           il componente SharedCostsSection resta nel file ma non è più renderizzato */}
 
       {/* Entries table */}
-      <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>📋 Entrate Registrate</div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+        <div style={{fontSize:14,fontWeight:700}}>📋 Entrate Registrate</div>
+        <button
+          onClick={()=>setOnlyUncompensated(v=>!v)}
+          title="Mostra solo le entrate che hanno ancora un residuo da compensare"
+          style={{display:'flex',alignItems:'center',gap:6,padding:'5px 12px',borderRadius:16,cursor:'pointer',
+            fontSize:12,fontWeight:700,fontFamily:'var(--font-sans)',
+            border:`1px solid ${onlyUncompensated?'var(--blue)':'var(--border)'}`,
+            background:onlyUncompensated?'var(--blue-l,#e8f4ff)':'var(--surface)',
+            color:onlyUncompensated?'var(--blue)':'var(--text3)'}}>
+          🔗 Solo non compensate {uncompensatedCount>0 ? `(${uncompensatedCount})` : ''}
+        </button>
+      </div>
       {allEntries.length === 0 ? (
         <div style={{textAlign:'center',padding:'40px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)'}}>
           <div style={{fontSize:36,marginBottom:12}}>💸</div>
@@ -928,6 +947,12 @@ export default function AltreEntratePage() {
           </div>
           <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={14}/> Aggiungi manuale</button>
         </div>
+      ) : visibleEntries.length === 0 ? (
+        <div style={{textAlign:'center',padding:'40px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)'}}>
+          <div style={{fontSize:36,marginBottom:12}}>✅</div>
+          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Tutte le entrate sono compensate</div>
+          <button className="btn btn-secondary" style={{fontSize:12}} onClick={()=>setOnlyUncompensated(false)}>Mostra tutte</button>
+        </div>
       ) : (
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
@@ -937,7 +962,7 @@ export default function AltreEntratePage() {
               ))}
             </tr></thead>
             <tbody>
-              {allEntries.slice(0,50).map((e,i)=>{
+              {visibleEntries.slice(0,50).map((e,i)=>{
                 const entryKey = e.txId || e.id || String(i)
                 const compLink = compLinks[e.txId || e.id]
                 return (
