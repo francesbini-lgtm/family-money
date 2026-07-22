@@ -32,6 +32,123 @@ function meseLabel(ym) {
   const [y,m] = ym.split('-')
   return `${MESI[parseInt(m)-1]} ${String(y).slice(2)}`
 }
+const MESI_FULL = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
+function meseFullLabel(ym) {
+  if (!ym) return ''
+  const [, m] = ym.split('-')
+  return MESI_FULL[parseInt(m)-1] || ym
+}
+// Ultimo giorno del mese 'YYYY-MM' in formato 'YYYY-MM-DD'
+function lastDayOfMonth(ym) {
+  const [y,m] = ym.split('-').map(Number)
+  const last = new Date(y, m, 0).getDate()
+  return `${ym}-${String(last).padStart(2,'0')}`
+}
+
+// Saldo totale (somma di tutti gli amount non esclusi) — stesso calcolo usato
+// altrove nell'app (vedi computeSaldoConto in ImportModal.jsx) come rete di
+// sicurezza: questa operazione è una pura riclassificazione contabile (crea la
+// spesa Nanny/Colf, spacca/consuma il prelievo che la copre) e NON deve MAI
+// cambiare il saldo — se cambiasse sarebbe un bug, non un caso limite da gestire.
+function computeSaldoTotale(transactions) {
+  return Math.round(transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s,t)=>s+t.amount,0) * 100) / 100
+}
+
+/**
+ * Richiesta utente 2026-07-21/22: quando l'importo Nanny/Colf del mese è coperto
+ * al 100% (o più) dai prelievi selezionati in riconciliazione, l'utente può
+ * confermare MANUALMENTE (bottone in riga, mai automatico) la creazione della
+ * vera transazione di spesa:
+ *  - crea 1 transazione nuova: cat1/cat2 (Figli/Nanny o Casa/Colf), importo
+ *    esatto del mese, data = ultimo giorno del mese di competenza, descrizione
+ *    "{Nanny|Colf} mese {MeseEsteso}"
+ *  - il/i prelievo/i che coprono ESATTAMENTE l'importo vengono esclusi (tolti
+ *    dai totali di spesa — altrimenti l'uscita di cassa conterebbe due volte)
+ *  - se un prelievo copre PIÙ del necessario, viene "spaccato in due": la quota
+ *    esatta usata resta sulla transazione originale (che viene esclusa), il
+ *    residuo diventa una NUOVA transazione "Contanti" separata (stesso importo
+ *    lordo invariato in totale, saldo intatto)
+ * Il saldo totale viene verificato prima e dopo: se non torna, rollback completo
+ * e messaggio d'errore — non deve mai succedere per costruzione, è solo una
+ * rete di sicurezza contro bug.
+ */
+function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, expenseCat2, reconKey }) {
+  const store = useStore.getState()
+  const saldoPrima = computeSaldoTotale(store.transactions)
+
+  const nannyAmt = entry.totale
+  const meseLbl = meseFullLabel(entry.mese)
+  const expenseTxId = '0000-' + Date.now().toString(36).toUpperCase()
+  const rollbackOps = [] // funzioni da chiamare in ordine INVERSO per annullare
+
+  try {
+    // 1) crea la transazione di spesa Nanny/Colf
+    store.addTransactions([{
+      txId: expenseTxId,
+      date: lastDayOfMonth(entry.mese),
+      amount: -Math.abs(nannyAmt),
+      description: `${entityLabel} mese ${meseLbl}`,
+      descAI: `${entityLabel} mese ${meseLbl}`,
+      cat1: expenseCat1,
+      cat2: expenseCat2,
+      account: 'Contanti',
+      aiEnriched: true,
+      _nannyColfExpense: true,
+      _nannyColfEntryId: entry.id,
+      _nannyColfReconKey: reconKey,
+    }])
+    rollbackOps.push(() => useStore.getState().deleteTransaction(expenseTxId))
+
+    // 2) consuma i prelievi: escludi quelli usati per intero, spacca quelli
+    //    usati solo in parte (residuo diventa una nuova tx "Contanti" separata)
+    for (const a of allocations) {
+      const tx = store.transactions.find(t => t.txId === a.txId)
+      if (!tx) continue
+      const grossAbs = Math.round(Math.abs(tx.amount)*100)/100
+      const usedAbs  = Math.round(a.amt*100)/100
+      const leftoverAbs = Math.round((grossAbs - usedAbs)*100)/100
+
+      const prevPatch = { excluded: tx.excluded, excludedAt: tx.excludedAt, excludedBy: tx.excludedBy, excludedType: tx.excludedType, excludedReason: tx.excludedReason }
+      useStore.getState().updateTransaction(a.txId, {
+        excluded: true,
+        excludedReason: `Coperto da ${entityLabel} mese ${meseLbl}`,
+        excludedType: 'manual',
+        _nannyColfConsumedBy: expenseTxId,
+      })
+      rollbackOps.push(() => useStore.getState().updateTransaction(a.txId, prevPatch))
+
+      if (leftoverAbs > 0.005) {
+        const leftoverTxId = '0000-' + (Date.now()+Math.floor(Math.random()*1000)).toString(36).toUpperCase()
+        useStore.getState().addTransactions([{
+          ...tx,
+          txId: leftoverTxId,
+          amount: tx.amount < 0 ? -leftoverAbs : leftoverAbs,
+          excluded: false,
+          excludedAt: null, excludedBy: null, excludedType: null, excludedReason: null,
+          _nannyColfSplitFrom: a.txId,
+        }])
+        rollbackOps.push(() => useStore.getState().deleteTransaction(leftoverTxId))
+      }
+    }
+
+    // 3) verifica saldo invariato — se no, rollback completo
+    const saldoDopo = computeSaldoTotale(useStore.getState().transactions)
+    if (Math.abs(saldoDopo - saldoPrima) > 0.01) {
+      for (let i = rollbackOps.length-1; i >= 0; i--) rollbackOps[i]()
+      return { ok:false, reason:'saldo-diverso' }
+    }
+
+    // 4) marca la recon come "postata" (per il badge verde e per evitare doppie esecuzioni)
+    const recon = { ...getRecon(reconKey) }
+    recon[entry.id] = { ...(recon[entry.id]||{}), expenseTxId, posted:true, postedAt:new Date().toISOString() }
+    saveRecon(reconKey, recon)
+
+    return { ok:true, expenseTxId }
+  } catch (e) {
+    for (let i = rollbackOps.length-1; i >= 0; i--) { try { rollbackOps[i]() } catch(_) {} }
+    return { ok:false, reason:'errore', error:e }
+  }
+}
 
 // Somma dei residui prelievi (post abbinamento a Nanny/Colf/Contanti) raggruppati per mese —
 // richiesta utente 2026-07-20: colonna "Prelievi nel mese" + box laterale storico.
@@ -336,7 +453,7 @@ function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', rec
   )
 }
 
-function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultRate=10, nameKey, reconKey=NANNY_RECON_KEY }) {
+function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultRate=10, nameKey, reconKey=NANNY_RECON_KEY, expenseCat1, expenseCat2 }) {
   const store = useStore()
   const entries = store[tsKey] || []
   const transactions = useStore(s=>s.transactions)
@@ -351,6 +468,10 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
   // richiesta utente 2026-07-21: modificare righe già aggiunte manualmente —
   // riusa lo stesso modale "Aggiungi Mese", precompilato; editingId!=null → save() aggiorna invece di creare
   const [editingId, setEditingId] = useState(null)
+  // richiesta utente 2026-07-21/22: bottone "Registra spesa" — mai automatico,
+  // conferma esplicita + messaggio di esito (successo o "saldo diverso, errore di calcolo")
+  const [postConfirmEntry, setPostConfirmEntry] = useState(null) // {entry, allocations} in attesa di conferma
+  const [postResult, setPostResult] = useState(null) // {ok, entry, expenseTxId?, reason?}
   const [form, setForm] = useState({ mese:new Date().toISOString().slice(0,7), ore:'', rate:defaultRate, note:'' })
   const set=(k,v)=>setForm(f=>({...f,[k]:v}))
 
@@ -407,6 +528,20 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
   const prelieviByMonth = computePrelieviByMonth(transactions, store)
   const prelieviList = Object.values(prelieviByMonth).sort((a,b)=>b.mese.localeCompare(a.mese))
 
+  // KPI condiviso "Contanti mancanti" — richiesta utente 2026-07-21: somma dei gap
+  // (costo mese - prelievi effettivamente coperti) SOLO per le entry già passate dal
+  // nuovo flusso "crea transazione" (recon con campo .gap valorizzato), sia Nanny che
+  // Colf insieme — non stime su entry non ancora riconciliate.
+  const contantiMancanti = (() => {
+    const nannyRecon = getRecon(NANNY_RECON_KEY)
+    const colfRecon  = getRecon(COLF_RECON_KEY)
+    let tot = 0
+    ;[nannyRecon, colfRecon].forEach(recon => {
+      Object.values(recon || {}).forEach(r => { if (r?.gap > 0.005) tot += r.gap })
+    })
+    return Math.round(tot*100)/100
+  })()
+
   return (
     <div style={{padding:'28px 32px',display:'flex',gap:24,alignItems:'flex-start'}}>
     <div style={{flex:1,maxWidth:860,minWidth:0}}>
@@ -441,11 +576,12 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
         </div>
       )}
 
-      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:20}}>
-        {[['Mesi registrati',entries.length],['Totale anno',`€ ${fmtIT(totalYear, 2)}`],['Media mensile',yearEntries.length?`€ ${fmtIT(totalYear/yearEntries.length, 2)}`:'—']].map(([l,v])=>(
-          <div key={l} className="card" style={{padding:'14px 18px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,marginBottom:20}}>
+        {[['Mesi registrati',entries.length,null],['Totale anno',`€ ${fmtIT(totalYear, 2)}`,null],['Media mensile',yearEntries.length?`€ ${fmtIT(totalYear/yearEntries.length, 2)}`:'—',null],
+          ['Contanti mancanti',`€ ${fmtIT(contantiMancanti, 2)}`,contantiMancanti>0.005?'var(--gold)':null]].map(([l,v,color])=>(
+          <div key={l} className="card" style={{padding:'14px 18px'}} title={l==='Contanti mancanti' ? 'Somma dei gap tra costo mensile e prelievi effettivamente coperti, per mesi già riconciliati (Nanny + Colf)' : undefined}>
             <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:6}}>{l}</div>
-            <div style={{fontSize:22,fontWeight:700,fontFamily:'var(--font-mono)'}}>{v}</div>
+            <div style={{fontSize:22,fontWeight:700,fontFamily:'var(--font-mono)',color:color||'inherit'}}>{v}</div>
           </div>
         ))}
       </div>
@@ -459,7 +595,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Residuo Prelievi Mese','',''].map((h,hi)=>(
+              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Residuo Prelievi Mese','','',''].map((h,hi)=>(
                 <th key={h+hi} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Residuo Prelievi Mese'].includes(h)?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
@@ -467,6 +603,12 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
               {[...entries].sort((a,b)=>b.mese.localeCompare(a.mese)).map(e=>{
                 const r=reconcileStatus(e,transactions,reconKey)
                 const allocs = r.status==='ok' ? reconAllocations(r.recon) : []
+                // Coperto al 100%+ dai prelievi selezionati E non ancora "postato" — richiesta
+                // utente 2026-07-21/22: il bottone "Registra spesa" compare SOLO in questo caso,
+                // mai se resta un residuo scoperto, mai se già eseguito (r.recon.posted)
+                const allocatedTotal = Math.round(allocs.reduce((s,a)=>s+a.amt,0)*100)/100
+                const canPost = r.status==='ok' && !r.recon?.posted && allocatedTotal >= e.totale - 0.01
+                const alreadyPosted = !!r.recon?.posted
                 const firstTx = allocs[0] ? transactions.find(t=>t.txId===allocs[0].txId) : null
                 const atmDate = firstTx ? (firstTx.date||'').slice(0,10) : null
                 const fmtAtmDate = d => {
@@ -508,6 +650,19 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                           background:e.note?.trim() ? 'var(--text1,#222)' : 'transparent',
                           border:`1.5px solid ${e.note?.trim() ? 'var(--text1,#222)' : 'var(--border)'}`}}/>
                       </button>
+                    </td>
+                    <td style={{padding:'10px 6px',textAlign:'center',whiteSpace:'nowrap'}}>
+                      {alreadyPosted ? (
+                        <span title={`Spesa registrata in Transazioni (${r.recon.expenseTxId})`} style={{color:'var(--green)',display:'inline-flex',alignItems:'center'}}>
+                          <CheckCircle size={16}/>
+                        </span>
+                      ) : canPost ? (
+                        <button className="btn btn-ghost" title="Registra la spesa in Transazioni e consuma i prelievi abbinati"
+                          onClick={()=>setPostConfirmEntry({ entry:e, allocations:allocs })}
+                          style={{color:'var(--green)',fontSize:11,fontWeight:700,border:'1px solid var(--green)',borderRadius:6,padding:'3px 8px'}}>
+                          ✓ Registra spesa
+                        </button>
+                      ) : null}
                     </td>
                     <td style={{padding:'6px 10px',whiteSpace:'nowrap'}}>
                       <button className="btn btn-ghost" title="Modifica" onClick={()=>openEdit(e)} style={{marginRight:2}}>✏️</button>
@@ -592,6 +747,66 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
           </ModalFooter>
         </Modal>
       )}
+      {postConfirmEntry && (() => {
+        const { entry, allocations } = postConfirmEntry
+        const meseLbl = meseFullLabel(entry.mese)
+        return (
+          <Modal title={`Registra spesa — ${entry.mese}`} onClose={()=>setPostConfirmEntry(null)} width={480}>
+            <div style={{padding:14,background:'var(--surface2)',borderRadius:'var(--radius-sm)',marginBottom:14,fontSize:13}}>
+              <div style={{marginBottom:8}}>
+                Verrà creata una nuova transazione di spesa:
+                <div style={{marginTop:6,padding:'8px 10px',background:'var(--bg)',borderRadius:6}}>
+                  <strong>{title} mese {meseLbl}</strong> — <span style={{fontFamily:'var(--font-mono)',fontWeight:700}}>€ {fmtIT(entry.totale,2)}</span>
+                  <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{expenseCat1} / {expenseCat2}</div>
+                </div>
+              </div>
+              <div>
+                I seguenti prelievi verranno consumati (esclusi dai totali, spaccati se in eccesso):
+                {allocations.map(a => {
+                  const tx = transactions.find(t=>t.txId===a.txId)
+                  const gross = tx ? Math.abs(tx.amount) : a.amt
+                  const leftover = Math.round((gross - a.amt)*100)/100
+                  return (
+                    <div key={a.txId} style={{marginTop:6,padding:'8px 10px',background:'var(--bg)',borderRadius:6,fontSize:12}}>
+                      <span style={{fontFamily:'var(--font-mono)'}}>{a.txId}</span> — usati <strong>€ {fmtIT(a.amt,2)}</strong> di € {fmtIT(gross,2)}
+                      {leftover > 0.005 && <div style={{color:'var(--text3)'}}>Residuo € {fmtIT(leftover,2)} diventerà una nuova transazione separata</div>}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            <div style={{fontSize:12,color:'var(--text3)',marginBottom:4}}>Il saldo totale non cambierà. L'operazione va confermata manualmente e non è reversibile da qui (usa "Rimuovi riconciliazione" solo per lo stato precedente a questa conferma).</div>
+            <ModalFooter>
+              <button className="btn btn-primary" onClick={()=>{
+                const res = postaSpesaNannyColf(entry, allocations, { entityLabel:title, expenseCat1, expenseCat2, reconKey })
+                setPostConfirmEntry(null)
+                setPostResult({ ...res, entry })
+              }}>Conferma</button>
+              <button className="btn btn-secondary" onClick={()=>setPostConfirmEntry(null)}>Annulla</button>
+            </ModalFooter>
+          </Modal>
+        )
+      })()}
+      {postResult && (
+        <Modal title={postResult.ok ? '✅ Spesa registrata' : '⚠ Operazione annullata'} onClose={()=>setPostResult(null)} width={440}>
+          {postResult.ok ? (
+            <div style={{padding:14,background:'var(--green-l,#e8f5e9)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--green)'}}>
+              Transazione creata (<span style={{fontFamily:'var(--font-mono)'}}>{postResult.expenseTxId}</span>) e prelievi aggiornati. Il saldo totale è invariato.
+            </div>
+          ) : postResult.reason === 'saldo-diverso' ? (
+            <div style={{padding:14,background:'var(--red-l,#fde8e8)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--red)'}}>
+              <strong>Saldo diverso, errore di calcolo.</strong> L'operazione è stata annullata automaticamente e i dati sono tornati alla situazione precedente. Nessuna modifica è stata mantenuta.
+            </div>
+          ) : (
+            <div style={{padding:14,background:'var(--red-l,#fde8e8)',borderRadius:'var(--radius-sm)',fontSize:13,color:'var(--red)'}}>
+              Si è verificato un errore imprevisto. L'operazione è stata annullata e i dati sono tornati alla situazione precedente.
+            </div>
+          )}
+          <ModalFooter>
+            <button className="btn btn-primary" onClick={()=>setPostResult(null)}>Chiudi</button>
+          </ModalFooter>
+        </Modal>
+      )}
     </div>
 
       {/* Box laterale — storico prelievi per mese, sfogliabile in verticale.
@@ -659,5 +874,5 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
   )
 }
 
-export function NannyPage() { return <TimesheetPage title="Nanny" icon="👩‍🍼" tsKey="nannyTS" addFn="addNannyMonth" deleteFn="deleteNannyMonth" updateFn="updateNannyMonth" defaultRate={12} nameKey="fm-nanny-name" reconKey={NANNY_RECON_KEY}/> }
-export function ColfPage()  { return <TimesheetPage title="Colf"  icon="🧹"    tsKey="colfTS"  addFn="addColfMonth"  deleteFn="deleteColfMonth"  updateFn="updateColfMonth"  defaultRate={10} nameKey="fm-colf-name"  reconKey={COLF_RECON_KEY}/> }
+export function NannyPage() { return <TimesheetPage title="Nanny" icon="👩‍🍼" tsKey="nannyTS" addFn="addNannyMonth" deleteFn="deleteNannyMonth" updateFn="updateNannyMonth" defaultRate={12} nameKey="fm-nanny-name" reconKey={NANNY_RECON_KEY} expenseCat1="Figli" expenseCat2="Nanny"/> }
+export function ColfPage()  { return <TimesheetPage title="Colf"  icon="🧹"    tsKey="colfTS"  addFn="addColfMonth"  deleteFn="deleteColfMonth"  updateFn="updateColfMonth"  defaultRate={10} nameKey="fm-colf-name"  reconKey={COLF_RECON_KEY} expenseCat1="Casa" expenseCat2="Colf"/> }
