@@ -623,17 +623,17 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                     <td style={{padding:'10px 14px',color:'var(--text3)',whiteSpace:'nowrap'}}>{e.ore}h</td>
                     <td style={{padding:'10px 14px',color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>€ {fmtIT(e.rate||0,2)}</td>
                     <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap'}}>€ {fmtIT(e.totale, 2)}</td>
-                    <td style={{padding:'10px 14px'}}>
-                      <button onClick={()=>setReconEntry(e)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text2)'}}>
+                    <td style={{padding:'10px 14px',whiteSpace:'nowrap'}}>
+                      <button onClick={()=>setReconEntry(e)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text2)',whiteSpace:'nowrap'}}>
                         <StatusIcon status={r.status}/>
                         {r.status==='ok'?'Verificato':r.status==='partial'?`Parziale (€${Math.round(r.found)})`:'Non trovato'}
                       </button>
                     </td>
-                    <td style={{padding:'10px 14px',fontSize:12,color:atmDate?'var(--text2)':'var(--text3)',fontFamily:atmDate?'var(--font-mono)':'inherit'}}>
+                    <td style={{padding:'10px 14px',fontSize:12,color:atmDate?'var(--text2)':'var(--text3)',fontFamily:atmDate?'var(--font-mono)':'inherit',whiteSpace:'nowrap'}}>
                       {atmDate ? (
                         <button onClick={()=>setPrelievoDetailEntry(e)}
                           title="Clicca per vedere data e importo"
-                          style={{border:'none',background:'none',cursor:'pointer',padding:0,fontFamily:'inherit',fontSize:'inherit',color:'inherit'}}>
+                          style={{border:'none',background:'none',cursor:'pointer',padding:0,fontFamily:'inherit',fontSize:'inherit',color:'inherit',whiteSpace:'nowrap'}}>
                           📅 {fmtAtmDate(atmDate)}{allocs.length>1 ? ` +${allocs.length-1}` : ''}
                         </button>
                       ) : '—'}
