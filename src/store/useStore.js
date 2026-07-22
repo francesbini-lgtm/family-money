@@ -1116,47 +1116,20 @@ export const useStore = create((set, get) => ({
 
     const shouldExist = new Map() // txId → data
 
-    // Nanny — push when ATM-linked (ma non più se già "Registrata" col nuovo
-    // flusso manuale postaSpesaNannyColf: quella crea la sua transazione 0000-...
-    // e questo vecchio sync andrebbe altrimenti a duplicarla)
-    ;(nannyTS || []).forEach(entry => {
-      const recon = nannyRecon[entry.id]
-      if (!recon?.txId) return
-      if (recon?.posted) return
-      const id = `cash-nanny-${entry.id}`
-      shouldExist.set(id, {
-        id, txId: id,
-        amount: -(recon.nannyAmt || entry.totale || 0),
-        date: (entry.mese || '') + '-01',
-        _effDate: (entry.mese || '') + '-01',
-        cat1: 'Famiglia', cat2: nannyName,
-        description: `Pagamento contanti ${nannyName} — ${entry.mese}`,
-        descAI: `${nannyName} ${entry.mese}`,
-        account: 'Contanti', excluded: false,
-        _source: 'cash-sync', _cashSyncRole: 'nanny',
-        userEditedCat: true, aiEnriched: true,
-      })
-    })
-
-    // Colf — push when ATM-linked (stesso discorso: skip se già "Registrata")
-    ;(colfTS || []).forEach(entry => {
-      const recon = colfRecon[entry.id]
-      if (!recon?.txId) return
-      if (recon?.posted) return
-      const id = `cash-colf-${entry.id}`
-      shouldExist.set(id, {
-        id, txId: id,
-        amount: -(recon.nannyAmt || entry.totale || 0),
-        date: (entry.mese || '') + '-01',
-        _effDate: (entry.mese || '') + '-01',
-        cat1: 'Famiglia', cat2: colfName,
-        description: `Pagamento contanti ${colfName} — ${entry.mese}`,
-        descAI: `${colfName} ${entry.mese}`,
-        account: 'Contanti', excluded: false,
-        _source: 'cash-sync', _cashSyncRole: 'colf',
-        userEditedCat: true, aiEnriched: true,
-      })
-    })
+    // Nanny — DISATTIVATO (2026-07-22, richiesta utente): questo vecchio sync
+    // automatico creava una spesa "cash-nanny-..." per QUALUNQUE entry
+    // riconciliata (anche solo abbinata a un prelievo, non ancora "Registrata"),
+    // causando cambi di saldo silenziosi/inattesi al solo salvataggio di una
+    // riconciliazione (vedi episodio Colf 2026-04: "Conferma riconciliazione"
+    // cambiava il saldo senza che l'utente avesse creato nessuna spesa).
+    // Ora la SPESA reale in Transazioni nasce SOLO dal bottone manuale
+    // "Registra" (postaSpesaNannyColf, sopra in NannyColfPage.jsx) — mai in
+    // automatico. Il blocco Veicoli sotto resta invariato (comportamento
+    // diverso, non oggetto di questa richiesta). Non aggiungere più nulla a
+    // shouldExist per Nanny/Colf: qualunque cash-nanny-/cash-colf- ancora
+    // presente da prima di questo fix viene rimossa dal diffing esistente
+    // sotto (righe "Compare with existing synthetic txs in store"), la
+    // prima volta che syncCashTransactions gira.
 
     // Veicoli — push when ATM-linked AND NOT Satispay-matched
     ;(vehExpenses || []).filter(e => e.payMethod === 'cash' && e.reconType === 'cash' && e.reconRef).forEach(e => {
