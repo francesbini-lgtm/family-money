@@ -1116,10 +1116,13 @@ export const useStore = create((set, get) => ({
 
     const shouldExist = new Map() // txId → data
 
-    // Nanny — push when ATM-linked
+    // Nanny — push when ATM-linked (ma non più se già "Registrata" col nuovo
+    // flusso manuale postaSpesaNannyColf: quella crea la sua transazione 0000-...
+    // e questo vecchio sync andrebbe altrimenti a duplicarla)
     ;(nannyTS || []).forEach(entry => {
       const recon = nannyRecon[entry.id]
       if (!recon?.txId) return
+      if (recon?.posted) return
       const id = `cash-nanny-${entry.id}`
       shouldExist.set(id, {
         id, txId: id,
@@ -1135,10 +1138,11 @@ export const useStore = create((set, get) => ({
       })
     })
 
-    // Colf — push when ATM-linked
+    // Colf — push when ATM-linked (stesso discorso: skip se già "Registrata")
     ;(colfTS || []).forEach(entry => {
       const recon = colfRecon[entry.id]
       if (!recon?.txId) return
+      if (recon?.posted) return
       const id = `cash-colf-${entry.id}`
       shouldExist.set(id, {
         id, txId: id,
