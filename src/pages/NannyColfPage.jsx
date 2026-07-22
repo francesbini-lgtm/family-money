@@ -82,7 +82,9 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
   const rollbackOps = [] // funzioni da chiamare in ordine INVERSO per annullare
 
   try {
-    // 1) crea la transazione di spesa Nanny/Colf
+    const allocTxIds = allocations.map(a => a.txId)
+    // 1) crea la transazione di spesa Nanny/Colf — nota spiega da quale/i prelievo/i
+    //    arriva la copertura, coi relativi codici (richiesta utente 2026-07-22)
     store.addTransactions([{
       txId: expenseTxId,
       date: lastDayOfMonth(entry.mese),
@@ -93,6 +95,7 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
       cat2: expenseCat2,
       account: 'Contanti',
       aiEnriched: true,
+      note: `Spesa generata da riconciliazione ${entityLabel} mese ${meseLbl}. Coperta da: ${allocTxIds.join(', ')}.`,
       _nannyColfExpense: true,
       _nannyColfEntryId: entry.id,
       _nannyColfReconKey: reconKey,
@@ -119,12 +122,19 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
 
       if (leftoverAbs > 0.005) {
         const leftoverTxId = '0000-' + (Date.now()+Math.floor(Math.random()*1000)).toString(36).toUpperCase()
+        // Nota sulla transazione residuo: spiega da dove arriva e riporta tutti i
+        // codici coinvolti (prelievo originale spaccato, spesa Nanny/Colf generata,
+        // eventuali altri prelievi della stessa riconciliazione) — richiesta utente 2026-07-22
+        const otherAllocTxIds = allocTxIds.filter(id => id !== a.txId)
+        const leftoverNote = `Residuo del prelievo ${a.txId} (€ ${fmtIT(grossAbs,2)}), dopo che € ${fmtIT(usedAbs,2)} sono stati usati per coprire ${entityLabel} mese ${meseLbl} (transazione ${expenseTxId})`
+          + (otherAllocTxIds.length ? `, insieme a: ${otherAllocTxIds.join(', ')}.` : '.')
         useStore.getState().addTransactions([{
           ...tx,
           txId: leftoverTxId,
           amount: tx.amount < 0 ? -leftoverAbs : leftoverAbs,
           excluded: false,
           excludedAt: null, excludedBy: null, excludedType: null, excludedReason: null,
+          note: leftoverNote,
           _nannyColfSplitFrom: a.txId,
         }])
         rollbackOps.push(() => useStore.getState().deleteTransaction(leftoverTxId))
@@ -757,7 +767,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                 Verrà creata una nuova transazione di spesa:
                 <div style={{marginTop:6,padding:'8px 10px',background:'var(--bg)',borderRadius:6}}>
                   <strong>{title} mese {meseLbl}</strong> — <span style={{fontFamily:'var(--font-mono)',fontWeight:700}}>€ {fmtIT(entry.totale,2)}</span>
-                  <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{expenseCat1} / {expenseCat2}</div>
+                  <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{expenseCat1} / {expenseCat2} · data {fmtDate(lastDayOfMonth(entry.mese))}</div>
                 </div>
               </div>
               <div>
