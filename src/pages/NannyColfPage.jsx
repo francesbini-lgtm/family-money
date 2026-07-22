@@ -72,6 +72,20 @@ function computeSaldoTotale(transactions) {
  * e messaggio d'errore — non deve mai succedere per costruzione, è solo una
  * rete di sicurezza contro bug.
  */
+// Log diagnostico temporaneo (2026-07-22, richiesta utente dopo saldo anomalo
+// su Aprile): registra ogni step in console + window.__fmtDebugLog, cosi la
+// prossima esecuzione di "Registra" si può leggere/copiare senza ricostruire
+// tutto a ritroso. Non tocca la logica, solo osservazione.
+function dbgLog(entry) {
+  const stamp = new Date().toISOString()
+  const row = { t: stamp, ...entry }
+  if (typeof window !== 'undefined') {
+    window.__fmtDebugLog = window.__fmtDebugLog || []
+    window.__fmtDebugLog.push(row)
+  }
+  console.log('[postaSpesaNannyColf]', row)
+}
+
 function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, expenseCat2, reconKey }) {
   const store = useStore.getState()
   const saldoPrima = computeSaldoTotale(store.transactions)
@@ -80,6 +94,17 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
   const meseLbl = meseFullLabel(entry.mese)
   const expenseTxId = '0000-' + Date.now().toString(36).toUpperCase()
   const rollbackOps = [] // funzioni da chiamare in ordine INVERSO per annullare
+
+  dbgLog({
+    step: 'start',
+    mese: entry.mese, entityLabel, nannyAmt, expenseTxId,
+    saldoPrima,
+    allocations: allocations.map(a => ({
+      txId: a.txId, amt: a.amt,
+      grossAbs: (store.transactions.find(t=>t.txId===a.txId)||{}).amount,
+      _source: (store.transactions.find(t=>t.txId===a.txId)||{})._source || null,
+    })),
+  })
 
   try {
     const allocTxIds = allocations.map(a => a.txId)
@@ -101,12 +126,22 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
       _nannyColfReconKey: reconKey,
     }])
     rollbackOps.push(() => useStore.getState().deleteTransaction(expenseTxId))
+    dbgLog({
+      step: 'expense-created',
+      expenseTxId, importoAtteso: -Math.abs(nannyAmt),
+      trovataDopoAdd: !!useStore.getState().transactions.find(t=>t.txId===expenseTxId),
+      importoReale: (useStore.getState().transactions.find(t=>t.txId===expenseTxId)||{}).amount,
+      saldoDopoQuestoStep: computeSaldoTotale(useStore.getState().transactions),
+    })
 
     // 2) consuma i prelievi: escludi quelli usati per intero, spacca quelli
     //    usati solo in parte (residuo diventa una nuova tx "Contanti" separata)
     for (const a of allocations) {
       const tx = store.transactions.find(t => t.txId === a.txId)
-      if (!tx) continue
+      if (!tx) {
+        dbgLog({ step:'alloc-tx-NOT-FOUND', txId:a.txId, amt:a.amt })
+        continue
+      }
       const grossAbs = Math.round(Math.abs(tx.amount)*100)/100
       const usedAbs  = Math.round(a.amt*100)/100
       const leftoverAbs = Math.round((grossAbs - usedAbs)*100)/100
@@ -119,6 +154,12 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
         _nannyColfConsumedBy: expenseTxId,
       })
       rollbackOps.push(() => useStore.getState().updateTransaction(a.txId, prevPatch))
+      dbgLog({
+        step: 'alloc-consumed',
+        txId: a.txId, grossAbs, usedAbs, leftoverAbs,
+        excludedOraConfermato: !!useStore.getState().transactions.find(t=>t.txId===a.txId)?.excluded,
+        saldoDopoQuestoStep: computeSaldoTotale(useStore.getState().transactions),
+      })
 
       if (leftoverAbs > 0.005) {
         const leftoverTxId = '0000-' + (Date.now()+Math.floor(Math.random()*1000)).toString(36).toUpperCase()
@@ -138,13 +179,24 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
           _nannyColfSplitFrom: a.txId,
         }])
         rollbackOps.push(() => useStore.getState().deleteTransaction(leftoverTxId))
+        dbgLog({
+          step: 'leftover-created',
+          leftoverTxId, leftoverAbs, splitFrom: a.txId,
+          trovataDopoAdd: !!useStore.getState().transactions.find(t=>t.txId===leftoverTxId),
+          importoReale: (useStore.getState().transactions.find(t=>t.txId===leftoverTxId)||{}).amount,
+          saldoDopoQuestoStep: computeSaldoTotale(useStore.getState().transactions),
+        })
+      } else {
+        dbgLog({ step:'no-leftover-needed', txId:a.txId, leftoverAbs })
       }
     }
 
     // 3) verifica saldo invariato — se no, rollback completo
     const saldoDopo = computeSaldoTotale(useStore.getState().transactions)
+    dbgLog({ step:'balance-check', saldoPrima, saldoDopo, diff: Math.round((saldoDopo-saldoPrima)*100)/100 })
     if (Math.abs(saldoDopo - saldoPrima) > 0.01) {
       for (let i = rollbackOps.length-1; i >= 0; i--) rollbackOps[i]()
+      dbgLog({ step:'ROLLBACK-eseguito', saldoDopoRollback: computeSaldoTotale(useStore.getState().transactions) })
       return { ok:false, reason:'saldo-diverso' }
     }
 
@@ -152,10 +204,25 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
     const recon = { ...getRecon(reconKey) }
     recon[entry.id] = { ...(recon[entry.id]||{}), expenseTxId, posted:true, postedAt:new Date().toISOString() }
     saveRecon(reconKey, recon)
+    dbgLog({ step:'posted-saved', reconKey, entryId: entry.id })
+
+    // Controllo POST-hoc (diagnostico, non bloccante): 500ms dopo, quando anche
+    // il syncCashTransactions triggerato da saveRecon ha finito di girare, ricontrolla
+    // il saldo per vedere se qualcosa lo altera DOPO che questa funzione ha già
+    // dato l'ok — è l'ipotesi principale del bug segnalato dall'utente.
+    setTimeout(() => {
+      const saldoPostSync = computeSaldoTotale(useStore.getState().transactions)
+      dbgLog({
+        step: 'post-sync-check (500ms dopo)',
+        saldoDopo, saldoPostSync,
+        diffPostSync: Math.round((saldoPostSync - saldoDopo)*100)/100,
+      })
+    }, 500)
 
     return { ok:true, expenseTxId }
   } catch (e) {
     for (let i = rollbackOps.length-1; i >= 0; i--) { try { rollbackOps[i]() } catch(_) {} }
+    dbgLog({ step:'exception', error: String(e) })
     return { ok:false, reason:'errore', error:e }
   }
 }
