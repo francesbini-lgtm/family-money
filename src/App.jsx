@@ -3,6 +3,7 @@ const MobileApp = lazy(() => import('./mobile/MobileApp'))
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import LoginScreen from './auth/LoginScreen'
 import { useStore } from './store/useStore'
+import { fmtIT } from './utils/format'
 import { APP_VERSION, BUILD_TIME } from './auth/LoginScreen'
 // Debug: expose store to window
 if (typeof window !== 'undefined') { import('./store/useStore').then(m => { window.__store = m.useStore }) }
@@ -178,6 +179,15 @@ function AppShell() {
     transactions.filter(t => !t.excluded && t.cat1 === 'Non Categorizzato').length
   , [transactions])
 
+  // Saldo conto sempre visibile in topbar (richiesta utente 2026-07-22) — stessa
+  // formula del KPI "Saldo Conto" in TransactionsPage.jsx (non l'amount grezzo di
+  // ogni singola transazione, ma la somma di tutte le non escluse + eventuale
+  // rettifica _forcedBalance), così il numero mostrato qui è sempre coerente con
+  // quello che l'utente vede aprendo la pagina Transazioni.
+  const saldoConto = useMemo(() =>
+    transactions.filter(t => !t.excluded || t._forcedBalance).reduce((s,t)=>s+t.amount,0)
+  , [transactions])
+
   const missingDays = useMemo(() => {
     const dates = transactions
       .filter(t => !t._forcedBalance && !t.excluded && t.date)
@@ -317,6 +327,15 @@ function AppShell() {
           )}
 
           <div className="topbar-right">
+          <button
+            onClick={()=>navigate('transactions')}
+            title="Saldo Conto — clicca per aprire Transazioni"
+            style={{display:'flex',alignItems:'center',gap:5,padding:'5px 12px',borderRadius:8,cursor:'pointer',
+              fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',border:'1px solid var(--border)',
+              background:'var(--bg)',color:saldoConto>=0?'var(--blue)':'var(--red)'}}
+          >
+            💰 {saldoConto>=0?'+':'-'}€ {fmtIT(Math.abs(saldoConto),0)}
+          </button>
           <button
             onClick={()=>navigate('settings')}
             title="Impostazioni"
