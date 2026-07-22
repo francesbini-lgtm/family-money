@@ -660,7 +660,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                         <button className="btn btn-ghost" title="Registra la spesa in Transazioni e consuma i prelievi abbinati"
                           onClick={()=>setPostConfirmEntry({ entry:e, allocations:allocs })}
                           style={{color:'var(--green)',fontSize:11,fontWeight:700,border:'1px solid var(--green)',borderRadius:6,padding:'3px 8px'}}>
-                          ✓ Registra spesa
+                          ✓ Registra
                         </button>
                       ) : null}
                     </td>
@@ -751,7 +751,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
         const { entry, allocations } = postConfirmEntry
         const meseLbl = meseFullLabel(entry.mese)
         return (
-          <Modal title={`Registra spesa — ${entry.mese}`} onClose={()=>setPostConfirmEntry(null)} width={480}>
+          <Modal title={`Registra — ${entry.mese}`} onClose={()=>setPostConfirmEntry(null)} width={480}>
             <div style={{padding:14,background:'var(--surface2)',borderRadius:'var(--radius-sm)',marginBottom:14,fontSize:13}}>
               <div style={{marginBottom:8}}>
                 Verrà creata una nuova transazione di spesa:
