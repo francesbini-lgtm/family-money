@@ -1348,9 +1348,6 @@ export default function ForecastPage() {
                         <td style={{padding:'8px 12px',fontWeight:700}}>{d.label}</td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
                           € {fmtIT(Math.round(inc), 0)}
-                          {d.bonusExtra > 0 && (
-                            <span title="13ª/14ª inclusa" style={{marginLeft:5,fontSize:10,color:'var(--accent)'}}>★</span>
-                          )}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
                           € {fmtIT(Math.round(exp), 0)}
