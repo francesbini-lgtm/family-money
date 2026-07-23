@@ -1087,6 +1087,11 @@ export default function ForecastPage() {
     let mortRata     = (mortgageOn && mortgage) ? mortgage.rata : 0
     let mortSavingsCounter = 0
     let mortMonthsElapsed  = 0
+    // DEBUG TEMPORANEO (2026-07-23) — rimborso anticipato automatico segnalato
+    // come "non funziona": log dei primi mesi per capire se il flag è letto,
+    // se i risparmi si accumulano, e quando/se scatta la soglia. Da rimuovere
+    // quando confermato risolto.
+    const __mortDebugRows = []
 
     for (let m = 0; m <= totalMonths; m++) {
       const d  = new Date(now.getFullYear(), now.getMonth() + m, 1)
@@ -1159,6 +1164,16 @@ export default function ForecastPage() {
         }
         mortBalance = newBalance
         mortMonthsElapsed++
+        if (m < 36) {
+          __mortDebugRows.push({
+            ym, extraRepayEnabled, extraRepayThreshold,
+            incThisMonth: Math.round(incThisMonth), expThisMonth: Math.round(expThisMonth),
+            mortgageMonthly: Math.round(mortgageMonthly),
+            savingsThisMonth: Math.round(incThisMonth + bonusExtra - expThisMonth - mortgageMonthly),
+            mortSavingsCounterAfter: Math.round(mortSavingsCounter),
+            autoExtra, manualExtra, totalExtra, newRata: Math.round(mortRata), newBalance: Math.round(mortBalance),
+          })
+        }
       }
       saldo += (incThisMonth - expThisMonth - mortgageMonthly - mortgageExtra + bonusExtra)
 
@@ -1199,6 +1214,11 @@ export default function ForecastPage() {
       } else {
         exp *= iMonthly
       }
+    }
+    if (typeof window !== 'undefined' && mortgageOn && mortgage) {
+      window.__fmtMortgageDebug = __mortDebugRows
+      console.log('[mortgageAuto] primi 36 mesi (o fino a estinzione):', __mortDebugRows)
+      console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
   }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
