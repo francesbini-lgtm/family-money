@@ -2452,7 +2452,19 @@ export default function ForecastPage() {
         return (
           <ExpenseOverrideModal
             title={`Modifica spese — ${overridePopup.label}`}
-            catStats={catStats}
+            // BUG REALE (2026-07-23, segnalato dall'utente: "non ho toccato
+            // niente" ma il totale L1 non torna con la somma delle sue
+            // sotto-categorie mostrate qui) — questo popup passava SEMPRE
+            // `catStats` (la finestra condivisa fissa a 12 mesi), anche in
+            // modalità Teoriche, mentre `defaultsByCat` (usato per pre-
+            // compilare il valore L1) chiama `catEffectiveBase()` che in
+            // Teoriche usa `catStatsTeoriche` (finestra scelta dall'utente col
+            // selettore mesi). Le sotto-categorie mostrate qui provenivano
+            // quindi da una finestra diversa da quella usata per il totale —
+            // due fonti diverse, da qui il disallineamento anche SENZA alcun
+            // override stantio. Fix: in Teoriche usa la STESSA fonte di
+            // defaultsByCat (catStatsTeoriche), coerente col resto della tab.
+            catStats={forecastBasis === 'teoriche' ? catStatsTeoriche : catStats}
             defaultsByCat={defaultsByCat}
             initialSpese={existing?.spese}
             initialSpeseL2={existing?.speseL2}
