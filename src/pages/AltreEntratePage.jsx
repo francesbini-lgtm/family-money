@@ -839,25 +839,43 @@ export default function AltreEntratePage() {
   // PARZIALMENTE abbinata deve contare il residuo nei KPI, non sparire del tutto
   // come succedeva prima (bastava un solo link, anche minimo, per azzerarla).
   function entryResidual(e) {
-    const compLink = compLinks[e.txId || e.id]
+    const key = e.txId || e.id
+    const compLink = compLinks[key]
+    let totalUsed = 0
     if (compLink) {
-      const totalUsed = getAeLinksArray(compLink).reduce((s, l) => {
+      totalUsed = getAeLinksArray(compLink).reduce((s, l) => {
         const expTx = transactions.find(t => t.txId === l.expTxId)
         const expAmt = expTx ? Math.abs(expTx.amount) : null
         return s + (expAmt != null ? Math.min(expAmt, l.compensatedAmt || Infinity) : (l.compensatedAmt || 0))
       }, 0)
-      return Math.max(0, (e.amount||0) - totalUsed)
+    } else if (isCompensated(e)) {
+      // Bug segnalato dall'utente 2026-07-15: un'entrata può risultare già
+      // compensata SENZA passare da compLinks — es. Satispay scrive _compensatedAmt
+      // direttamente sulla transazione con un proprio registro separato
+      // (satiMatches), che questa pagina non consultava affatto. Qui si controlla
+      // anche _compensatedAmt diretto, non solo il registro compLinks.
+      totalUsed = e._compensatedAmt || 0
     }
-    // Bug segnalato dall'utente 2026-07-15: un'entrata può risultare già
-    // compensata SENZA passare da compLinks — es. Satispay scrive _compensatedAmt
-    // direttamente sulla transazione con un proprio registro separato
-    // (satiMatches), che questa pagina non consultava affatto. Risultato: la riga
-    // mostrava ancora "🔗 Abbina" (residuo = importo lordo) anche quando l'importo
-    // era già stato interamente usato altrove — e tentare di abbinarla a mano
-    // falliva perché la spesa candidata risultava già "presa" da availableAmount().
-    // Qui si controlla anche _compensatedAmt diretto, non solo il registro compLinks.
-    if (isCompensated(e)) return Math.max(0, (e.amount||0) - (e._compensatedAmt||0))
-    return e.amount || 0
+    // Fix 2026-07-23 (segnalato dall'utente, caso codice 26-0598): esistono
+    // percorsi che scrivono la compensazione SOLO sul lato spesa (_compensatedAmt/
+    // _compensatedBy sulla transazione negativa) senza toccare compLinks NÉ il
+    // campo diretto sul lato entrata — l'entrata restava quindi mostrata come
+    // "da compensare" nonostante la spesa collegata risultasse già rettificata in
+    // Transazioni. Fallback di sicurezza: se compLinks e il campo diretto non
+    // hanno rilevato nulla, cerca tra le spese quelle che referenziano QUESTA
+    // entrata in _compensatedBy e usa quell'importo — indipendentemente da quale
+    // pagina ha creato la compensazione.
+    if (totalUsed <= 0.005) {
+      const reverse = transactions
+        .filter(t => t.amount < 0 && t._compensatedAmt > 0)
+        .filter(t => {
+          const by = Array.isArray(t._compensatedBy) ? t._compensatedBy : (t._compensatedBy ? [t._compensatedBy] : [])
+          return by.includes(key) || (e.txId != null && by.includes(e.txId)) || (e.id != null && by.includes(e.id))
+        })
+        .reduce((s, t) => s + (t._compensatedAmt || 0), 0)
+      if (reverse > 0.005) totalUsed = reverse
+    }
+    return Math.max(0, (e.amount||0) - totalUsed)
   }
 
   // "Non compensate" = hanno ancora un residuo da abbinare (parziali incluse)
