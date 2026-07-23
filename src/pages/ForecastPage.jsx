@@ -2128,12 +2128,11 @@ export default function ForecastPage() {
                           {fmtIT(Math.round(exp * 12), 0)}
                         </td>
                         {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer',
-                            background: extraAnnua > 0 ? 'color-mix(in srgb, var(--green) 12%, transparent)' : undefined}}
-                            title={extraAnnua > 0 ? `Estinzione anticipata: ${fmtFull(extraAnnua)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo anno'}
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:extraAnnua > 0 ? 'var(--red)' : 'var(--accent)',fontSize:12,cursor:'pointer',
+                            background: extraAnnua > 0 ? 'color-mix(in srgb, var(--red) 12%, transparent)' : undefined}}
+                            title={extraAnnua > 0 ? `Rata + estinzione anticipata: ${fmtFull(extraAnnua)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo anno'}
                             onClick={()=>setMortgageExtraPopup({ granularity:'annuale', key:String(year), label:d.label })}>
-                            {rataAnnua > 0 ? `${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
-                            {extraAnnua > 0 && <span style={{color:'var(--red)',fontWeight:700}}> −{fmtIT(Math.round(extraAnnua), 0)}</span>}
+                            {rataAnnua > 0 || extraAnnua > 0 ? `${fmtIT(Math.round(rataAnnua + extraAnnua), 0)}` : '—'}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
@@ -2186,12 +2185,11 @@ export default function ForecastPage() {
                           {fmtIT(Math.round(exp), 0)}
                         </td>
                         {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer',
-                            background: extraMese > 0 ? 'color-mix(in srgb, var(--green) 12%, transparent)' : undefined}}
-                            title={extraMese > 0 ? `Estinzione anticipata: ${fmtFull(extraMese)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo mese'}
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:extraMese > 0 ? 'var(--red)' : 'var(--accent)',fontSize:12,cursor:'pointer',
+                            background: extraMese > 0 ? 'color-mix(in srgb, var(--red) 12%, transparent)' : undefined}}
+                            title={extraMese > 0 ? `Rata + estinzione anticipata: ${fmtFull(extraMese)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo mese'}
                             onClick={()=>setMortgageExtraPopup({ granularity:'mensile', key:d.ym, label:d.label })}>
-                            {rataMese > 0 ? `${fmtIT(Math.round(rataMese), 0)}` : '—'}
-                            {extraMese > 0 && <span style={{color:'var(--red)',fontWeight:700}}> −{fmtIT(Math.round(extraMese), 0)}</span>}
+                            {rataMese > 0 || extraMese > 0 ? `${fmtIT(Math.round(rataMese + extraMese), 0)}` : '—'}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
