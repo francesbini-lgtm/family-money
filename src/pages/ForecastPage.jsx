@@ -1088,6 +1088,13 @@ export default function ForecastPage() {
     let inc   = avgIncomeEffective
     let exp   = effectiveExpense
     let anticipoApplied = false
+    // Erogazione del capitale mutuo (2026-07-23, richiesta utente: il mese/anno
+    // in cui parte il mutuo deve mostrare anche l'importo POSITIVO del capitale
+    // erogato come ENTRATA — oltre alla rata/anticipo già gestiti). Evento
+    // one-off, separato dall'anticipo (che può anche essere 0): non entra mai
+    // nella base ricorrente `inc` che si inflaziona di anno in anno, solo nel
+    // saldo e nel campo "income" del punto in cui avviene.
+    let mortgageCapitalCredited = false
 
     // Stato dinamico del mutuo (2026-07-23, richiesta utente: rimborsi
     // anticipati automatici "ogni X risparmiati" + estinzioni manuali puntuali
@@ -1145,6 +1152,15 @@ export default function ForecastPage() {
         saldo -= mortgageAnticipo
         simSaldo -= mortgageAnticipo
         anticipoApplied = true
+      }
+      // Erogazione capitale mutuo — stesso anno di inizio, indipendente
+      // dall'anticipo (scatta anche se l'anticipo è 0).
+      let mortgageCapitalThisYear = 0
+      if (mortgageOn && mortgage && !mortgageCapitalCredited && mortgageNotYetStarted && year >= mortgageStartYear) {
+        mortgageCapitalThisYear = mortgageAmt
+        saldo += mortgageCapitalThisYear
+        simSaldo += mortgageCapitalThisYear
+        mortgageCapitalCredited = true
       }
       // Year 0: only count the fraction of the year that remains
       const yearFraction = y === 0 ? currentYearFraction : 1
@@ -1230,8 +1246,15 @@ export default function ForecastPage() {
         residualNominal: residualNominal !== null ? Math.round(residualNominal) : undefined,
         // Entrate/Spese effettive di QUESTO anno (con eventuale override già
         // applicato) — usate dalla tabella "Proiezione Annuale" invece di
-        // ricalcolare con una formula approssimata separata.
+        // ricalcolare con una formula approssimata separata. ATTENZIONE:
+        // "income" qui è un tasso MENSILE (la tabella lo moltiplica per 12 in
+        // rendering) — l'erogazione capitale mutuo è invece un importo ANNUO
+        // già assoluto (one-off), va tenuta in un campo separato (mortgageCapital,
+        // sullo stesso modello di mortgageExtra) e sommata DOPO la
+        // moltiplicazione per 12 lato rendering, altrimenti verrebbe
+        // amplificata per errore di un fattore 12 (2026-07-23).
         income:  Math.round(incThisYear),
+        mortgageCapital: Math.round(mortgageCapitalThisYear),
         expense: Math.round(expThisYear),
         hasOverride: !!ovY,
         hasIncomeOverride: !!ovYE,
@@ -1277,6 +1300,9 @@ export default function ForecastPage() {
     const iMonthly = Math.pow(1 + inflation / 100, 1 / 12)
     const mortgageStartYM = mortgageStart || null
     let anticipoApplied = false
+    // Erogazione capitale mutuo (2026-07-23) — vedi commento gemello nel loop
+    // annuale sopra: evento one-off, indipendente dall'anticipo.
+    let mortgageCapitalCredited = false
 
     // Stato dinamico del mutuo (2026-07-23) — vedi commento analogo nel loop
     // annuale sopra: rimborsi anticipati automatici "ogni X risparmiati" +
@@ -1336,6 +1362,14 @@ export default function ForecastPage() {
       if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageNotYetStarted && mortgageStartYM && ym >= mortgageStartYM) {
         saldo -= mortgageAnticipo
         anticipoApplied = true
+      }
+      // Erogazione capitale mutuo — stesso mese di inizio, indipendente
+      // dall'anticipo (scatta anche se l'anticipo è 0).
+      let mortgageCapitalThisMonth = 0
+      if (mortgageOn && mortgage && !mortgageCapitalCredited && mortgageNotYetStarted && mortgageStartYM && ym >= mortgageStartYM) {
+        mortgageCapitalThisMonth = mortgageAmt
+        saldo += mortgageCapitalThisMonth
+        mortgageCapitalCredited = true
       }
       // 13ma/14ma (solo in modalità Teoriche) — richiesta utente 2026-07-20: nei mesi in
       // cui una persona ha la 14esima o la 13esima, il suo stipendio in quel mese
@@ -1456,8 +1490,16 @@ export default function ForecastPage() {
         residualNominal: residualNominal !== null ? Math.round(residualNominal) : undefined,
         // Entrate/Spese effettive DI QUESTO mese (con crescita/inflazione già composte
         // e, in modalità Teoriche, la 13ª/14ª già sommata) — usate dalla tabella
-        // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto
-        income:  Math.round(incThisMonth + bonusExtra),
+        // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto.
+        // Include anche l'eventuale erogazione una tantum del capitale mutuo
+        // (2026-07-23, richiesta utente: il mese in cui parte il mutuo deve
+        // mostrare l'importo del capitale come ENTRATA in questa colonna). Qui
+        // "income" è già un valore mensile assoluto (nessuna moltiplicazione
+        // *12 nel rendering, a differenza della vista annuale), quindi si può
+        // sommare direttamente. mortgageCapital esposto anche a parte solo per
+        // tooltip/evidenziazione della cella.
+        income:  Math.round(incThisMonth + bonusExtra + mortgageCapitalThisMonth),
+        mortgageCapital: Math.round(mortgageCapitalThisMonth),
         expense: Math.round(expThisMonth),
         bonusExtra: Math.round(bonusExtra),
         hasOverride: !!ovM,
@@ -2334,17 +2376,19 @@ export default function ForecastPage() {
                     const exp = d.expense
                     const rataAnnua = d.mortgageRata || 0
                     const extraAnnua = d.mortgageExtra || 0
-                    const cf = (inc - exp) * 12 - rataAnnua - extraAnnua
+                    // + mortgageCapital: erogazione una tantum del capitale mutuo,
+                    // già assoluta (non un tasso mensile) — 2026-07-23.
+                    const cf = (inc - exp) * 12 - rataAnnua - extraAnnua + (d.mortgageCapital || 0)
                     return (
                       <tr key={d.label} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer',
-                          background: d.hasIncomeOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
-                          title={d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo anno'}
+                          background: (d.hasIncomeOverride || d.mortgageCapital > 0) ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                          title={d.mortgageCapital > 0 ? `Include erogazione capitale mutuo: +${fmtFull(d.mortgageCapital)}` : d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo anno'}
                           onClick={()=>setOverrideIncomePopup({ granularity:'annuale', key:String(year), label:d.label })}>
-                          {fmtIT(Math.round(inc * 12), 0)}
+                          {fmtIT(Math.round(inc * 12 + (d.mortgageCapital || 0)), 0)}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer',
                           background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
@@ -2398,8 +2442,8 @@ export default function ForecastPage() {
                           {d.label}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer',
-                          background: d.hasIncomeOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
-                          title={d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo mese'}
+                          background: (d.hasIncomeOverride || d.mortgageCapital > 0) ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                          title={d.mortgageCapital > 0 ? `Include erogazione capitale mutuo: +${fmtFull(d.mortgageCapital)}` : d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo mese'}
                           onClick={()=>setOverrideIncomePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                           {fmtIT(Math.round(inc), 0)}
                         </td>
