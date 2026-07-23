@@ -288,17 +288,28 @@ export const useStore = create((set, get) => ({
       })
 
       // 2) Fallback legacy: spese con _compensatedAmt/_compensatedBy diretti,
-      //    MAI passate da compLinks per QUESTA coppia specifica — solo il caso
-      //    non ambiguo, gruppo di 2 (_compensatedBy stringa singola).
-      const skippedAmbiguous = [] // debug: spese con _compensatedBy array o assente, non gestite
+      //    MAI passate da compLinks per QUESTA coppia specifica.
+      // FIX 2026-07-23 (caso reale segnalato dall'utente: entrata 26-0598,
+      // ancora "da compensare" nonostante il fix precedente): il fallback
+      // saltava del tutto le spese con _compensatedBy ARRAY ("ambigue"),
+      // trattandole come irrisolvibili. In realtà anche un array va gestito —
+      // meglio attribuire (nel dubbio, per intero) l'importo a CIASCUNA
+      // entrata referenziata piuttosto che non attribuirlo a nessuna: la
+      // correzione qui SOLO ALZA il valore esistente (mai lo abbassa), quindi
+      // un'eventuale sovrastima per un caso multi-entrata genuino è comunque
+      // meno dannosa di lasciare un'entrata "già usata" mostrata come piena.
+      const skippedAmbiguous = [] // debug: spese con _compensatedAmt>0 ma senza alcun _compensatedBy
       allTxs2.forEach(tx => {
         if (tx.amount >= 0) return // solo spese
         if (!(tx._compensatedAmt > 0)) return
         const by = tx._compensatedBy
-        if (Array.isArray(by) || !by) { skippedAmbiguous.push({ txId: tx.txId, by }); return }
-        const alreadyCounted = accountedExpForKey[by]?.has(tx.txId)
-        if (alreadyCounted) return
-        neededByIncome[by] = (neededByIncome[by] || 0) + tx._compensatedAmt
+        const byArr = Array.isArray(by) ? by : (by ? [by] : [])
+        if (byArr.length === 0) { skippedAmbiguous.push({ txId: tx.txId, by }); return }
+        byArr.forEach(incomeKey => {
+          const alreadyCounted = accountedExpForKey[incomeKey]?.has(tx.txId)
+          if (alreadyCounted) return
+          neededByIncome[incomeKey] = (neededByIncome[incomeKey] || 0) + tx._compensatedAmt
+        })
       })
 
       // Log diagnostico temporaneo (2026-07-23, task #85 — utente segnala che il
