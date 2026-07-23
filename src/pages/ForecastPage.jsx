@@ -968,7 +968,13 @@ export default function ForecastPage() {
     const durationMonths = mortgage ? Math.min(mortgageYears, years + 30) * 12 : 0
     let mortBalance = (mortgageOn && mortgage) ? mortgageAmt : 0
     let mortRata     = (mortgageOn && mortgage) ? mortgage.rata : 0
-    let mortSavingsCounter = 0
+    // Rimborso anticipato automatico — vedi commento analogo nel loop mensile
+    // sotto: si traccia il SALDO vero (stimato mese per mese anche qui, per
+    // interessi/soglia corretti), non un contatore di risparmi separato.
+    // `simSaldo` segue lo stesso percorso del vero `saldo` annuale ma a grana
+    // mensile (necessaria per sapere ESATTAMENTE quando si supera la soglia).
+    let extraBaseSaldo = null
+    let simSaldo = currentSaldo
     let mortMonthsElapsed  = 0
 
     for (let y = 0; y <= years; y++) {
@@ -1001,6 +1007,7 @@ export default function ForecastPage() {
       // not unconditionally in year 0
       if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageNotYetStarted && year >= mortgageStartYear) {
         saldo -= mortgageAnticipo
+        simSaldo -= mortgageAnticipo
         anticipoApplied = true
       }
       // Year 0: only count the fraction of the year that remains
@@ -1019,20 +1026,27 @@ export default function ForecastPage() {
           const interest  = mortBalance * rMonthly
           const principal = Math.min(mortRata - interest, mortBalance)
           mortBalance = Math.max(0, mortBalance - principal)
-          // Risparmio approssimato di questo mese (entrate/spese di quest'anno
-          // spalmate uniformemente sui mesi — approssimazione accettabile a
-          // livello annuale, coerente con come già lavora questo loop).
-          mortSavingsCounter += (incThisYear - expThisYear - mortRata)
+          // Base = saldo stimato PRIMA dei flussi di questo mese. Impostata una
+          // sola volta, al primo mese mai attivo del mutuo — il mese di
+          // partenza del mutuo non genera quindi mai un rimborso extra.
+          if (extraBaseSaldo === null) extraBaseSaldo = simSaldo
+          // entrate/spese di quest'anno spalmate uniformemente sui mesi —
+          // approssimazione accettabile a livello annuale, coerente con come
+          // già lavora questo loop.
+          simSaldo += (incThisYear - expThisYear - mortRata)
           let autoExtra = 0
-          if (extraRepayEnabled && extraRepayThreshold > 0 && mortSavingsCounter >= extraRepayThreshold) {
-            autoExtra = Math.floor(mortSavingsCounter / extraRepayThreshold) * extraRepayThreshold
-            mortSavingsCounter -= autoExtra
+          if (extraRepayEnabled && extraRepayThreshold > 0) {
+            const surplus = simSaldo - extraBaseSaldo
+            if (surplus >= extraRepayThreshold) {
+              autoExtra = Math.floor(surplus / extraRepayThreshold) * extraRepayThreshold
+            }
           }
           // Il rimborso manuale annuale viene versato una sola volta, nell'ultimo
           // mese processato di quell'anno (semplificazione: lump sum di fine anno).
           const manualExtra = (!manualApplied && mm === monthsThisYear - 1) ? manualExtraThisYear : 0
           if (manualExtra > 0) manualApplied = true
           const totalExtra = Math.min(autoExtra + manualExtra, mortBalance)
+          if (totalExtra > 0) { extraBaseSaldo += totalExtra; simSaldo -= totalExtra }
           mortBalance = Math.max(0, mortBalance - totalExtra)
           yearExtra += totalExtra
           const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
@@ -1114,7 +1128,19 @@ export default function ForecastPage() {
     const durationMonths = mortgage ? Math.min(mortgageYears, years + 30) * 12 : 0
     let mortBalance = (mortgageOn && mortgage) ? mortgageAmt : 0
     let mortRata     = (mortgageOn && mortgage) ? mortgage.rata : 0
-    let mortSavingsCounter = 0
+    // Rimborso anticipato automatico — riscritto 2026-07-23 su correzione
+    // esplicita dell'utente: NON si accumula un contatore di "risparmi mensili"
+    // separato (bug: poteva scattare cifre enormi al primo mese per un motivo
+    // di scala/unità mai isolato con certezza). Si traccia invece il SALDO
+    // vero e proprio: `extraBaseSaldo` è il saldo previsto nel mese in cui il
+    // mutuo diventa attivo (es. 199), e il rimborso scatta solo su quanto il
+    // saldo cresce OLTRE quella base — quando supera la soglia (es. +20), si
+    // preleva esattamente la soglia e si rimette la base al nuovo livello,
+    // così il saldo "torna" al livello precedente e il ciclo ricomincia.
+    // Nessun rimborso può quindi scattare nel mese stesso in cui parte il
+    // mutuo (la base è presa PRIMA dei flussi di quel mese, quindi il surplus
+    // parte da 0).
+    let extraBaseSaldo = null
     let mortMonthsElapsed  = 0
     // DEBUG TEMPORANEO (2026-07-23) — rimborso anticipato automatico segnalato
     // come "non funziona": log dei primi mesi per capire se il flag è letto,
@@ -1170,19 +1196,32 @@ export default function ForecastPage() {
       let mortgageMonthly = 0
       let mortgageExtra   = 0
       if (mortgageActive) {
+        // Base = saldo previsto PRIMA dei flussi di questo mese. Impostata una
+        // sola volta, al primo mese in cui il mutuo è attivo — quindi il mese
+        // di partenza del mutuo non può mai generare un rimborso extra.
+        if (extraBaseSaldo === null) extraBaseSaldo = saldo
         mortgageMonthly = mortRata
         const rMonthly  = mortgageTaeg / 100 / 12
         const interest  = mortBalance * rMonthly
         const principal = Math.min(mortgageMonthly - interest, mortBalance)
         let newBalance  = Math.max(0, mortBalance - principal)
-        mortSavingsCounter += (incThisMonth + bonusExtra - expThisMonth - mortgageMonthly)
+        // Saldo proiettato a fine di QUESTO mese (flussi normali), usato SOLO
+        // per capire di quanto ha superato la base — mai scritto nel vero
+        // saldo prima del tempo.
+        const saldoAfterMonth = saldo + (incThisMonth - expThisMonth - mortgageMonthly + bonusExtra)
         let autoExtra = 0
-        if (extraRepayEnabled && extraRepayThreshold > 0 && mortSavingsCounter >= extraRepayThreshold) {
-          autoExtra = Math.floor(mortSavingsCounter / extraRepayThreshold) * extraRepayThreshold
-          mortSavingsCounter -= autoExtra
+        let surplus   = 0
+        if (extraRepayEnabled && extraRepayThreshold > 0) {
+          surplus = saldoAfterMonth - extraBaseSaldo
+          if (surplus >= extraRepayThreshold) {
+            autoExtra = Math.floor(surplus / extraRepayThreshold) * extraRepayThreshold
+          }
         }
         const manualExtra = mortgageExtraMonthly[ym] || 0
         const totalExtra  = Math.min(autoExtra + manualExtra, newBalance)
+        // Qualunque euro che esce davvero dal saldo (auto o manuale) sposta in
+        // avanti la base, così il prossimo scatto si misura dal nuovo livello.
+        if (totalExtra > 0) extraBaseSaldo += totalExtra
         newBalance = Math.max(0, newBalance - totalExtra)
         mortgageExtra = totalExtra
         const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
@@ -1198,8 +1237,7 @@ export default function ForecastPage() {
             ym, extraRepayEnabled, extraRepayThreshold,
             incThisMonth: Math.round(incThisMonth), expThisMonth: Math.round(expThisMonth),
             mortgageMonthly: Math.round(mortgageMonthly),
-            savingsThisMonth: Math.round(incThisMonth + bonusExtra - expThisMonth - mortgageMonthly),
-            mortSavingsCounterAfter: Math.round(mortSavingsCounter),
+            saldoAfterMonth: Math.round(saldoAfterMonth), extraBaseSaldo: Math.round(extraBaseSaldo), surplus: Math.round(surplus),
             autoExtra, manualExtra, totalExtra, newRata: Math.round(mortRata), newBalance: Math.round(mortBalance),
           })
         }
