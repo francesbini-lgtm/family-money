@@ -233,38 +233,101 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
 // modificare la composizione delle spese (L1) di QUEL mese/anno specifico,
 // con opzione "applica da qui in avanti" (cascata, si ferma da sola al
 // prossimo override — vedi commenti su overridesMonthly/overridesYearly).
-function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, initialCascade, hasExisting, onSave, onRemove, onClose }) {
+function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, initialSpeseL2, initialCascade, hasExisting, onSave, onRemove, onClose }) {
   const [values, setValues] = useState(() => {
     const v = {}
     Object.keys(catStats).forEach(c1 => { v[c1] = Math.round(initialSpese?.[c1] ?? defaultsByCat[c1] ?? 0) })
     return v
   })
+  // Breakdown L2 opzionale per singolo L1 (stesso schema di teoricheSpeseL2 in
+  // Teoriche > Spese, richiesta utente 2026-07-23: poter vedere/modificare le
+  // sotto-categorie anche da questo popup, non solo il totale L1).
+  const [valuesL2, setValuesL2] = useState(() => {
+    const v = {}
+    Object.keys(catStats).forEach(c1 => { v[c1] = { ...(initialSpeseL2?.[c1] || {}) } })
+    return v
+  })
+  const [expandedL1, setExpandedL1] = useState(() => new Set(
+    Object.keys(initialSpeseL2 || {}).filter(c1 => Object.keys(initialSpeseL2[c1] || {}).length > 0)
+  ))
   const [cascade, setCascade] = useState(!!initialCascade)
-  const total = Object.values(values).reduce((s, v) => s + (Number(v) || 0), 0)
+
+  function hasL2(c1) { return Object.keys(valuesL2[c1] || {}).length > 0 }
+  function toggleExpand(c1) {
+    setExpandedL1(prev => { const n = new Set(prev); if (n.has(c1)) n.delete(c1); else n.add(c1); return n })
+  }
+  function setValueL2(c1, c2, val) {
+    setValuesL2(v => ({ ...v, [c1]: { ...(v[c1] || {}), [c2]: val } }))
+  }
+  function l1Total(c1) {
+    if (hasL2(c1)) {
+      const subs = catStats[c1]?.subs || {}
+      return Object.keys(subs).reduce((s, c2) => s + (valuesL2[c1]?.[c2] ?? subs[c2] ?? 0), 0)
+    }
+    return Number(values[c1]) || 0
+  }
+  const total = Object.keys(catStats).reduce((s, c1) => s + l1Total(c1), 0)
 
   return (
     <Modal title={title} onClose={onClose} width={480}>
       <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>
         Modifica le spese solo per questo periodo, oppure spunta "da qui in avanti" per farle valere anche sui mesi/anni successivi (finché non incontri un altro override).
+        Clicca sul nome per espandere e modificare le singole sotto-categorie.
       </div>
-      <div style={{maxHeight:320,overflowY:'auto',display:'flex',flexDirection:'column',gap:6,marginBottom:10}}>
-        {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => (
-          <div key={c1} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-            padding:'7px 9px',background:'var(--surface2)',borderRadius:6,border:'1px solid var(--border)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600}}>
-              <span style={{width:8,height:8,borderRadius:'50%',background:data.color,display:'inline-block'}}/>
-              {c1}
+      <div className="fc-whatif-panel" style={{marginTop:0,maxHeight:320,marginBottom:10}}>
+        {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => {
+          const isOpen = expandedL1.has(c1)
+          const l2v    = valuesL2[c1] || {}
+          const catHasL2 = hasL2(c1)
+          const subs   = Object.entries(data.subs || {}).sort((a,b)=>b[1]-a[1])
+          return (
+            <div key={c1} className="fc-whatif-cat">
+              <div className="fc-whatif-l1">
+                <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600,
+                    minWidth:0,flex:1,cursor:subs.length>0?'pointer':'default'}}
+                  onClick={()=>subs.length>0 && toggleExpand(c1)}>
+                  {subs.length > 0 && (
+                    <span style={{fontSize:10,color:'var(--text3)',width:10,flexShrink:0,display:'inline-block'}}>{isOpen?'▾':'▸'}</span>
+                  )}
+                  <span style={{width:8,height:8,borderRadius:'50%',background:data.color,flexShrink:0,display:'inline-block'}}/>
+                  <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c1}>{c1}</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+                  <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
+                  <input type="number" value={catHasL2 ? l1Total(c1) : values[c1]} disabled={catHasL2}
+                    title={catHasL2 ? 'Calcolato come somma delle sotto-categorie — modifica quelle' : undefined}
+                    onChange={e=>setValues(v=>({...v,[c1]:Number(e.target.value)||0}))}
+                    style={{width:58,padding:'3px 4px',borderRadius:5,border:'1px solid var(--border)',
+                      background:'var(--surface)',color:'var(--red)',fontWeight:700,opacity:catHasL2?0.7:1,
+                      fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
+                  <span style={{fontSize:10,color:'var(--text3)'}}>/m</span>
+                </div>
+              </div>
+              {isOpen && subs.length > 0 && (
+                <div className="fc-whatif-subs">
+                  {subs.map(([c2, avgC2]) => {
+                    const valC2 = l2v[c2] ?? avgC2
+                    return (
+                      <div key={c2} className="fc-whatif-l2">
+                        <span style={{fontSize:12,color:'var(--text2)',minWidth:0,flex:1,
+                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c2}>{c2}</span>
+                        <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+                          <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
+                          <input type="number" value={valC2}
+                            onChange={e=>setValueL2(c1, c2, Number(e.target.value)||0)}
+                            style={{width:52,padding:'2px 4px',borderRadius:5,border:'1px solid var(--border)',
+                              background:'var(--surface)',color:'var(--red)',fontWeight:600,
+                              fontFamily:'var(--font-mono)',fontSize:11,textAlign:'right'}}/>
+                          <span style={{fontSize:10,color:'var(--text3)'}}>/m</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:4}}>
-              <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
-              <input type="number" value={values[c1]}
-                onChange={e=>setValues(v=>({...v,[c1]:Number(e.target.value)||0}))}
-                style={{width:80,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
-                  background:'var(--surface)',color:'var(--red)',fontWeight:700,
-                  fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       <div style={{display:'flex',justifyContent:'space-between',padding:'7px 9px',
         borderTop:'2px solid var(--border)',fontSize:12,fontWeight:800,marginBottom:12}}>
@@ -279,7 +342,15 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
         {hasExisting && (
           <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi override</button>
         )}
-        <button className="btn btn-primary" onClick={()=>onSave(values, cascade)}>Salva</button>
+        <button className="btn btn-primary" onClick={()=>{
+          // Il totale per-L1 salvato in "spese" è sempre il flattening (somma
+          // L2 se presente, altrimenti il valore L1 diretto) — così il motore
+          // di proiezione (overrideTotal/catEffectiveBase) non deve sapere
+          // nulla della scomposizione L2, che resta solo per ri-editing futuro.
+          const flatSpese = {}
+          Object.keys(catStats).forEach(c1 => { flatSpese[c1] = l1Total(c1) })
+          onSave(flatSpese, valuesL2, cascade)
+        }}>Salva</button>
       </ModalFooter>
     </Modal>
   )
@@ -1662,6 +1733,7 @@ export default function ForecastPage() {
             catStats={catStats}
             defaultsByCat={defaultsByCat}
             initialSpese={existing?.spese}
+            initialSpeseL2={existing?.speseL2}
             initialCascade={existing?.cascade}
             hasExisting={!!existing}
             onClose={()=>setOverridePopup(null)}
@@ -1670,8 +1742,8 @@ export default function ForecastPage() {
               else removeOverrideYearly(overridePopup.key)
               setOverridePopup(null)
             }}
-            onSave={(values, cascade)=>{
-              const entry = { spese: values, cascade }
+            onSave={(values, valuesL2, cascade)=>{
+              const entry = { spese: values, speseL2: valuesL2, cascade }
               if (isMonthly) saveOverrideMonthly(overridePopup.key, entry)
               else saveOverrideYearly(overridePopup.key, entry)
               setOverridePopup(null)
