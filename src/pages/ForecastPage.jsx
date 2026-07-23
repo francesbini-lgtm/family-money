@@ -1545,7 +1545,7 @@ export default function ForecastPage() {
           {/* Projection table */}
           <div className="card" style={{padding:0,overflow:'hidden'}}>
             <div style={{padding:'12px 18px',borderBottom:'1px solid var(--border)',fontSize:14,fontWeight:700,background:'var(--surface2)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-              📋 Proiezione {projectionView === 'annuale' ? 'Annuale' : 'Mensile'}
+              📋 Proiezione {projectionView === 'annuale' ? 'Annuale' : 'Mensile'} €
               {savedPerMonth > 0 && (
                 <span style={{fontSize:11,fontWeight:500,color:'var(--green)',padding:'2px 8px',background:'rgba(50,180,100,.1)',borderRadius:5}}>
                   🤔 what if incluso
@@ -1595,20 +1595,20 @@ export default function ForecastPage() {
                         {d.label} <span style={{fontSize:9,fontWeight:500,background:'var(--border)',padding:'1px 5px',borderRadius:4,marginLeft:4}}>storico</span>
                       </td>
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
-                        € {fmtIT(d.inc, 0)}
+                        {fmtIT(d.inc, 0)}
                       </td>
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                        € {fmtIT(d.exp, 0)}
+                        {fmtIT(d.exp, 0)}
                       </td>
                       {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                       {mortgageOn && mortgageAnticipo > 0 && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                         color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
-                        {cf>=0?'+':''}€ {fmtIT(Math.abs(cf), 0)}
+                        {cf>=0?'+':''}{fmtIT(Math.abs(cf), 0)}
                       </td>
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                         fontWeight:700,color:'var(--text2)',fontSize:12}}>
-                        € {fmtIT(d.saldo, 0)}
+                        {fmtIT(d.saldo, 0)}
                       </td>
                       {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                     </tr>
@@ -1634,33 +1634,33 @@ export default function ForecastPage() {
                           {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
-                          € {fmtIT(Math.round(inc * 12), 0)}
+                          {fmtIT(Math.round(inc * 12), 0)}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                          € {fmtIT(Math.round(exp * 12), 0)}
+                          {fmtIT(Math.round(exp * 12), 0)}
                         </td>
                         {mortgageOn && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12}}>
-                            {rataAnnua > 0 ? `€ ${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
+                            {rataAnnua > 0 ? `${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                            {year === mortgageStartYear ? `−€ ${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                            {year === mortgageStartYear ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
                           </td>
                         )}
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                           color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
-                          {cf>=0?'+':''}€ {fmtIT(Math.abs(Math.round(cf)), 0)}
+                          {cf>=0?'+':''}{fmtIT(Math.abs(Math.round(cf)), 0)}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                           fontWeight:700,color:'var(--accent)',fontSize:12}}>
-                          € {fmtIT(d.forecast, 0)}
+                          {fmtIT(d.forecast, 0)}
                         </td>
                         {mortgageOn && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                             color:'var(--blue)',fontSize:12}}>
-                            {d.residual != null ? `€ ${fmtIT(d.residual, 0)}` : '—'}
+                            {d.residual != null ? `${fmtIT(d.residual, 0)}` : '—'}
                           </td>
                         )}
                       </tr>
@@ -1685,33 +1685,33 @@ export default function ForecastPage() {
                           {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
-                          € {fmtIT(Math.round(inc), 0)}
+                          {fmtIT(Math.round(inc), 0)}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                          € {fmtIT(Math.round(exp), 0)}
+                          {fmtIT(Math.round(exp), 0)}
                         </td>
                         {mortgageOn && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12}}>
-                            {rataMese > 0 ? `€ ${fmtIT(Math.round(rataMese), 0)}` : '—'}
+                            {rataMese > 0 ? `${fmtIT(Math.round(rataMese), 0)}` : '—'}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                            {mortgageStart && d.ym === mortgageStart ? `−€ ${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                            {mortgageStart && d.ym === mortgageStart ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
                           </td>
                         )}
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                           color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
-                          {cf>=0?'+':''}€ {fmtIT(Math.abs(Math.round(cf)), 0)}
+                          {cf>=0?'+':''}{fmtIT(Math.abs(Math.round(cf)), 0)}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                           fontWeight:700,color:'var(--accent)',fontSize:12}}>
-                          € {fmtIT(d.forecast, 0)}
+                          {fmtIT(d.forecast, 0)}
                         </td>
                         {mortgageOn && (
                           <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                             color:'var(--blue)',fontSize:12}}>
-                            {d.residual != null ? `€ ${fmtIT(d.residual, 0)}` : '—'}
+                            {d.residual != null ? `${fmtIT(d.residual, 0)}` : '—'}
                           </td>
                         )}
                       </tr>
