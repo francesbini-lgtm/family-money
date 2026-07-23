@@ -1800,7 +1800,30 @@ export default function ForecastPage() {
                   <MonthPickerModal
                     months={catMonthlyRaw.months}
                     initialSelected={effectiveSpeseMonths}
-                    onSave={(arr)=>{ setTeoricheSpeseMonths(arr); setMonthPickerOpen(false) }}
+                    onSave={(arr)=>{
+                      // 2026-07-23 (segnalato dall'utente): cambiare i mesi
+                      // storici ricalcola le medie di default (catStatsTeoriche),
+                      // ma eventuali modifiche manuali già fatte in tabella
+                      // (override L1 diretti o L2 per sotto-categoria) restano
+                      // congelate ai vecchi valori — il totale L1 e la somma
+                      // delle sue sotto-categorie possono quindi non tornare
+                      // più. Se esistono override, si chiede conferma prima di
+                      // azzerarli così tutto si riallinea alle nuove medie.
+                      const hasOverrides = Object.keys(teoricheSpese).length > 0 || Object.keys(teoricheSpeseL2).length > 0
+                      if (hasOverrides) {
+                        const reset = window.confirm(
+                          'Hai delle spese modificate manualmente in questa tabella, calcolate con la vecchia selezione di mesi.\n\n' +
+                          'Cambiando i mesi storici, quei valori NON si aggiornano da soli e potrebbero non tornare più con le nuove medie (es. il totale di una categoria diverso dalla somma delle sue sotto-categorie).\n\n' +
+                          'Vuoi azzerare le modifiche manuali così che tutto si ricalcoli con i nuovi mesi scelti?'
+                        )
+                        if (reset) {
+                          setAppPref('forecastTeoricheSpese', {})
+                          setAppPref('forecastTeoricheSpeseL2', {})
+                        }
+                      }
+                      setTeoricheSpeseMonths(arr)
+                      setMonthPickerOpen(false)
+                    }}
                     onClose={()=>setMonthPickerOpen(false)}
                   />
                 )}
