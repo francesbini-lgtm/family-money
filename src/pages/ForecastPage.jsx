@@ -1163,7 +1163,7 @@ export default function ForecastPage() {
 
                 {teoricheTab === 'spese' && (
                   <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    <div style={{maxHeight:340,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
+                    <div className="fc-whatif-panel" style={{marginTop:0}}>
                       {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => {
                         const val    = teoricheL1Value(c1)
                         const isOpen = expandedTeoricheL1.has(c1)
@@ -1171,43 +1171,45 @@ export default function ForecastPage() {
                         const hasL2 = Object.keys(l2overrides).length > 0
                         const subs  = Object.entries(data.subs || {}).sort((a,b)=>b[1]-a[1])
                         return (
-                          <div key={c1} style={{background:'var(--surface2)',borderRadius:7,border:'1px solid var(--border)',overflow:'hidden'}}>
-                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 10px'}}>
-                              <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600,cursor:subs.length>0?'pointer':'default'}}
+                          <div key={c1} className="fc-whatif-cat">
+                            <div className="fc-whatif-l1">
+                              <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600,
+                                  minWidth:0,flex:1,cursor:subs.length>0?'pointer':'default'}}
                                 onClick={()=>subs.length>0 && toggleTeoricheL1Expand(c1)}>
                                 {subs.length > 0 && (
-                                  <span style={{fontSize:10,color:'var(--text3)',width:10,display:'inline-block'}}>{isOpen?'▾':'▸'}</span>
+                                  <span style={{fontSize:10,color:'var(--text3)',width:10,flexShrink:0,display:'inline-block'}}>{isOpen?'▾':'▸'}</span>
                                 )}
-                                <span style={{width:8,height:8,borderRadius:'50%',background:data.color,display:'inline-block'}}/>
-                                {c1}
+                                <span style={{width:8,height:8,borderRadius:'50%',background:data.color,flexShrink:0,display:'inline-block'}}/>
+                                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c1}>{c1}</span>
                               </div>
-                              <div style={{display:'flex',alignItems:'center',gap:4}}>
-                                <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
+                              <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+                                <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
                                 <input type="number" value={val} disabled={hasL2}
                                   title={hasL2 ? 'Calcolato come somma delle sotto-categorie — modifica quelle' : undefined}
                                   onChange={e=>setTeoricheSpesa(c1, Number(e.target.value)||0)}
-                                  style={{width:80,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
-                                    background: hasL2 ? 'var(--surface)' : 'var(--surface)',
+                                  style={{width:58,padding:'3px 4px',borderRadius:5,border:'1px solid var(--border)',
+                                    background:'var(--surface)',
                                     color:'var(--red)',fontWeight:700,opacity:hasL2?0.7:1,
-                                    fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
-                                <span style={{fontSize:11,color:'var(--text3)'}}>/mese</span>
+                                    fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
+                                <span style={{fontSize:10,color:'var(--text3)'}}>/m</span>
                               </div>
                             </div>
                             {isOpen && subs.length > 0 && (
-                              <div style={{padding:'0 10px 8px 26px',display:'flex',flexDirection:'column',gap:4}}>
+                              <div className="fc-whatif-subs">
                                 {subs.map(([c2, avgC2]) => {
                                   const valC2 = l2overrides[c2] ?? avgC2
                                   return (
-                                    <div key={c2} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 0'}}>
-                                      <span style={{fontSize:12,color:'var(--text2)'}}>{c2}</span>
-                                      <div style={{display:'flex',alignItems:'center',gap:4}}>
+                                    <div key={c2} className="fc-whatif-l2">
+                                      <span style={{fontSize:12,color:'var(--text2)',minWidth:0,flex:1,
+                                        overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c2}>{c2}</span>
+                                      <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
                                         <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
                                         <input type="number" value={valC2}
                                           onChange={e=>setTeoricheSpesaL2(c1, c2, Number(e.target.value)||0)}
-                                          style={{width:72,padding:'3px 5px',borderRadius:5,border:'1px solid var(--border)',
+                                          style={{width:52,padding:'2px 4px',borderRadius:5,border:'1px solid var(--border)',
                                             background:'var(--surface)',color:'var(--red)',fontWeight:600,
-                                            fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
-                                        <span style={{fontSize:10,color:'var(--text3)'}}>/mese</span>
+                                            fontFamily:'var(--font-mono)',fontSize:11,textAlign:'right'}}/>
+                                        <span style={{fontSize:10,color:'var(--text3)'}}>/m</span>
                                       </div>
                                     </div>
                                   )
