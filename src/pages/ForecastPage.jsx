@@ -1119,6 +1119,16 @@ export default function ForecastPage() {
     // reale/mortgageActive) così non si blocca se il mutuo vero si estingue
     // in anticipo — il piano nominale continua ad ammortizzarsi per conto suo.
     let nominalMonthsElapsed = 0
+    // Contatore mesi reali trascorsi da "oggi" (2026-07-24, fix bug reale
+    // segnalato dall'utente: un override MENSILE enorme fatto dal popup
+    // "Modifica spese" in vista Mensile — es. il prezzo di una casa pagata
+    // con l'erogazione del mutuo — non veniva MAI visto da questo loop
+    // annuale, che leggeva solo overridesYearly. Risultato: il grafico
+    // "Andamento Saldo"/tabella Annuale mostravano un Forecast completamente
+    // sballato (saldo gonfiato dall'erogazione capitale senza la spesa che la
+    // compensa). Serve per calcolare la ym esatta di ogni mese dell'anno e
+    // controllare anche overridesMonthly/overridesEntrateMonthly sotto.
+    let monthsElapsedFromNow = 0
 
     for (let y = 0; y <= years; y++) {
       const year = now.getFullYear() + y
@@ -1164,12 +1174,61 @@ export default function ForecastPage() {
       }
       // Year 0: only count the fraction of the year that remains
       const yearFraction = y === 0 ? currentYearFraction : 1
+      const monthsThisYearAll = y === 0 ? monthsRemaining : 12
+
+      // FIX 2026-07-24: ricalcola expThisYear/incThisYear sommando i valori
+      // REALI mese per mese di quest'anno (leggendo overridesMonthly/
+      // overridesEntrateMonthly per la ym esatta, con fallback all'override
+      // annuale ovY/ovYE se il mese non ne ha uno proprio, altrimenti il
+      // tasso ricorrente normale) — poi si ridivide per il numero di mesi per
+      // ottenere di nuovo un tasso MENSILE (coerente con come "income"/
+      // "expense" vengono mostrati in tabella, sempre moltiplicati per 12).
+      // Senza questo fix, un override mensile (es. il prezzo di una casa,
+      // impostato dal popup di Modifica Spese in vista Mensile) restava
+      // invisibile a questo loop annuale, facendo divergere vistosamente il
+      // Forecast annuale/grafico da quello mensile (bug reale confermato
+      // dall'utente: saldo previsto "vola altissimo" perché vedeva
+      // l'erogazione capitale mutuo ma non la spesa di acquisto che la
+      // compensa, quest'ultima messa come override mensile).
+      let hasAnyMonthlyExpOverride = false
+      let hasAnyMonthlyIncOverride = false
+      {
+        let expYearSum = 0
+        let incYearSum = 0
+        for (let mm2 = 0; mm2 < monthsThisYearAll; mm2++) {
+          const dmm = new Date(now.getFullYear(), now.getMonth() + monthsElapsedFromNow, 1)
+          const ymX = `${dmm.getFullYear()}-${String(dmm.getMonth()+1).padStart(2,'0')}`
+          const ovMX = overridesMonthly[ymX]
+          let expX = exp
+          if (ovMX) {
+            const t = overrideTotal(ovMX)
+            if (t != null) { expX = t; hasAnyMonthlyExpOverride = true }
+          } else if (ovY) {
+            const t = overrideTotal(ovY)
+            if (t != null) expX = t
+          }
+          expYearSum += expX
+
+          const ovMEX = overridesEntrateMonthly[ymX]
+          let incX = inc
+          if (ovMEX) {
+            incX = overrideIncomeParts(ovMEX, teoricheFraVal, teoricheSofiVal).total
+            hasAnyMonthlyIncOverride = true
+          } else if (ovYE) {
+            incX = incParts.total
+          }
+          incYearSum += incX
+
+          monthsElapsedFromNow++
+        }
+        expThisYear = expYearSum / monthsThisYearAll
+        incThisYear = incYearSum / monthsThisYearAll
+      }
 
       // Simulazione mensile del mutuo per QUESTO anno (rimborsi anticipati
       // automatici + manuale una tantum sull'anno) — vedi commento sopra sul
       // perché serve un sotto-loop mensile anche nella vista annuale.
       let yearExtra = 0
-      const monthsThisYearAll = y === 0 ? monthsRemaining : 12
       if (mortgageActive) {
         const monthsThisYear = monthsThisYearAll
         const rMonthly = mortgageTaeg / 100 / 12
@@ -1256,8 +1315,11 @@ export default function ForecastPage() {
         income:  Math.round(incThisYear),
         mortgageCapital: Math.round(mortgageCapitalThisYear),
         expense: Math.round(expThisYear),
-        hasOverride: !!ovY,
-        hasIncomeOverride: !!ovYE,
+        // 2026-07-24: evidenzia la cella in tabella anche se l'override che
+        // ha determinato il valore è mensile (non solo annuale) — coerente
+        // col fix sopra che ora legge anche overridesMonthly/Entrate.
+        hasOverride: !!ovY || hasAnyMonthlyExpOverride,
+        hasIncomeOverride: !!ovYE || hasAnyMonthlyIncOverride,
         // Rata/estinzione anticipata di QUESTO anno (2026-07-23) — usate dalla
         // tabella "Proiezione Annuale" invece della rata statica mortgage.rata.
         mortgageRata:  mortgageActive ? Math.round(rataAtYearStart * 12) : 0,
@@ -1282,7 +1344,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, overridesMonthly, overridesEntrateMonthly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
