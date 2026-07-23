@@ -392,6 +392,86 @@ function MortgageExtraPaymentModal({ title, initialAmount, hasExisting, onSave, 
   )
 }
 
+// ── Popup override mese/anno sulla colonna ENTRATE della tabella "Proiezione"
+// (2026-07-23, richiesta utente: stesso meccanismo delle Spese — Fra/Sofi
+// modificabili con opzione "da qui in avanti" — più una riga "Altro" per
+// un'entrata extra di quel periodo specifico, con un flag INDIPENDENTE
+// scelto dall'utente per decidere se anche "Altro" deve ripetersi nei periodi
+// successivi oppure valere solo per quello corrente).
+function IncomeOverrideModal({ title, initialEntrate, initialCascade, initialAltro, initialAltroCascade, defaultFra, defaultSofi, hasExisting, onSave, onRemove, onClose }) {
+  const [fra, setFra]   = useState(Math.round(initialEntrate?.Fra  ?? defaultFra))
+  const [sofi, setSofi] = useState(Math.round(initialEntrate?.Sofi ?? defaultSofi))
+  const [cascade, setCascade] = useState(!!initialCascade)
+  const [altro, setAltro] = useState(Math.round(initialAltro || 0))
+  const [altroCascade, setAltroCascade] = useState(!!initialAltroCascade)
+  const total = (Number(fra)||0) + (Number(sofi)||0) + (Number(altro)||0)
+
+  return (
+    <Modal title={title} onClose={onClose} width={440}>
+      <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>
+        Modifica le entrate solo per questo periodo, oppure spunta "da qui in avanti" per farle valere anche sui mesi/anni successivi (finché non incontri un altro override).
+      </div>
+      <div className="fc-whatif-panel" style={{marginTop:0,marginBottom:10}}>
+        {[['Fra', fra, setFra], ['Sofi', sofi, setSofi]].map(([nome, val, setVal]) => (
+          <div key={nome} className="fc-whatif-cat">
+            <div className="fc-whatif-l1" style={{cursor:'default'}}>
+              <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600,minWidth:0,flex:1}}>
+                <span style={{width:8,height:8,borderRadius:'50%',background:'var(--green)',flexShrink:0,display:'inline-block'}}/>
+                {nome}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+                <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
+                <input type="number" value={val}
+                  onChange={e=>setVal(Number(e.target.value)||0)}
+                  style={{width:70,padding:'3px 4px',borderRadius:5,border:'1px solid var(--border)',
+                    background:'var(--surface)',color:'var(--green)',fontWeight:700,
+                    fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
+                <span style={{fontSize:10,color:'var(--text3)'}}>/m</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,cursor:'pointer',marginBottom:14}}>
+        <input type="checkbox" checked={cascade} onChange={e=>setCascade(e.target.checked)}/>
+        Applica Fra/Sofi da qui in avanti
+      </label>
+
+      <div style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:6}}>
+        Altro
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+        padding:'7px 9px',background:'var(--surface2)',borderRadius:6,border:'1px solid var(--border)',marginBottom:8}}>
+        <span style={{fontSize:12,color:'var(--text2)'}}>Entrata extra (bonus, rimborso, ecc.)</span>
+        <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+          <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
+          <input type="number" value={altro}
+            onChange={e=>setAltro(Number(e.target.value)||0)}
+            style={{width:70,padding:'3px 4px',borderRadius:5,border:'1px solid var(--border)',
+              background:'var(--surface)',color:'var(--green)',fontWeight:700,
+              fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
+        </div>
+      </div>
+      <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,cursor:'pointer',marginBottom:12}}>
+        <input type="checkbox" checked={altroCascade} onChange={e=>setAltroCascade(e.target.checked)}/>
+        Applica anche "Altro" da qui in avanti (di norma è un'entrata una tantum, solo per questo periodo)
+      </label>
+
+      <div style={{display:'flex',justifyContent:'space-between',padding:'7px 9px',
+        borderTop:'2px solid var(--border)',fontSize:12,fontWeight:800,marginBottom:12}}>
+        <span>Totale</span>
+        <span style={{fontFamily:'var(--font-mono)',color:'var(--green)'}}>{fmtFull(total)}</span>
+      </div>
+      <ModalFooter>
+        {hasExisting && (
+          <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi override</button>
+        )}
+        <button className="btn btn-primary" onClick={()=>onSave({ Fra: Number(fra)||0, Sofi: Number(sofi)||0 }, cascade, Number(altro)||0, altroCascade)}>Salva</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function ForecastPage() {
   const { transactions, customCats, appPrefs, setAppPref, ceciliaGoals } = useStore()
@@ -793,6 +873,44 @@ export default function ForecastPage() {
     return d
   }, [catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
+  // ── Override puntuali mese/anno sulla colonna ENTRATE (2026-07-23, richiesta
+  // utente: stesso meccanismo delle Spese, ma per Fra/Sofi + una riga "Altro"
+  // per un'entrata extra di quel periodo). Formato:
+  // { [ym|year]: { entrate: {Fra,Sofi}, cascade: bool, altro: number, altroCascade: bool } }
+  // cascade → si applica a Fra/Sofi (stessa logica delle Spese: resta valido
+  // finché non arriva un altro override). altroCascade è un flag SEPARATO,
+  // scelto dall'utente, perché "Altro" è tipicamente un'entrata one-off
+  // (es. bonus, rimborso) che di norma NON deve ripetersi nei mesi successivi
+  // — ma l'utente può scegliere di farla ripetere (es. un nuovo affitto extra).
+  const overridesEntrateMonthly = appPrefs?.forecastOverridesEntrateMonthly || {}
+  const overridesEntrateYearly  = appPrefs?.forecastOverridesEntrateYearly  || {}
+  function saveOverrideEntrateMonthly(ym, entry) {
+    setAppPref('forecastOverridesEntrateMonthly', { ...overridesEntrateMonthly, [ym]: entry })
+  }
+  function removeOverrideEntrateMonthly(ym) {
+    const next = { ...overridesEntrateMonthly }; delete next[ym]
+    setAppPref('forecastOverridesEntrateMonthly', next)
+  }
+  function saveOverrideEntrateYearly(year, entry) {
+    setAppPref('forecastOverridesEntrateYearly', { ...overridesEntrateYearly, [year]: entry })
+  }
+  function removeOverrideEntrateYearly(year) {
+    const next = { ...overridesEntrateYearly }; delete next[year]
+    setAppPref('forecastOverridesEntrateYearly', next)
+  }
+  // Ritorna { base: Fra+Sofi (soggetto a cascade), altro, total: base+altro } —
+  // "base" e "altro" separati perché hanno cascade indipendenti nel loop di
+  // proiezione (vedi forecastData/forecastDataMonthly).
+  function overrideIncomeParts(entry, defaultFra, defaultSofi) {
+    if (!entry) return null
+    const ent = entry.entrate || {}
+    const base = (ent.Fra ?? defaultFra) + (ent.Sofi ?? defaultSofi)
+    const altro = entry.altro || 0
+    return { base, altro, total: base + altro, cascade: !!entry.cascade, altroCascade: !!entry.altroCascade }
+  }
+  // Popup override Entrate mese/anno — { granularity:'mensile'|'annuale', key: ym|year, label }
+  const [overrideIncomePopup, setOverrideIncomePopup] = useState(null)
+
   // ── Mortgage calculation ──────────────────────────────────
   const mortgage = useMemo(() => {
     if (!mortgageOn || !mortgageAmt || !mortgageTaeg) return null
@@ -842,6 +960,17 @@ export default function ForecastPage() {
         const total = overrideTotal(ovY)
         if (total != null) expThisYear = total
       }
+      // Override puntuale ENTRATE su questo anno (2026-07-23) — vedi
+      // overrideIncomeParts/overridesEntrateYearly sopra. Fra/Sofi hanno un
+      // cascade, "Altro" ne ha uno separato scelto dall'utente.
+      const ovYE = overridesEntrateYearly[String(year)]
+      const preOverrideInc = inc
+      let incThisYear = inc
+      let incParts = null
+      if (ovYE) {
+        incParts = overrideIncomeParts(ovYE, teoricheFraVal, teoricheSofiVal)
+        incThisYear = incParts.total
+      }
       const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear && mortBalance > 0
       const rataAtYearStart = mortRata
       // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
@@ -869,7 +998,7 @@ export default function ForecastPage() {
           // Risparmio approssimato di questo mese (entrate/spese di quest'anno
           // spalmate uniformemente sui mesi — approssimazione accettabile a
           // livello annuale, coerente con come già lavora questo loop).
-          mortSavingsCounter += (inc - expThisYear - mortRata)
+          mortSavingsCounter += (incThisYear - expThisYear - mortRata)
           let autoExtra = 0
           if (extraRepayEnabled && extraRepayThreshold > 0 && mortSavingsCounter >= extraRepayThreshold) {
             autoExtra = Math.floor(mortSavingsCounter / extraRepayThreshold) * extraRepayThreshold
@@ -892,7 +1021,7 @@ export default function ForecastPage() {
         }
       }
 
-      saldo += (inc - expThisYear - rataAtYearStart) * 12 * yearFraction - yearExtra
+      saldo += (incThisYear - expThisYear - rataAtYearStart) * 12 * yearFraction - yearExtra
 
       const residual = mortgageOn && mortgage && year >= mortgageStartYear ? mortBalance : null
 
@@ -903,9 +1032,10 @@ export default function ForecastPage() {
         // Entrate/Spese effettive di QUESTO anno (con eventuale override già
         // applicato) — usate dalla tabella "Proiezione Annuale" invece di
         // ricalcolare con una formula approssimata separata.
-        income:  Math.round(inc),
+        income:  Math.round(incThisYear),
         expense: Math.round(expThisYear),
         hasOverride: !!ovY,
+        hasIncomeOverride: !!ovYE,
         // Rata/estinzione anticipata di QUESTO anno (2026-07-23) — usate dalla
         // tabella "Proiezione Annuale" invece della rata statica mortgage.rata.
         mortgageRata:  mortgageActive ? Math.round(rataAtYearStart * 12) : 0,
@@ -913,7 +1043,13 @@ export default function ForecastPage() {
         hasMortgageExtra: !!(mortgageExtraYearly[String(year)]),
       })
 
-      inc *= (1 + growth / 100)
+      if (ovYE) {
+        // Cascata separata per Fra/Sofi (base) e per "Altro" — vedi commento
+        // sopra su overridesEntrateYearly.
+        inc = ((incParts.cascade ? incParts.base : preOverrideInc) + (incParts.altroCascade ? incParts.altro : 0)) * (1 + growth / 100)
+      } else {
+        inc *= (1 + growth / 100)
+      }
       if (ovY && overrideTotal(ovY) != null) {
         // Cascata → il valore di questo anno diventa la nuova base che continua
         // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
@@ -924,7 +1060,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraYearly, overridesYearly, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
@@ -965,6 +1101,16 @@ export default function ForecastPage() {
         const total = overrideTotal(ovM)
         if (total != null) expThisMonth = total
       }
+      // Override puntuale ENTRATE su questo mese (2026-07-23) — vedi
+      // overrideIncomeParts/overridesEntrateMonthly sopra.
+      const ovME = overridesEntrateMonthly[ym]
+      const preOverrideInc = inc
+      let incThisMonth = inc
+      let incParts = null
+      if (ovME) {
+        incParts = overrideIncomeParts(ovME, teoricheFraVal, teoricheSofiVal)
+        incThisMonth = incParts.total
+      }
 
       if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageStartYM && ym >= mortgageStartYM) {
         saldo -= mortgageAnticipo
@@ -995,7 +1141,7 @@ export default function ForecastPage() {
         const interest  = mortBalance * rMonthly
         const principal = Math.min(mortgageMonthly - interest, mortBalance)
         let newBalance  = Math.max(0, mortBalance - principal)
-        mortSavingsCounter += (inc + bonusExtra - expThisMonth - mortgageMonthly)
+        mortSavingsCounter += (incThisMonth + bonusExtra - expThisMonth - mortgageMonthly)
         let autoExtra = 0
         if (extraRepayEnabled && extraRepayThreshold > 0 && mortSavingsCounter >= extraRepayThreshold) {
           autoExtra = Math.floor(mortSavingsCounter / extraRepayThreshold) * extraRepayThreshold
@@ -1014,7 +1160,7 @@ export default function ForecastPage() {
         mortBalance = newBalance
         mortMonthsElapsed++
       }
-      saldo += (inc - expThisMonth - mortgageMonthly - mortgageExtra + bonusExtra)
+      saldo += (incThisMonth - expThisMonth - mortgageMonthly - mortgageExtra + bonusExtra)
 
       const residual = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM ? mortBalance : null
 
@@ -1026,10 +1172,11 @@ export default function ForecastPage() {
         // Entrate/Spese effettive DI QUESTO mese (con crescita/inflazione già composte
         // e, in modalità Teoriche, la 13ª/14ª già sommata) — usate dalla tabella
         // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto
-        income:  Math.round(inc + bonusExtra),
+        income:  Math.round(incThisMonth + bonusExtra),
         expense: Math.round(expThisMonth),
         bonusExtra: Math.round(bonusExtra),
         hasOverride: !!ovM,
+        hasIncomeOverride: !!ovME,
         // Rata/estinzione anticipata di QUESTO mese (2026-07-23) — usate dalla
         // tabella "Proiezione Mensile" invece della rata statica mortgage.rata.
         mortgageRata:  Math.round(mortgageMonthly),
@@ -1037,7 +1184,13 @@ export default function ForecastPage() {
         hasMortgageExtra: !!(mortgageExtraMonthly[ym]),
       })
 
-      inc *= gMonthly
+      if (ovME) {
+        // Cascata separata per Fra/Sofi (base) e per "Altro" — vedi commento
+        // su overridesEntrateMonthly sopra.
+        inc = ((incParts.cascade ? incParts.base : preOverrideInc) + (incParts.altroCascade ? incParts.altro : 0)) * gMonthly
+      } else {
+        inc *= gMonthly
+      }
       if (ovM && overrideTotal(ovM) != null) {
         // Cascata → il valore di questo mese diventa la nuova base che continua
         // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
@@ -1048,7 +1201,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -1844,8 +1997,11 @@ export default function ForecastPage() {
                           {d.label}
                           {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer'}}
+                          title="Clicca per modificare le entrate di questo anno"
+                          onClick={()=>setOverrideIncomePopup({ granularity:'annuale', key:String(year), label:d.label })}>
                           {fmtIT(Math.round(inc * 12), 0)}
+                          {d.hasIncomeOverride && <span title="Override attivo" style={{marginLeft:5,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer'}}
                           title="Clicca per modificare le spese di questo anno"
@@ -1900,8 +2056,11 @@ export default function ForecastPage() {
                           {d.label}
                           {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer'}}
+                          title="Clicca per modificare le entrate di questo mese"
+                          onClick={()=>setOverrideIncomePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                           {fmtIT(Math.round(inc), 0)}
+                          {d.hasIncomeOverride && <span title="Override attivo" style={{marginLeft:5,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer'}}
                           title="Clicca per modificare le spese di questo mese"
@@ -1993,6 +2152,35 @@ export default function ForecastPage() {
               if (isMonthly) saveMortgageExtraMonthly(mortgageExtraPopup.key, amount)
               else saveMortgageExtraYearly(mortgageExtraPopup.key, amount)
               setMortgageExtraPopup(null)
+            }}
+          />
+        )
+      })()}
+
+      {overrideIncomePopup && (() => {
+        const isMonthly = overrideIncomePopup.granularity === 'mensile'
+        const existing = isMonthly ? overridesEntrateMonthly[overrideIncomePopup.key] : overridesEntrateYearly[overrideIncomePopup.key]
+        return (
+          <IncomeOverrideModal
+            title={`Modifica entrate — ${overrideIncomePopup.label}`}
+            initialEntrate={existing?.entrate}
+            initialCascade={existing?.cascade}
+            initialAltro={existing?.altro}
+            initialAltroCascade={existing?.altroCascade}
+            defaultFra={teoricheFraVal}
+            defaultSofi={teoricheSofiVal}
+            hasExisting={!!existing}
+            onClose={()=>setOverrideIncomePopup(null)}
+            onRemove={()=>{
+              if (isMonthly) removeOverrideEntrateMonthly(overrideIncomePopup.key)
+              else removeOverrideEntrateYearly(overrideIncomePopup.key)
+              setOverrideIncomePopup(null)
+            }}
+            onSave={(entrate, cascade, altro, altroCascade)=>{
+              const entry = { entrate, cascade, altro, altroCascade }
+              if (isMonthly) saveOverrideEntrateMonthly(overrideIncomePopup.key, entry)
+              else saveOverrideEntrateYearly(overrideIncomePopup.key, entry)
+              setOverrideIncomePopup(null)
             }}
           />
         )
