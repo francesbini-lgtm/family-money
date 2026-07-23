@@ -1244,7 +1244,7 @@ export default function ForecastPage() {
     if (!mortgageOn || !mortgage) return null
     const firstActive = forecastDataMonthly.find(d => d.mortgageRata > 0)
     const rataAttuale = firstActive ? firstActive.mortgageRata : mortgage.rata
-    const thisYear = now.getFullYear()
+    const thisYear = new Date().getFullYear()
     const monthsThisYear = forecastDataMonthly.filter(d => d.ym.startsWith(String(thisYear)))
     // Somma di rata+estinzioni versate da qui a fine anno (non "tutto l'anno
     // solare": la proiezione parte dal mese corrente, i mesi già passati
@@ -1259,7 +1259,7 @@ export default function ForecastPage() {
       totalExtraForecast: Math.round(totalExtraForecast),
       payoffYear: payoffPoint ? payoffPoint.label : (mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—'),
     }
-  }, [mortgageOn, mortgage, forecastDataMonthly, forecastData, mortgageAmt, mortgageStart, mortgageYears, now.getFullYear()])
+  }, [mortgageOn, mortgage, forecastDataMonthly, forecastData, mortgageAmt, mortgageStart, mortgageYears])
 
   // ── Fondo Cecilia: andamento saldo (versamenti cumulati nel tempo) ──
   const ceciliaFund = (ceciliaGoals || []).find(g => (g.name || '').toLowerCase().includes('cecilia'))
