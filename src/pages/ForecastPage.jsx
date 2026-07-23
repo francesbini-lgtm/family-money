@@ -583,8 +583,17 @@ export default function ForecastPage() {
   // conto proiettato quel mese/anno (anche questo confermato dall'utente).
   const extraRepayEnabled   = mortgagePrefs.extraRepayEnabled   ?? false
   const extraRepayThreshold = mortgagePrefs.extraRepayThreshold ?? 20000
+  // Strategia rimborso (2026-07-23, richiesta utente): 'rata' = riduci la rata
+  // mantenendo la stessa scadenza (comportamento attuale); 'durata' = mantieni
+  // la stessa rata e lascia che il mutuo si estingua prima (la rata fissa,
+  // applicata a un capitale minore, naturalmente ammortizza più in fretta —
+  // non serve nessun ricalcolo esplicito, basta NON richiamare
+  // calcMortgagePayment dopo un rimborso extra). Vale sia per il rimborso
+  // automatico che per quello manuale (stessa variabile, unica scelta).
+  const extraRepayStrategy = mortgagePrefs.extraRepayStrategy ?? 'rata' // 'rata' | 'durata'
   function setExtraRepayEnabled(v)   { patchMortgage({ extraRepayEnabled: v }) }
   function setExtraRepayThreshold(v) { patchMortgage({ extraRepayThreshold: v }) }
+  function setExtraRepayStrategy(v)  { patchMortgage({ extraRepayStrategy: v }) }
 
   // Rimborsi anticipati MANUALI puntuali (2026-07-23, richiesta utente: click
   // sulla colonna "Rata mutuo"/"Rata mutuo annua" in tabella Proiezione per
@@ -926,6 +935,21 @@ export default function ForecastPage() {
     return parseInt(mortgageStart.split('-')[0])
   }, [mortgageStart])
 
+  // BUG FIX (2026-07-23, segnalato utente): l'Anticipo (acconto) veniva
+  // dedotto dal saldo previsto al PRIMO punto della proiezione ogni volta che
+  // il mutuo era già in corso (mortgageStart nel passato), perché la
+  // condizione era "year/ym >= mortgageStartYear/YM" — vera fin da subito per
+  // un mutuo già partito. L'utente ha confermato: "non deve succedere niente
+  // il mese del mutuo" quando il mutuo è già attivo — l'anticipo è un evento
+  // storico già riflesso nel saldo attuale, non va ridedotto nella proiezione.
+  // L'anticipo va tolto dal saldo SOLO se il mutuo non è ancora partito (data
+  // di inizio nel futuro rispetto ad oggi) — cioè per un mutuo pianificato.
+  const mortgageNotYetStarted = useMemo(() => {
+    if (!mortgageStart) return false
+    const nowYM = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`
+    return mortgageStart > nowYM
+  }, [mortgageStart])
+
   const forecastData = useMemo(() => {
     const now = new Date()
     const pts = []
@@ -975,7 +999,7 @@ export default function ForecastPage() {
       const rataAtYearStart = mortRata
       // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
       // not unconditionally in year 0
-      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && year >= mortgageStartYear) {
+      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageNotYetStarted && year >= mortgageStartYear) {
         saldo -= mortgageAnticipo
         anticipoApplied = true
       }
@@ -1013,7 +1037,12 @@ export default function ForecastPage() {
           yearExtra += totalExtra
           const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
           if (totalExtra > 0 && mortBalance > 0 && remainingMonths > 0) {
-            mortRata = calcMortgagePayment(mortBalance, mortgageTaeg, remainingMonths)
+            // 'rata' → ricalcola (stessa scadenza, rata più bassa da qui in poi);
+            // 'durata' → rata invariata, il capitale minore si estingue da solo
+            // prima (nessun ricalcolo necessario).
+            if (extraRepayStrategy === 'rata') {
+              mortRata = calcMortgagePayment(mortBalance, mortgageTaeg, remainingMonths)
+            }
           } else if (mortBalance <= 0) {
             mortRata = 0
           }
@@ -1060,7 +1089,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
@@ -1117,7 +1146,7 @@ export default function ForecastPage() {
         incThisMonth = incParts.total
       }
 
-      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageStartYM && ym >= mortgageStartYM) {
+      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageNotYetStarted && mortgageStartYM && ym >= mortgageStartYM) {
         saldo -= mortgageAnticipo
         anticipoApplied = true
       }
@@ -1157,7 +1186,7 @@ export default function ForecastPage() {
         newBalance = Math.max(0, newBalance - totalExtra)
         mortgageExtra = totalExtra
         const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
-        if (totalExtra > 0 && newBalance > 0 && remainingMonths > 0) {
+        if (totalExtra > 0 && newBalance > 0 && remainingMonths > 0 && extraRepayStrategy === 'rata') {
           mortRata = calcMortgagePayment(newBalance, mortgageTaeg, remainingMonths)
         } else if (newBalance <= 0) {
           mortRata = 0
@@ -1221,7 +1250,7 @@ export default function ForecastPage() {
       console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -1741,7 +1770,20 @@ export default function ForecastPage() {
                 {extraRepayEnabled && (
                   <div className="fc-mortgage-fields" style={{marginTop:8}}>
                     <MoneyField label="Soglia risparmio (€)" value={extraRepayThreshold} onChange={setExtraRepayThreshold}
-                      placeholder="20.000" hint="Ogni volta che i risparmi cumulati raggiungono questa cifra, vengono versati come rimborso anticipato e la rata si abbassa (stessa scadenza)"/>
+                      placeholder="20.000" hint="Ogni volta che i risparmi cumulati raggiungono questa cifra, vengono versati come rimborso anticipato"/>
+                    <div>
+                      <span className="form-lbl-sm">Cosa fare col rimborso</span>
+                      <div style={{display:'flex', flexDirection:'column', gap:6, marginTop:2}}>
+                        <label style={{display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:12.5, color:extraRepayStrategy==='rata'?'var(--text)':'var(--text3)'}}>
+                          <input type="radio" name="extraRepayStrategy" checked={extraRepayStrategy==='rata'} onChange={()=>setExtraRepayStrategy('rata')}/>
+                          Riduci la rata (stessa scadenza)
+                        </label>
+                        <label style={{display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:12.5, color:extraRepayStrategy==='durata'?'var(--text)':'var(--text3)'}}>
+                          <input type="radio" name="extraRepayStrategy" checked={extraRepayStrategy==='durata'} onChange={()=>setExtraRepayStrategy('durata')}/>
+                          Riduci la durata (stessa rata)
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 )}
 
