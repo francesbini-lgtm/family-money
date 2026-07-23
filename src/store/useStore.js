@@ -250,6 +250,69 @@ export const useStore = create((set, get) => ({
         }
       })
     }, 1500)
+    // Migrazione una tantum (2026-07-23, task #85 — segnalato dall'utente con
+    // esempio concreto: spesa "Acquisto VF" 26-0238 correttamente rettificata
+    // (netto 15,03€, _compensatedBy:'26-0245'), ma l'entrata "Scarponi Luca"
+    // 26-0245 usata per coprirla mostrata ancora piena (77,00€, nessun
+    // asterisco) — mai ricevuto il proprio _compensatedAmt. Causa: alcune
+    // compensazioni storiche (pre-compLinks, es. vecchio flusso Carte "solo
+    // campi diretti senza scrivere qui" — vedi commento in compensation.js)
+    // scrivevano SOLO sul lato spesa. Effetto: la spesa appare giusta in
+    // Transazioni, ma l'entrata risulta ancora "da compensare" in Altre
+    // Entrate pur essendo già del tutto consumata altrove (rischio di essere
+    // ri-compensata una seconda volta).
+    // Fonte di verità preferita: appPrefs.compLinks (importo ESATTO per ogni
+    // coppia entrata↔spesa, anche con split su più entrate/spese). Fallback
+    // SOLO per coppie 1:1 non ambigue (_compensatedBy stringa singola, non
+    // array) e non già presenti in compLinks per quella stessa spesa — in tal
+    // caso l'intero _compensatedAmt della spesa viene attribuito all'unica
+    // entrata referenziata. La correzione SOLO ALZA il valore esistente
+    // dell'entrata (mai lo abbassa): idempotente, non distruttiva, non tocca
+    // mai il lato spesa (già corretto) né entrate gestite da satiMatches.
+    setTimeout(() => {
+      const allTxs2   = get().transactions
+      const byTxId    = new Map(allTxs2.map(t => [t.txId, t]))
+      const compLinks = get().appPrefs?.compLinks || {}
+      const neededByIncome     = {} // incomeKey → importo minimo che dovrebbe risultare consumato
+      const accountedExpForKey = {} // incomeKey → Set di expTxId già contati via compLinks
+
+      // 1) Fonte esatta: compLinks
+      Object.entries(compLinks).forEach(([incomeKey, entry]) => {
+        const arr = Array.isArray(entry) ? entry : (entry ? [entry] : [])
+        const set = accountedExpForKey[incomeKey] || (accountedExpForKey[incomeKey] = new Set())
+        arr.forEach(l => {
+          if (!l || !l.expTxId) return
+          neededByIncome[incomeKey] = (neededByIncome[incomeKey] || 0) + (l.compensatedAmt || 0)
+          set.add(l.expTxId)
+        })
+      })
+
+      // 2) Fallback legacy: spese con _compensatedAmt/_compensatedBy diretti,
+      //    MAI passate da compLinks per QUESTA coppia specifica — solo il caso
+      //    non ambiguo, gruppo di 2 (_compensatedBy stringa singola).
+      allTxs2.forEach(tx => {
+        if (tx.amount >= 0) return // solo spese
+        if (!(tx._compensatedAmt > 0)) return
+        const by = tx._compensatedBy
+        if (Array.isArray(by) || !by) return // gruppi >2 o nessun riferimento: ambiguo, skip
+        const alreadyCounted = accountedExpForKey[by]?.has(tx.txId)
+        if (alreadyCounted) return
+        neededByIncome[by] = (neededByIncome[by] || 0) + tx._compensatedAmt
+      })
+
+      // 3) Applica solo se il valore corretto è MAGGIORE di quello attuale
+      //    (le entrate manuali di Altre Entrate, chiave = .id, non vivono nella
+      //    collection transactions: byTxId.get() torna undefined, si saltano)
+      Object.entries(neededByIncome).forEach(([incomeTxId, needed]) => {
+        const incomeTx = byTxId.get(incomeTxId)
+        if (!incomeTx) return
+        const current = incomeTx._compensatedAmt || 0
+        const correct = Math.round(needed * 100) / 100
+        if (correct > current + 0.005) {
+          updateTx(incomeTxId, { _compensatedAmt: correct })
+        }
+      })
+    }, 2000)
   },
 
   // ── Realtime sync ─────────────────────────────────────
