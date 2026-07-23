@@ -1844,79 +1844,8 @@ export default function ForecastPage() {
                   </div>
                 )}
 
-                {mortgage && mortgageOn && (
-                  <div className="fc-mortgage-preview">
-                    <div className="fc-preview-item">
-                      <span>Rata mensile (iniziale)</span>
-                      <strong style={{color:'var(--accent)'}}>€ {fmtIT(mortgage.rata, 2)}</strong>
-                    </div>
-                    <div className="fc-preview-item">
-                      <span>Totale interessi</span>
-                      <strong style={{color:'var(--red)'}}>
-                        € {fmtIT(Math.round(mortgage.rata * mortgageYears * 12 - mortgageAmt), 0)}
-                      </strong>
-                    </div>
-                    <div className="fc-preview-item">
-                      <span>Costo totale</span>
-                      <strong>€ {fmtIT(Math.round(mortgage.rata * mortgageYears * 12), 0)}</strong>
-                    </div>
-                    <div className="fc-preview-item">
-                      <span>Impatto mensile</span>
-                      <strong style={{color:'var(--red)'}}>−{fmtFull(mortgage.rata)}</strong>
-                    </div>
-                    {mortgageAnticipo > 0 && (
-                      <div className="fc-preview-item">
-                        <span>Anticipo</span>
-                        <strong style={{color:'var(--red)'}}>−{fmtFull(mortgageAnticipo)}</strong>
-                      </div>
-                    )}
-                    {breakeven >= 0 && (
-                      <div className="fc-preview-item" style={{gridColumn:'1 / -1'}}>
-                        <span>Saldo {'>'} Debito dal</span>
-                        <strong style={{color:'var(--green)'}}>{forecastData[breakeven]?.label || '—'}</strong>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
-          </div>
-
-          {/* Summary */}
-          <div className="card fc-controls" style={{paddingTop:14}}>
-            <div style={{fontSize:11,fontWeight:700,marginBottom:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'.06em'}}>
-              Riepilogo proiezione ({years} anni)
-            </div>
-            <div className="fc-summary">
-              {savedPerMonth > 0 && (
-                <div className="fc-sum-row" style={{background:'rgba(50,180,100,.06)',borderRadius:6,padding:'6px 8px',marginBottom:2}}>
-                  <span style={{color:'var(--green)'}}>Spese eliminate (what if)</span>
-                  <strong style={{color:'var(--green)'}}>−{fmtFull(savedPerMonth)}/m</strong>
-                </div>
-              )}
-              <div className="fc-sum-row">
-                <span>Risparmio mensile netto</span>
-                <strong style={{color:monthlySavings>=0?'var(--green)':'var(--red)'}}>
-                  {monthlySavings>=0?'+':''}{fmtFull(Math.round(monthlySavings))}
-                </strong>
-              </div>
-              <div className="fc-sum-row">
-                <span>Tasso risparmio</span>
-                <strong style={{color:savingsRate>=20?'var(--green)':savingsRate>=10?'var(--gold)':'var(--red)'}}>
-                  {savingsRate}%
-                </strong>
-              </div>
-              {mortgageOn && mortgage && (
-                <div className="fc-sum-row">
-                  <span>Debito residuo tra {years} anni</span>
-                  <strong style={{color:'var(--red)'}}>{fmtK(finalResidual)}</strong>
-                </div>
-              )}
-              <div className="fc-sum-row" style={{borderTop:'1px solid var(--border)',paddingTop:8,marginTop:4}}>
-                <span>Saldo previsto nel {now.getFullYear() + years}</span>
-                <strong style={{color:'var(--blue)',fontSize:15}}>{fmtK(finalSaldo)}</strong>
-              </div>
-            </div>
           </div>
         </div>
 
