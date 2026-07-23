@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import './ForecastPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
+import Modal, { ModalFooter } from '../components/Modal'
 // Importi NETTI post-compensazione (fix 2026-07-13: questa pagina era rimasta
 // indietro rispetto a UscitePage/RisparmioPage, che già usano netAmt — vedi
 // audit richiesto dall'utente sulla coerenza dei totali Uscite tra le 3 pagine)
@@ -227,6 +228,63 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
   )
 }
 
+// ── Override puntuale mese/anno sulla tabella "Proiezione" (2026-07-23) ────
+// Popup che si apre cliccando una riga futura della tabella: permette di
+// modificare la composizione delle spese (L1) di QUEL mese/anno specifico,
+// con opzione "applica da qui in avanti" (cascata, si ferma da sola al
+// prossimo override — vedi commenti su overridesMonthly/overridesYearly).
+function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, initialCascade, hasExisting, onSave, onRemove, onClose }) {
+  const [values, setValues] = useState(() => {
+    const v = {}
+    Object.keys(catStats).forEach(c1 => { v[c1] = Math.round(initialSpese?.[c1] ?? defaultsByCat[c1] ?? 0) })
+    return v
+  })
+  const [cascade, setCascade] = useState(!!initialCascade)
+  const total = Object.values(values).reduce((s, v) => s + (Number(v) || 0), 0)
+
+  return (
+    <Modal title={title} onClose={onClose} width={480}>
+      <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>
+        Modifica le spese solo per questo periodo, oppure spunta "da qui in avanti" per farle valere anche sui mesi/anni successivi (finché non incontri un altro override).
+      </div>
+      <div style={{maxHeight:320,overflowY:'auto',display:'flex',flexDirection:'column',gap:6,marginBottom:10}}>
+        {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => (
+          <div key={c1} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+            padding:'7px 9px',background:'var(--surface2)',borderRadius:6,border:'1px solid var(--border)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600}}>
+              <span style={{width:8,height:8,borderRadius:'50%',background:data.color,display:'inline-block'}}/>
+              {c1}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:4}}>
+              <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
+              <input type="number" value={values[c1]}
+                onChange={e=>setValues(v=>({...v,[c1]:Number(e.target.value)||0}))}
+                style={{width:80,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
+                  background:'var(--surface)',color:'var(--red)',fontWeight:700,
+                  fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between',padding:'7px 9px',
+        borderTop:'2px solid var(--border)',fontSize:12,fontWeight:800,marginBottom:12}}>
+        <span>Totale</span>
+        <span style={{fontFamily:'var(--font-mono)',color:'var(--red)'}}>{fmtFull(total)}</span>
+      </div>
+      <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,cursor:'pointer',marginBottom:6}}>
+        <input type="checkbox" checked={cascade} onChange={e=>setCascade(e.target.checked)}/>
+        Applica da qui in avanti
+      </label>
+      <ModalFooter>
+        {hasExisting && (
+          <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi override</button>
+        )}
+        <button className="btn btn-primary" onClick={()=>onSave(values, cascade)}>Salva</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function ForecastPage() {
   const { transactions, customCats, appPrefs, setAppPref, ceciliaGoals } = useStore()
@@ -238,9 +296,19 @@ export default function ForecastPage() {
   function setForecastBasis(v) { setAppPref('forecastBasis', v) }
   const [teoricheTab, setTeoricheTab] = useState('entrate') // 'entrate' | 'spese' (sub-tab locale)
   const [teoricheDetailPerson, setTeoricheDetailPerson] = useState(null) // 'Fra' | 'Sofi' | null — storico 12 mesi in tab Teoriche
+  const [expandedTeoricheL1, setExpandedTeoricheL1] = useState(() => new Set()) // solo UI, quali L1 sono espansi in Teoriche > Spese
   const teoricheEntrate = appPrefs?.forecastTeoricheEntrate || {} // { Fra: number, Sofi: number }
   const teoricheBonus   = appPrefs?.forecastTeoricheBonus   || {} // { Fra: {has13,has14}, Sofi: {...} }
   const teoricheSpese   = appPrefs?.forecastTeoricheSpese   || {} // { [cat1]: number }
+  // Breakdown L2 per Teoriche > Spese (2026-07-23, richiesta utente: poter
+  // modificare le singole sotto-categorie, non solo il totale L1 — stesso
+  // formato "espandi e modifica" già usato nel pannello What if di Storico, ma
+  // con input numerici invece di checkbox). Se per un L1 esiste un override L2
+  // (anche solo su UNA sotto-categoria), il totale di quel L1 diventa la SOMMA
+  // delle sue L2 (default = media 12 mesi reale per le L2 non ancora toccate) e
+  // l'input L1 diventa di sola lettura — evita di avere L1 e somma-L2
+  // incoerenti tra loro.
+  const teoricheSpeseL2 = appPrefs?.forecastTeoricheSpeseL2 || {} // { [cat1]: { [cat2]: number } }
   // Mese di pagamento 13ª/14ª (1-based: 6=giugno, 12=dicembre) — richiesta utente
   // 2026-07-20: rendere modificabile (non tutte le aziende le pagano negli stessi mesi)
   const bonusMonths = appPrefs?.forecastBonusMonths || { m13: 6, m14: 12 }
@@ -256,50 +324,90 @@ export default function ForecastPage() {
   function setTeoricheSpesa(cat1, val) {
     setAppPref('forecastTeoricheSpese', { ...teoricheSpese, [cat1]: val })
   }
-
-  const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
-  // Vista tabella "Proiezione" — richiesta utente 2026-07-19: poter scegliere fra
-  // proiezione annuale (una riga per anno) o mensile (una riga per mese)
-  const [projectionView, setProjectionView] = useState('annuale') // 'annuale' | 'mensile'
-
-  // Adjustable parameters
-  const [growth,    setGrowth]    = useState(2)
-  const [inflation, setInflation] = useState(2)
-  const [years,     setYears]     = useState(15)
-
-  // Mortgage
-  const [showMortgage,  setShowMortgage]  = useState(false)
-  const [mortgageOn,    setMortgageOn]    = useState(false)
-  const [mortgageAmt,   setMortgageAmt]   = useState(200000)
-  const [mortgageYears, setMortgageYears] = useState(20)
-  const [mortgageTaeg,  setMortgageTaeg]  = useState(3.5)
-  const [mortgageStart, setMortgageStart] = useState(() => {
-    const d = new Date(); d.setFullYear(d.getFullYear() + 1)
-    return `${d.getFullYear()}-01`
-  })
-  const [mortgageAnticipo, setMortgageAnticipo] = useState(0)
-
-  // What if
-  const [whatIfOpen,   setWhatIfOpen]   = useState(false)
-  const [excludedCats, setExcludedCats] = useState(() => new Set())
-
-  function toggleExcludedCat(key) {
-    setExcludedCats(prev => {
+  function setTeoricheSpesaL2(cat1, cat2, val) {
+    setAppPref('forecastTeoricheSpeseL2', {
+      ...teoricheSpeseL2,
+      [cat1]: { ...(teoricheSpeseL2[cat1] || {}), [cat2]: val },
+    })
+  }
+  function toggleTeoricheL1Expand(c1) {
+    setExpandedTeoricheL1(prev => {
       const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-        // If removing an L1, no orphan L2 keys since L2 keys are "C1:::C2"
-      } else {
-        next.add(key)
-        // If adding an L1, remove any L2 sub-exclusions (L1 covers all)
-        if (!key.includes(':::')) {
-          for (const k of next) {
-            if (k.startsWith(key + ':::')) next.delete(k)
-          }
-        }
-      }
+      if (next.has(c1)) next.delete(c1); else next.add(c1)
       return next
     })
+  }
+
+  const [detailPopup, setDetailPopup] = useState(null) // 'income' | 'expense' | null
+  // Popup override mese/anno sulla tabella Proiezione — { granularity:'mensile'|'annuale', key: ym|year, label }
+  const [overridePopup, setOverridePopup] = useState(null)
+
+  // ── Impostazioni persistenti (2026-07-23, richiesta utente: "questa pagina
+  // deve salvare le impostazioni che vengono messe... non deve ogni volta che
+  // si apre azzerarsi tutto") — growth/inflation/years, mutuo, vista tabella e
+  // what-if erano SOLO in useState locale: si azzeravano ad ogni riapertura
+  // della pagina. Ora tutto vive in appPrefs, stesso pattern già usato per
+  // forecastBasis/forecastTeoriche*. I nomi delle variabili/funzioni restano
+  // identici a prima (solo il "dietro le quinte" cambia) per non dover toccare
+  // tutti i punti dove vengono lette/usate più sotto nel file.
+
+  // Vista tabella "Proiezione" — richiesta utente 2026-07-19: poter scegliere fra
+  // proiezione annuale (una riga per anno) o mensile (una riga per mese)
+  const projectionView = appPrefs?.forecastProjectionView || 'annuale' // 'annuale' | 'mensile'
+  function setProjectionView(v) { setAppPref('forecastProjectionView', v) }
+
+  // Adjustable parameters
+  const growth    = appPrefs?.forecastGrowth    ?? 2
+  const inflation = appPrefs?.forecastInflation ?? 2
+  const years     = appPrefs?.forecastYears     ?? 15
+  function setGrowth(v)    { setAppPref('forecastGrowth', v) }
+  function setInflation(v) { setAppPref('forecastInflation', v) }
+  function setYears(v)     { setAppPref('forecastYears', v) }
+
+  // Mutuo/Finanziamento — un unico oggetto persistito, patchato pezzo per pezzo
+  function defaultMortgageStart() {
+    const d = new Date(); d.setFullYear(d.getFullYear() + 1)
+    return `${d.getFullYear()}-01`
+  }
+  const mortgagePrefs = appPrefs?.forecastMortgage || {}
+  function patchMortgage(patch) {
+    setAppPref('forecastMortgage', { ...(useStore.getState().appPrefs?.forecastMortgage || {}), ...patch })
+  }
+  const showMortgage     = mortgagePrefs.panelOpen ?? false
+  const mortgageOn       = mortgagePrefs.on        ?? false
+  const mortgageAmt      = mortgagePrefs.amt       ?? 200000
+  const mortgageYears    = mortgagePrefs.years     ?? 20
+  const mortgageTaeg     = mortgagePrefs.taeg      ?? 3.5
+  const mortgageStart    = mortgagePrefs.start     ?? defaultMortgageStart()
+  const mortgageAnticipo = mortgagePrefs.anticipo  ?? 0
+  function setShowMortgage(v)     { patchMortgage({ panelOpen: typeof v === 'function' ? v(showMortgage) : v }) }
+  function setMortgageOn(v)       { patchMortgage({ on: v }) }
+  function setMortgageAmt(v)      { patchMortgage({ amt: v }) }
+  function setMortgageYears(v)    { patchMortgage({ years: v }) }
+  function setMortgageTaeg(v)     { patchMortgage({ taeg: v }) }
+  function setMortgageStart(v)    { patchMortgage({ start: v }) }
+  function setMortgageAnticipo(v) { patchMortgage({ anticipo: v }) }
+
+  // What if — selezioni persistite come array (Set ricostruito in memoria)
+  const [whatIfOpen, setWhatIfOpen] = useState(false) // solo UI (aperto/chiuso pannello), non serve persisterlo
+  const excludedCatsArr = appPrefs?.forecastExcludedCatsWhatIf || []
+  const excludedCats = useMemo(() => new Set(excludedCatsArr), [excludedCatsArr])
+
+  function toggleExcludedCat(key) {
+    const next = new Set(excludedCats)
+    if (next.has(key)) {
+      next.delete(key)
+      // If removing an L1, no orphan L2 keys since L2 keys are "C1:::C2"
+    } else {
+      next.add(key)
+      // If adding an L1, remove any L2 sub-exclusions (L1 covers all)
+      if (!key.includes(':::')) {
+        for (const k of next) {
+          if (k.startsWith(key + ':::')) next.delete(k)
+        }
+      }
+    }
+    setAppPref('forecastExcludedCatsWhatIf', [...next])
   }
 
   // ── Real data: last 6 FULL months (excluding current month) ──
@@ -425,8 +533,22 @@ export default function ForecastPage() {
   const teoricheFraVal  = teoricheEntrate.Fra  ?? Math.round(lastMonthIncome.fra  || 0)
   const teoricheSofiVal = teoricheEntrate.Sofi ?? Math.round(lastMonthIncome.sofi || 0)
   const teoricheIncomeTotal = teoricheFraVal + teoricheSofiVal
+  // Valore effettivo di un L1 in Teoriche: se ha un override L2 (anche parziale),
+  // il totale è la somma di TUTTE le sue L2 (override dove presente, altrimenti
+  // media reale) — altrimenti il vecchio comportamento (override L1 diretto o
+  // media reale del L1 intero).
+  function teoricheL1Value(c1) {
+    const l2overrides = teoricheSpeseL2[c1]
+    const hasL2 = l2overrides && Object.keys(l2overrides).length > 0
+    if (hasL2) {
+      const subs = catStats[c1]?.subs || {}
+      return Object.keys(subs).reduce((s, c2) => s + (l2overrides[c2] ?? subs[c2] ?? 0), 0)
+    }
+    return teoricheSpese[c1] ?? catStats[c1]?.avg ?? 0
+  }
+
   const teoricheExpenseTotal = Object.keys(catStats).reduce(
-    (s, c1) => s + (teoricheSpese[c1] ?? catStats[c1].avg), 0
+    (s, c1) => s + teoricheL1Value(c1), 0
   )
 
   const avgIncomeEffective = forecastBasis === 'teoriche' ? teoricheIncomeTotal : avgIncomeStorico
@@ -474,6 +596,59 @@ export default function ForecastPage() {
 
   const effectiveExpense = forecastBasis === 'teoriche' ? teoricheExpenseTotal : (avgExpense - savedPerMonth)
 
+  // Valore "oggi" (non ancora inflazionato) di un L1, coerente con qualunque
+  // modalità/esclusione attiva — usato come DEFAULT per le categorie non
+  // esplicitamente toccate da un override puntuale mese/anno (sotto). La somma
+  // su tutti i cat1 di catStats torna sempre uguale a effectiveExpense.
+  function catEffectiveBase(c1) {
+    if (forecastBasis === 'teoriche') return teoricheL1Value(c1)
+    if (excludedCats.has(c1)) return 0
+    const subs = catStats[c1]?.subs || {}
+    let total = catStats[c1]?.avg || 0
+    Object.keys(subs).forEach(c2 => {
+      if (excludedCats.has(`${c1}:::${c2}`)) total -= subs[c2]
+    })
+    return Math.max(0, total)
+  }
+
+  // ── Override puntuali mese/anno sulla tabella "Proiezione" (2026-07-23,
+  // richiesta utente: click su un mese/anno per modificare la composizione
+  // delle spese da quel punto, con opzione "applica da qui in avanti"). Solo
+  // Spese (non Entrate), per scelta esplicita dell'utente. Formato:
+  // { [ym|year]: { spese: {[cat1]: number}, cascade: boolean } }
+  // cascade:true → resta valido finché non arriva un ALTRO override più avanti
+  // nel tempo (si "ferma" da solo, vedi forecastData/forecastDataMonthly);
+  // cascade:false → vale SOLO per quel mese/anno specifico, il mese dopo si
+  // ritorna alla traiettoria che ci sarebbe stata comunque.
+  const overridesMonthly = appPrefs?.forecastOverridesMonthly || {}
+  const overridesYearly  = appPrefs?.forecastOverridesYearly  || {}
+  function saveOverrideMonthly(ym, entry) {
+    setAppPref('forecastOverridesMonthly', { ...overridesMonthly, [ym]: entry })
+  }
+  function removeOverrideMonthly(ym) {
+    const next = { ...overridesMonthly }; delete next[ym]
+    setAppPref('forecastOverridesMonthly', next)
+  }
+  function saveOverrideYearly(year, entry) {
+    setAppPref('forecastOverridesYearly', { ...overridesYearly, [year]: entry })
+  }
+  function removeOverrideYearly(year) {
+    const next = { ...overridesYearly }; delete next[year]
+    setAppPref('forecastOverridesYearly', next)
+  }
+  function overrideTotal(entry) {
+    if (!entry) return null
+    const spese = entry.spese || {}
+    return Object.keys(catStats).reduce((s, c1) => s + (spese[c1] ?? catEffectiveBase(c1)), 0)
+  }
+  // Valori di default (oggi, non inflazionati) per ogni L1 — usati per
+  // precompilare il popup di override quando si clicca un mese/anno.
+  const defaultsByCat = useMemo(() => {
+    const d = {}
+    Object.keys(catStats).forEach(c1 => { d[c1] = catEffectiveBase(c1) })
+    return d
+  }, [catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+
   // ── Mortgage calculation ──────────────────────────────────
   const mortgage = useMemo(() => {
     if (!mortgageOn || !mortgageAmt || !mortgageTaeg) return null
@@ -501,6 +676,17 @@ export default function ForecastPage() {
 
     for (let y = 0; y <= years; y++) {
       const year = now.getFullYear() + y
+      // Override puntuale su questo anno (solo Spese) — vedi overrideTotal/
+      // overridesYearly sopra. preOverrideExp serve a "far ripartire" la
+      // traiettoria normale l'anno dopo se l'override NON è a cascata (vale
+      // solo per questo anno specifico, non altera il futuro).
+      const ovY = overridesYearly[String(year)]
+      const preOverrideExp = exp
+      let expThisYear = exp
+      if (ovY) {
+        const total = overrideTotal(ovY)
+        if (total != null) expThisYear = total
+      }
       const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear
       const mortgageMonthly = mortgageActive ? mortgage.rata : 0
       // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
@@ -511,7 +697,7 @@ export default function ForecastPage() {
       }
       // Year 0: only count the fraction of the year that remains
       const yearFraction = y === 0 ? currentYearFraction : 1
-      saldo += (inc - exp - mortgageMonthly) * 12 * yearFraction
+      saldo += (inc - expThisYear - mortgageMonthly) * 12 * yearFraction
 
       const yearsIntoMortgage = year - mortgageStartYear
       const residual = (mortgageActive && yearsIntoMortgage >= 0 && yearsIntoMortgage < mortgage.residuals.length)
@@ -522,13 +708,26 @@ export default function ForecastPage() {
         label:    String(year),
         forecast: Math.round(saldo),
         residual: residual !== null ? residual : undefined,
+        // Entrate/Spese effettive di QUESTO anno (con eventuale override già
+        // applicato) — usate dalla tabella "Proiezione Annuale" invece di
+        // ricalcolare con una formula approssimata separata.
+        income:  Math.round(inc),
+        expense: Math.round(expThisYear),
+        hasOverride: !!ovY,
       })
 
       inc *= (1 + growth / 100)
-      exp *= (1 + inflation / 100)
+      if (ovY && overrideTotal(ovY) != null) {
+        // Cascata → il valore di questo anno diventa la nuova base che continua
+        // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
+        // arrivati (l'anno "blip" non lascia traccia sul futuro).
+        exp = (ovY.cascade ? expThisYear : preOverrideExp) * (1 + inflation / 100)
+      } else {
+        exp *= (1 + inflation / 100)
+      }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAnticipo])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAnticipo, overridesYearly, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
@@ -550,6 +749,16 @@ export default function ForecastPage() {
     for (let m = 0; m <= totalMonths; m++) {
       const d  = new Date(now.getFullYear(), now.getMonth() + m, 1)
       const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+      // Override puntuale su questo mese (solo Spese) — vedi overrideTotal/
+      // overridesMonthly sopra. preOverrideExp serve a "far ripartire" la
+      // traiettoria normale il mese dopo se l'override NON è a cascata.
+      const ovM = overridesMonthly[ym]
+      const preOverrideExp = exp
+      let expThisMonth = exp
+      if (ovM) {
+        const total = overrideTotal(ovM)
+        if (total != null) expThisMonth = total
+      }
       const mortgageActive  = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM
       const mortgageMonthly = mortgageActive ? mortgage.rata : 0
 
@@ -570,7 +779,7 @@ export default function ForecastPage() {
           if (mon === bonusMonths.m13 && flags.has13) bonusExtra += val
         })
       }
-      saldo += (inc - exp - mortgageMonthly + bonusExtra)
+      saldo += (inc - expThisMonth - mortgageMonthly + bonusExtra)
 
       let monthsIntoMortgage = -1
       if (mortgageActive && mortgageStartYM) {
@@ -590,15 +799,23 @@ export default function ForecastPage() {
         // e, in modalità Teoriche, la 13ª/14ª già sommata) — usate dalla tabella
         // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto
         income:  Math.round(inc + bonusExtra),
-        expense: Math.round(exp),
+        expense: Math.round(expThisMonth),
         bonusExtra: Math.round(bonusExtra),
+        hasOverride: !!ovM,
       })
 
       inc *= gMonthly
-      exp *= iMonthly
+      if (ovM && overrideTotal(ovM) != null) {
+        // Cascata → il valore di questo mese diventa la nuova base che continua
+        // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
+        // arrivati (il mese "blip" non lascia traccia sul futuro).
+        exp = (ovM.cascade ? expThisMonth : preOverrideExp) * iMonthly
+      } else {
+        exp *= iMonthly
+      }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -946,28 +1163,63 @@ export default function ForecastPage() {
 
                 {teoricheTab === 'spese' && (
                   <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    <div style={{maxHeight:280,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
+                    <div style={{maxHeight:340,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
                       {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => {
-                        const val = teoricheSpese[c1] ?? data.avg
+                        const val    = teoricheL1Value(c1)
+                        const isOpen = expandedTeoricheL1.has(c1)
+                        const l2overrides = teoricheSpeseL2[c1] || {}
+                        const hasL2 = Object.keys(l2overrides).length > 0
+                        const subs  = Object.entries(data.subs || {}).sort((a,b)=>b[1]-a[1])
                         return (
-                          <div key={c1} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-                            padding:'8px 10px',background:'var(--surface2)',borderRadius:7,border:'1px solid var(--border)'}}>
-                            <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600}}>
-                              <span style={{width:8,height:8,borderRadius:'50%',background:data.color,display:'inline-block'}}/>
-                              {c1}
+                          <div key={c1} style={{background:'var(--surface2)',borderRadius:7,border:'1px solid var(--border)',overflow:'hidden'}}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 10px'}}>
+                              <div style={{display:'flex',alignItems:'center',gap:7,fontSize:12,fontWeight:600,cursor:subs.length>0?'pointer':'default'}}
+                                onClick={()=>subs.length>0 && toggleTeoricheL1Expand(c1)}>
+                                {subs.length > 0 && (
+                                  <span style={{fontSize:10,color:'var(--text3)',width:10,display:'inline-block'}}>{isOpen?'▾':'▸'}</span>
+                                )}
+                                <span style={{width:8,height:8,borderRadius:'50%',background:data.color,display:'inline-block'}}/>
+                                {c1}
+                              </div>
+                              <div style={{display:'flex',alignItems:'center',gap:4}}>
+                                <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
+                                <input type="number" value={val} disabled={hasL2}
+                                  title={hasL2 ? 'Calcolato come somma delle sotto-categorie — modifica quelle' : undefined}
+                                  onChange={e=>setTeoricheSpesa(c1, Number(e.target.value)||0)}
+                                  style={{width:80,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
+                                    background: hasL2 ? 'var(--surface)' : 'var(--surface)',
+                                    color:'var(--red)',fontWeight:700,opacity:hasL2?0.7:1,
+                                    fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
+                                <span style={{fontSize:11,color:'var(--text3)'}}>/mese</span>
+                              </div>
                             </div>
-                            <div style={{display:'flex',alignItems:'center',gap:4}}>
-                              <span style={{fontSize:11,color:'var(--text3)'}}>€</span>
-                              <input type="number" value={val}
-                                onChange={e=>setTeoricheSpesa(c1, Number(e.target.value)||0)}
-                                style={{width:80,padding:'4px 6px',borderRadius:5,border:'1px solid var(--border)',
-                                  background:'var(--surface)',color:'var(--red)',fontWeight:700,
-                                  fontFamily:'var(--font-mono)',fontSize:13,textAlign:'right'}}/>
-                              <span style={{fontSize:11,color:'var(--text3)'}}>/mese</span>
-                            </div>
+                            {isOpen && subs.length > 0 && (
+                              <div style={{padding:'0 10px 8px 26px',display:'flex',flexDirection:'column',gap:4}}>
+                                {subs.map(([c2, avgC2]) => {
+                                  const valC2 = l2overrides[c2] ?? avgC2
+                                  return (
+                                    <div key={c2} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'3px 0'}}>
+                                      <span style={{fontSize:12,color:'var(--text2)'}}>{c2}</span>
+                                      <div style={{display:'flex',alignItems:'center',gap:4}}>
+                                        <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
+                                        <input type="number" value={valC2}
+                                          onChange={e=>setTeoricheSpesaL2(c1, c2, Number(e.target.value)||0)}
+                                          style={{width:72,padding:'3px 5px',borderRadius:5,border:'1px solid var(--border)',
+                                            background:'var(--surface)',color:'var(--red)',fontWeight:600,
+                                            fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
+                                        <span style={{fontSize:10,color:'var(--text3)'}}>/mese</span>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
                           </div>
                         )
                       })}
+                    </div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginTop:2,lineHeight:1.4}}>
+                      Clicca sul nome per espandere e modificare le singole sotto-categorie — in quel caso il totale L1 diventa la somma delle sue sotto-categorie.
                     </div>
                     <div style={{display:'flex',justifyContent:'space-between',padding:'8px 10px',marginTop:2,
                       borderTop:'2px solid var(--border)',fontSize:12,fontWeight:800}}>
@@ -1289,19 +1541,25 @@ export default function ForecastPage() {
                     </tr>
                   )
                 })}
-                {/* Forecast rows — vista Annuale: una riga per ogni anno, nessun anno saltato */}
+                {/* Forecast rows — vista Annuale: una riga per ogni anno, nessun anno saltato.
+                    Cliccabile per aprire il popup di override spese di quell'anno — richiesta
+                    utente 2026-07-23 */}
                 {projectionView === 'annuale' && forecastData
                   .map((d) => {
                     const year = parseInt(d.label)
-                    const yOffset = year - now.getFullYear()
-                    const inc = avgIncomeEffective * Math.pow(1 + growth / 100, yOffset)
-                    const exp = effectiveExpense * Math.pow(1 + inflation / 100, yOffset)
+                    const inc = d.income
+                    const exp = d.expense
                     const mortgageActive = mortgageOn && mortgage && year >= mortgageStartYear
                     const rataAnnua = mortgageActive ? mortgage.rata * 12 : 0
                     const cf = (inc - exp) * 12 - rataAnnua
                     return (
-                      <tr key={d.label} style={{borderBottom:'1px solid var(--border)'}}>
-                        <td style={{padding:'8px 12px',fontWeight:700}}>{d.label}</td>
+                      <tr key={d.label} style={{borderBottom:'1px solid var(--border)',cursor:'pointer'}}
+                        title="Clicca per modificare le spese di questo anno"
+                        onClick={()=>setOverridePopup({ granularity:'annuale', key:String(year), label:d.label })}>
+                        <td style={{padding:'8px 12px',fontWeight:700}}>
+                          {d.label}
+                          {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
+                        </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
                           € {fmtIT(Math.round(inc * 12), 0)}
                         </td>
@@ -1335,7 +1593,9 @@ export default function ForecastPage() {
                       </tr>
                     )
                   })}
-                {/* Forecast rows — vista Mensile: una riga per ogni mese proiettato */}
+                {/* Forecast rows — vista Mensile: una riga per ogni mese proiettato.
+                    Cliccabile per aprire il popup di override spese di quel mese —
+                    richiesta utente 2026-07-23 */}
                 {projectionView === 'mensile' && forecastDataMonthly
                   .map((d) => {
                     const mortgageActive = mortgageOn && mortgageStart && d.ym >= mortgageStart
@@ -1344,8 +1604,13 @@ export default function ForecastPage() {
                     const exp = d.expense
                     const cf = (inc - exp) - rataMese
                     return (
-                      <tr key={d.ym} style={{borderBottom:'1px solid var(--border)'}}>
-                        <td style={{padding:'8px 12px',fontWeight:700}}>{d.label}</td>
+                      <tr key={d.ym} style={{borderBottom:'1px solid var(--border)',cursor:'pointer'}}
+                        title="Clicca per modificare le spese di questo mese"
+                        onClick={()=>setOverridePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
+                        <td style={{padding:'8px 12px',fontWeight:700}}>
+                          {d.label}
+                          {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
+                        </td>
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
                           € {fmtIT(Math.round(inc), 0)}
                         </td>
@@ -1385,6 +1650,33 @@ export default function ForecastPage() {
 
         </div>
       </div>
+
+      {overridePopup && (() => {
+        const isMonthly = overridePopup.granularity === 'mensile'
+        const existing = isMonthly ? overridesMonthly[overridePopup.key] : overridesYearly[overridePopup.key]
+        return (
+          <ExpenseOverrideModal
+            title={`Modifica spese — ${overridePopup.label}`}
+            catStats={catStats}
+            defaultsByCat={defaultsByCat}
+            initialSpese={existing?.spese}
+            initialCascade={existing?.cascade}
+            hasExisting={!!existing}
+            onClose={()=>setOverridePopup(null)}
+            onRemove={()=>{
+              if (isMonthly) removeOverrideMonthly(overridePopup.key)
+              else removeOverrideYearly(overridePopup.key)
+              setOverridePopup(null)
+            }}
+            onSave={(values, cascade)=>{
+              const entry = { spese: values, cascade }
+              if (isMonthly) saveOverrideMonthly(overridePopup.key, entry)
+              else saveOverrideYearly(overridePopup.key, entry)
+              setOverridePopup(null)
+            }}
+          />
+        )
+      })()}
     </div>
   )
 }
