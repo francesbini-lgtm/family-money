@@ -2346,21 +2346,21 @@ export default function ForecastPage() {
                       <td style={{padding:'8px 12px',fontWeight:700,color:'var(--text3)'}}>
                         {d.label} <span style={{fontSize:9,fontWeight:500,background:'var(--border)',padding:'1px 5px',borderRadius:4,marginLeft:4}}>storico</span>
                       </td>
-                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
-                        {fmtIT(d.inc, 0)}
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: d.inc >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
+                        {d.inc >= 0 ? '' : '−'}{fmtIT(Math.abs(d.inc), 0)}
                       </td>
-                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                        {fmtIT(d.exp, 0)}
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: d.exp > 0 ? 'var(--red)' : 'var(--green)',fontSize:12}}>
+                        {d.exp > 0 ? `−${fmtIT(d.exp, 0)}` : fmtIT(0, 0)}
                       </td>
                       {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                       {mortgageOn && mortgageAnticipo > 0 && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
                         color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
-                        {cf>=0?'+':''}{fmtIT(Math.abs(cf), 0)}
+                        {cf>=0?'+':'−'}{fmtIT(Math.abs(cf), 0)}
                       </td>
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                        fontWeight:700,color:'var(--text2)',fontSize:12}}>
-                        {fmtIT(d.saldo, 0)}
+                        fontWeight:700,color: d.saldo >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
+                        {d.saldo >= 0 ? '' : '−'}{fmtIT(Math.abs(d.saldo), 0)}
                       </td>
                       {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
                     </tr>
@@ -2384,45 +2384,66 @@ export default function ForecastPage() {
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer',
-                          background: (d.hasIncomeOverride || d.mortgageCapital > 0) ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
-                          title={d.mortgageCapital > 0 ? `Include erogazione capitale mutuo: +${fmtFull(d.mortgageCapital)}` : d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo anno'}
-                          onClick={()=>setOverrideIncomePopup({ granularity:'annuale', key:String(year), label:d.label })}>
-                          {fmtIT(Math.round(inc * 12 + (d.mortgageCapital || 0)), 0)}
-                        </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer',
-                          background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
-                          title={d.hasOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le spese di questo anno'}
-                          onClick={()=>setOverridePopup({ granularity:'annuale', key:String(year), label:d.label })}>
-                          {fmtIT(Math.round(exp * 12), 0)}
-                        </td>
-                        {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:extraAnnua > 0 ? 'var(--red)' : 'var(--accent)',fontSize:12,cursor:'pointer',
-                            background: extraAnnua > 0 ? 'color-mix(in srgb, var(--red) 12%, transparent)' : undefined}}
-                            title={extraAnnua > 0 ? `Rata + estinzione anticipata: ${fmtFull(extraAnnua)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo anno'}
-                            onClick={()=>setMortgageExtraPopup({ granularity:'annuale', key:String(year), label:d.label })}>
-                            {rataAnnua > 0 || extraAnnua > 0 ? `${fmtIT(Math.round(rataAnnua + extraAnnua), 0)}` : '—'}
-                          </td>
-                        )}
-                        {mortgageOn && mortgageAnticipo > 0 && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                            {year === mortgageStartYear ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
-                          </td>
-                        )}
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                          color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
-                          {cf>=0?'+':''}{fmtIT(Math.abs(Math.round(cf)), 0)}
-                        </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                          fontWeight:700,color:'var(--accent)',fontSize:12}}>
-                          {fmtIT(d.forecast, 0)}
-                        </td>
-                        {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                            color:'var(--blue)',fontSize:12}}>
-                            {d.residual != null ? `${fmtIT(d.residual, 0)}` : '—'}
-                          </td>
-                        )}
+                        {(() => {
+                          // 2026-07-24, richiesta esplicita utente: TUTTI i numeri della
+                          // tabella Proiezione (Annuale/Mensile) devono essere colorati
+                          // solo in base al segno — verde se positivi (entrate/afflussi),
+                          // rosso se negativi (uscite/deflussi) — non più colori fissi
+                          // per colonna (niente più blu per il Residuo o "accent" per la
+                          // Rata quando non scatta un extra). Le uscite (Spesa, Rata
+                          // Mutuo) sono mostrate col segno "−" per essere coerenti col
+                          // colore rosso (sono negative per davvero, non solo per colore).
+                          const incTotal = Math.round(inc * 12 + (d.mortgageCapital || 0))
+                          const expTotal = Math.round(exp * 12)
+                          const rataTotal = Math.round(rataAnnua + extraAnnua)
+                          const saldoVal = d.forecast
+                          const residualVal = d.residual
+                          return (
+                            <>
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: incTotal >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12,cursor:'pointer',
+                                background: (d.hasIncomeOverride || d.mortgageCapital > 0) ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                                title={d.mortgageCapital > 0 ? `Include erogazione capitale mutuo: +${fmtFull(d.mortgageCapital)}` : d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo anno'}
+                                onClick={()=>setOverrideIncomePopup({ granularity:'annuale', key:String(year), label:d.label })}>
+                                {incTotal >= 0 ? '' : '−'}{fmtIT(Math.abs(incTotal), 0)}
+                              </td>
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: expTotal > 0 ? 'var(--red)' : 'var(--green)',fontSize:12,cursor:'pointer',
+                                background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                                title={d.hasOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le spese di questo anno'}
+                                onClick={()=>setOverridePopup({ granularity:'annuale', key:String(year), label:d.label })}>
+                                {expTotal > 0 ? `−${fmtIT(expTotal, 0)}` : fmtIT(0, 0)}
+                              </td>
+                              {mortgageOn && (
+                                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: rataTotal > 0 ? 'var(--red)' : 'var(--green)',fontSize:12,cursor:'pointer',
+                                  background: extraAnnua > 0 ? 'color-mix(in srgb, var(--red) 12%, transparent)' : undefined}}
+                                  title={extraAnnua > 0 ? `Rata + estinzione anticipata: ${fmtFull(extraAnnua)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo anno'}
+                                  onClick={()=>setMortgageExtraPopup({ granularity:'annuale', key:String(year), label:d.label })}>
+                                  {rataTotal > 0 ? `−${fmtIT(rataTotal, 0)}` : '—'}
+                                </td>
+                              )}
+                              {mortgageOn && mortgageAnticipo > 0 && (
+                                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                                  {year === mortgageStartYear ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                                </td>
+                              )}
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                                color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
+                                {cf>=0?'+':'−'}{fmtIT(Math.abs(Math.round(cf)), 0)}
+                              </td>
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                                fontWeight:700,color: saldoVal >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
+                                {saldoVal >= 0 ? '' : '−'}{fmtIT(Math.abs(saldoVal), 0)}
+                              </td>
+                              {mortgageOn && (
+                                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                                  // Il residuo mutuo non è mai negativo (floor a 0) — sempre
+                                  // verde per coerenza con "positivo = verde".
+                                  color:'var(--green)',fontSize:12}}>
+                                  {residualVal != null ? `${fmtIT(residualVal, 0)}` : '—'}
+                                </td>
+                              )}
+                            </>
+                          )
+                        })()}
                       </tr>
                     )
                   })}
@@ -2441,45 +2462,58 @@ export default function ForecastPage() {
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer',
-                          background: (d.hasIncomeOverride || d.mortgageCapital > 0) ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
-                          title={d.mortgageCapital > 0 ? `Include erogazione capitale mutuo: +${fmtFull(d.mortgageCapital)}` : d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo mese'}
-                          onClick={()=>setOverrideIncomePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
-                          {fmtIT(Math.round(inc), 0)}
-                        </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer',
-                          background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
-                          title={d.hasOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le spese di questo mese'}
-                          onClick={()=>setOverridePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
-                          {fmtIT(Math.round(exp), 0)}
-                        </td>
-                        {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:extraMese > 0 ? 'var(--red)' : 'var(--accent)',fontSize:12,cursor:'pointer',
-                            background: extraMese > 0 ? 'color-mix(in srgb, var(--red) 12%, transparent)' : undefined}}
-                            title={extraMese > 0 ? `Rata + estinzione anticipata: ${fmtFull(extraMese)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo mese'}
-                            onClick={()=>setMortgageExtraPopup({ granularity:'mensile', key:d.ym, label:d.label })}>
-                            {rataMese > 0 || extraMese > 0 ? `${fmtIT(Math.round(rataMese + extraMese), 0)}` : '—'}
-                          </td>
-                        )}
-                        {mortgageOn && mortgageAnticipo > 0 && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                            {mortgageStart && d.ym === mortgageStart ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
-                          </td>
-                        )}
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                          color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
-                          {cf>=0?'+':''}{fmtIT(Math.abs(Math.round(cf)), 0)}
-                        </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                          fontWeight:700,color:'var(--accent)',fontSize:12}}>
-                          {fmtIT(d.forecast, 0)}
-                        </td>
-                        {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
-                            color:'var(--blue)',fontSize:12}}>
-                            {d.residual != null ? `${fmtIT(d.residual, 0)}` : '—'}
-                          </td>
-                        )}
+                        {(() => {
+                          // Stesso principio "positivo=verde, negativo=rosso" applicato
+                          // sopra alla vista Annuale — vedi commento lì.
+                          const incVal = Math.round(inc)
+                          const expVal = Math.round(exp)
+                          const rataTotal = Math.round(rataMese + extraMese)
+                          const saldoVal = d.forecast
+                          const residualVal = d.residual
+                          return (
+                            <>
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: incVal >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12,cursor:'pointer',
+                                background: (d.hasIncomeOverride || d.mortgageCapital > 0) ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                                title={d.mortgageCapital > 0 ? `Include erogazione capitale mutuo: +${fmtFull(d.mortgageCapital)}` : d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo mese'}
+                                onClick={()=>setOverrideIncomePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
+                                {incVal >= 0 ? '' : '−'}{fmtIT(Math.abs(incVal), 0)}
+                              </td>
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: expVal > 0 ? 'var(--red)' : 'var(--green)',fontSize:12,cursor:'pointer',
+                                background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                                title={d.hasOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le spese di questo mese'}
+                                onClick={()=>setOverridePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
+                                {expVal > 0 ? `−${fmtIT(expVal, 0)}` : fmtIT(0, 0)}
+                              </td>
+                              {mortgageOn && (
+                                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: rataTotal > 0 ? 'var(--red)' : 'var(--green)',fontSize:12,cursor:'pointer',
+                                  background: extraMese > 0 ? 'color-mix(in srgb, var(--red) 12%, transparent)' : undefined}}
+                                  title={extraMese > 0 ? `Rata + estinzione anticipata: ${fmtFull(extraMese)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo mese'}
+                                  onClick={()=>setMortgageExtraPopup({ granularity:'mensile', key:d.ym, label:d.label })}>
+                                  {rataTotal > 0 ? `−${fmtIT(rataTotal, 0)}` : '—'}
+                                </td>
+                              )}
+                              {mortgageOn && mortgageAnticipo > 0 && (
+                                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                                  {mortgageStart && d.ym === mortgageStart ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                                </td>
+                              )}
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                                color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
+                                {cf>=0?'+':'−'}{fmtIT(Math.abs(Math.round(cf)), 0)}
+                              </td>
+                              <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                                fontWeight:700,color: saldoVal >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
+                                {saldoVal >= 0 ? '' : '−'}{fmtIT(Math.abs(saldoVal), 0)}
+                              </td>
+                              {mortgageOn && (
+                                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                                  color:'var(--green)',fontSize:12}}>
+                                  {residualVal != null ? `${fmtIT(residualVal, 0)}` : '—'}
+                                </td>
+                              )}
+                            </>
+                          )
+                        })()}
                       </tr>
                     )
                   })}
