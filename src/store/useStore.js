@@ -290,26 +290,47 @@ export const useStore = create((set, get) => ({
       // 2) Fallback legacy: spese con _compensatedAmt/_compensatedBy diretti,
       //    MAI passate da compLinks per QUESTA coppia specifica — solo il caso
       //    non ambiguo, gruppo di 2 (_compensatedBy stringa singola).
+      const skippedAmbiguous = [] // debug: spese con _compensatedBy array o assente, non gestite
       allTxs2.forEach(tx => {
         if (tx.amount >= 0) return // solo spese
         if (!(tx._compensatedAmt > 0)) return
         const by = tx._compensatedBy
-        if (Array.isArray(by) || !by) return // gruppi >2 o nessun riferimento: ambiguo, skip
+        if (Array.isArray(by) || !by) { skippedAmbiguous.push({ txId: tx.txId, by }); return }
         const alreadyCounted = accountedExpForKey[by]?.has(tx.txId)
         if (alreadyCounted) return
         neededByIncome[by] = (neededByIncome[by] || 0) + tx._compensatedAmt
       })
+
+      // Log diagnostico temporaneo (2026-07-23, task #85 — utente segnala che il
+      // caso "Scarponi Luca"/26-0245 persiste nonostante il fix): permette di
+      // vedere in console cosa la migrazione trova/decide senza accesso diretto
+      // al browser. Da rimuovere una volta confermato il fix.
+      if (typeof window !== 'undefined') {
+        window.__fmtCompFixDebug = { compLinks, neededByIncome, skippedAmbiguous,
+          allExpensesWithCompensatedBy: allTxs2.filter(t => t.amount < 0 && t._compensatedAmt > 0).map(t => ({
+            txId: t.txId, amount: t.amount, _compensatedAmt: t._compensatedAmt, _compensatedBy: t._compensatedBy,
+          })) }
+        console.log('[compFix] neededByIncome', neededByIncome)
+        console.log('[compFix] skippedAmbiguous', skippedAmbiguous)
+        console.log('[compFix] full debug in window.__fmtCompFixDebug')
+      }
 
       // 3) Applica solo se il valore corretto è MAGGIORE di quello attuale
       //    (le entrate manuali di Altre Entrate, chiave = .id, non vivono nella
       //    collection transactions: byTxId.get() torna undefined, si saltano)
       Object.entries(neededByIncome).forEach(([incomeTxId, needed]) => {
         const incomeTx = byTxId.get(incomeTxId)
-        if (!incomeTx) return
-        const current = incomeTx._compensatedAmt || 0
+        const current = incomeTx?._compensatedAmt || 0
         const correct = Math.round(needed * 100) / 100
+        if (!incomeTx) {
+          console.log('[compFix] SKIP — nessuna transazione trovata con txId', incomeTxId, '(entrata manuale o codice diverso)')
+          return
+        }
         if (correct > current + 0.005) {
+          console.log('[compFix] UPDATE', incomeTxId, 'da', current, 'a', correct)
           updateTx(incomeTxId, { _compensatedAmt: correct })
+        } else {
+          console.log('[compFix] no-op', incomeTxId, 'current', current, 'correct', correct)
         }
       })
     }, 2000)
