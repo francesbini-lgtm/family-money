@@ -2057,27 +2057,25 @@ export default function ForecastPage() {
                       <tr key={d.label} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
-                          {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer'}}
-                          title="Clicca per modificare le entrate di questo anno"
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer',
+                          background: d.hasIncomeOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                          title={d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo anno'}
                           onClick={()=>setOverrideIncomePopup({ granularity:'annuale', key:String(year), label:d.label })}>
                           {fmtIT(Math.round(inc * 12), 0)}
-                          {d.hasIncomeOverride && <span title="Override attivo" style={{marginLeft:5,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer'}}
-                          title="Clicca per modificare le spese di questo anno"
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer',
+                          background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                          title={d.hasOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le spese di questo anno'}
                           onClick={()=>setOverridePopup({ granularity:'annuale', key:String(year), label:d.label })}>
                           {fmtIT(Math.round(exp * 12), 0)}
                         </td>
                         {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer'}}
-                            title="Clicca per estinguere una cifra sul mutuo in questo anno"
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer',
+                            background: extraAnnua > 0 ? 'color-mix(in srgb, var(--green) 12%, transparent)' : undefined}}
+                            title={extraAnnua > 0 ? `Estinzione anticipata: ${fmtFull(extraAnnua)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo anno'}
                             onClick={()=>setMortgageExtraPopup({ granularity:'annuale', key:String(year), label:d.label })}>
                             {rataAnnua > 0 ? `${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
-                            {extraAnnua > 0 && (
-                              <span title={`Estinzione anticipata: ${fmtFull(extraAnnua)}`} style={{marginLeft:5,fontSize:9,color:'var(--green)'}}>⚡</span>
-                            )}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
@@ -2116,27 +2114,25 @@ export default function ForecastPage() {
                       <tr key={d.ym} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
-                          {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer'}}
-                          title="Clicca per modificare le entrate di questo mese"
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12,cursor:'pointer',
+                          background: d.hasIncomeOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                          title={d.hasIncomeOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le entrate di questo mese'}
                           onClick={()=>setOverrideIncomePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                           {fmtIT(Math.round(inc), 0)}
-                          {d.hasIncomeOverride && <span title="Override attivo" style={{marginLeft:5,fontSize:9,color:'var(--accent)'}}>✎</span>}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer'}}
-                          title="Clicca per modificare le spese di questo mese"
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer',
+                          background: d.hasOverride ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined}}
+                          title={d.hasOverride ? 'Modificato manualmente — clicca per rivedere/cambiare' : 'Clicca per modificare le spese di questo mese'}
                           onClick={()=>setOverridePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                           {fmtIT(Math.round(exp), 0)}
                         </td>
                         {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer'}}
-                            title="Clicca per estinguere una cifra sul mutuo in questo mese"
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer',
+                            background: extraMese > 0 ? 'color-mix(in srgb, var(--green) 12%, transparent)' : undefined}}
+                            title={extraMese > 0 ? `Estinzione anticipata: ${fmtFull(extraMese)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo mese'}
                             onClick={()=>setMortgageExtraPopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                             {rataMese > 0 ? `${fmtIT(Math.round(rataMese), 0)}` : '—'}
-                            {extraMese > 0 && (
-                              <span title={`Estinzione anticipata: ${fmtFull(extraMese)}`} style={{marginLeft:5,fontSize:9,color:'var(--green)'}}>⚡</span>
-                            )}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
