@@ -1238,14 +1238,24 @@ export default function ForecastPage() {
           const interest  = mortBalance * rMonthly
           const principal = Math.min(mortRata - interest, mortBalance)
           mortBalance = Math.max(0, mortBalance - principal)
-          // Base = saldo stimato PRIMA dei flussi di questo mese. Impostata una
-          // sola volta, al primo mese mai attivo del mutuo — il mese di
-          // partenza del mutuo non genera quindi mai un rimborso extra.
-          if (extraBaseSaldo === null) extraBaseSaldo = simSaldo
           // entrate/spese di quest'anno spalmate uniformemente sui mesi —
           // approssimazione accettabile a livello annuale, coerente con come
           // già lavora questo loop.
           simSaldo += (incThisYear - expThisYear - mortRata)
+          // FIX 2026-07-24 (bug reale confermato dall'utente: il rimborso
+          // anticipato automatico ha smesso di scattare del tutto dopo
+          // l'aggiunta dell'erogazione capitale mutuo): la base va catturata
+          // DOPO i flussi di questo mese/anno (qui: dopo aver sommato
+          // incThisYear-expThisYear-mortRata), non prima. Prima di questo fix,
+          // se il mese/anno di partenza del mutuo include SIA l'erogazione
+          // del capitale (+) SIA una spesa di pari importo per l'acquisto (-,
+          // impostata dall'utente), la base veniva catturata TRA le due (dopo
+          // il + ma prima del -), restando artificialmente troppo alta per
+          // sempre — nessun risparmio futuro reale poteva mai superarla. Il
+          // guard mortMonthsElapsed>0 (sotto) impedisce comunque che scatti
+          // un extra proprio in questo primo mese/anno, quindi non c'è alcun
+          // effetto collaterale nel catturare la base già "assestata".
+          if (extraBaseSaldo === null) extraBaseSaldo = simSaldo
           let autoExtra = 0
           // mortMonthsElapsed === 0 → primo mese attivo del mutuo: nessuna
           // estinzione automatica può scattare qui, anche se il saldo di
@@ -1459,10 +1469,6 @@ export default function ForecastPage() {
       let mortgageInterestActual  = null
       let mortgagePrincipalActual = null
       if (mortgageActive) {
-        // Base = saldo previsto PRIMA dei flussi di questo mese. Impostata una
-        // sola volta, al primo mese in cui il mutuo è attivo — quindi il mese
-        // di partenza del mutuo non può mai generare un rimborso extra.
-        if (extraBaseSaldo === null) extraBaseSaldo = saldo
         mortgageMonthly = mortRata
         const rMonthly  = mortgageTaeg / 100 / 12
         const interest  = mortBalance * rMonthly
@@ -1474,6 +1480,22 @@ export default function ForecastPage() {
         // per capire di quanto ha superato la base — mai scritto nel vero
         // saldo prima del tempo.
         const saldoAfterMonth = saldo + (incThisMonth - expThisMonth - mortgageMonthly + bonusExtra)
+        // FIX 2026-07-24 (bug reale confermato dall'utente: il rimborso
+        // anticipato automatico ha smesso del tutto di scattare dopo
+        // l'aggiunta dell'erogazione capitale mutuo come entrata): la base va
+        // catturata DOPO i flussi di questo mese (usando saldoAfterMonth), non
+        // PRIMA (usando il saldo grezzo di inizio mese). Se il mese di
+        // partenza del mutuo include sia l'erogazione del capitale (+, già
+        // sommata al saldo qualche riga sopra) sia una spesa di pari importo
+        // per l'acquisto (-, impostata dall'utente per compensarla), catturare
+        // la base PRIMA di questo mese avrebbe fissato un livello
+        // artificialmente troppo alto (a cavallo tra il + e il −), che
+        // nessun risparmio futuro reale avrebbe mai potuto superare — bug
+        // osservato: extra mai più scattato in centinaia di mesi successivi.
+        // Il guard mortMonthsElapsed>0 (sotto) impedisce comunque che un
+        // extra scatti proprio in questo primo mese, quindi non c'è alcun
+        // effetto collaterale nel catturare la base già "assestata".
+        if (extraBaseSaldo === null) extraBaseSaldo = saldoAfterMonth
         let autoExtra = 0
         let surplus   = 0
         // mortMonthsElapsed === 0 → questo È il primo mese attivo del mutuo:
