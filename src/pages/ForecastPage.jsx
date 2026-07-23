@@ -281,6 +281,21 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
   }
   const total = Object.keys(catStats).reduce((s, c1) => s + l1Total(c1), 0)
 
+  // Ripristina i valori mostrati nel form ai default ATTUALI (defaultsByCat,
+  // già calcolati con l'eventuale selezione mesi storici di Teoriche > Spese)
+  // — richiesta utente 2026-07-23: se l'override qui dentro era stato salvato
+  // con medie vecchie, poterlo riallineare senza dover prima "Rimuovere
+  // override" (che chiude il popup) e poi ricrearlo da zero. NON salva da
+  // solo: l'utente deve comunque premere "Salva" per rendere effettivo il
+  // ripristino (o "Rimuovi override" per eliminare del tutto il punto).
+  function resetToDefaults() {
+    const v = {}
+    Object.keys(catStats).forEach(c1 => { v[c1] = Math.round(defaultsByCat[c1] ?? 0) })
+    setValues(v)
+    setValuesL2({})
+    setExpandedL1(new Set())
+  }
+
   return (
     <Modal title={title} onClose={onClose} width={480}>
       <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>
@@ -352,6 +367,9 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
         Applica da qui in avanti
       </label>
       <ModalFooter>
+        <button className="btn btn-secondary" onClick={resetToDefaults} title="Ricarica i valori dalle medie attuali (non salva da solo — premi Salva dopo)">
+          Ripristina ai valori attuali
+        </button>
         {hasExisting && (
           <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi override</button>
         )}
@@ -1801,24 +1819,34 @@ export default function ForecastPage() {
                     months={catMonthlyRaw.months}
                     initialSelected={effectiveSpeseMonths}
                     onSave={(arr)=>{
-                      // 2026-07-23 (segnalato dall'utente): cambiare i mesi
+                      // 2026-07-23 (segnalato dall'utente, poi ESTESO su
+                      // richiesta esplicita successiva): cambiare i mesi
                       // storici ricalcola le medie di default (catStatsTeoriche),
-                      // ma eventuali modifiche manuali già fatte in tabella
-                      // (override L1 diretti o L2 per sotto-categoria) restano
-                      // congelate ai vecchi valori — il totale L1 e la somma
-                      // delle sue sotto-categorie possono quindi non tornare
-                      // più. Se esistono override, si chiede conferma prima di
-                      // azzerarli così tutto si riallinea alle nuove medie.
+                      // ma eventuali modifiche manuali già fatte a valle
+                      // restano congelate ai vecchi valori e possono non
+                      // tornare più con le nuove medie. Questo riguarda SIA gli
+                      // override diretti di Teoriche > Spese (L1/L2) SIA gli
+                      // override puntuali mese/anno della tabella "Proiezione"
+                      // (popup "Modifica spese" — overridesMonthly/Yearly),
+                      // perché anche questi ultimi si pre-compilano dai default
+                      // correnti (defaultsByCat → catEffectiveBase → in modalità
+                      // Teoriche usa proprio catStatsTeoriche). Se esistono
+                      // override di uno dei due tipi, si chiede conferma prima
+                      // di azzerarli tutti così che tutto si riallinei alle
+                      // nuove medie.
                       const hasOverrides = Object.keys(teoricheSpese).length > 0 || Object.keys(teoricheSpeseL2).length > 0
+                        || Object.keys(overridesMonthly).length > 0 || Object.keys(overridesYearly).length > 0
                       if (hasOverrides) {
                         const reset = window.confirm(
-                          'Hai delle spese modificate manualmente in questa tabella, calcolate con la vecchia selezione di mesi.\n\n' +
+                          'Hai delle spese modificate manualmente (in questa tabella e/o in singoli mesi/anni della tabella Proiezione), calcolate con la vecchia selezione di mesi.\n\n' +
                           'Cambiando i mesi storici, quei valori NON si aggiornano da soli e potrebbero non tornare più con le nuove medie (es. il totale di una categoria diverso dalla somma delle sue sotto-categorie).\n\n' +
-                          'Vuoi azzerare le modifiche manuali così che tutto si ricalcoli con i nuovi mesi scelti?'
+                          'Vuoi azzerare TUTTE le modifiche manuali così che si ricalcolino con i nuovi mesi scelti?'
                         )
                         if (reset) {
                           setAppPref('forecastTeoricheSpese', {})
                           setAppPref('forecastTeoricheSpeseL2', {})
+                          setAppPref('forecastOverridesMonthly', {})
+                          setAppPref('forecastOverridesYearly', {})
                         }
                       }
                       setTeoricheSpeseMonths(arr)
