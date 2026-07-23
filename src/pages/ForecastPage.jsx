@@ -100,6 +100,19 @@ function calcMortgage(capital, rateAnnual, durationYears) {
   return { rata: Math.round(rata * 100) / 100, residuals, monthlyResiduals }
 }
 
+// Ricalcola la rata per un capitale residuo e un numero di mesi rimanenti
+// arbitrario — usata dopo un rimborso anticipato (automatico o manuale) per
+// abbassare la rata mantenendo la STESSA scadenza originale del mutuo
+// (2026-07-23, richiesta utente: "riduci la rata, stessa scadenza").
+function calcMortgagePayment(capital, rateAnnual, months) {
+  if (!Number.isFinite(capital) || capital <= 0 ||
+      !Number.isFinite(months) || months <= 0 ||
+      !Number.isFinite(rateAnnual)) return 0
+  const r = rateAnnual / 100 / 12
+  if (r === 0) return Math.round((capital / months) * 100) / 100
+  return Math.round((capital * r * Math.pow(1+r, months) / (Math.pow(1+r, months) - 1)) * 100) / 100
+}
+
 // ── Money field with thousands separator (visual only, valore numerico puro) ──
 function MoneyField({ label, value, onChange, placeholder, hint }) {
   function handleChange(e) {
@@ -356,6 +369,29 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
   )
 }
 
+// ── Popup estinzione anticipata mutuo su mese/anno specifico (2026-07-23,
+// richiesta utente: click sulla colonna "Rata mutuo"/"Rata mutuo annua" nella
+// tabella Proiezione) — importo one-off che riduce il capitale residuo, la
+// rata viene ricalcolata mantenendo la stessa scadenza (stesso principio del
+// rimborso automatico "ogni X risparmiati").
+function MortgageExtraPaymentModal({ title, initialAmount, hasExisting, onSave, onRemove, onClose }) {
+  const [amount, setAmount] = useState(initialAmount || 0)
+  return (
+    <Modal title={title} onClose={onClose} width={400}>
+      <div style={{fontSize:11,color:'var(--text3)',marginBottom:14,lineHeight:1.5}}>
+        Importo da versare in questo periodo per estinguere anticipatamente parte del mutuo, oltre alla rata normale. Il capitale residuo si riduce e la rata viene ricalcolata (stessa scadenza, rata più bassa da quel momento in poi). L'importo esce anche dal saldo conto previsto.
+      </div>
+      <MoneyField label="Importo estinzione (€)" value={amount} onChange={setAmount} placeholder="0"/>
+      <ModalFooter>
+        {hasExisting && (
+          <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi</button>
+        )}
+        <button className="btn btn-primary" onClick={()=>onSave(Number(amount) || 0)}>Salva</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function ForecastPage() {
   const { transactions, customCats, appPrefs, setAppPref, ceciliaGoals } = useStore()
@@ -458,6 +494,43 @@ export default function ForecastPage() {
   function setMortgageTaeg(v)     { patchMortgage({ taeg: v }) }
   function setMortgageStart(v)    { patchMortgage({ start: v }) }
   function setMortgageAnticipo(v) { patchMortgage({ anticipo: v }) }
+
+  // Rimborso anticipato automatico "ogni X risparmiati" (2026-07-23, richiesta
+  // utente) — quando i risparmi cumulati (entrate-spese-rata) superano la
+  // soglia, il surplus viene versato come rimborso anticipato di capitale e la
+  // rata viene ricalcolata (STESSA scadenza, rata più bassa da quel momento —
+  // scelta confermata dall'utente). L'importo versato esce anche dal saldo
+  // conto proiettato quel mese/anno (anche questo confermato dall'utente).
+  const extraRepayEnabled   = mortgagePrefs.extraRepayEnabled   ?? false
+  const extraRepayThreshold = mortgagePrefs.extraRepayThreshold ?? 20000
+  function setExtraRepayEnabled(v)   { patchMortgage({ extraRepayEnabled: v }) }
+  function setExtraRepayThreshold(v) { patchMortgage({ extraRepayThreshold: v }) }
+
+  // Rimborsi anticipati MANUALI puntuali (2026-07-23, richiesta utente: click
+  // sulla colonna "Rata mutuo"/"Rata mutuo annua" in tabella Proiezione per
+  // estinguere una cifra in quel mese/anno specifico). Stesso principio del
+  // rimborso automatico: riduce il capitale, ricalcola la rata (stessa
+  // scadenza), esce dal saldo. Tenuti separati per vista mensile/annuale dato
+  // che le due tabelle sono proiezioni indipendenti (stesso pattern già usato
+  // per forecastOverridesMonthly/Yearly).
+  const mortgageExtraMonthly = appPrefs?.forecastMortgageExtraMonthly || {} // { [ym]: amount }
+  const mortgageExtraYearly  = appPrefs?.forecastMortgageExtraYearly  || {} // { [year]: amount }
+  function saveMortgageExtraMonthly(ym, amount) {
+    setAppPref('forecastMortgageExtraMonthly', { ...mortgageExtraMonthly, [ym]: amount })
+  }
+  function removeMortgageExtraMonthly(ym) {
+    const next = { ...mortgageExtraMonthly }; delete next[ym]
+    setAppPref('forecastMortgageExtraMonthly', next)
+  }
+  function saveMortgageExtraYearly(year, amount) {
+    setAppPref('forecastMortgageExtraYearly', { ...mortgageExtraYearly, [year]: amount })
+  }
+  function removeMortgageExtraYearly(year) {
+    const next = { ...mortgageExtraYearly }; delete next[year]
+    setAppPref('forecastMortgageExtraYearly', next)
+  }
+  // Popup estinzione anticipata mese/anno — { granularity:'mensile'|'annuale', key: ym|year, label }
+  const [mortgageExtraPopup, setMortgageExtraPopup] = useState(null)
 
   // What if — selezioni persistite come array (Set ricostruito in memoria)
   const [whatIfOpen, setWhatIfOpen] = useState(false) // solo UI (aperto/chiuso pannello), non serve persisterlo
@@ -745,6 +818,17 @@ export default function ForecastPage() {
     let exp   = effectiveExpense
     let anticipoApplied = false
 
+    // Stato dinamico del mutuo (2026-07-23, richiesta utente: rimborsi
+    // anticipati automatici "ogni X risparmiati" + estinzioni manuali puntuali
+    // — vedi extraRepayEnabled/mortgageExtraYearly sopra). Simulato mese per
+    // mese DENTRO il loop annuale (per interessi composti corretti) ma esposto
+    // solo a livello di anno nei punti restituiti.
+    const durationMonths = mortgage ? Math.min(mortgageYears, years + 30) * 12 : 0
+    let mortBalance = (mortgageOn && mortgage) ? mortgageAmt : 0
+    let mortRata     = (mortgageOn && mortgage) ? mortgage.rata : 0
+    let mortSavingsCounter = 0
+    let mortMonthsElapsed  = 0
+
     for (let y = 0; y <= years; y++) {
       const year = now.getFullYear() + y
       // Override puntuale su questo anno (solo Spese) — vedi overrideTotal/
@@ -758,8 +842,8 @@ export default function ForecastPage() {
         const total = overrideTotal(ovY)
         if (total != null) expThisYear = total
       }
-      const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear
-      const mortgageMonthly = mortgageActive ? mortgage.rata : 0
+      const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear && mortBalance > 0
+      const rataAtYearStart = mortRata
       // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
       // not unconditionally in year 0
       if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && year >= mortgageStartYear) {
@@ -768,23 +852,65 @@ export default function ForecastPage() {
       }
       // Year 0: only count the fraction of the year that remains
       const yearFraction = y === 0 ? currentYearFraction : 1
-      saldo += (inc - expThisYear - mortgageMonthly) * 12 * yearFraction
 
-      const yearsIntoMortgage = year - mortgageStartYear
-      const residual = (mortgageActive && yearsIntoMortgage >= 0 && yearsIntoMortgage < mortgage.residuals.length)
-        ? mortgage.residuals[yearsIntoMortgage]
-        : (mortgageOn && year >= mortgageStartYear ? 0 : null)
+      // Simulazione mensile del mutuo per QUESTO anno (rimborsi anticipati
+      // automatici + manuale una tantum sull'anno) — vedi commento sopra sul
+      // perché serve un sotto-loop mensile anche nella vista annuale.
+      let yearExtra = 0
+      if (mortgageActive) {
+        const monthsThisYear = y === 0 ? monthsRemaining : 12
+        const rMonthly = mortgageTaeg / 100 / 12
+        const manualExtraThisYear = mortgageExtraYearly[String(year)] || 0
+        let manualApplied = false
+        for (let mm = 0; mm < monthsThisYear && mortBalance > 0; mm++) {
+          const interest  = mortBalance * rMonthly
+          const principal = Math.min(mortRata - interest, mortBalance)
+          mortBalance = Math.max(0, mortBalance - principal)
+          // Risparmio approssimato di questo mese (entrate/spese di quest'anno
+          // spalmate uniformemente sui mesi — approssimazione accettabile a
+          // livello annuale, coerente con come già lavora questo loop).
+          mortSavingsCounter += (inc - expThisYear - mortRata)
+          let autoExtra = 0
+          if (extraRepayEnabled && extraRepayThreshold > 0 && mortSavingsCounter >= extraRepayThreshold) {
+            autoExtra = Math.floor(mortSavingsCounter / extraRepayThreshold) * extraRepayThreshold
+            mortSavingsCounter -= autoExtra
+          }
+          // Il rimborso manuale annuale viene versato una sola volta, nell'ultimo
+          // mese processato di quell'anno (semplificazione: lump sum di fine anno).
+          const manualExtra = (!manualApplied && mm === monthsThisYear - 1) ? manualExtraThisYear : 0
+          if (manualExtra > 0) manualApplied = true
+          const totalExtra = Math.min(autoExtra + manualExtra, mortBalance)
+          mortBalance = Math.max(0, mortBalance - totalExtra)
+          yearExtra += totalExtra
+          const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
+          if (totalExtra > 0 && mortBalance > 0 && remainingMonths > 0) {
+            mortRata = calcMortgagePayment(mortBalance, mortgageTaeg, remainingMonths)
+          } else if (mortBalance <= 0) {
+            mortRata = 0
+          }
+          mortMonthsElapsed++
+        }
+      }
+
+      saldo += (inc - expThisYear - rataAtYearStart) * 12 * yearFraction - yearExtra
+
+      const residual = mortgageOn && mortgage && year >= mortgageStartYear ? mortBalance : null
 
       pts.push({
         label:    String(year),
         forecast: Math.round(saldo),
-        residual: residual !== null ? residual : undefined,
+        residual: residual !== null ? Math.round(residual) : undefined,
         // Entrate/Spese effettive di QUESTO anno (con eventuale override già
         // applicato) — usate dalla tabella "Proiezione Annuale" invece di
         // ricalcolare con una formula approssimata separata.
         income:  Math.round(inc),
         expense: Math.round(expThisYear),
         hasOverride: !!ovY,
+        // Rata/estinzione anticipata di QUESTO anno (2026-07-23) — usate dalla
+        // tabella "Proiezione Annuale" invece della rata statica mortgage.rata.
+        mortgageRata:  mortgageActive ? Math.round(rataAtYearStart * 12) : 0,
+        mortgageExtra: Math.round(yearExtra),
+        hasMortgageExtra: !!(mortgageExtraYearly[String(year)]),
       })
 
       inc *= (1 + growth / 100)
@@ -798,7 +924,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAnticipo, overridesYearly, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraYearly, overridesYearly, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
@@ -817,6 +943,15 @@ export default function ForecastPage() {
     const mortgageStartYM = mortgageStart || null
     let anticipoApplied = false
 
+    // Stato dinamico del mutuo (2026-07-23) — vedi commento analogo nel loop
+    // annuale sopra: rimborsi anticipati automatici "ogni X risparmiati" +
+    // estinzioni manuali puntuali, rata ricalcolata mantenendo la scadenza.
+    const durationMonths = mortgage ? Math.min(mortgageYears, years + 30) * 12 : 0
+    let mortBalance = (mortgageOn && mortgage) ? mortgageAmt : 0
+    let mortRata     = (mortgageOn && mortgage) ? mortgage.rata : 0
+    let mortSavingsCounter = 0
+    let mortMonthsElapsed  = 0
+
     for (let m = 0; m <= totalMonths; m++) {
       const d  = new Date(now.getFullYear(), now.getMonth() + m, 1)
       const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
@@ -830,8 +965,6 @@ export default function ForecastPage() {
         const total = overrideTotal(ovM)
         if (total != null) expThisMonth = total
       }
-      const mortgageActive  = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM
-      const mortgageMonthly = mortgageActive ? mortgage.rata : 0
 
       if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageStartYM && ym >= mortgageStartYM) {
         saldo -= mortgageAnticipo
@@ -850,22 +983,46 @@ export default function ForecastPage() {
           if (mon === bonusMonths.m13 && flags.has13) bonusExtra += val
         })
       }
-      saldo += (inc - expThisMonth - mortgageMonthly + bonusExtra)
 
-      let monthsIntoMortgage = -1
-      if (mortgageActive && mortgageStartYM) {
-        const [sy, sm] = mortgageStartYM.split('-').map(Number)
-        monthsIntoMortgage = (d.getFullYear() - sy) * 12 + (d.getMonth() + 1 - sm)
+      // Simulazione mensile del mutuo (rimborso anticipato automatico +
+      // manuale) — vedi extraRepayEnabled/mortgageExtraMonthly sopra.
+      const mortgageActive = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM && mortBalance > 0
+      let mortgageMonthly = 0
+      let mortgageExtra   = 0
+      if (mortgageActive) {
+        mortgageMonthly = mortRata
+        const rMonthly  = mortgageTaeg / 100 / 12
+        const interest  = mortBalance * rMonthly
+        const principal = Math.min(mortgageMonthly - interest, mortBalance)
+        let newBalance  = Math.max(0, mortBalance - principal)
+        mortSavingsCounter += (inc + bonusExtra - expThisMonth - mortgageMonthly)
+        let autoExtra = 0
+        if (extraRepayEnabled && extraRepayThreshold > 0 && mortSavingsCounter >= extraRepayThreshold) {
+          autoExtra = Math.floor(mortSavingsCounter / extraRepayThreshold) * extraRepayThreshold
+          mortSavingsCounter -= autoExtra
+        }
+        const manualExtra = mortgageExtraMonthly[ym] || 0
+        const totalExtra  = Math.min(autoExtra + manualExtra, newBalance)
+        newBalance = Math.max(0, newBalance - totalExtra)
+        mortgageExtra = totalExtra
+        const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
+        if (totalExtra > 0 && newBalance > 0 && remainingMonths > 0) {
+          mortRata = calcMortgagePayment(newBalance, mortgageTaeg, remainingMonths)
+        } else if (newBalance <= 0) {
+          mortRata = 0
+        }
+        mortBalance = newBalance
+        mortMonthsElapsed++
       }
-      const residual = (mortgageActive && monthsIntoMortgage >= 0 && monthsIntoMortgage < mortgage.monthlyResiduals.length)
-        ? mortgage.monthlyResiduals[monthsIntoMortgage]
-        : (mortgageOn && mortgageStartYM && ym >= mortgageStartYM ? 0 : null)
+      saldo += (inc - expThisMonth - mortgageMonthly - mortgageExtra + bonusExtra)
+
+      const residual = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM ? mortBalance : null
 
       pts.push({
         label:    ymToLabel(ym),
         ym,
         forecast: Math.round(saldo),
-        residual: residual !== null ? residual : undefined,
+        residual: residual !== null ? Math.round(residual) : undefined,
         // Entrate/Spese effettive DI QUESTO mese (con crescita/inflazione già composte
         // e, in modalità Teoriche, la 13ª/14ª già sommata) — usate dalla tabella
         // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto
@@ -873,6 +1030,11 @@ export default function ForecastPage() {
         expense: Math.round(expThisMonth),
         bonusExtra: Math.round(bonusExtra),
         hasOverride: !!ovM,
+        // Rata/estinzione anticipata di QUESTO mese (2026-07-23) — usate dalla
+        // tabella "Proiezione Mensile" invece della rata statica mortgage.rata.
+        mortgageRata:  Math.round(mortgageMonthly),
+        mortgageExtra: Math.round(mortgageExtra),
+        hasMortgageExtra: !!(mortgageExtraMonthly[ym]),
       })
 
       inc *= gMonthly
@@ -886,7 +1048,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAnticipo, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -918,6 +1080,33 @@ export default function ForecastPage() {
   const breakeven = mortgage
     ? forecastData.findIndex(d => (d.residual ?? Infinity) <= d.forecast)
     : -1
+
+  // ── KPI dedicati al mutuo (2026-07-23, richiesta utente: quando il mutuo è
+  // attivo, la riga KPI sotto il grafico deve mostrare SOLO metriche sul
+  // mutuo — rata attuale, quanto rimborsato quest'anno, rimborsi anticipati
+  // previsti nell'orizzonte, anno di estinzione — al posto di "Saldo {anno}".
+  // Usa sempre forecastDataMonthly (granularità fine) indipendentemente dalla
+  // vista selezionata in tabella, per avere numeri precisi.
+  const mortgageKpis = useMemo(() => {
+    if (!mortgageOn || !mortgage) return null
+    const firstActive = forecastDataMonthly.find(d => d.mortgageRata > 0)
+    const rataAttuale = firstActive ? firstActive.mortgageRata : mortgage.rata
+    const thisYear = now.getFullYear()
+    const monthsThisYear = forecastDataMonthly.filter(d => d.ym.startsWith(String(thisYear)))
+    // Somma di rata+estinzioni versate da qui a fine anno (non "tutto l'anno
+    // solare": la proiezione parte dal mese corrente, i mesi già passati
+    // dell'anno non sono nell'array) — evita di dover ricostruire un saldo
+    // "a inizio anno" che non è disponibile per mutui già in corso da prima.
+    const repaidThisYear = monthsThisYear.reduce((s, d) => s + (d.mortgageRata || 0) + (d.mortgageExtra || 0), 0)
+    const totalExtraForecast = forecastDataMonthly.reduce((s, d) => s + (d.mortgageExtra || 0), 0)
+    const payoffPoint = forecastData.find(d => d.residual === 0)
+    return {
+      rataAttuale,
+      repaidThisYear: Math.round(repaidThisYear),
+      totalExtraForecast: Math.round(totalExtraForecast),
+      payoffYear: payoffPoint ? payoffPoint.label : (mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—'),
+    }
+  }, [mortgageOn, mortgage, forecastDataMonthly, forecastData, mortgageAmt, mortgageStart, mortgageYears, now.getFullYear()])
 
   // ── Fondo Cecilia: andamento saldo (versamenti cumulati nel tempo) ──
   const ceciliaFund = (ceciliaGoals || []).find(g => (g.name || '').toLowerCase().includes('cecilia'))
@@ -1363,10 +1552,30 @@ export default function ForecastPage() {
                   </div>
                 </div>
 
+                {/* Rimborso anticipato automatico "ogni X risparmiati" (2026-07-23,
+                    richiesta utente) — quando i risparmi cumulati superano la soglia,
+                    il surplus viene versato come rimborso anticipato di capitale e la
+                    rata si abbassa da quel momento (stessa scadenza). Si somma agli
+                    eventuali rimborsi manuali una tantum (click sulla colonna "Rata
+                    mutuo" in tabella Proiezione). */}
+                <label className="fc-mortgage-toggle" style={{marginTop:14}}>
+                  <input type="checkbox" checked={extraRepayEnabled} onChange={e=>setExtraRepayEnabled(e.target.checked)}/>
+                  <span className={`ob-toggle ${extraRepayEnabled?'on':''}`}/>
+                  <span style={{fontSize:13,fontWeight:600,color:extraRepayEnabled?'var(--text)':'var(--text3)'}}>
+                    Rimborso anticipato automatico ogni X risparmiati
+                  </span>
+                </label>
+                {extraRepayEnabled && (
+                  <div className="fc-mortgage-fields" style={{marginTop:8}}>
+                    <MoneyField label="Soglia risparmio (€)" value={extraRepayThreshold} onChange={setExtraRepayThreshold}
+                      placeholder="20.000" hint="Ogni volta che i risparmi cumulati raggiungono questa cifra, vengono versati come rimborso anticipato e la rata si abbassa (stessa scadenza)"/>
+                  </div>
+                )}
+
                 {mortgage && mortgageOn && (
                   <div className="fc-mortgage-preview">
                     <div className="fc-preview-item">
-                      <span>Rata mensile</span>
+                      <span>Rata mensile (iniziale)</span>
                       <strong style={{color:'var(--accent)'}}>€ {fmtIT(mortgage.rata, 2)}</strong>
                     </div>
                     <div className="fc-preview-item">
@@ -1525,16 +1734,20 @@ export default function ForecastPage() {
             </div>
           )}
 
-          {/* KPI row */}
+          {/* KPI row — quando il mutuo è attivo mostra SOLO KPI sul mutuo
+              (richiesta utente 2026-07-23), altrimenti i KPI generali sul saldo */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
-            {[
+            {(mortgageOn && mortgage && mortgageKpis ? [
+              ['Rata attuale', fmtFull(mortgageKpis.rataAttuale), 'var(--accent)'],
+              ['Verso mutuo entro fine anno', fmtFull(mortgageKpis.repaidThisYear), 'var(--green)'],
+              ['Rimborsi anticipati previsti', fmtFull(mortgageKpis.totalExtraForecast), 'var(--green)'],
+              ['Mutuo estinto', mortgageKpis.payoffYear, 'var(--blue)'],
+            ] : [
               ['Saldo ' + (now.getFullYear() + years), fmtK(finalSaldo), 'var(--accent)'],
               ['Risparmio / mese', (monthlySavings>=0?'+':'')+fmtFull(Math.round(monthlySavings)), monthlySavings>=0?'var(--green)':'var(--red)'],
               ['Tasso risparmio', savingsRate+'%', savingsRate>=20?'var(--green)':savingsRate>=10?'var(--gold)':'var(--red)'],
-              mortgageOn && mortgage
-                ? ['Mutuo estinto', mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—', 'var(--blue)']
-                : ['Orizzonte', years+' anni', 'var(--text2)'],
-            ].map(([l,v,color])=>(
+              ['Orizzonte', years+' anni', 'var(--text2)'],
+            ]).map(([l,v,color])=>(
               <div key={l} className="card" style={{padding:'12px 16px'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:5}}>{l}</div>
                 <div style={{fontSize:17,fontWeight:800,color,fontFamily:'var(--font-serif)'}}>{v}</div>
@@ -1622,9 +1835,9 @@ export default function ForecastPage() {
                     const year = parseInt(d.label)
                     const inc = d.income
                     const exp = d.expense
-                    const mortgageActive = mortgageOn && mortgage && year >= mortgageStartYear
-                    const rataAnnua = mortgageActive ? mortgage.rata * 12 : 0
-                    const cf = (inc - exp) * 12 - rataAnnua
+                    const rataAnnua = d.mortgageRata || 0
+                    const extraAnnua = d.mortgageExtra || 0
+                    const cf = (inc - exp) * 12 - rataAnnua - extraAnnua
                     return (
                       <tr key={d.label} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
@@ -1640,8 +1853,13 @@ export default function ForecastPage() {
                           {fmtIT(Math.round(exp * 12), 0)}
                         </td>
                         {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12}}>
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer'}}
+                            title="Clicca per estinguere una cifra sul mutuo in questo anno"
+                            onClick={()=>setMortgageExtraPopup({ granularity:'annuale', key:String(year), label:d.label })}>
                             {rataAnnua > 0 ? `${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
+                            {extraAnnua > 0 && (
+                              <span title={`Estinzione anticipata: ${fmtFull(extraAnnua)}`} style={{marginLeft:5,fontSize:9,color:'var(--green)'}}>⚡</span>
+                            )}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
@@ -1671,11 +1889,11 @@ export default function ForecastPage() {
                     richiesta utente 2026-07-23 */}
                 {projectionView === 'mensile' && forecastDataMonthly
                   .map((d) => {
-                    const mortgageActive = mortgageOn && mortgageStart && d.ym >= mortgageStart
-                    const rataMese = mortgageActive ? mortgage.rata : 0
+                    const rataMese = d.mortgageRata || 0
+                    const extraMese = d.mortgageExtra || 0
                     const inc = d.income
                     const exp = d.expense
-                    const cf = (inc - exp) - rataMese
+                    const cf = (inc - exp) - rataMese - extraMese
                     return (
                       <tr key={d.ym} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
@@ -1691,8 +1909,13 @@ export default function ForecastPage() {
                           {fmtIT(Math.round(exp), 0)}
                         </td>
                         {mortgageOn && (
-                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12}}>
+                          <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)',fontSize:12,cursor:'pointer'}}
+                            title="Clicca per estinguere una cifra sul mutuo in questo mese"
+                            onClick={()=>setMortgageExtraPopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                             {rataMese > 0 ? `${fmtIT(Math.round(rataMese), 0)}` : '—'}
+                            {extraMese > 0 && (
+                              <span title={`Estinzione anticipata: ${fmtFull(extraMese)}`} style={{marginLeft:5,fontSize:9,color:'var(--green)'}}>⚡</span>
+                            )}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
@@ -1747,6 +1970,29 @@ export default function ForecastPage() {
               if (isMonthly) saveOverrideMonthly(overridePopup.key, entry)
               else saveOverrideYearly(overridePopup.key, entry)
               setOverridePopup(null)
+            }}
+          />
+        )
+      })()}
+
+      {mortgageExtraPopup && (() => {
+        const isMonthly = mortgageExtraPopup.granularity === 'mensile'
+        const existing = isMonthly ? mortgageExtraMonthly[mortgageExtraPopup.key] : mortgageExtraYearly[mortgageExtraPopup.key]
+        return (
+          <MortgageExtraPaymentModal
+            title={`Estingui mutuo — ${mortgageExtraPopup.label}`}
+            initialAmount={existing}
+            hasExisting={!!existing}
+            onClose={()=>setMortgageExtraPopup(null)}
+            onRemove={()=>{
+              if (isMonthly) removeMortgageExtraMonthly(mortgageExtraPopup.key)
+              else removeMortgageExtraYearly(mortgageExtraPopup.key)
+              setMortgageExtraPopup(null)
+            }}
+            onSave={(amount)=>{
+              if (isMonthly) saveMortgageExtraMonthly(mortgageExtraPopup.key, amount)
+              else saveMortgageExtraYearly(mortgageExtraPopup.key, amount)
+              setMortgageExtraPopup(null)
             }}
           />
         )
