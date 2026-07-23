@@ -392,6 +392,49 @@ function MortgageExtraPaymentModal({ title, initialAmount, hasExisting, onSave, 
   )
 }
 
+// ── Popup selezione mesi storici per le medie di Teoriche > Spese (2026-07-23,
+// richiesta utente: poter scegliere manualmente da quali mesi prendere le
+// medie per TUTTE le categorie insieme, invece dei soliti ultimi 12 fissi).
+function MonthPickerModal({ months, initialSelected, onSave, onClose }) {
+  const [selected, setSelected] = useState(() => new Set(initialSelected))
+  function toggle(ym) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(ym)) next.delete(ym); else next.add(ym)
+      return next
+    })
+  }
+  const isDefault12 = months.slice(-12)
+  return (
+    <Modal title="Mesi storici per le medie (Spese)" onClose={onClose} width={420}>
+      <div style={{fontSize:11,color:'var(--text3)',marginBottom:12,lineHeight:1.5}}>
+        Scegli da quali mesi calcolare la media mensile di ogni categoria in "Teoriche &gt; Spese". Di default sono gli ultimi 12 mesi pieni.
+      </div>
+      <div style={{display:'flex',gap:8,marginBottom:10}}>
+        <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px'}}
+          onClick={()=>setSelected(new Set(isDefault12))}>Ultimi 12 (default)</button>
+        <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px'}}
+          onClick={()=>setSelected(new Set(months))}>Seleziona tutti (24)</button>
+        <button className="btn btn-secondary" style={{fontSize:11,padding:'4px 10px'}}
+          onClick={()=>setSelected(new Set())}>Deseleziona tutti</button>
+      </div>
+      <div style={{maxHeight:280,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,padding:'6px 10px'}}>
+        {months.map(ym => (
+          <label key={ym} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',fontSize:12.5,cursor:'pointer'}}>
+            <input type="checkbox" checked={selected.has(ym)} onChange={()=>toggle(ym)}/>
+            {ymToLabel(ym)}
+          </label>
+        ))}
+      </div>
+      <div style={{fontSize:11,color:'var(--text3)',marginTop:8}}>{selected.size} mesi selezionati</div>
+      <ModalFooter>
+        <button className="btn btn-secondary" onClick={()=>{ onSave(null); }}>Ripristina default</button>
+        <button className="btn btn-primary" onClick={()=>onSave([...selected])}>Salva</button>
+      </ModalFooter>
+    </Modal>
+  )
+}
+
 // ── Popup override mese/anno sulla colonna ENTRATE della tabella "Proiezione"
 // (2026-07-23, richiesta utente: stesso meccanismo delle Spese — Fra/Sofi
 // modificabili con opzione "da qui in avanti" — più una riga "Altro" per
@@ -496,6 +539,15 @@ export default function ForecastPage() {
   // l'input L1 diventa di sola lettura — evita di avere L1 e somma-L2
   // incoerenti tra loro.
   const teoricheSpeseL2 = appPrefs?.forecastTeoricheSpeseL2 || {} // { [cat1]: { [cat2]: number } }
+  // Mesi storici usati per calcolare la media di TUTTE le categorie in Teoriche >
+  // Spese (2026-07-23, richiesta utente: poter scegliere manualmente da quali
+  // mesi prendere le medie, non solo i soliti ultimi 12 fissi). null/vuoto =
+  // default (ultimi 12 mesi pieni, comportamento storico invariato).
+  const teoricheSpeseMonths = appPrefs?.forecastTeoricheSpeseMonths || null // array di 'YYYY-MM' oppure null
+  function setTeoricheSpeseMonths(arr) {
+    setAppPref('forecastTeoricheSpeseMonths', (arr && arr.length) ? arr : null)
+  }
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
   // Mese di pagamento 13ª/14ª (1-based: 6=giugno, 12=dicembre) — richiesta utente
   // 2026-07-20: rendere modificabile (non tutte le aziende le pagano negli stessi mesi)
   const bonusMonths = appPrefs?.forecastBonusMonths || { m13: 6, m14: 12 }
@@ -761,6 +813,65 @@ export default function ForecastPage() {
     ? Math.round(effectiveIncomeMths.reduce((s, m) => s + m.fra + m.sofi + m.other, 0) / effectiveIncomeMths.length)
     : avgIncome
 
+  // Breakdown mensile per categoria (2026-07-23, richiesta utente: poter scegliere
+  // manualmente da quali mesi storici prendere le medie in Teoriche > Spese,
+  // invece dei soliti ultimi 12 fissi). Finestra ampia (24 mesi) per dare al
+  // selettore abbastanza storia da cui scegliere. SOLO per Teoriche — il
+  // catStats condiviso sopra (usato anche dal What If di Storico) resta
+  // invariato con la finestra fissa di 12 mesi, per non alterare di riflesso
+  // calcoli che l'utente non ha chiesto di toccare.
+  const catMonthlyRaw = useMemo(() => {
+    const now = new Date()
+    const months = []
+    for (let i = 24; i >= 1; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
+    }
+    const merged = getMergedCats(customCats)
+    const raw = {}
+    months.forEach(ym => { raw[ym] = {} })
+    expList(transactions, months).forEach(t => {
+      const ym = (t._effDate || t.date || '').slice(0, 7)
+      if (!raw[ym]) return
+      const c1 = t.cat1 || 'Non Categorizzato'
+      if (c1 === 'Entrate') return
+      if (!raw[ym][c1]) raw[ym][c1] = { total: 0, subs: {}, color: merged[c1]?.color || '#888' }
+      raw[ym][c1].total += Math.abs(netAmt(t))
+      const c2 = t.cat2 || 'Altro'
+      raw[ym][c1].subs[c2] = (raw[ym][c1].subs[c2] || 0) + Math.abs(netAmt(t))
+    })
+    return { months, raw }
+  }, [transactions, customCats])
+
+  // Mesi effettivamente usati per Teoriche > Spese: quelli scelti dall'utente,
+  // altrimenti gli stessi ultimi 12 mesi di sempre (comportamento invariato).
+  const effectiveSpeseMonths = (teoricheSpeseMonths && teoricheSpeseMonths.length > 0) ? teoricheSpeseMonths : last6
+
+  const catStatsTeoriche = useMemo(() => {
+    const divisor = effectiveSpeseMonths.length || 1
+    const agg = {}
+    effectiveSpeseMonths.forEach(ym => {
+      const monthData = catMonthlyRaw.raw[ym]
+      if (!monthData) return
+      Object.entries(monthData).forEach(([c1, d]) => {
+        if (!agg[c1]) agg[c1] = { total: 0, subs: {}, color: d.color }
+        agg[c1].total += d.total
+        Object.entries(d.subs).forEach(([c2, amt]) => {
+          agg[c1].subs[c2] = (agg[c1].subs[c2] || 0) + amt
+        })
+      })
+    })
+    const out = {}
+    Object.entries(agg).forEach(([c1, d]) => {
+      out[c1] = {
+        avg: Math.round(d.total / divisor),
+        color: d.color,
+        subs: Object.fromEntries(Object.entries(d.subs).map(([c2, tot]) => [c2, Math.round(tot / divisor)])),
+      }
+    })
+    return out
+  }, [catMonthlyRaw, effectiveSpeseMonths])
+
   // Valori "Teoriche" — default: Entrate = ultimo mese reale per persona, Spese = media 12 mesi per categoria L1
   const lastMonthIncome = incomeByMonth[incomeByMonth.length - 1] || { fra: 0, sofi: 0 }
   const teoricheFraVal  = teoricheEntrate.Fra  ?? Math.round(lastMonthIncome.fra  || 0)
@@ -774,13 +885,13 @@ export default function ForecastPage() {
     const l2overrides = teoricheSpeseL2[c1]
     const hasL2 = l2overrides && Object.keys(l2overrides).length > 0
     if (hasL2) {
-      const subs = catStats[c1]?.subs || {}
+      const subs = catStatsTeoriche[c1]?.subs || {}
       return Object.keys(subs).reduce((s, c2) => s + (l2overrides[c2] ?? subs[c2] ?? 0), 0)
     }
-    return teoricheSpese[c1] ?? catStats[c1]?.avg ?? 0
+    return teoricheSpese[c1] ?? catStatsTeoriche[c1]?.avg ?? 0
   }
 
-  const teoricheExpenseTotal = Object.keys(catStats).reduce(
+  const teoricheExpenseTotal = Object.keys(catStatsTeoriche).reduce(
     (s, c1) => s + teoricheL1Value(c1), 0
   )
 
@@ -880,7 +991,7 @@ export default function ForecastPage() {
     const d = {}
     Object.keys(catStats).forEach(c1 => { d[c1] = catEffectiveBase(c1) })
     return d
-  }, [catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [catStats, catStatsTeoriche, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Override puntuali mese/anno sulla colonna ENTRATE (2026-07-23, richiesta
   // utente: stesso meccanismo delle Spese, ma per Fra/Sofi + una riga "Altro"
@@ -976,6 +1087,13 @@ export default function ForecastPage() {
     let extraBaseSaldo = null
     let simSaldo = currentSaldo
     let mortMonthsElapsed  = 0
+    // Mesi trascorsi sul piano di ammortamento NOMINALE (rata fissa, nessun
+    // extra) — 2026-07-23, richiesta utente: mostrare in chart/KPI ANCHE il
+    // mutuo "originale" per confronto quando il rimborso anticipato
+    // automatico è attivo. Avanza SEMPRE (indipendentemente da mortBalance
+    // reale/mortgageActive) così non si blocca se il mutuo vero si estingue
+    // in anticipo — il piano nominale continua ad ammortizzarsi per conto suo.
+    let nominalMonthsElapsed = 0
 
     for (let y = 0; y <= years; y++) {
       const year = now.getFullYear() + y
@@ -1017,8 +1135,9 @@ export default function ForecastPage() {
       // automatici + manuale una tantum sull'anno) — vedi commento sopra sul
       // perché serve un sotto-loop mensile anche nella vista annuale.
       let yearExtra = 0
+      const monthsThisYearAll = y === 0 ? monthsRemaining : 12
       if (mortgageActive) {
-        const monthsThisYear = y === 0 ? monthsRemaining : 12
+        const monthsThisYear = monthsThisYearAll
         const rMonthly = mortgageTaeg / 100 / 12
         const manualExtraThisYear = mortgageExtraYearly[String(year)] || 0
         let manualApplied = false
@@ -1076,10 +1195,21 @@ export default function ForecastPage() {
 
       const residual = mortgageOn && mortgage && year >= mortgageStartYear ? mortBalance : null
 
+      // Residuo NOMINALE (piano di ammortamento originale, rata fissa, nessun
+      // extra) allo stesso punto nel tempo — 2026-07-23, vedi commento su
+      // nominalMonthsElapsed sopra.
+      let residualNominal = null
+      if (mortgageOn && mortgage && year >= mortgageStartYear) {
+        nominalMonthsElapsed = Math.min(nominalMonthsElapsed + monthsThisYearAll, durationMonths)
+        const idx = nominalMonthsElapsed - 1
+        residualNominal = (idx >= 0 && idx < mortgage.monthlyResiduals.length) ? mortgage.monthlyResiduals[idx] : 0
+      }
+
       pts.push({
         label:    String(year),
         forecast: Math.round(saldo),
         residual: residual !== null ? Math.round(residual) : undefined,
+        residualNominal: residualNominal !== null ? Math.round(residualNominal) : undefined,
         // Entrate/Spese effettive di QUESTO anno (con eventuale override già
         // applicato) — usate dalla tabella "Proiezione Annuale" invece di
         // ricalcolare con una formula approssimata separata.
@@ -1150,6 +1280,11 @@ export default function ForecastPage() {
     // parte da 0).
     let extraBaseSaldo = null
     let mortMonthsElapsed  = 0
+    // Mesi trascorsi sul piano di ammortamento NOMINALE (rata fissa, nessun
+    // extra) — vedi commento gemello in forecastData sopra: serve per la
+    // linea "mutuo originale" nel chart e per le quote capitale/interessi
+    // "originali" mostrate nei KPI.
+    let nominalMonthsElapsedM = 0
     // DEBUG TEMPORANEO (2026-07-23) — rimborso anticipato automatico segnalato
     // come "non funziona": log dei primi mesi per capire se il flag è letto,
     // se i risparmi si accumulano, e quando/se scatta la soglia. Da rimuovere
@@ -1203,6 +1338,12 @@ export default function ForecastPage() {
       const mortgageActive = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM && mortBalance > 0
       let mortgageMonthly = 0
       let mortgageExtra   = 0
+      // Quota capitale/interessi EFFETTIVE di questa rata (2026-07-23,
+      // richiesta utente: nuovi KPI "Quota capitale"/"Quota interessi") —
+      // catturate fuori dal blocco perché servono anche se mortgageActive
+      // diventa false in futuro (mutuo già estinto).
+      let mortgageInterestActual  = null
+      let mortgagePrincipalActual = null
       if (mortgageActive) {
         // Base = saldo previsto PRIMA dei flussi di questo mese. Impostata una
         // sola volta, al primo mese in cui il mutuo è attivo — quindi il mese
@@ -1212,6 +1353,8 @@ export default function ForecastPage() {
         const rMonthly  = mortgageTaeg / 100 / 12
         const interest  = mortBalance * rMonthly
         const principal = Math.min(mortgageMonthly - interest, mortBalance)
+        mortgageInterestActual  = interest
+        mortgagePrincipalActual = principal
         let newBalance  = Math.max(0, mortBalance - principal)
         // Saldo proiettato a fine di QUESTO mese (flussi normali), usato SOLO
         // per capire di quanto ha superato la base — mai scritto nel vero
@@ -1265,11 +1408,34 @@ export default function ForecastPage() {
 
       const residual = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM ? mortBalance : null
 
+      // Piano NOMINALE (originale, rata fissa, nessun extra) allo stesso mese
+      // — 2026-07-23, per la linea di confronto nel chart e per i KPI "quota
+      // capitale/interessi originali". Avanza sempre, indipendentemente da
+      // mortgageActive/mortBalance reale (vedi commento su nominalMonthsElapsedM).
+      let residualNominal = null
+      let mortgageInterestNominal  = null
+      let mortgagePrincipalNominal = null
+      if (mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM) {
+        const idx = nominalMonthsElapsedM
+        const balanceBeforeNominal = idx === 0 ? mortgageAmt : (mortgage.monthlyResiduals[idx - 1] ?? 0)
+        const rMonthlyNominal = mortgageTaeg / 100 / 12
+        if (balanceBeforeNominal > 0) {
+          mortgageInterestNominal  = balanceBeforeNominal * rMonthlyNominal
+          mortgagePrincipalNominal = Math.min(mortgage.rata - mortgageInterestNominal, balanceBeforeNominal)
+        } else {
+          mortgageInterestNominal  = 0
+          mortgagePrincipalNominal = 0
+        }
+        residualNominal = idx < mortgage.monthlyResiduals.length ? mortgage.monthlyResiduals[idx] : 0
+        nominalMonthsElapsedM++
+      }
+
       pts.push({
         label:    ymToLabel(ym),
         ym,
         forecast: Math.round(saldo),
         residual: residual !== null ? Math.round(residual) : undefined,
+        residualNominal: residualNominal !== null ? Math.round(residualNominal) : undefined,
         // Entrate/Spese effettive DI QUESTO mese (con crescita/inflazione già composte
         // e, in modalità Teoriche, la 13ª/14ª già sommata) — usate dalla tabella
         // "Proiezione Mensile" al posto di ricalcolare da avgIncomeEffective piatto
@@ -1283,6 +1449,12 @@ export default function ForecastPage() {
         mortgageRata:  Math.round(mortgageMonthly),
         mortgageExtra: Math.round(mortgageExtra),
         hasMortgageExtra: !!(mortgageExtraMonthly[ym]),
+        // Quota capitale/interessi (2026-07-23, nuovi KPI) — effettive (con
+        // eventuale strategia 'rata' già applicata) e nominali (piano originale).
+        mortgageInterestActual:   mortgageInterestActual  !== null ? Math.round(mortgageInterestActual)  : undefined,
+        mortgagePrincipalActual:  mortgagePrincipalActual !== null ? Math.round(mortgagePrincipalActual) : undefined,
+        mortgageInterestNominal:  mortgageInterestNominal !== null ? Math.round(mortgageInterestNominal) : undefined,
+        mortgagePrincipalNominal: mortgagePrincipalNominal !== null ? Math.round(mortgagePrincipalNominal) : undefined,
       })
 
       if (ovME) {
@@ -1318,6 +1490,7 @@ export default function ForecastPage() {
       historical: p.saldo,
       forecast:   null,
       residual:   null,
+      residualNominal: null,
       _ym:        p.ym,
     }))
     if (histPts.length > 0) {
@@ -1328,6 +1501,11 @@ export default function ForecastPage() {
       historical: null,
       forecast:   d.forecast,
       residual:   d.residual ?? null,
+      // Linea di confronto "mutuo originale" (2026-07-23) — mostrata in chart
+      // SOLO quando il rimborso anticipato automatico è attivo (altrimenti
+      // coinciderebbe con "residual" ed è ridondante); il campo è comunque
+      // sempre disponibile qui, la UI decide se disegnarlo.
+      residualNominal: d.residualNominal ?? null,
     }))
     return [...histPts, ...fcPts]
   }, [historicalPoints, historicalYearPoints, forecastData, years])
@@ -1359,11 +1537,28 @@ export default function ForecastPage() {
     const repaidThisYear = monthsThisYear.reduce((s, d) => s + (d.mortgageRata || 0) + (d.mortgageExtra || 0), 0)
     const totalExtraForecast = forecastDataMonthly.reduce((s, d) => s + (d.mortgageExtra || 0), 0)
     const payoffPoint = forecastData.find(d => d.residual === 0)
+    // Anno di estinzione sul piano ORIGINALE (nominale, nessun extra) — per
+    // confronto quando il rimborso anticipato automatico è attivo (2026-07-23).
+    const payoffPointNominal = forecastData.find(d => d.residualNominal === 0)
+    const payoffYearFallback = mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—'
+    // Quota capitale/interessi (2026-07-23, nuovi KPI): valore ORIGINALE
+    // (piano nominale, rata fissa) come principale, valore EFFETTIVO (con
+    // l'eventuale rimborso anticipato automatico già applicato) come dato
+    // secondario — mostrato dalla UI solo se extraRepayEnabled.
+    const quotaCapitale         = firstActive ? (firstActive.mortgagePrincipalNominal ?? 0) : 0
+    const quotaInteressi        = firstActive ? (firstActive.mortgageInterestNominal  ?? 0) : 0
+    const quotaCapitaleActual   = firstActive ? (firstActive.mortgagePrincipalActual  ?? quotaCapitale)  : quotaCapitale
+    const quotaInteressiActual  = firstActive ? (firstActive.mortgageInterestActual   ?? quotaInteressi) : quotaInteressi
     return {
       rataAttuale,
       repaidThisYear: Math.round(repaidThisYear),
       totalExtraForecast: Math.round(totalExtraForecast),
-      payoffYear: payoffPoint ? payoffPoint.label : (mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—'),
+      payoffYear: payoffPoint ? payoffPoint.label : payoffYearFallback,
+      payoffYearNominal: payoffPointNominal ? payoffPointNominal.label : payoffYearFallback,
+      quotaCapitale: Math.round(quotaCapitale),
+      quotaInteressi: Math.round(quotaInteressi),
+      quotaCapitaleActual: Math.round(quotaCapitaleActual),
+      quotaInteressiActual: Math.round(quotaInteressiActual),
     }
   }, [mortgageOn, mortgage, forecastDataMonthly, forecastData, mortgageAmt, mortgageStart, mortgageYears])
 
@@ -1577,7 +1772,7 @@ export default function ForecastPage() {
             {forecastBasis === 'teoriche' && (
               <div>
                 {/* Sub-tab Entrate / Spese */}
-                <div style={{display:'flex',gap:6,marginBottom:12}}>
+                <div style={{display:'flex',gap:6,marginBottom:12,alignItems:'center'}}>
                   {[['entrate','📥 Entrate'],['spese','📤 Spese']].map(([v,l]) => (
                     <button key={v} onClick={()=>setTeoricheTab(v)}
                       style={{padding:'5px 12px',borderRadius:6,cursor:'pointer',fontFamily:'var(--font-sans)',
@@ -1588,7 +1783,27 @@ export default function ForecastPage() {
                       {l}
                     </button>
                   ))}
+                  {teoricheTab === 'spese' && (
+                    <button onClick={()=>setMonthPickerOpen(true)}
+                      title={teoricheSpeseMonths ? `Mesi storici personalizzati (${teoricheSpeseMonths.length}) — clicca per cambiare` : 'Ultimi 12 mesi (default) — clicca per scegliere i mesi'}
+                      style={{marginLeft:'auto',width:20,height:20,borderRadius:'50%',flexShrink:0,
+                        border:`1px solid ${teoricheSpeseMonths ? 'var(--accent)' : 'var(--border)'}`,
+                        background: teoricheSpeseMonths ? 'var(--accent)' : 'var(--surface2)',
+                        cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',
+                        color: teoricheSpeseMonths ? '#fff' : 'var(--text3)',fontSize:10,padding:0}}>
+                      📅
+                    </button>
+                  )}
                 </div>
+
+                {monthPickerOpen && (
+                  <MonthPickerModal
+                    months={catMonthlyRaw.months}
+                    initialSelected={effectiveSpeseMonths}
+                    onSave={(arr)=>{ setTeoricheSpeseMonths(arr); setMonthPickerOpen(false) }}
+                    onClose={()=>setMonthPickerOpen(false)}
+                  />
+                )}
 
                 {teoricheTab === 'entrate' && (
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -1683,7 +1898,7 @@ export default function ForecastPage() {
                 {teoricheTab === 'spese' && (
                   <div style={{display:'flex',flexDirection:'column',gap:6}}>
                     <div className="fc-whatif-panel" style={{marginTop:0}}>
-                      {Object.entries(catStats).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => {
+                      {Object.entries(catStatsTeoriche).sort((a,b)=>b[1].avg-a[1].avg).map(([c1,data]) => {
                         const val    = teoricheL1Value(c1)
                         const isOpen = expandedTeoricheL1.has(c1)
                         const l2overrides = teoricheSpeseL2[c1] || {}
@@ -1878,6 +2093,12 @@ export default function ForecastPage() {
                     Mutuo residuo
                   </span>
                 )}
+                {mortgageOn && extraRepayEnabled && (
+                  <span style={{display:'flex',alignItems:'center',gap:5}} title="Piano di ammortamento originale, senza rimborso anticipato automatico">
+                    <svg width="22" height="4"><line x1="0" y1="2" x2="22" y2="2" stroke="#9a9a9a" strokeWidth="2" strokeDasharray="3 3"/></svg>
+                    Mutuo originale
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1905,6 +2126,10 @@ export default function ForecastPage() {
                 {mortgageOn && (
                   <Line type="monotone" dataKey="residual" name="Mutuo residuo"
                     stroke="#2a5c8a" strokeWidth={2.5} dot={false} connectNulls={false}/>
+                )}
+                {mortgageOn && extraRepayEnabled && (
+                  <Line type="monotone" dataKey="residualNominal" name="Mutuo originale"
+                    stroke="#9a9a9a" strokeWidth={1.75} strokeDasharray="3 3" dot={false} connectNulls={false}/>
                 )}
               </ComposedChart>
             </ResponsiveContainer>
@@ -1936,22 +2161,42 @@ export default function ForecastPage() {
           )}
 
           {/* KPI row — quando il mutuo è attivo mostra SOLO KPI sul mutuo
-              (richiesta utente 2026-07-23), altrimenti i KPI generali sul saldo */}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+              (richiesta utente 2026-07-23), altrimenti i KPI generali sul saldo.
+              Aggiornamento 2026-07-23: aggiunte Quota Capitale/Quota Interessi;
+              per queste due + Mutuo Estinto il valore principale resta quello
+              ORIGINALE (piano nominale, senza rimborso anticipato automatico),
+              con il valore EFFETTIVO (con l'auto-rimborso applicato) mostrato
+              in piccolo nell'angolo in basso a destra della stessa cella — ma
+              SOLO se il flag "Rimborso anticipato automatico" è attivo
+              (altrimenti i due valori coinciderebbero ed è ridondante). */}
+          <div style={{display:'grid',gridTemplateColumns: (mortgageOn && mortgage && mortgageKpis) ? 'repeat(3,1fr)' : 'repeat(4,1fr)',gap:10}}>
             {(mortgageOn && mortgage && mortgageKpis ? [
               ['Rata attuale', fmtFull(mortgageKpis.rataAttuale), 'var(--accent)'],
+              ['Quota capitale', fmtFull(mortgageKpis.quotaCapitale), 'var(--green)',
+                extraRepayEnabled ? fmtFull(mortgageKpis.quotaCapitaleActual) : null],
+              ['Quota interessi', fmtFull(mortgageKpis.quotaInteressi), 'var(--red)',
+                extraRepayEnabled ? fmtFull(mortgageKpis.quotaInteressiActual) : null],
               ['Verso mutuo entro fine anno', fmtFull(mortgageKpis.repaidThisYear), 'var(--green)'],
               ['Rimborsi anticipati previsti', fmtFull(mortgageKpis.totalExtraForecast), 'var(--green)'],
-              ['Mutuo estinto', mortgageKpis.payoffYear, 'var(--blue)'],
+              ['Mutuo estinto', mortgageKpis.payoffYearNominal, 'var(--blue)',
+                (extraRepayEnabled && mortgageKpis.payoffYear !== mortgageKpis.payoffYearNominal) ? mortgageKpis.payoffYear : null],
             ] : [
               ['Saldo ' + (now.getFullYear() + years), fmtK(finalSaldo), 'var(--accent)'],
               ['Risparmio / mese', (monthlySavings>=0?'+':'')+fmtFull(Math.round(monthlySavings)), monthlySavings>=0?'var(--green)':'var(--red)'],
               ['Tasso risparmio', savingsRate+'%', savingsRate>=20?'var(--green)':savingsRate>=10?'var(--gold)':'var(--red)'],
               ['Orizzonte', years+' anni', 'var(--text2)'],
-            ]).map(([l,v,color])=>(
-              <div key={l} className="card" style={{padding:'12px 16px'}}>
+            ]).map(([l,v,color,sub])=>(
+              <div key={l} className="card" style={{padding:'12px 16px', position:'relative'}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',marginBottom:5}}>{l}</div>
                 <div style={{fontSize:17,fontWeight:800,color,fontFamily:'var(--font-serif)'}}>{v}</div>
+                {sub && (
+                  <div
+                    title="Valore effettivo con rimborso anticipato automatico attivo (originale sopra)"
+                    style={{position:'absolute',right:10,bottom:8,fontSize:10.5,fontWeight:700,color:'var(--text3)',fontFamily:'var(--font-mono)'}}
+                  >
+                    {sub}
+                  </div>
+                )}
               </div>
             ))}
           </div>
