@@ -1050,7 +1050,11 @@ export default function ForecastPage() {
           const manualExtra = (!manualApplied && mm === monthsThisYear - 1) ? manualExtraThisYear : 0
           if (manualExtra > 0) manualApplied = true
           const totalExtra = Math.min(autoExtra + manualExtra, mortBalance)
-          if (totalExtra > 0) { extraBaseSaldo += totalExtra; simSaldo -= totalExtra }
+          // FIX 2026-07-23 — vedi commento analogo nel loop mensile: la base va
+          // resettata al saldo VERO rimasto dopo l'estinzione (simSaldo dopo la
+          // sottrazione), non spostata in avanti di "totalExtra" (avrebbe
+          // ritardato il trigger successivo oltre il dovuto).
+          if (totalExtra > 0) { simSaldo -= totalExtra; extraBaseSaldo = simSaldo }
           mortBalance = Math.max(0, mortBalance - totalExtra)
           yearExtra += totalExtra
           const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
@@ -1230,9 +1234,13 @@ export default function ForecastPage() {
         }
         const manualExtra = mortgageExtraMonthly[ym] || 0
         const totalExtra  = Math.min(autoExtra + manualExtra, newBalance)
-        // Qualunque euro che esce davvero dal saldo (auto o manuale) sposta in
-        // avanti la base, così il prossimo scatto si misura dal nuovo livello.
-        if (totalExtra > 0) extraBaseSaldo += totalExtra
+        // FIX 2026-07-23 (segnalato dall'utente con esempio numerico reale):
+        // la base NON deve avanzare di "totalExtra" (avrebbe saltato in avanti
+        // oltre il vero saldo, ritardando il prossimo scatto) — deve resettarsi
+        // al saldo VERO rimasto dopo l'estinzione, esattamente come dice
+        // l'utente ("il saldo torna al livello base"). saldoAfterMonth-totalExtra
+        // è per costruzione il saldo reale di fine mese dopo l'estinzione.
+        if (totalExtra > 0) extraBaseSaldo = saldoAfterMonth - totalExtra
         newBalance = Math.max(0, newBalance - totalExtra)
         mortgageExtra = totalExtra
         const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
@@ -2125,6 +2133,7 @@ export default function ForecastPage() {
                             title={extraAnnua > 0 ? `Estinzione anticipata: ${fmtFull(extraAnnua)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo anno'}
                             onClick={()=>setMortgageExtraPopup({ granularity:'annuale', key:String(year), label:d.label })}>
                             {rataAnnua > 0 ? `${fmtIT(Math.round(rataAnnua), 0)}` : '—'}
+                            {extraAnnua > 0 && <span style={{color:'var(--green)',fontWeight:700}}> +{fmtIT(Math.round(extraAnnua), 0)}</span>}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
@@ -2182,6 +2191,7 @@ export default function ForecastPage() {
                             title={extraMese > 0 ? `Estinzione anticipata: ${fmtFull(extraMese)} — clicca per rivedere/cambiare` : 'Clicca per estinguere una cifra sul mutuo in questo mese'}
                             onClick={()=>setMortgageExtraPopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                             {rataMese > 0 ? `${fmtIT(Math.round(rataMese), 0)}` : '—'}
+                            {extraMese > 0 && <span style={{color:'var(--green)',fontWeight:700}}> +{fmtIT(Math.round(extraMese), 0)}</span>}
                           </td>
                         )}
                         {mortgageOn && mortgageAnticipo > 0 && (
