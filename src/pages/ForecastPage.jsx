@@ -1626,9 +1626,7 @@ export default function ForecastPage() {
                     const rataAnnua = mortgageActive ? mortgage.rata * 12 : 0
                     const cf = (inc - exp) * 12 - rataAnnua
                     return (
-                      <tr key={d.label} style={{borderBottom:'1px solid var(--border)',cursor:'pointer'}}
-                        title="Clicca per modificare le spese di questo anno"
-                        onClick={()=>setOverridePopup({ granularity:'annuale', key:String(year), label:d.label })}>
+                      <tr key={d.label} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
                           {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
@@ -1636,7 +1634,9 @@ export default function ForecastPage() {
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
                           {fmtIT(Math.round(inc * 12), 0)}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer'}}
+                          title="Clicca per modificare le spese di questo anno"
+                          onClick={()=>setOverridePopup({ granularity:'annuale', key:String(year), label:d.label })}>
                           {fmtIT(Math.round(exp * 12), 0)}
                         </td>
                         {mortgageOn && (
@@ -1677,9 +1677,7 @@ export default function ForecastPage() {
                     const exp = d.expense
                     const cf = (inc - exp) - rataMese
                     return (
-                      <tr key={d.ym} style={{borderBottom:'1px solid var(--border)',cursor:'pointer'}}
-                        title="Clicca per modificare le spese di questo mese"
-                        onClick={()=>setOverridePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
+                      <tr key={d.ym} style={{borderBottom:'1px solid var(--border)'}}>
                         <td style={{padding:'8px 12px',fontWeight:700}}>
                           {d.label}
                           {d.hasOverride && <span title="Override attivo" style={{marginLeft:6,fontSize:9,color:'var(--accent)'}}>✎</span>}
@@ -1687,7 +1685,9 @@ export default function ForecastPage() {
                         <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--green)',fontSize:12}}>
                           {fmtIT(Math.round(inc), 0)}
                         </td>
-                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
+                        <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12,cursor:'pointer'}}
+                          title="Clicca per modificare le spese di questo mese"
+                          onClick={()=>setOverridePopup({ granularity:'mensile', key:d.ym, label:d.label })}>
                           {fmtIT(Math.round(exp), 0)}
                         </td>
                         {mortgageOn && (
