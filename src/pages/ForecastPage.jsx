@@ -1035,7 +1035,11 @@ export default function ForecastPage() {
           // già lavora questo loop.
           simSaldo += (incThisYear - expThisYear - mortRata)
           let autoExtra = 0
-          if (extraRepayEnabled && extraRepayThreshold > 0) {
+          // mortMonthsElapsed === 0 → primo mese attivo del mutuo: nessuna
+          // estinzione automatica può scattare qui, anche se il saldo di
+          // QUESTO mese da solo supera già la soglia — vedi commento analogo
+          // nel loop mensile sopra.
+          if (extraRepayEnabled && extraRepayThreshold > 0 && mortMonthsElapsed > 0) {
             const surplus = simSaldo - extraBaseSaldo
             if (surplus >= extraRepayThreshold) {
               autoExtra = Math.floor(surplus / extraRepayThreshold) * extraRepayThreshold
@@ -1211,7 +1215,14 @@ export default function ForecastPage() {
         const saldoAfterMonth = saldo + (incThisMonth - expThisMonth - mortgageMonthly + bonusExtra)
         let autoExtra = 0
         let surplus   = 0
-        if (extraRepayEnabled && extraRepayThreshold > 0) {
+        // mortMonthsElapsed === 0 → questo È il primo mese attivo del mutuo:
+        // nessuna estinzione automatica può scattare qui, anche se il saldo di
+        // QUESTO mese da solo (es. un'entrata una tantum molto alta) supera già
+        // la soglia — richiesta esplicita dell'utente 2026-07-23. Il surplus
+        // resta comunque "in banca" nel saldo reale e verrà catturato al primo
+        // mese successivo idoneo, perché la base non si sposta finché non
+        // scatta davvero un'estinzione.
+        if (extraRepayEnabled && extraRepayThreshold > 0 && mortMonthsElapsed > 0) {
           surplus = saldoAfterMonth - extraBaseSaldo
           if (surplus >= extraRepayThreshold) {
             autoExtra = Math.floor(surplus / extraRepayThreshold) * extraRepayThreshold
