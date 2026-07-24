@@ -945,6 +945,25 @@ export default function ForecastPage() {
     return rows
   }, [transactions])
 
+  // Righe storiche nella vista Mensile (2026-07-24, richiesta utente) — stessi
+  // mesi selezionati nel month-picker di Teoriche > Spese (effectiveSpeseMonths,
+  // la stessa finestra usata per calcolare catStatsTeoriche), mostrati con lo
+  // stesso sfondo grigio delle righe storiche della vista Annuale, per capire
+  // a colpo d'occhio quali mesi alimentano la media Teoriche.
+  const monthlyHistoricalTableData = useMemo(() => {
+    const activeTxs = transactions.filter(t => !t.excluded)
+    const months = [...effectiveSpeseMonths].sort()
+    return months.map(ym => {
+      const inc = activeTxs.filter(t => t.amount > 0 && (t._effDate||t.date||'').startsWith(ym))
+        .reduce((s,t) => s+t.amount, 0)
+      const exp = Math.abs(activeTxs.filter(t => t.amount < 0 && (t._effDate||t.date||'').startsWith(ym))
+        .reduce((s,t) => s+t.amount, 0))
+      const saldo = activeTxs.filter(t => (t._effDate||t.date||'') <= `${ym}-31`)
+        .reduce((s,t) => s+t.amount, 0)
+      return { ym, label: ymToLabel(ym), inc: Math.round(inc), exp: Math.round(exp), saldo: Math.round(saldo) }
+    })
+  }, [transactions, effectiveSpeseMonths])
+
   // ── What If: saved per month from excluded cats ───────────
   const savedPerMonth = useMemo(() => {
     if (excludedCats.size === 0) return 0
@@ -2448,8 +2467,8 @@ export default function ForecastPage() {
                 <tr>
                   {[
                     projectionView === 'annuale' ? 'Anno' : 'Mese',
-                    projectionView === 'annuale' ? 'Entrate annue' : 'Entrate',
-                    projectionView === 'annuale' ? 'Spese annue' : 'Uscite',
+                    'Entrate',
+                    'Uscite',
                     mortgageOn ? (projectionView === 'annuale' ? 'Rata mutuo annua' : 'Rata mutuo') : null,
                     mortgageOn && mortgageAnticipo > 0 ? 'Anticipo' : null,
                     'Cash flow','Saldo previsto',
@@ -2470,7 +2489,7 @@ export default function ForecastPage() {
                   return (
                     <tr key={d.label} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
                       <td style={{padding:'8px 12px',fontWeight:700,color:'var(--text3)'}}>
-                        {d.label} <span style={{fontSize:9,fontWeight:500,background:'var(--border)',padding:'1px 5px',borderRadius:4,marginLeft:4}}>storico</span>
+                        {d.label}
                       </td>
                       <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: d.inc >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
                         {d.inc >= 0 ? '' : '−'}{fmtIT(Math.abs(d.inc), 0)}
@@ -2573,6 +2592,39 @@ export default function ForecastPage() {
                       </tr>
                     )
                   })}
+                {/* Storico reale — vista Mensile (2026-07-24, richiesta utente):
+                    stessi mesi selezionati nel month-picker di Teoriche > Spese
+                    (monthlyHistoricalTableData), stesso sfondo grigio delle righe
+                    storiche della vista Annuale, nessun testo "storico" (basta
+                    lo sfondo). Utile per vedere a colpo d'occhio quali mesi
+                    reali alimentano la media Teoriche. */}
+                {projectionView === 'mensile' && monthlyHistoricalTableData.map(d => {
+                  const cf = d.inc - d.exp
+                  return (
+                    <tr key={'hist-'+d.ym} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
+                      <td style={{padding:'8px 12px',fontWeight:700,color:'var(--text3)'}}>
+                        {d.label}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: d.inc >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
+                        {d.inc >= 0 ? '' : '−'}{fmtIT(Math.abs(d.inc), 0)}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color: d.exp > 0 ? 'var(--red)' : 'var(--green)',fontSize:12}}>
+                        {d.exp > 0 ? `−${fmtIT(d.exp, 0)}` : fmtIT(0, 0)}
+                      </td>
+                      {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                      {mortgageOn && mortgageAnticipo > 0 && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        color:cf>=0?'var(--green)':'var(--red)',fontWeight:700,fontSize:12}}>
+                        {cf>=0?'+':'−'}{fmtIT(Math.abs(cf), 0)}
+                      </td>
+                      <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
+                        fontWeight:700,color: d.saldo >= 0 ? 'var(--green)' : 'var(--red)',fontSize:12}}>
+                        {d.saldo >= 0 ? '' : '−'}{fmtIT(Math.abs(d.saldo), 0)}
+                      </td>
+                      {mortgageOn && <td style={{padding:'8px 12px',textAlign:'right',color:'var(--text3)',fontSize:12}}>—</td>}
+                    </tr>
+                  )
+                })}
                 {/* Forecast rows — vista Mensile: una riga per ogni mese proiettato.
                     Cliccabile per aprire il popup di override spese di quel mese —
                     richiesta utente 2026-07-23 */}
