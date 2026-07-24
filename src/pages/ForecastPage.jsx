@@ -542,6 +542,11 @@ export default function ForecastPage() {
   // richiesta utente 2026-07-20
   const forecastBasis = appPrefs?.forecastBasis || 'storico' // 'storico' | 'teoriche'
   function setForecastBasis(v) { setAppPref('forecastBasis', v) }
+  // Storico: media (default, storico) vs puntuale (2026-07-24, richiesta utente:
+  // ogni mese futuro usa come proxy lo STESSO mese reale di un anno fa, invece
+  // della media annua) — vedi expenseByMonthNum/incomeByMonthNum sotto.
+  const forecastStoricoMode = appPrefs?.forecastStoricoMode || 'media'
+  function setForecastStoricoMode(v) { setAppPref('forecastStoricoMode', v) }
   const [teoricheTab, setTeoricheTab] = useState('entrate') // 'entrate' | 'spese' (sub-tab locale)
   const [teoricheDetailPerson, setTeoricheDetailPerson] = useState(null) // 'Fra' | 'Sofi' | null — storico 12 mesi in tab Teoriche
   const [expandedTeoricheL1, setExpandedTeoricheL1] = useState(() => new Set()) // solo UI, quali L1 sono espansi in Teoriche > Spese
@@ -833,6 +838,21 @@ export default function ForecastPage() {
       expenseByMonth,
     }
   }, [transactions, customCats])
+
+  // Storico "puntuale" (2026-07-24) — mappa mese-del-calendario (1-12) -> totale
+  // reale dell'ultima occorrenza di quel mese (es. Set: quanto speso/incassato
+  // a settembre scorso), usata come proxy per ogni mese futuro con quello
+  // stesso numero, invece della media annua.
+  const expenseByMonthNum = useMemo(() => {
+    const map = {}
+    expenseByMonth.forEach(e => { map[parseInt(e.ym.split('-')[1], 10)] = e.total })
+    return map
+  }, [expenseByMonth])
+  const incomeByMonthNum = useMemo(() => {
+    const map = {}
+    incomeByMonth.forEach(e => { map[parseInt(e.ym.split('-')[1], 10)] = (e.fra||0) + (e.sofi||0) + (e.other||0) })
+    return map
+  }, [incomeByMonth])
 
   // Effective income avg excluding deselected months (base storico)
   const effectiveIncomeMths = incomeByMonth.filter(m => !excludedMonths.includes(m.ym))
@@ -1168,7 +1188,15 @@ export default function ForecastPage() {
       // traiettoria normale il mese dopo se l'override NON è a cascata.
       const ovM = overridesMonthly[ym]
       const preOverrideExp = exp
-      let expThisMonth = exp
+      // Storico "puntuale" (2026-07-24): il mese futuro usa come base il
+      // totale REALE dello stesso mese di calendario di un anno fa (invece
+      // della media annua), scalato per crescita/inflazione come la media.
+      // Un override manuale su questo mese specifico vince comunque su
+      // entrambe le modalità (controllo subito sotto, invariato).
+      const gfExp = Math.pow(iMonthly, m)
+      let expThisMonth = (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && expenseByMonthNum[d.getMonth()+1] != null)
+        ? (expenseByMonthNum[d.getMonth()+1] - savedPerMonth) * gfExp
+        : exp
       if (ovM) {
         const total = overrideTotal(ovM)
         if (total != null) expThisMonth = total
@@ -1177,7 +1205,11 @@ export default function ForecastPage() {
       // overrideIncomeParts/overridesEntrateMonthly sopra.
       const ovME = overridesEntrateMonthly[ym]
       const preOverrideInc = inc
-      let incThisMonth = inc
+      // Storico "puntuale" — vedi commento gemello sopra su expThisMonth.
+      const gfInc = Math.pow(gMonthly, m)
+      let incThisMonth = (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && incomeByMonthNum[d.getMonth()+1] != null)
+        ? incomeByMonthNum[d.getMonth()+1] * gfInc
+        : inc
       let incParts = null
       if (ovME) {
         incParts = overrideIncomeParts(ovME, teoricheFraVal, teoricheSofiVal)
@@ -1379,7 +1411,7 @@ export default function ForecastPage() {
       console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Proiezione ANNUALE, derivata dalla Mensile (2026-07-24, richiesta
   // esplicita dell'utente: "la tabella Annuale deve essere semplicemente la
@@ -1594,6 +1626,19 @@ export default function ForecastPage() {
             </div>
 
             {forecastBasis === 'storico' && (<>
+            {/* Media vs Puntuale (2026-07-24, richiesta utente) */}
+            <div style={{display:'flex',gap:4,background:'var(--surface2)',borderRadius:8,padding:3,marginBottom:12}}>
+              {[['media','Media (÷12)'],['puntuale','Puntuale (mese scorso)']].map(([v,l]) => (
+                <button key={v} onClick={()=>setForecastStoricoMode(v)}
+                  style={{flex:1,padding:'5px 8px',borderRadius:6,border:'none',cursor:'pointer',
+                    fontFamily:'var(--font-sans)',fontSize:11,fontWeight:700,
+                    background:forecastStoricoMode===v?'var(--surface)':'none',
+                    color:forecastStoricoMode===v?'var(--text)':'var(--text3)',
+                    boxShadow:forecastStoricoMode===v?'0 1px 4px rgba(0,0,0,.08)':'none',transition:'all .15s'}}>
+                  {l}
+                </button>
+              ))}
+            </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
               {/* Entrate — clickable */}
               <div onClick={()=>setDetailPopup(detailPopup==='income'?null:'income')}
