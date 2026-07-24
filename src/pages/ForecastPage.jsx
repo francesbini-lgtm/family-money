@@ -661,9 +661,18 @@ export default function ForecastPage() {
   // calcMortgagePayment dopo un rimborso extra). Vale sia per il rimborso
   // automatico che per quello manuale (stessa variabile, unica scelta).
   const extraRepayStrategy = mortgagePrefs.extraRepayStrategy ?? 'rata' // 'rata' | 'durata'
+  // Base di partenza manuale (2026-07-24, richiesta utente) — di default la
+  // base (extraBaseSaldo) viene catturata automaticamente dal saldo del mese
+  // in cui parte il mutuo (vedi extraBaseSaldo nei due loop sotto), ma quel
+  // valore può risultare artificialmente alto/basso se quel mese/anno include
+  // grossi movimenti one-off (es. erogazione capitale + spesa d'acquisto).
+  // L'utente può quindi impostare qui una base propria: se >0 viene usata al
+  // posto del valore auto-catturato. 0 (o vuoto) = comportamento automatico.
+  const extraRepayBaseOverride = mortgagePrefs.extraRepayBaseOverride ?? 0
   function setExtraRepayEnabled(v)   { patchMortgage({ extraRepayEnabled: v }) }
   function setExtraRepayThreshold(v) { patchMortgage({ extraRepayThreshold: v }) }
   function setExtraRepayStrategy(v)  { patchMortgage({ extraRepayStrategy: v }) }
+  function setExtraRepayBaseOverride(v) { patchMortgage({ extraRepayBaseOverride: v }) }
 
   // Rimborsi anticipati MANUALI puntuali (2026-07-23, richiesta utente: click
   // sulla colonna "Rata mutuo"/"Rata mutuo annua" in tabella Proiezione per
@@ -1255,7 +1264,10 @@ export default function ForecastPage() {
           // guard mortMonthsElapsed>0 (sotto) impedisce comunque che scatti
           // un extra proprio in questo primo mese/anno, quindi non c'è alcun
           // effetto collaterale nel catturare la base già "assestata".
-          if (extraBaseSaldo === null) extraBaseSaldo = simSaldo
+          // 2026-07-24: se l'utente ha impostato una base manuale
+          // (extraRepayBaseOverride > 0), questa vince sempre sul valore
+          // auto-catturato — vedi commento sopra su extraRepayBaseOverride.
+          if (extraBaseSaldo === null) extraBaseSaldo = extraRepayBaseOverride > 0 ? extraRepayBaseOverride : simSaldo
           let autoExtra = 0
           // mortMonthsElapsed === 0 → primo mese attivo del mutuo: nessuna
           // estinzione automatica può scattare qui, anche se il saldo di
@@ -1354,7 +1366,7 @@ export default function ForecastPage() {
       }
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, overridesMonthly, overridesEntrateMonthly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, overridesMonthly, overridesEntrateMonthly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
@@ -1495,7 +1507,10 @@ export default function ForecastPage() {
         // Il guard mortMonthsElapsed>0 (sotto) impedisce comunque che un
         // extra scatti proprio in questo primo mese, quindi non c'è alcun
         // effetto collaterale nel catturare la base già "assestata".
-        if (extraBaseSaldo === null) extraBaseSaldo = saldoAfterMonth
+        // 2026-07-24: se l'utente ha impostato una base manuale
+        // (extraRepayBaseOverride > 0), questa vince sempre sul valore
+        // auto-catturato — vedi commento su extraRepayBaseOverride più sopra.
+        if (extraBaseSaldo === null) extraBaseSaldo = extraRepayBaseOverride > 0 ? extraRepayBaseOverride : saldoAfterMonth
         let autoExtra = 0
         let surplus   = 0
         // mortMonthsElapsed === 0 → questo È il primo mese attivo del mutuo:
@@ -1623,7 +1638,7 @@ export default function ForecastPage() {
       console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
@@ -2220,6 +2235,8 @@ export default function ForecastPage() {
                   <div className="fc-mortgage-fields" style={{marginTop:8}}>
                     <MoneyField label="Soglia risparmio (€)" value={extraRepayThreshold} onChange={setExtraRepayThreshold}
                       placeholder="20.000" hint="Ogni volta che i risparmi cumulati raggiungono questa cifra, vengono versati come rimborso anticipato"/>
+                    <MoneyField label="Base risparmio (€)" value={extraRepayBaseOverride} onChange={setExtraRepayBaseOverride}
+                      placeholder="Automatica" hint="Punto di partenza da cui contare i risparmi. Lascia vuoto per usare automaticamente il saldo del mese in cui parte il mutuo — impostala a mano se quel mese ha movimenti one-off (es. erogazione capitale + spesa d'acquisto) che alterano il valore automatico"/>
                     <div>
                       <span className="form-lbl-sm">Cosa fare col rimborso</span>
                       <div style={{display:'flex', flexDirection:'column', gap:6, marginTop:2}}>
