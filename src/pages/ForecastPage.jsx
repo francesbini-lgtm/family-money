@@ -1201,6 +1201,27 @@ export default function ForecastPage() {
       // compensa, quest'ultima messa come override mensile).
       let hasAnyMonthlyExpOverride = false
       let hasAnyMonthlyIncOverride = false
+      // FIX 2026-07-24 (bug reale confermato dall'utente: "qualcosa non torna
+      // tra Annuale e Mensile", Rata Mutuo Annua/Debito Residuo completamente
+      // diversi dalla vista Mensile): questo blocco calcolava SOLO la media
+      // annua (expYearSum/incYearSum poi divisi per 12), che va benissimo per
+      // il totale Entrate/Spese annue (la somma è comunque corretta), ma il
+      // sotto-loop del mutuo qualche riga sotto usava quella STESSA media
+      // "spalmata" per OGNI mese dell'anno — quindi una spesa enorme e
+      // concentrata in 1-2 mesi (es. l'acquisto casa) veniva spalmata in
+      // piccole fette su tutti i 12 mesi, e il saldo simulato mese per mese
+      // (simSaldo) restava artificialmente alto invece di crollare nel mese
+      // giusto. Con una base "Rimborso anticipato" automatica questo era
+      // invisibile (la base veniva ri-catturata dallo stesso simSaldo
+      // spalmato, quindi l'errore si annullava), ma con la Base risparmio
+      // manuale (impostata a un valore assoluto reale) il simSaldo restava
+      // troppo alto rispetto alla base, scatenando un rimborso automatico
+      // enorme e sbagliato già al secondo mese dell'anno. Fix: salvare anche
+      // il valore ESATTO mese per mese (incByMonth/expByMonth) e usarlo nel
+      // sotto-loop sotto al posto della media, così l'Annuale ricostruisce
+      // esattamente la stessa sequenza mensile della vista Mensile.
+      const incByMonth = []
+      const expByMonth = []
       {
         let expYearSum = 0
         let incYearSum = 0
@@ -1217,6 +1238,7 @@ export default function ForecastPage() {
             if (t != null) expX = t
           }
           expYearSum += expX
+          expByMonth.push(expX)
 
           const ovMEX = overridesEntrateMonthly[ymX]
           let incX = inc
@@ -1227,6 +1249,7 @@ export default function ForecastPage() {
             incX = incParts.total
           }
           incYearSum += incX
+          incByMonth.push(incX)
 
           monthsElapsedFromNow++
         }
@@ -1247,10 +1270,12 @@ export default function ForecastPage() {
           const interest  = mortBalance * rMonthly
           const principal = Math.min(mortRata - interest, mortBalance)
           mortBalance = Math.max(0, mortBalance - principal)
-          // entrate/spese di quest'anno spalmate uniformemente sui mesi —
-          // approssimazione accettabile a livello annuale, coerente con come
-          // già lavora questo loop.
-          simSaldo += (incThisYear - expThisYear - mortRata)
+          // FIX 2026-07-24 — vedi commento sopra su incByMonth/expByMonth:
+          // usa il valore REALE di QUESTO specifico mese (mm), non la media
+          // annua spalmata, così simSaldo segue esattamente la stessa
+          // traiettoria mese per mese della vista Mensile (essenziale per la
+          // corretta tempistica del rimborso anticipato automatico/soglia).
+          simSaldo += (incByMonth[mm] - expByMonth[mm] - mortRata)
           // FIX 2026-07-24 (bug reale confermato dall'utente: il rimborso
           // anticipato automatico ha smesso di scattare del tutto dopo
           // l'aggiunta dell'erogazione capitale mutuo): la base va catturata
