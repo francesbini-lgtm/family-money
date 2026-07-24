@@ -1107,310 +1107,7 @@ export default function ForecastPage() {
     return mortgageStart > nowYM
   }, [mortgageStart])
 
-  const forecastData = useMemo(() => {
-    const now = new Date()
-    const pts = []
-    const monthsRemaining = 12 - now.getMonth() // getMonth() is 0-based, so July = 6, remaining = 6
-    const currentYearFraction = monthsRemaining / 12
-    let saldo = currentSaldo
-    let inc   = avgIncomeEffective
-    let exp   = effectiveExpense
-    let anticipoApplied = false
-    // Erogazione del capitale mutuo (2026-07-23, richiesta utente: il mese/anno
-    // in cui parte il mutuo deve mostrare anche l'importo POSITIVO del capitale
-    // erogato come ENTRATA — oltre alla rata/anticipo già gestiti). Evento
-    // one-off, separato dall'anticipo (che può anche essere 0): non entra mai
-    // nella base ricorrente `inc` che si inflaziona di anno in anno, solo nel
-    // saldo e nel campo "income" del punto in cui avviene.
-    let mortgageCapitalCredited = false
-
-    // Stato dinamico del mutuo (2026-07-23, richiesta utente: rimborsi
-    // anticipati automatici "ogni X risparmiati" + estinzioni manuali puntuali
-    // — vedi extraRepayEnabled/mortgageExtraYearly sopra). Simulato mese per
-    // mese DENTRO il loop annuale (per interessi composti corretti) ma esposto
-    // solo a livello di anno nei punti restituiti.
-    const durationMonths = mortgage ? Math.min(mortgageYears, years + 30) * 12 : 0
-    let mortBalance = (mortgageOn && mortgage) ? mortgageAmt : 0
-    let mortRata     = (mortgageOn && mortgage) ? mortgage.rata : 0
-    // Rimborso anticipato automatico — vedi commento analogo nel loop mensile
-    // sotto: si traccia il SALDO vero (stimato mese per mese anche qui, per
-    // interessi/soglia corretti), non un contatore di risparmi separato.
-    // `simSaldo` segue lo stesso percorso del vero `saldo` annuale ma a grana
-    // mensile (necessaria per sapere ESATTAMENTE quando si supera la soglia).
-    let extraBaseSaldo = null
-    let simSaldo = currentSaldo
-    let mortMonthsElapsed  = 0
-    // Mesi trascorsi sul piano di ammortamento NOMINALE (rata fissa, nessun
-    // extra) — 2026-07-23, richiesta utente: mostrare in chart/KPI ANCHE il
-    // mutuo "originale" per confronto quando il rimborso anticipato
-    // automatico è attivo. Avanza SEMPRE (indipendentemente da mortBalance
-    // reale/mortgageActive) così non si blocca se il mutuo vero si estingue
-    // in anticipo — il piano nominale continua ad ammortizzarsi per conto suo.
-    let nominalMonthsElapsed = 0
-    // Contatore mesi reali trascorsi da "oggi" (2026-07-24, fix bug reale
-    // segnalato dall'utente: un override MENSILE enorme fatto dal popup
-    // "Modifica spese" in vista Mensile — es. il prezzo di una casa pagata
-    // con l'erogazione del mutuo — non veniva MAI visto da questo loop
-    // annuale, che leggeva solo overridesYearly. Risultato: il grafico
-    // "Andamento Saldo"/tabella Annuale mostravano un Forecast completamente
-    // sballato (saldo gonfiato dall'erogazione capitale senza la spesa che la
-    // compensa). Serve per calcolare la ym esatta di ogni mese dell'anno e
-    // controllare anche overridesMonthly/overridesEntrateMonthly sotto.
-    let monthsElapsedFromNow = 0
-
-    for (let y = 0; y <= years; y++) {
-      const year = now.getFullYear() + y
-      // Override puntuale su questo anno (solo Spese) — vedi overrideTotal/
-      // overridesYearly sopra. preOverrideExp serve a "far ripartire" la
-      // traiettoria normale l'anno dopo se l'override NON è a cascata (vale
-      // solo per questo anno specifico, non altera il futuro).
-      const ovY = overridesYearly[String(year)]
-      const preOverrideExp = exp
-      let expThisYear = exp
-      if (ovY) {
-        const total = overrideTotal(ovY)
-        if (total != null) expThisYear = total
-      }
-      // Override puntuale ENTRATE su questo anno (2026-07-23) — vedi
-      // overrideIncomeParts/overridesEntrateYearly sopra. Fra/Sofi hanno un
-      // cascade, "Altro" ne ha uno separato scelto dall'utente.
-      const ovYE = overridesEntrateYearly[String(year)]
-      const preOverrideInc = inc
-      let incThisYear = inc
-      let incParts = null
-      if (ovYE) {
-        incParts = overrideIncomeParts(ovYE, teoricheFraVal, teoricheSofiVal)
-        incThisYear = incParts.total
-      }
-      const mortgageActive  = mortgageOn && mortgage && year >= mortgageStartYear && mortBalance > 0
-      const rataAtYearStart = mortRata
-      // Deduct the anticipo (down payment) only in the year the mortgage actually starts,
-      // not unconditionally in year 0
-      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageNotYetStarted && year >= mortgageStartYear) {
-        saldo -= mortgageAnticipo
-        simSaldo -= mortgageAnticipo
-        anticipoApplied = true
-      }
-      // Erogazione capitale mutuo — stesso anno di inizio, indipendente
-      // dall'anticipo (scatta anche se l'anticipo è 0).
-      let mortgageCapitalThisYear = 0
-      if (mortgageOn && mortgage && !mortgageCapitalCredited && mortgageNotYetStarted && year >= mortgageStartYear) {
-        mortgageCapitalThisYear = mortgageAmt
-        saldo += mortgageCapitalThisYear
-        simSaldo += mortgageCapitalThisYear
-        mortgageCapitalCredited = true
-      }
-      // Year 0: only count the fraction of the year that remains
-      const yearFraction = y === 0 ? currentYearFraction : 1
-      const monthsThisYearAll = y === 0 ? monthsRemaining : 12
-
-      // FIX 2026-07-24: ricalcola expThisYear/incThisYear sommando i valori
-      // REALI mese per mese di quest'anno (leggendo overridesMonthly/
-      // overridesEntrateMonthly per la ym esatta, con fallback all'override
-      // annuale ovY/ovYE se il mese non ne ha uno proprio, altrimenti il
-      // tasso ricorrente normale) — poi si ridivide per il numero di mesi per
-      // ottenere di nuovo un tasso MENSILE (coerente con come "income"/
-      // "expense" vengono mostrati in tabella, sempre moltiplicati per 12).
-      // Senza questo fix, un override mensile (es. il prezzo di una casa,
-      // impostato dal popup di Modifica Spese in vista Mensile) restava
-      // invisibile a questo loop annuale, facendo divergere vistosamente il
-      // Forecast annuale/grafico da quello mensile (bug reale confermato
-      // dall'utente: saldo previsto "vola altissimo" perché vedeva
-      // l'erogazione capitale mutuo ma non la spesa di acquisto che la
-      // compensa, quest'ultima messa come override mensile).
-      let hasAnyMonthlyExpOverride = false
-      let hasAnyMonthlyIncOverride = false
-      // FIX 2026-07-24 (bug reale confermato dall'utente: "qualcosa non torna
-      // tra Annuale e Mensile", Rata Mutuo Annua/Debito Residuo completamente
-      // diversi dalla vista Mensile): questo blocco calcolava SOLO la media
-      // annua (expYearSum/incYearSum poi divisi per 12), che va benissimo per
-      // il totale Entrate/Spese annue (la somma è comunque corretta), ma il
-      // sotto-loop del mutuo qualche riga sotto usava quella STESSA media
-      // "spalmata" per OGNI mese dell'anno — quindi una spesa enorme e
-      // concentrata in 1-2 mesi (es. l'acquisto casa) veniva spalmata in
-      // piccole fette su tutti i 12 mesi, e il saldo simulato mese per mese
-      // (simSaldo) restava artificialmente alto invece di crollare nel mese
-      // giusto. Con una base "Rimborso anticipato" automatica questo era
-      // invisibile (la base veniva ri-catturata dallo stesso simSaldo
-      // spalmato, quindi l'errore si annullava), ma con la Base risparmio
-      // manuale (impostata a un valore assoluto reale) il simSaldo restava
-      // troppo alto rispetto alla base, scatenando un rimborso automatico
-      // enorme e sbagliato già al secondo mese dell'anno. Fix: salvare anche
-      // il valore ESATTO mese per mese (incByMonth/expByMonth) e usarlo nel
-      // sotto-loop sotto al posto della media, così l'Annuale ricostruisce
-      // esattamente la stessa sequenza mensile della vista Mensile.
-      const incByMonth = []
-      const expByMonth = []
-      {
-        let expYearSum = 0
-        let incYearSum = 0
-        for (let mm2 = 0; mm2 < monthsThisYearAll; mm2++) {
-          const dmm = new Date(now.getFullYear(), now.getMonth() + monthsElapsedFromNow, 1)
-          const ymX = `${dmm.getFullYear()}-${String(dmm.getMonth()+1).padStart(2,'0')}`
-          const ovMX = overridesMonthly[ymX]
-          let expX = exp
-          if (ovMX) {
-            const t = overrideTotal(ovMX)
-            if (t != null) { expX = t; hasAnyMonthlyExpOverride = true }
-          } else if (ovY) {
-            const t = overrideTotal(ovY)
-            if (t != null) expX = t
-          }
-          expYearSum += expX
-          expByMonth.push(expX)
-
-          const ovMEX = overridesEntrateMonthly[ymX]
-          let incX = inc
-          if (ovMEX) {
-            incX = overrideIncomeParts(ovMEX, teoricheFraVal, teoricheSofiVal).total
-            hasAnyMonthlyIncOverride = true
-          } else if (ovYE) {
-            incX = incParts.total
-          }
-          incYearSum += incX
-          incByMonth.push(incX)
-
-          monthsElapsedFromNow++
-        }
-        expThisYear = expYearSum / monthsThisYearAll
-        incThisYear = incYearSum / monthsThisYearAll
-      }
-
-      // Simulazione mensile del mutuo per QUESTO anno (rimborsi anticipati
-      // automatici + manuale una tantum sull'anno) — vedi commento sopra sul
-      // perché serve un sotto-loop mensile anche nella vista annuale.
-      let yearExtra = 0
-      if (mortgageActive) {
-        const monthsThisYear = monthsThisYearAll
-        const rMonthly = mortgageTaeg / 100 / 12
-        const manualExtraThisYear = mortgageExtraYearly[String(year)] || 0
-        let manualApplied = false
-        for (let mm = 0; mm < monthsThisYear && mortBalance > 0; mm++) {
-          const interest  = mortBalance * rMonthly
-          const principal = Math.min(mortRata - interest, mortBalance)
-          mortBalance = Math.max(0, mortBalance - principal)
-          // FIX 2026-07-24 — vedi commento sopra su incByMonth/expByMonth:
-          // usa il valore REALE di QUESTO specifico mese (mm), non la media
-          // annua spalmata, così simSaldo segue esattamente la stessa
-          // traiettoria mese per mese della vista Mensile (essenziale per la
-          // corretta tempistica del rimborso anticipato automatico/soglia).
-          simSaldo += (incByMonth[mm] - expByMonth[mm] - mortRata)
-          // FIX 2026-07-24 (bug reale confermato dall'utente: il rimborso
-          // anticipato automatico ha smesso di scattare del tutto dopo
-          // l'aggiunta dell'erogazione capitale mutuo): la base va catturata
-          // DOPO i flussi di questo mese/anno (qui: dopo aver sommato
-          // incThisYear-expThisYear-mortRata), non prima. Prima di questo fix,
-          // se il mese/anno di partenza del mutuo include SIA l'erogazione
-          // del capitale (+) SIA una spesa di pari importo per l'acquisto (-,
-          // impostata dall'utente), la base veniva catturata TRA le due (dopo
-          // il + ma prima del -), restando artificialmente troppo alta per
-          // sempre — nessun risparmio futuro reale poteva mai superarla. Il
-          // guard mortMonthsElapsed>0 (sotto) impedisce comunque che scatti
-          // un extra proprio in questo primo mese/anno, quindi non c'è alcun
-          // effetto collaterale nel catturare la base già "assestata".
-          // 2026-07-24: se l'utente ha impostato una base manuale
-          // (extraRepayBaseOverride > 0), questa vince sempre sul valore
-          // auto-catturato — vedi commento sopra su extraRepayBaseOverride.
-          if (extraBaseSaldo === null) extraBaseSaldo = extraRepayBaseOverride > 0 ? extraRepayBaseOverride : simSaldo
-          let autoExtra = 0
-          // mortMonthsElapsed === 0 → primo mese attivo del mutuo: nessuna
-          // estinzione automatica può scattare qui, anche se il saldo di
-          // QUESTO mese da solo supera già la soglia — vedi commento analogo
-          // nel loop mensile sopra.
-          if (extraRepayEnabled && extraRepayThreshold > 0 && mortMonthsElapsed > 0) {
-            const surplus = simSaldo - extraBaseSaldo
-            if (surplus >= extraRepayThreshold) {
-              autoExtra = Math.floor(surplus / extraRepayThreshold) * extraRepayThreshold
-            }
-          }
-          // Il rimborso manuale annuale viene versato una sola volta, nell'ultimo
-          // mese processato di quell'anno (semplificazione: lump sum di fine anno).
-          const manualExtra = (!manualApplied && mm === monthsThisYear - 1) ? manualExtraThisYear : 0
-          if (manualExtra > 0) manualApplied = true
-          const totalExtra = Math.min(autoExtra + manualExtra, mortBalance)
-          // FIX 2026-07-23 — vedi commento analogo nel loop mensile: la base va
-          // resettata al saldo VERO rimasto dopo l'estinzione (simSaldo dopo la
-          // sottrazione), non spostata in avanti di "totalExtra" (avrebbe
-          // ritardato il trigger successivo oltre il dovuto).
-          if (totalExtra > 0) { simSaldo -= totalExtra; extraBaseSaldo = simSaldo }
-          mortBalance = Math.max(0, mortBalance - totalExtra)
-          yearExtra += totalExtra
-          const remainingMonths = durationMonths - (mortMonthsElapsed + 1)
-          if (totalExtra > 0 && mortBalance > 0 && remainingMonths > 0) {
-            // 'rata' → ricalcola (stessa scadenza, rata più bassa da qui in poi);
-            // 'durata' → rata invariata, il capitale minore si estingue da solo
-            // prima (nessun ricalcolo necessario).
-            if (extraRepayStrategy === 'rata') {
-              mortRata = calcMortgagePayment(mortBalance, mortgageTaeg, remainingMonths)
-            }
-          } else if (mortBalance <= 0) {
-            mortRata = 0
-          }
-          mortMonthsElapsed++
-        }
-      }
-
-      saldo += (incThisYear - expThisYear - rataAtYearStart) * 12 * yearFraction - yearExtra
-
-      const residual = mortgageOn && mortgage && year >= mortgageStartYear ? mortBalance : null
-
-      // Residuo NOMINALE (piano di ammortamento originale, rata fissa, nessun
-      // extra) allo stesso punto nel tempo — 2026-07-23, vedi commento su
-      // nominalMonthsElapsed sopra.
-      let residualNominal = null
-      if (mortgageOn && mortgage && year >= mortgageStartYear) {
-        nominalMonthsElapsed = Math.min(nominalMonthsElapsed + monthsThisYearAll, durationMonths)
-        const idx = nominalMonthsElapsed - 1
-        residualNominal = (idx >= 0 && idx < mortgage.monthlyResiduals.length) ? mortgage.monthlyResiduals[idx] : 0
-      }
-
-      pts.push({
-        label:    String(year),
-        forecast: Math.round(saldo),
-        residual: residual !== null ? Math.round(residual) : undefined,
-        residualNominal: residualNominal !== null ? Math.round(residualNominal) : undefined,
-        // Entrate/Spese effettive di QUESTO anno (con eventuale override già
-        // applicato) — usate dalla tabella "Proiezione Annuale" invece di
-        // ricalcolare con una formula approssimata separata. ATTENZIONE:
-        // "income" qui è un tasso MENSILE (la tabella lo moltiplica per 12 in
-        // rendering) — l'erogazione capitale mutuo è invece un importo ANNUO
-        // già assoluto (one-off), va tenuta in un campo separato (mortgageCapital,
-        // sullo stesso modello di mortgageExtra) e sommata DOPO la
-        // moltiplicazione per 12 lato rendering, altrimenti verrebbe
-        // amplificata per errore di un fattore 12 (2026-07-23).
-        income:  Math.round(incThisYear),
-        mortgageCapital: Math.round(mortgageCapitalThisYear),
-        expense: Math.round(expThisYear),
-        // 2026-07-24: evidenzia la cella in tabella anche se l'override che
-        // ha determinato il valore è mensile (non solo annuale) — coerente
-        // col fix sopra che ora legge anche overridesMonthly/Entrate.
-        hasOverride: !!ovY || hasAnyMonthlyExpOverride,
-        hasIncomeOverride: !!ovYE || hasAnyMonthlyIncOverride,
-        // Rata/estinzione anticipata di QUESTO anno (2026-07-23) — usate dalla
-        // tabella "Proiezione Annuale" invece della rata statica mortgage.rata.
-        mortgageRata:  mortgageActive ? Math.round(rataAtYearStart * 12) : 0,
-        mortgageExtra: Math.round(yearExtra),
-        hasMortgageExtra: !!(mortgageExtraYearly[String(year)]),
-      })
-
-      if (ovYE) {
-        // Cascata separata per Fra/Sofi (base) e per "Altro" — vedi commento
-        // sopra su overridesEntrateYearly.
-        inc = ((incParts.cascade ? incParts.base : preOverrideInc) + (incParts.altroCascade ? incParts.altro : 0)) * (1 + growth / 100)
-      } else {
-        inc *= (1 + growth / 100)
-      }
-      if (ovY && overrideTotal(ovY) != null) {
-        // Cascata → il valore di questo anno diventa la nuova base che continua
-        // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
-        // arrivati (l'anno "blip" non lascia traccia sul futuro).
-        exp = (ovY.cascade ? expThisYear : preOverrideExp) * (1 + inflation / 100)
-      } else {
-        exp *= (1 + inflation / 100)
-      }
-    }
-    return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStartYear, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraYearly, overridesYearly, overridesEntrateYearly, overridesMonthly, overridesEntrateMonthly, teoricheFraVal, teoricheSofiVal, catStats, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
+  // (rimosso 2026-07-24: vedi forecastDataAnnual dopo forecastDataMonthly)
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
   // scegliere fra proiezione annuale o mensile nella tabella "Proiezione") —
@@ -1684,6 +1381,58 @@ export default function ForecastPage() {
     return pts
   }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
+  // ── Proiezione ANNUALE, derivata dalla Mensile (2026-07-24, richiesta
+  // esplicita dell'utente: "la tabella Annuale deve essere semplicemente la
+  // somma della Mensile" — prima erano due simulazioni separate mantenute a
+  // mano, che sono divergite ripetutamente nella stessa giornata: prima il
+  // loop annuale ignorava gli override mensili (fix 4f7dcf2), poi il suo
+  // sotto-loop del mutuo spalmava la media annua invece dei valori mensili
+  // reali (fix incByMonth/expByMonth), e comunque non gestiva MAI la
+  // 13ª/14ª mensilità (bonusExtra, presente solo nel loop mensile). Anziché
+  // rincorrere l'ennesima divergenza, l'Annuale ora si limita ad aggregare
+  // per anno solare i punti già calcolati (e già corretti) da
+  // forecastDataMonthly — stessa fonte di verità, zero possibilità di
+  // scollamento futuro. Vedi memoria [[fmt-annual-monthly-loop-divergence-pattern]].
+  const forecastDataAnnual = useMemo(() => {
+    const byYear = new Map()
+    forecastDataMonthly.forEach(d => {
+      const y = d.ym.slice(0, 4)
+      if (!byYear.has(y)) byYear.set(y, [])
+      byYear.get(y).push(d)
+    })
+    const yearsSorted = [...byYear.keys()].sort()
+    return yearsSorted.map(y => {
+      const months = byYear.get(y)
+      const n = months.length
+      // income mensile del punto include già l'eventuale erogazione capitale
+      // mutuo (mortgageCapital) sommata dentro — va tolta prima di fare la
+      // media, per riesporla separata (stessa convenzione della vecchia
+      // simulazione annuale: "income" = solo tasso ricorrente, mortgageCapital
+      // = evento one-off a parte, sommato dal rendering dopo il ×12).
+      const incSumExclCapital = months.reduce((s, d) => s + (d.income || 0) - (d.mortgageCapital || 0), 0)
+      const expSum            = months.reduce((s, d) => s + (d.expense || 0), 0)
+      const mortgageRataSum   = months.reduce((s, d) => s + (d.mortgageRata || 0), 0)
+      const mortgageExtraSum  = months.reduce((s, d) => s + (d.mortgageExtra || 0), 0)
+      const mortgageCapitalSum = months.reduce((s, d) => s + (d.mortgageCapital || 0), 0)
+      const hasOverride       = months.some(d => d.hasOverride)
+      const hasIncomeOverride = months.some(d => d.hasIncomeOverride)
+      const last = months[months.length - 1]
+      return {
+        label: y,
+        income: incSumExclCapital / n,
+        expense: expSum / n,
+        mortgageRata: mortgageRataSum,
+        mortgageExtra: mortgageExtraSum,
+        mortgageCapital: mortgageCapitalSum,
+        hasOverride,
+        hasIncomeOverride,
+        forecast: last.forecast,
+        residual: last.residual,
+        residualNominal: last.residualNominal,
+      }
+    })
+  }, [forecastDataMonthly])
+
   // ── Combined chart data ───────────────────────────────────
   const chartData = useMemo(() => {
     // Use yearly historical when forecast horizon > 1 year (for label coherence)
@@ -1699,7 +1448,7 @@ export default function ForecastPage() {
     if (histPts.length > 0) {
       histPts[histPts.length - 1].forecast = histPts[histPts.length - 1].historical
     }
-    const fcPts = forecastData.map(d => ({
+    const fcPts = forecastDataAnnual.map(d => ({
       label:      d.label,
       historical: null,
       forecast:   d.forecast,
@@ -1711,14 +1460,14 @@ export default function ForecastPage() {
       residualNominal: d.residualNominal ?? null,
     }))
     return [...histPts, ...fcPts]
-  }, [historicalPoints, historicalYearPoints, forecastData, years])
+  }, [historicalPoints, historicalYearPoints, forecastDataAnnual, years])
 
-  const finalPoint    = forecastData[forecastData.length - 1]
+  const finalPoint    = forecastDataAnnual[forecastDataAnnual.length - 1]
   const finalSaldo    = finalPoint?.forecast || 0
   const finalResidual = finalPoint?.residual || 0
 
   const breakeven = mortgage
-    ? forecastData.findIndex(d => (d.residual ?? Infinity) <= d.forecast)
+    ? forecastDataAnnual.findIndex(d => (d.residual ?? Infinity) <= d.forecast)
     : -1
 
   // ── KPI dedicati al mutuo (2026-07-23, richiesta utente: quando il mutuo è
@@ -1739,10 +1488,10 @@ export default function ForecastPage() {
     // "a inizio anno" che non è disponibile per mutui già in corso da prima.
     const repaidThisYear = monthsThisYear.reduce((s, d) => s + (d.mortgageRata || 0) + (d.mortgageExtra || 0), 0)
     const totalExtraForecast = forecastDataMonthly.reduce((s, d) => s + (d.mortgageExtra || 0), 0)
-    const payoffPoint = forecastData.find(d => d.residual === 0)
+    const payoffPoint = forecastDataAnnual.find(d => d.residual === 0)
     // Anno di estinzione sul piano ORIGINALE (nominale, nessun extra) — per
     // confronto quando il rimborso anticipato automatico è attivo (2026-07-23).
-    const payoffPointNominal = forecastData.find(d => d.residualNominal === 0)
+    const payoffPointNominal = forecastDataAnnual.find(d => d.residualNominal === 0)
     const payoffYearFallback = mortgageStart ? String(parseInt(mortgageStart.split('-')[0],10) + mortgageYears) : '—'
     // Quota capitale/interessi (2026-07-23, nuovi KPI): valore ORIGINALE
     // (piano nominale, rata fissa) come principale, valore EFFETTIVO (con
@@ -1763,7 +1512,7 @@ export default function ForecastPage() {
       quotaCapitaleActual: Math.round(quotaCapitaleActual),
       quotaInteressiActual: Math.round(quotaInteressiActual),
     }
-  }, [mortgageOn, mortgage, forecastDataMonthly, forecastData, mortgageAmt, mortgageStart, mortgageYears])
+  }, [mortgageOn, mortgage, forecastDataMonthly, forecastDataAnnual, mortgageAmt, mortgageStart, mortgageYears])
 
   // ── Fondo Cecilia: andamento saldo (versamenti cumulati nel tempo) ──
   const ceciliaFund = (ceciliaGoals || []).find(g => (g.name || '').toLowerCase().includes('cecilia'))
@@ -2514,7 +2263,7 @@ export default function ForecastPage() {
                 {/* Forecast rows — vista Annuale: una riga per ogni anno, nessun anno saltato.
                     Cliccabile per aprire il popup di override spese di quell'anno — richiesta
                     utente 2026-07-23 */}
-                {projectionView === 'annuale' && forecastData
+                {projectionView === 'annuale' && forecastDataAnnual
                   .map((d) => {
                     const year = parseInt(d.label)
                     const inc = d.income
