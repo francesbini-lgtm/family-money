@@ -2406,8 +2406,8 @@ export default function ForecastPage() {
                 <tr>
                   {[
                     projectionView === 'annuale' ? 'Anno' : 'Mese',
-                    projectionView === 'annuale' ? 'Entrate annue' : 'Entrate mensili',
-                    projectionView === 'annuale' ? 'Spese annue' : 'Spese mensili',
+                    projectionView === 'annuale' ? 'Entrate annue' : 'Entrate',
+                    projectionView === 'annuale' ? 'Spese annue' : 'Uscite',
                     mortgageOn ? (projectionView === 'annuale' ? 'Rata mutuo annua' : 'Rata mutuo') : null,
                     mortgageOn && mortgageAnticipo > 0 ? 'Anticipo' : null,
                     'Cash flow','Saldo previsto',
