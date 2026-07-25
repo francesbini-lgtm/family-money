@@ -335,40 +335,13 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
       getAeLinksArray(allLinks[linkKey]).map(l => l.expTxId)
     )
 
-    // Scoring function: higher = better suggestion
-    function scoreMatch(t) {
-      let score = 0
-      const absT   = Math.abs(t.amount)
-      const absInc = incomeEntry.amount || 0
-      const diff   = Math.abs(absT - absInc)
-
-      // Amount similarity
-      if (diff < 0.01)  score += 100  // exact match
-      else if (diff < 1)  score += 80   // within €1
-      else if (diff < 2)  score += 60   // within €2
-      else if (diff < 5)  score += 40   // within €5
-      else if (diff < 10) score += 20   // within €10
-
-      // Date proximity
-      const tDate   = new Date(t._effDate || t.date || 0).getTime()
-      const incDate = new Date(incomeEntry._effDate || incomeEntry.date || 0).getTime()
-      const daysDiff = Math.abs(tDate - incDate) / 86400000
-      if (daysDiff < 1)       score += 50
-      else if (daysDiff < 7)  score += 35
-      else if (daysDiff < 14) score += 20
-      else if (daysDiff < 30) score += 10
-
-      // Description word overlap
-      const incWords = new Set(
-        (incomeEntry.descAI || incomeEntry.desc || incomeEntry.description || '')
-          .toLowerCase().split(/\W+/).filter(w => w.length > 3)
-      )
-      const tWords = (t.descAI || t.description || t.merchant || '')
-        .toLowerCase().split(/\W+/).filter(w => w.length > 3)
-      const overlap = tWords.filter(w => incWords.has(w)).length
-      score += overlap * 15
-
-      return score
+    // Match = importo IDENTICO al residuo da compensare (richiesta utente
+    // 2026-07-25: prima "isFull" segnava ✅ qualunque spesa <= residuo, anche
+    // importi molto diversi — ora il flag verde è riservato solo alle spese
+    // con lo STESSO importo esatto, che vengono sempre mostrate per prime
+    // (anche se non sono le più recenti); il resto resta in ordine di data.
+    function isExactAmountMatch(t) {
+      return Math.abs(Math.abs(t.amount) - availableForComp) < 0.01
     }
 
     return transactions
@@ -381,13 +354,12 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
         if (availableAmount(t) <= 0.005) return false
         return t.amount < 0  // only expenses (negative transactions)
       })
-      .map(t => ({ t, score: scoreMatch(t) }))
+      .map(t => ({ ...t, _exactMatch: isExactAmountMatch(t) }))
       .sort((a, b) => {
-        // Primary: score desc; secondary: date desc
-        if (b.score !== a.score) return b.score - a.score
-        return (b.t._effDate||b.t.date||'').localeCompare(a.t._effDate||a.t.date||'')
+        // Primary: match esatto sempre in cima; secondary: data desc
+        if (a._exactMatch !== b._exactMatch) return a._exactMatch ? -1 : 1
+        return (b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')
       })
-      .map(({ t, score }) => ({ ...t, _matchScore: score }))
   }, [transactions, incomeEntry, availableForComp])
 
   const filtered = eligible.filter(t => {
@@ -497,13 +469,14 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                   {filtered.slice(0,80).map((t, idx) => {
                     const absAmt = availableAmount(t)
                     const isSel  = selected?.txId === t.txId
-                    const isFull = absAmt <= availableForComp
-                    const score  = t._matchScore || 0
-                    // Show "suggerito" badge on high-score items (top of list, score >= 40)
-                    const isSuggested = score >= 40
-                    // Show separator between suggested and rest
-                    const prevScore = idx > 0 ? (filtered[idx-1]._matchScore||0) : score
-                    const showSep = idx > 0 && isSuggested !== (prevScore >= 40)
+                    // Match verde SOLO per importo esattamente identico al residuo
+                    // da compensare (richiesta utente 2026-07-25) — non più "spesa
+                    // coperta dal residuo" (quel calcolo restava vero per qualunque
+                    // spesa più piccola, mostrando ✅ anche su importi diversi).
+                    const isSuggested = !!t._exactMatch
+                    // Show separator between exact-match group and the rest
+                    const prevExact = idx > 0 ? !!filtered[idx-1]._exactMatch : isSuggested
+                    const showSep = idx > 0 && isSuggested !== prevExact
                     return (
                       <>
                         {showSep && (
@@ -532,7 +505,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                             {t.amount>0?'+':'−'}€ {absAmt.toLocaleString('it-IT',{minimumFractionDigits:2})}
                           </td>
                           <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>
-                            {isFull ? '✅' : '⚠️'}
+                            {isSuggested ? '✅' : ''}
                           </td>
                         </tr>
                       </>
@@ -975,7 +948,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Codice Transazione','Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','Compensato','Esclusa','💬','Note',''].map(h=>(
+              {['COD','Data','Fonte','Descrizione','Cat L2','Compensa costo','Importo','Residuo','Compensato','Esclusa','💬','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr></thead>
@@ -1016,18 +989,6 @@ export default function AltreEntratePage() {
                         {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
                         {e.excluded&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4}}>Esclusa</span>}
                       </div>
-                    </td>
-                    <td style={{padding:'9px 14px',maxWidth:180}}>
-                      {(() => {
-                        const causale = extractCausale(e.description)
-                        return causale ? (
-                          <span style={{fontSize:11,color:'var(--text2)',overflow:'hidden',
-                            textOverflow:'ellipsis',display:'block',whiteSpace:'nowrap'}}
-                            title={causale}>
-                            {causale}
-                          </span>
-                        ) : <span style={{color:'var(--text3)',fontSize:11}}>—</span>
-                      })()}
                     </td>
                     <td style={{padding:'9px 14px'}}>
                       <AeCat2Cell entry={e} updateTransaction={updateTransaction} customCats={customCats}/>
