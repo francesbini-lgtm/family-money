@@ -975,7 +975,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Codice Transazione','Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','💬','Note',''].map(h=>(
+              {['Codice Transazione','Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','Esclusa','💬','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr></thead>
@@ -1093,6 +1093,18 @@ export default function AltreEntratePage() {
                             )}
                           </div>
                         )
+                      })()}
+                    </td>
+                    <td style={{padding:'6px 10px',textAlign:'center'}}>
+                      {(() => {
+                        // Verifica live nel DB transazioni (2026-07-24, richiesta utente):
+                        // 'transactions' è già reattivo dallo store, quindi questo controllo
+                        // viene ripetuto ad ogni apertura/render della pagina, non è un valore
+                        // cacheato — se l'esclusione cambia altrove, qui si aggiorna da sola.
+                        const tx = transactions.find(t => t.txId === e.txId || t.id === e.id)
+                        return tx?.excluded
+                          ? <span style={{fontSize:10,padding:'1px 6px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4,fontWeight:700}}>Esclusa</span>
+                          : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>
                       })()}
                     </td>
                     <td style={{padding:'6px 10px',textAlign:'center'}}>
