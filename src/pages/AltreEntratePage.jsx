@@ -341,7 +341,12 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
     // con lo STESSO importo esatto, che vengono sempre mostrate per prime
     // (anche se non sono le più recenti); il resto resta in ordine di data.
     function isExactAmountMatch(t) {
-      return Math.abs(Math.abs(t.amount) - availableForComp) < 0.01
+      // availableAmount(t), non Math.abs(t.amount): una spesa può avere importo
+      // lordo diverso da 80 ma un residuo disponibile di 80 (già parzialmente
+      // compensata altrove) — o viceversa, lordo 80 ma residuo minore. Il match
+      // deve confrontare la stessa cosa che viene poi davvero usata/mostrata
+      // in tabella (absAmt = availableAmount(t)) e in confirm() (absExp).
+      return Math.abs(availableAmount(t) - availableForComp) < 0.01
     }
 
     return transactions
