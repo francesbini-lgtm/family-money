@@ -1157,7 +1157,7 @@ function ExcludedTab() {
         <div className="card" style={{padding:0,overflow:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse',minWidth:1180}}>
             <thead><tr>
-              {['Data','Descrizione','Importo','Categoria','Escluso il','Da chi','Tipo',''].map(h=>(
+              {['Data','Codice Transazione','Descrizione','Importo','Categoria','Escluso il','Da chi','Tipo',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',minWidth:h===''?120:undefined}}>{h}</th>
               ))}
             </tr></thead>
@@ -1165,6 +1165,7 @@ function ExcludedTab() {
               {excluded.map(t=>(
                 <tr key={t.txId} style={{borderBottom:'1px solid var(--border)',opacity:.7}}>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                  <td style={{padding:'9px 14px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{t.txId||'—'}</td>
                   <td style={{padding:'9px 14px',fontSize:13}}>{t.descAI||(t.description||'').slice(0,45)}</td>
                   <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',color:'var(--text3)',whiteSpace:'nowrap'}}>€ {fmtIT(Math.abs(t.amount), 2)}</td>
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)'}}>{t.cat1||'—'}</td>
