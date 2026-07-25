@@ -975,7 +975,7 @@ export default function AltreEntratePage() {
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Codice Transazione','Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','Esclusa','💬','Note',''].map(h=>(
+              {['Codice Transazione','Data','Fonte','Descrizione','Causale','Cat L2','Compensa costo','Importo','Residuo','Compensato','Esclusa','💬','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
               ))}
             </tr></thead>
@@ -1094,6 +1094,11 @@ export default function AltreEntratePage() {
                           </div>
                         )
                       })()}
+                    </td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                      {e._compensatedAmt>0
+                        ? <span style={{fontSize:12,color:'var(--gold)',fontWeight:600}}>€ {fmtIT(e._compensatedAmt,2)}</span>
+                        : <span style={{fontSize:12,color:'var(--text3)'}}>—</span>}
                     </td>
                     <td style={{padding:'6px 10px',textAlign:'center'}}>
                       {(() => {
