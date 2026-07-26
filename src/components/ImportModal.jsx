@@ -759,38 +759,52 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       return  // in attesa della conferma dell'utente in CardImportReconcileModal
     }
 
-    // ── Phase 2: Salvataggio (nessuna AI ancora) ──
-    const saveResult = await saveTxs(allParsed)
-    if (!saveResult) return   // annullato a metà
+    // ── Phase 2-4: Salvataggio + AI + Regole — TUTTO in un unico batch Undo ──
+    // Fix reale (2026-07-26, richiesta utente: "se esco con la X il processo non si
+    // annulla"): senza questo batch, ogni singola updateTransaction dell'AI enrichment/
+    // delle regole finiva come voce SEPARATA in cima allo txUndoStack (capped a 20 —
+    // vedi beginTxUndoBatch/commitTxUndoBatch in useStore.js), evincendo in fretta la
+    // voce 'add' originale con i txId appena importati non appena si superano ~19
+    // transazioni categorizzate. Con questo batch, l'INTERO import (import+AI+regole)
+    // diventa UNA sola voce sullo stack — esattamente come già fa il flusso carta
+    // (handleCardReconcileConfirm) — permettendo al wizard di annullare per intero
+    // questa sessione con una manciata di undoLastTx(), anche con centinaia di righe.
+    useStore.getState().beginTxUndoBatch()
+    try {
+      const saveResult = await saveTxs(allParsed)
+      if (!saveResult) return   // annullato a metà
 
-    // ── Phase 3: Categorizzazione AI — sulle transazioni già salvate ──
-    const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
+      // ── Phase 3: Categorizzazione AI — sulle transazioni già salvate ──
+      const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
 
-    // ── Phase 4: Regole di sistema (catRules, regole AI, vacanze) — ultimo step ──
-    const rulesResult = await runRulesStep(saveResult.savedTxs.map(t => t.txId))
+      // ── Phase 4: Regole di sistema (catRules, regole AI, vacanze) — ultimo step ──
+      const rulesResult = await runRulesStep(saveResult.savedTxs.map(t => t.txId))
 
-    setStatus(null)
-    setDone({
-      total: saveResult.total,
-      aiCount: enrichResult.enrichedCount,
-      dupes: saveResult.dupes,
-      correctionsCount: saveResult.correctionsCount,
-      aiSkippedNoKey: enrichResult.skippedNoKey,
-      rulesAppliedCount: rulesResult.rulesAppliedCount,
-    })
-    if (onFlowDone) {
-      setTimeout(() => onFlowDone({
-        savedTxIds: saveResult.savedTxs.map(t => t.txId),
-        ruleAppliedIds: rulesResult.ruleAppliedIds || [],
-        total: saveResult.total, dupes: saveResult.dupes,
+      setStatus(null)
+      setDone({
+        total: saveResult.total,
         aiCount: enrichResult.enrichedCount,
+        dupes: saveResult.dupes,
+        correctionsCount: saveResult.correctionsCount,
+        aiSkippedNoKey: enrichResult.skippedNoKey,
         rulesAppliedCount: rulesResult.rulesAppliedCount,
-        targetGapDoppioni,
-        saldoDoppioniBreakdown,
-        account,
-      }), 1500)
-    } else {
-      setTimeout(onClose, 2500)
+      })
+      if (onFlowDone) {
+        setTimeout(() => onFlowDone({
+          savedTxIds: saveResult.savedTxs.map(t => t.txId),
+          ruleAppliedIds: rulesResult.ruleAppliedIds || [],
+          total: saveResult.total, dupes: saveResult.dupes,
+          aiCount: enrichResult.enrichedCount,
+          rulesAppliedCount: rulesResult.rulesAppliedCount,
+          targetGapDoppioni,
+          saldoDoppioniBreakdown,
+          account,
+        }), 1500)
+      } else {
+        setTimeout(onClose, 2500)
+      }
+    } finally {
+      useStore.getState().commitTxUndoBatch(`Import ${account}`)
     }
   }
 

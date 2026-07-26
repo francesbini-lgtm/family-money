@@ -1142,6 +1142,34 @@ export default function ImportWizard({ onClose }) {
   const [stepIdx, setStepIdx] = useState(0)
   const [results, setResults] = useState({})     // { conto: {...}, carta: {...}, paypal: {...} }
   const [rulePopup, setRulePopup] = useState(null) // { tx, match, newDesc }
+  // Fix reale (2026-07-26, richiesta utente): prima, chiudere il wizard a metà con la X
+  // NON annullava nulla — il conto (e la carta) vengono scritti su Firestore subito nello
+  // step 'import' stesso, ben prima del Riepilogo finale. Ora si tiene traccia di quante
+  // voci Undo esistevano all'apertura del wizard (txUndoStack.length), e se l'utente esce
+  // a metà si chiede conferma e si "riavvolge" lo stack con undoLastTx() fino a tornare a
+  // quella baseline — annullando per intero import/doppioni/regole fatti in QUESTA sessione.
+  // Funziona perché ogni import (conto E carta) ora è raggruppato in UN'UNICA voce sullo
+  // stack (vedi beginTxUndoBatch/commitTxUndoBatch in ImportModal.jsx), quindi anche
+  // centinaia di transazioni categorizzate dall'AI non rischiano di far uscire quella voce
+  // dal cap di 20 dello stack prima che l'utente riesca a chiudere.
+  const wizardStartStackLen = useRef(useStore.getState().txUndoStack.length)
+  const [wizClosing, setWizClosing] = useState(false)
+  async function handleWizardClose() {
+    if (wizClosing) return
+    if (!queue) { onClose(); return }
+    const pending = useStore.getState().txUndoStack.length - wizardStartStackLen.current
+    if (pending <= 0) { onClose(); return }
+    if (!window.confirm(
+      'Uscire ora annullerà questo import: verranno eliminate le transazioni importate in questa sessione ' +
+      '(compresi eventuali doppioni eliminati, categorie assegnate e rettifiche create). Continuare?'
+    )) return
+    setWizClosing(true)
+    for (let i = 0; i < pending; i++) {
+      await useStore.getState().undoLastTx()
+    }
+    setWizClosing(false)
+    onClose()
+  }
   // setResults è asincrono: quando PaypalImportModal chiama onImport e SUBITO DOPO
   // onClose (doImport), lo state non è ancora aggiornato — il ref sì.
   const ppImportedRef = useRef(false)
@@ -1497,7 +1525,7 @@ export default function ImportWizard({ onClose }) {
   return (
     <div style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.55)',backdropFilter:'blur(3px)',
       display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
-      onClick={e => e.target === e.currentTarget && !queue && onClose()}>
+      onClick={e => e.target === e.currentTarget && handleWizardClose()}>
       {/* Frame uniforme — dimensione FISSA per tutti gli step "nativi" del wizard
           (richiesta utente 2026-07-13, punto 3: "fai un grande e uniforme...
           facendo next scambia pagina, ma non grandezza o UI"): solo il contenuto
@@ -1506,9 +1534,11 @@ export default function ImportWizard({ onClose }) {
       <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 28px',
         width:1040,height:'82vh',maxWidth:'96vw',maxHeight:'92vh',
         display:'flex',flexDirection:'column',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-        <button onClick={onClose} title="Chiudi il wizard"
-          style={{position:'absolute',top:14,right:16,background:'none',border:'none',cursor:'pointer',
-            fontSize:18,color:'var(--text3)'}}>✕</button>
+        <button onClick={handleWizardClose} disabled={wizClosing} title="Chiudi il wizard"
+          style={{position:'absolute',top:14,right:16,background:'none',border:'none',
+            cursor:wizClosing?'default':'pointer',fontSize:18,color:'var(--text3)',opacity:wizClosing?0.5:1}}>
+          {wizClosing ? '…' : '✕'}
+        </button>
 
         <div style={{fontSize:18,fontWeight:800,marginBottom:2,flexShrink:0}}>📥 Importa</div>
         <div style={{fontSize:12,color:'var(--text3)',marginBottom:16,flexShrink:0}}>
