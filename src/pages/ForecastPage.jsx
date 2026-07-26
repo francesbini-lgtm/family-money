@@ -1141,6 +1141,18 @@ export default function ForecastPage() {
     let saldo = currentSaldo
     let inc   = avgIncomeEffective
     let exp   = effectiveExpense
+    // Bug segnalato dall'utente 2026-07-26: in modalità Storico > Puntuale, un
+    // override con "applica da qui in avanti" (cascade) non aveva alcun
+    // effetto sui mesi successivi. Causa: expThisMonth/incThisMonth in
+    // puntuale vengono SEMPRE ricalcolati dal dato storico dello stesso mese
+    // di un anno fa (expenseByMonthNum/incomeByMonthNum), ignorando del tutto
+    // la variabile "inc"/"exp" che la cascata aggiorna a fine ciclo — quindi
+    // il valore cascata veniva scritto ma mai più letto. Questi due flag
+    // tracciano se una cascata è attualmente "attiva" (impostata dall'ultimo
+    // override incontrato) per far vincere il valore cascata sul ricalcolo
+    // puntuale nei mesi successivi, finché non arriva un nuovo override.
+    let incCascadeActive = false
+    let expCascadeActive = false
     const gMonthly = Math.pow(1 + growth / 100, 1 / 12)
     const iMonthly = Math.pow(1 + inflation / 100, 1 / 12)
     const mortgageStartYM = mortgageStart || null
@@ -1194,9 +1206,11 @@ export default function ForecastPage() {
       // Un override manuale su questo mese specifico vince comunque su
       // entrambe le modalità (controllo subito sotto, invariato).
       const gfExp = Math.pow(iMonthly, m)
-      let expThisMonth = (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && expenseByMonthNum[d.getMonth()+1] != null)
-        ? (expenseByMonthNum[d.getMonth()+1] - savedPerMonth) * gfExp
-        : exp
+      let expThisMonth = (expCascadeActive && !ovM)
+        ? exp
+        : (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && expenseByMonthNum[d.getMonth()+1] != null)
+          ? (expenseByMonthNum[d.getMonth()+1] - savedPerMonth) * gfExp
+          : exp
       if (ovM) {
         const total = overrideTotal(ovM)
         if (total != null) expThisMonth = total
@@ -1207,9 +1221,11 @@ export default function ForecastPage() {
       const preOverrideInc = inc
       // Storico "puntuale" — vedi commento gemello sopra su expThisMonth.
       const gfInc = Math.pow(gMonthly, m)
-      let incThisMonth = (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && incomeByMonthNum[d.getMonth()+1] != null)
-        ? incomeByMonthNum[d.getMonth()+1] * gfInc
-        : inc
+      let incThisMonth = (incCascadeActive && !ovME)
+        ? inc
+        : (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && incomeByMonthNum[d.getMonth()+1] != null)
+          ? incomeByMonthNum[d.getMonth()+1] * gfInc
+          : inc
       let incParts = null
       if (ovME) {
         incParts = overrideIncomeParts(ovME, teoricheFraVal, teoricheSofiVal)
@@ -1393,6 +1409,7 @@ export default function ForecastPage() {
         // Cascata separata per Fra/Sofi (base) e per "Altro" — vedi commento
         // su overridesEntrateMonthly sopra.
         inc = ((incParts.cascade ? incParts.base : preOverrideInc) + (incParts.altroCascade ? incParts.altro : 0)) * gMonthly
+        incCascadeActive = incParts.cascade
       } else {
         inc *= gMonthly
       }
@@ -1401,6 +1418,7 @@ export default function ForecastPage() {
         // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
         // arrivati (il mese "blip" non lascia traccia sul futuro).
         exp = (ovM.cascade ? expThisMonth : preOverrideExp) * iMonthly
+        expCascadeActive = ovM.cascade
       } else {
         exp *= iMonthly
       }
