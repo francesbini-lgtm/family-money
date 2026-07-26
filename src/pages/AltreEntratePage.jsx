@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { Plus, Trash2, Link, TrendingUp, RefreshCw } from 'lucide-react'
@@ -33,6 +33,14 @@ const getAeLinksArray = getLinksArray
 // ── Notes (Firestore via appPrefs) ──────────────────────────
 function getAeNotes() { return useStore.getState()?.appPrefs?.aeNotes || {} }
 function saveAeNotes(data) { useStore.getState()?.setAppPref?.('aeNotes', data) }
+
+// ── "To be review" flag (richiesta utente 2026-07-26) ───────
+// Stesso pattern di aeNotes/aeCats: mappa entryKey→bool in appPrefs, così
+// funziona sia per entrate bancarie (txId) sia per quelle manuali (id) senza
+// dover distinguere i due casi — le entrate manuali non vivono in
+// `transactions` quindi non possono usare updateTransaction/_flagged come
+// fanno le altre pagine (Uscite/PayPal/Veicoli/Satispay).
+function getAeReview() { return useStore.getState()?.appPrefs?.aeReview || {} }
 
 // ── Clarification requests (Firestore via appPrefs) ─────────
 function getClarReqs() { return useStore.getState()?.appPrefs?.clarificationRequests || [] }
@@ -309,6 +317,12 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
   const [codeResult, setCodeResult] = useState(null) // tx or 'not-found'
   const [selected, setSelected] = useState(null)
   const [saved, setSaved] = useState(false)
+  // Richiesta utente 2026-07-26: prima si vedevano "solo alcune" transazioni
+  // (limite fisso slice(0,80)) — ora si può sfogliare tutto l'elenco, e la
+  // lista si apre già scrollata al mese dell'entrata da compensare invece che
+  // sempre dall'inizio.
+  const targetRowRef = useRef(null)
+  const scrolledRef  = useRef(false)
 
   // Stable link key: bank entries use txId, manual entries use id
   const linkKey = incomeEntry.txId || incomeEntry.id
@@ -372,6 +386,20 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
     const hay = `${t.description||''} ${t.merchant||''} ${t.descAI||''}`.toLowerCase()
     return hay.includes(search.toLowerCase())
   })
+
+  // Riga su cui aprire la lista già scrollata: la prima (in ordine di
+  // visualizzazione: match esatti prima, poi data decrescente) con data <= al
+  // mese dell'entrata — cioè il punto in cui l'utente si aspetta di trovare
+  // le transazioni "vicine" a quella da compensare.
+  const incomeYm = (incomeEntry._effDate || incomeEntry.date || '').slice(0, 7)
+  const anchorIdx = incomeYm ? filtered.findIndex(t => (t._effDate||t.date||'').slice(0,7) <= incomeYm) : -1
+
+  useEffect(() => {
+    if (tab === 'list' && targetRowRef.current && !scrolledRef.current) {
+      targetRowRef.current.scrollIntoView({ block: 'center' })
+      scrolledRef.current = true
+    }
+  }, [tab, filtered])
 
   function searchByCode() {
     const code = codeInput.trim()
@@ -471,7 +499,10 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.slice(0,80).map((t, idx) => {
+                  {/* Richiesta utente 2026-07-26: prima si vedevano solo le prime 80 —
+                      ora la lista completa è sfogliabile (il contenitore scrolla,
+                      maxHeight:260 sopra) invece di tagliare silenziosamente il resto. */}
+                  {filtered.map((t, idx) => {
                     const absAmt = availableAmount(t)
                     const isSel  = selected?.txId === t.txId
                     // Match verde SOLO per importo esattamente identico al residuo
@@ -493,9 +524,9 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                             </td>
                           </tr>
                         )}
-                        <tr key={t.txId} onClick={()=>setSelected(t)} style={{
+                        <tr key={t.txId} ref={idx===anchorIdx ? targetRowRef : null} onClick={()=>setSelected(t)} style={{
                           borderBottom:'1px solid var(--border)',cursor:'pointer',
-                          background: isSel ? 'var(--accent-l)' : isSuggested ? 'rgba(22,163,74,.03)' : 'transparent',
+                          background: isSel ? 'var(--accent-l)' : idx===anchorIdx ? 'rgba(60,120,220,.06)' : isSuggested ? 'rgba(22,163,74,.03)' : 'transparent',
                         }}>
                           <td style={{padding:'6px 10px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
                           <td style={{padding:'6px 10px',fontSize:12,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:5}}>
@@ -779,6 +810,7 @@ export default function AltreEntratePage() {
   const [chiarimentoEntry, setChiarimentoEntry] = useState(null)
   const aeNotes = appPrefs?.aeNotes || {}
   const aeCats  = appPrefs?.aeCats || {}
+  const aeReview = appPrefs?.aeReview || {}
   const nicknames = useMemo(() => getUserNicknames(), [])
 
   const now    = new Date()
@@ -891,6 +923,12 @@ export default function AltreEntratePage() {
     setAppPref('aeCats', next)
   }
 
+  function toggleReview(key) {
+    const next = { ...aeReview }
+    if (next[key]) delete next[key]; else next[key] = true
+    setAppPref('aeReview', next)
+  }
+
   return (
     <div className="ae-page">
       <div className="ae-header">
@@ -951,7 +989,12 @@ export default function AltreEntratePage() {
         </div>
       ) : (
         <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <table style={{width:'100%',borderCollapse:'collapse'}}>
+          {/* Richiesta utente 2026-07-26: con 13 colonne una table width:100% le
+              schiacciava, mandando a capo Descrizione/Cat L2/Compensa costo — ora
+              scroll orizzontale (stesso pattern di SatispayPage) + minWidth sulla
+              tabella + whiteSpace:nowrap su tutte le celle testuali. */}
+          <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',minWidth:1280,borderCollapse:'collapse'}}>
             <thead><tr>
               {['COD','Data','Fonte','Descrizione','Cat L2','Compensa costo','Importo','Residuo','Compensato','Esclusa','💬','Note',''].map(h=>(
                 <th key={h} style={{padding:'9px 14px',fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap'}}>{h}</th>
@@ -985,20 +1028,28 @@ export default function AltreEntratePage() {
                         )
                       })()}
                     </td>
-                    <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1}}>
+                    <td style={{padding:'9px 14px', opacity: e.excluded ? 0.55 : 1, whiteSpace:'nowrap'}}>
                       <div style={{fontSize:13,fontWeight:500,display:'flex',alignItems:'center'}}>
                         {e.descAI||e.desc||e.description?.slice(0,40)}
                         <OrigDescDot description={e.description}/>
                       </div>
-                      <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:2}}>
+                      <div style={{display:'flex',gap:4,marginTop:2,alignItems:'center'}}>
                         {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
                         {e.excluded&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4}}>Esclusa</span>}
+                        <button onClick={()=>toggleReview(entryKey)}
+                          title={aeReview[entryKey] ? 'Rimuovi flag “da rivedere”' : 'Segna come “da rivedere”'}
+                          style={{fontSize:10,padding:'1px 5px',borderRadius:4,cursor:'pointer',fontWeight:700,
+                            border:`1px solid ${aeReview[entryKey]?'#f59e0b':'var(--border)'}`,
+                            background:aeReview[entryKey]?'rgba(245,158,11,.12)':'transparent',
+                            color:aeReview[entryKey]?'#92400e':'var(--text3)'}}>
+                          🔍{aeReview[entryKey] ? ' Da rivedere' : ''}
+                        </button>
                       </div>
                     </td>
-                    <td style={{padding:'9px 14px'}}>
+                    <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
                       <AeCat2Cell entry={e} updateTransaction={updateTransaction} customCats={customCats}/>
                     </td>
-                    <td style={{padding:'9px 14px'}}>
+                    <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
                       {!compLink && !isCompensated(e) && (
                         <button className="btn btn-ghost" style={{fontSize:11,color:'var(--blue)',border:'1px solid var(--blue)',borderRadius:6,padding:'2px 8px'}}
                           onClick={()=>setCompensaEntry(e)}>
@@ -1109,6 +1160,7 @@ export default function AltreEntratePage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

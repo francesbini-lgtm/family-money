@@ -1961,6 +1961,7 @@ export function RuleApplyPopup({ tx, match, newDesc, txId, txDate, onApply, onCl
 function NoteCell({ tx, updateTransaction }) {
   const [open, setOpen] = useState(false)
   const [val,  setVal]  = useState(tx.note || '')
+  const [rect, setRect] = useState(null)
   const hasNote = !!(tx.note && tx.note.trim())
 
   // Keep editing draft in sync if tx.note changes externally (e.g. from another session)
@@ -1972,10 +1973,20 @@ function NoteCell({ tx, updateTransaction }) {
     setOpen(false)
   }
 
+  // Bug segnalato dall'utente 2026-07-26: il popup era `position:fixed` SENZA
+  // top/left calcolati — restava ancorato alla posizione statica del bottone,
+  // che dentro una tabella molto larga/scrollabile finiva quasi sempre fuori
+  // dalla viewport visibile (quindi "il tasto note non funziona": il click in
+  // realtà apriva il popup, ma invisibile). Fix: calcolare rect dal bottone al
+  // click (stesso pattern di ColFilterPopup/openColFilter) e clampare in
+  // orizzontale come già fatto lì.
+  const POPUP_W = 260
+  const left = rect ? Math.max(8, Math.min(rect.left, window.innerWidth - POPUP_W - 8)) : 0
+
   return (
     <div style={{ position:'relative' }}>
       <button
-        onClick={() => { setVal(tx.note || ''); setOpen(o => !o) }}
+        onClick={e => { setVal(tx.note || ''); setRect(e.currentTarget.getBoundingClientRect()); setOpen(o => !o) }}
         title={hasNote ? tx.note : 'Aggiungi nota'}
         style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 6px',
           display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -1987,10 +1998,12 @@ function NoteCell({ tx, updateTransaction }) {
           boxSizing: 'border-box',
         }}/>
       </button>
-      {open && (
-        <div style={{ position:'fixed', zIndex:200, background:'var(--surface)',
+      {open && rect && (
+        <>
+        <div style={{position:'fixed',inset:0,zIndex:9998}} onClick={()=>setOpen(false)}/>
+        <div style={{ position:'fixed', top: rect.bottom + 4, left, zIndex:9999, background:'var(--surface)',
           border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)',
-          padding:12, width:260, display:'flex', flexDirection:'column', gap:8 }}
+          padding:12, width:POPUP_W, display:'flex', flexDirection:'column', gap:8 }}
           onClick={e => e.stopPropagation()}>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text3)', letterSpacing:'.06em', textTransform:'uppercase' }}>
             Nota transazione
@@ -2020,6 +2033,7 @@ function NoteCell({ tx, updateTransaction }) {
                 cursor:'pointer', fontFamily:'var(--font-sans)' }}>🗑</button>}
           </div>
         </div>
+        </>
       )}
     </div>
   )
