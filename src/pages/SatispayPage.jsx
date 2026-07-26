@@ -996,12 +996,15 @@ function findExactSubset(txs, target) {
 
 // ── Fund projection KPIs (shown when noCompensazione is true) ─────────────
 function FundProjectionKPIs({ pot }) {
+  const updateSatiPot = useStore(s => s.updateSatiPot)
+  const [editingBalance, setEditingBalance] = useState(false)
+  const [balanceDraft, setBalanceDraft] = useState('')
   const now = nowYM()
   const voci = (pot.voci || []).map(migrateVoce)
   const allYMs = monthsRange(pot.startYM || nowYM())
 
   // Saldo accumulato ad oggi — solo mesi con abbinamento confermato
-  const totalAcc = allYMs.filter(m => m <= now && pot.data?.[m]?.linked && !pot.data?.[m]?.explicitUnlinked).reduce((s, ym) => {
+  const totalAccComputed = allYMs.filter(m => m <= now && pot.data?.[m]?.linked && !pot.data?.[m]?.explicitUnlinked).reduce((s, ym) => {
     const cells = pot.data?.[ym]?.cells || {}
     return s + voci.reduce((vs, v) => vs + (parseFloat(cells[v.id]) || 0), 0)
   }, 0)
@@ -1024,11 +1027,32 @@ function FundProjectionKPIs({ pot }) {
 
   const horizons = [1, 2, 5, 10, 15]
 
+  // Rettifica manuale (richiesta utente 2026-07-26) — vedi stesso pattern in FundCard
+  const totalAcc = pot.balanceOverride > 0 ? pot.balanceOverride : totalAccComputed
+
   return (
     <div style={{background:'#fff',border:'1px solid var(--border)',borderRadius:14,padding:'20px 20px 16px',marginTop:16}}>
       <div style={{fontSize:14,fontWeight:700,color:'var(--text1)',marginBottom:4}}>📈 Proiezione crescita fondo</div>
-      <div style={{fontSize:12,color:'var(--text3)',marginBottom:18}}>
-        Saldo attuale: <strong>€ {fmtIT(Math.round(totalAcc))}</strong>
+      <div style={{fontSize:12,color:'var(--text3)',marginBottom:18,display:'flex',alignItems:'center',flexWrap:'wrap',gap:4}}>
+        Saldo attuale:
+        {editingBalance ? (
+          <span style={{display:'inline-flex',gap:5,alignItems:'center'}}>
+            <input type="number" autoFocus value={balanceDraft} onChange={e=>setBalanceDraft(e.target.value)}
+              style={{width:90,fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',
+                border:'1px solid var(--accent)',borderRadius:5,padding:'1px 5px',background:'var(--surface)',color:'var(--text)'}}/>
+            <button onClick={()=>{updateSatiPot(pot.id,{balanceOverride:Number(balanceDraft)||0});setEditingBalance(false)}}
+              style={{border:'none',background:'var(--green)',color:'#fff',borderRadius:4,padding:'2px 6px',cursor:'pointer',fontWeight:700,fontSize:11}}>✓</button>
+            <button onClick={()=>{updateSatiPot(pot.id,{balanceOverride:0});setEditingBalance(false)}}
+              style={{border:'1px solid var(--border)',background:'var(--surface)',borderRadius:4,padding:'2px 6px',cursor:'pointer',fontSize:11,color:'var(--text3)'}}>✕</button>
+          </span>
+        ) : (
+          <>
+            <strong>€ {fmtIT(Math.round(totalAcc))}</strong>
+            <button onClick={()=>{setBalanceDraft(String(totalAcc));setEditingBalance(true)}} title="Forza saldo manualmente"
+              style={{border:'none',background:'none',cursor:'pointer',fontSize:11,color:'var(--text3)',padding:0}}>✏️</button>
+            {pot.balanceOverride > 0 && <span style={{fontSize:10,color:'var(--gold)'}}>rettifica manuale · calcolato €{fmtIT(totalAccComputed,0)}</span>}
+          </>
+        )}
         {monthlyAvg > 0 && <> · Versamento medio: <strong>€ {fmtIT(Math.round(monthlyAvg))}/mese</strong></>}
       </div>
       <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
@@ -1092,12 +1116,21 @@ function FundCard({ pot, allPots }) {
   , [viewYear, pot.startYM])
 
   // Cumulated: solo mesi con abbinamento confermato (linked + non explicitUnlinked)
-  const totalAcc = useMemo(()=>{
+  const totalAccComputed = useMemo(()=>{
     return allYMs.filter(m => m <= now && pot.data?.[m]?.linked && !pot.data?.[m]?.explicitUnlinked).reduce((s,ym)=>{
       const cells = pot.data?.[ym]?.cells || {}
       return s + voci.reduce((vs,v)=>vs+(parseFloat(cells[v.id])||0),0)
     }, 0)
   }, [pot, allYMs, voci, now])
+  // Rettifica manuale per-fondo (richiesta utente 2026-07-26): `pot.balanceOverride`
+  // vince sempre sul calcolo quando >0 — stesso pattern di extraRepayBaseOverride
+  // in ForecastPage.jsx. A differenza di appPrefs.satiNetOverride (che rettifica
+  // solo il TOTALE aggregato di tutti i fondi in SatiOverviewTab), questo vive
+  // sul singolo pot ed è quindi utilizzabile anche per un fondo specifico (es.
+  // "Cecilia", vedi CeciliaPage.jsx che legge lo stesso campo).
+  const totalAcc = pot.balanceOverride > 0 ? pot.balanceOverride : totalAccComputed
+  const [editingBalance, setEditingBalance] = useState(false)
+  const [balanceDraft, setBalanceDraft] = useState('')
 
   // Per-month cell total
   function monthTotal(ym) {
@@ -1608,7 +1641,26 @@ function FundCard({ pot, allPots }) {
             <div style={{fontSize:16,fontWeight:800}}>{pot.name}</div>
             <div style={{fontSize:12,color:'var(--text3)'}}>
               Accantonato totale:
-              <strong style={{color:'var(--green)',marginLeft:4}}>€ {fmtIT(totalAcc,0)}</strong>
+              {editingBalance ? (
+                <span style={{display:'inline-flex',gap:5,alignItems:'center',marginLeft:6}}>
+                  <input type="number" autoFocus value={balanceDraft} onChange={e=>setBalanceDraft(e.target.value)}
+                    style={{width:90,fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',
+                      border:'1px solid var(--accent)',borderRadius:5,padding:'1px 5px',background:'var(--surface)',color:'var(--text)'}}/>
+                  <button onClick={()=>{updateSatiPot(pot.id,{balanceOverride:Number(balanceDraft)||0});setEditingBalance(false)}}
+                    style={{border:'none',background:'var(--green)',color:'#fff',borderRadius:4,padding:'2px 6px',cursor:'pointer',fontWeight:700,fontSize:11}}>✓</button>
+                  <button onClick={()=>{updateSatiPot(pot.id,{balanceOverride:0});setEditingBalance(false)}}
+                    style={{border:'1px solid var(--border)',background:'var(--surface)',borderRadius:4,padding:'2px 6px',cursor:'pointer',fontSize:11,color:'var(--text3)'}}>✕</button>
+                </span>
+              ) : (
+                <>
+                  <strong style={{color:'var(--green)',marginLeft:4}}>€ {fmtIT(totalAcc,0)}</strong>
+                  <button onClick={()=>{setBalanceDraft(String(totalAcc));setEditingBalance(true)}} title="Forza saldo manualmente"
+                    style={{border:'none',background:'none',cursor:'pointer',fontSize:11,color:'var(--text3)',padding:'0 0 0 4px'}}>✏️</button>
+                  {pot.balanceOverride > 0 && (
+                    <span style={{fontSize:10,color:'var(--gold)',marginLeft:6}}>rettifica manuale · calcolato €{fmtIT(totalAccComputed,0)}</span>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>

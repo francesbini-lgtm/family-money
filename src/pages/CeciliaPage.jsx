@@ -403,7 +403,9 @@ function BuoniPostaliSection() {
 }
 
 export default function CeciliaPage() {
-  const { ceciliaGoals, deleteCeciliaGoal, transactions, satiPots } = useStore()
+  const { ceciliaGoals, deleteCeciliaGoal, transactions, satiPots, updateSatiPot } = useStore()
+  const [editingCecBalance, setEditingCecBalance] = useState(false)
+  const [cecBalanceDraft, setCecBalanceDraft] = useState('')
   const [showAdd,    setShowAdd]    = useState(false)
   const [editGoal,   setEditGoal]   = useState(null)
   const [depositGoal,setDepositGoal]= useState(null)
@@ -436,7 +438,7 @@ export default function CeciliaPage() {
 
   // Satispay "Cecilia" fund — find pot by name (case-insensitive)
   const cecSatiPot = (satiPots||[]).find(p => p.name?.toLowerCase().includes('cecilia'))
-  const cecSatiTotal = useMemo(() => {
+  const cecSatiTotalComputed = useMemo(() => {
     if (!cecSatiPot) return 0
     const nowYM_ = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`
     const voci = cecSatiPot.voci || []
@@ -449,6 +451,10 @@ export default function CeciliaPage() {
     })
     return total
   }, [cecSatiPot])
+  // Rettifica manuale (richiesta utente 2026-07-26): stesso campo pot.balanceOverride
+  // usato in SatispayPage (FundCard/FundProjectionKPIs) — un solo posto da
+  // aggiornare, coerente ovunque il fondo "Cecilia" venga mostrato.
+  const cecSatiTotal = cecSatiPot?.balanceOverride > 0 ? cecSatiPot.balanceOverride : cecSatiTotalComputed
 
   return (
     <div className="cec-page">
@@ -496,10 +502,29 @@ export default function CeciliaPage() {
             </div>
           </div>
           <div style={{textAlign:'right',flexShrink:0}}>
-            <div style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--green)'}}>
-              € {fmtIT(cecSatiTotal, 0)}
+            {editingCecBalance ? (
+              <div style={{display:'flex',gap:5,alignItems:'center',justifyContent:'flex-end'}}>
+                <input type="number" autoFocus value={cecBalanceDraft} onChange={e=>setCecBalanceDraft(e.target.value)}
+                  style={{width:100,fontSize:16,fontWeight:700,fontFamily:'var(--font-mono)',
+                    border:'1px solid var(--accent)',borderRadius:6,padding:'2px 6px',background:'var(--surface)',color:'var(--text)'}}/>
+                <button onClick={()=>{updateSatiPot(cecSatiPot.id,{balanceOverride:Number(cecBalanceDraft)||0});setEditingCecBalance(false)}}
+                  style={{border:'none',background:'var(--green)',color:'#fff',borderRadius:5,padding:'3px 8px',cursor:'pointer',fontWeight:700,fontSize:12}}>✓</button>
+                <button onClick={()=>{updateSatiPot(cecSatiPot.id,{balanceOverride:0});setEditingCecBalance(false)}}
+                  style={{border:'1px solid var(--border)',background:'var(--surface)',borderRadius:5,padding:'3px 8px',cursor:'pointer',fontSize:12,color:'var(--text3)'}}>✕ Reset</button>
+              </div>
+            ) : (
+              <div style={{display:'flex',gap:5,alignItems:'baseline',justifyContent:'flex-end'}}>
+                <div style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-mono)',color:'var(--green)'}}>
+                  € {fmtIT(cecSatiTotal, 0)}
+                </div>
+                <button onClick={()=>{setCecBalanceDraft(String(cecSatiTotal));setEditingCecBalance(true)}} title="Forza saldo manualmente"
+                  style={{border:'none',background:'none',cursor:'pointer',fontSize:12,color:'var(--text3)',padding:0}}>✏️</button>
+              </div>
+            )}
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>
+              totale accumulato
+              {cecSatiPot.balanceOverride > 0 && <span style={{color:'var(--gold)',marginLeft:5}}>· rettifica manuale (calcolato €{fmtIT(cecSatiTotalComputed,0)})</span>}
             </div>
-            <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>totale accumulato</div>
           </div>
         </div>
       )}
