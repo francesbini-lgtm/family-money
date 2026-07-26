@@ -248,8 +248,21 @@ function AppShell() {
   // sempre un piccolo scarto in alto (la vista non ripartiva mai dalla cima),
   // costringendo a scrollare manualmente. Il contenitore scrollabile reale è
   // .main-content (flex:1; overflow-y:auto — vedi App.css), non la window.
+  // Fix 2026-07-26: alcune pagine si aprivano comunque "a metà" — un elemento
+  // con autoFocus (es. un input) dentro la nuova pagina fa scrollare il
+  // browser automaticamente DOPO questo effect (che gira al commit, prima che
+  // certi figli abbiano finito i propri effect/layout), vincendo la corsa.
+  // Doppio requestAnimationFrame: aspetta che il layout della nuova pagina sia
+  // completamente dipinto prima di forzare lo scroll a 0, così vince sempre.
   useEffect(() => {
-    document.querySelector('.main-content')?.scrollTo(0, 0)
+    const el = document.querySelector('.main-content')
+    if (!el) return
+    el.scrollTo(0, 0)
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => { el.scrollTo(0, 0) })
+      return () => cancelAnimationFrame(raf2)
+    })
+    return () => cancelAnimationFrame(raf1)
   }, [page])
 
   function navigate(id) { setPage(id); setMenu(false) }

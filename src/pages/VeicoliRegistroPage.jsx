@@ -1199,9 +1199,6 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
         borderRadius: 'var(--radius) var(--radius) 0 0', border: '1px solid var(--border)', borderBottom: 'none' }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 700 }}>📋 Tutte le spese veicoli</div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
-            {rows.length} spese · € {fmtIT(Math.round(total), 0)} totale
-          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Gear button */}
@@ -1262,6 +1259,7 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                     textTransform: 'uppercase', color: 'var(--text3)', borderBottom: '1px solid var(--border)', minWidth: 110 }}>
                     Riconciliazione
                   </th>
+                  <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
                   <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
                   <th style={{ borderBottom: '1px solid var(--border)', width: 36 }} />
                 </tr>
@@ -1387,6 +1385,24 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                         )}
                       </td>
 
+                      {/* Allegati (manual only) — richiesta utente 2026-07-26 */}
+                      <td style={{ padding: '5px 6px', textAlign: 'center' }}>
+                        {r._type === 'manual' && (
+                          <button className="btn btn-ghost" style={{ padding: '2px 5px', position: 'relative',
+                              color: (r.attachments||[]).length ? 'var(--accent)' : 'var(--text3)' }}
+                            title={(r.attachments||[]).length ? `${r.attachments.length} allegat${r.attachments.length===1?'o':'i'}` : 'Nessun allegato'}
+                            onClick={() => setAttExp(r)}>
+                            📎
+                            {(r.attachments||[]).length > 0 && (
+                              <span style={{ position:'absolute', top:-2, right:-2, fontSize:8, fontWeight:800,
+                                background:'var(--accent)', color:'#fff', borderRadius:8, padding:'0 3px', lineHeight:'12px' }}>
+                                {r.attachments.length}
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </td>
+
                       {/* Edit (manual only) */}
                       <td style={{ padding: '5px 6px' }}>
                         {r._type === 'manual' && (
@@ -1419,7 +1435,7 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                   <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
                     € {fmtIT(total, 2)}
                   </td>
-                  <td colSpan={4} />
+                  <td colSpan={5} />
                 </tr>
               </tbody>
             </table>
