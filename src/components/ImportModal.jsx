@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import { useStore } from '../store/useStore'
 import { parseCSV } from '../data/csvParser'
 import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiService'
@@ -358,7 +358,22 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
     if (accountFilter === 'conto') return allAccounts.filter(a => a.type !== 'carta_credito')
     return allAccounts
   }, [allAccounts, accountFilter])
-  const [account, setAccount] = useState(userAccounts[0]?.name || 'Conto Corrente')
+  const [account, setAccount] = useState(userAccounts[0]?.name || '')
+  // Fix bug reale (2026-07-26): se lo store carica gli account DOPO il primo render
+  // (o se il fallback iniziale non corrisponde a NESSUN account vero), "account"
+  // restava agganciato a un nome che non esiste in userAccounts — il <select> mostrava
+  // comunque la prima opzione visivamente (comportamento standard del browser quando
+  // value non combacia con nessuna <option>), ma lo state React (e quindi il conto
+  // usato per calcolare saldoAttuale/salvare le transazioni) restava quello sbagliato.
+  // Risultato: computeSaldoAccount(transactions, account) non trovava NESSUNA
+  // transazione già salvata per quel nome → saldoAttuale calcolato a 0 → il "Doppioni
+  // attesi" mostrato nello step successivo risultava grande quanto l'INTERO saldo
+  // dichiarato (invece dei pochi euro di doppioni reali). Fix: risincronizza "account"
+  // ogni volta che userAccounts cambia, se il valore corrente non è (più) valido.
+  useEffect(() => {
+    if (!userAccounts.length) return
+    if (!userAccounts.some(a => a.name === account)) setAccount(userAccounts[0].name)
+  }, [userAccounts])
   // "Nuovo saldo" (richiesta utente 2026-07-15, SOLO import conto corrente — le carte
   // hanno già la propria riconciliazione mensile via CardImportReconcileModal): il saldo
   // vero che l'utente legge dalla propria banca DOPO aver scaricato questo estratto.
@@ -714,11 +729,19 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
     // delle transazioni doppione — questo è il targetGapDoppioni che lo step Doppioni
     // userà per bloccare l'avanzamento finché non torna a zero.
     let targetGapDoppioni = null
+    let saldoDoppioniBreakdown = null
     if (accountFilter === 'conto' && nuovoSaldo !== '' && !isNaN(parseFloat(nuovoSaldo))) {
       const saldoAttuale   = computeSaldoAccount(useStore.getState().transactions, account)
       const rawParsedTotal = allParsed.reduce((s, t) => s + t.amount, 0)
       const saldoSistema   = saldoAttuale + rawParsedTotal
-      targetGapDoppioni = Math.round((saldoSistema - parseFloat(nuovoSaldo)) * 100) / 100
+      const nuovoSaldoNum  = parseFloat(nuovoSaldo)
+      targetGapDoppioni = Math.round((saldoSistema - nuovoSaldoNum) * 100) / 100
+      // Esposto allo step Doppioni (vedi ImportWizard.jsx) per debug: se il gap mostrato
+      // sembra sballato (es. grande quanto l'intero saldo invece dei soli doppioni), qui
+      // si vede subito quale dei 4 numeri non torna — tipicamente saldoAttuale=0 vuol dire
+      // che "account" non combaciava con nessuna transazione già salvata per questo conto
+      // (bug reale trovato il 2026-07-26, vedi fix su useEffect di sync di "account" sopra).
+      saldoDoppioniBreakdown = { saldoAttuale, rawParsedTotal, saldoSistema, nuovoSaldo: nuovoSaldoNum, account }
     }
 
     // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──
@@ -763,6 +786,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         aiCount: enrichResult.enrichedCount,
         rulesAppliedCount: rulesResult.rulesAppliedCount,
         targetGapDoppioni,
+        saldoDoppioniBreakdown,
         account,
       }), 1500)
     } else {

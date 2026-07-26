@@ -766,7 +766,7 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   return results
 }
 
-function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount }) {
+function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const addTransactions   = useStore(s => s.addTransactions)
@@ -789,6 +789,7 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
   const [selected, setSelected] = useState(() => new Set())
   const [showAll, setShowAll] = useState(false)
   const [committed, setCommitted] = useState(false)
+  const [showBreakdown, setShowBreakdown] = useState(false)
 
   // Pre-seleziona i doppioni rilevati automaticamente al primo render di questo step
   const seededRef = useRef(false)
@@ -866,6 +867,28 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
     onNext?.()
   }
 
+  // Skip (richiesta utente 2026-07-26): a volte il gap non è spiegabile con doppioni
+  // reali (o il numero mostrato è palesemente sbagliato) — permette di proseguire
+  // SENZA creare la rettifica/tappo del residuo. Elimina comunque gli eventuali
+  // doppioni che l'utente ha già selezionato manualmente (quelli sono veri doppioni
+  // trovati, indipendenti dal fatto che il gap totale torni o meno).
+  function skipReconcile() {
+    if (committed) return
+    if (!window.confirm(
+      selected.size > 0
+        ? `Proseguire senza chiudere il gap di saldo (differenza € ${fmtIT(Math.abs(remaining), 2)})? Verranno comunque eliminati i ${selected.size} doppioni già selezionati, ma NESSUNA rettifica verrà creata per il residuo.`
+        : `Proseguire senza cercare altri doppioni? NESSUNA rettifica verrà creata per il residuo di € ${fmtIT(Math.abs(remaining), 2)}.`
+    )) return
+    setCommitted(true)
+    selected.forEach(txId => deleteTransaction(txId))
+    if (selected.size > 0) {
+      registerUndo?.(`${selected.size} doppioni eliminati`, () => {
+        for (let i = 0; i < selected.size; i++) useStore.getState().undoLastTx?.()
+      })
+    }
+    onNext?.()
+  }
+
   function removeDupe(d) {
     deleteTransaction(d.t.txId)
     setHandled(h => ({ ...h, [d.t.txId]: true }))
@@ -903,6 +926,29 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
               Differenza: € {fmtIT(Math.abs(remaining), 2)}
             </span>
           </div>
+          {saldoBreakdown && (
+            <div style={{ marginTop: 8 }}>
+              <button onClick={() => setShowBreakdown(v => !v)}
+                style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                {showBreakdown ? '▾' : '▸'} Il numero sembra sbagliato? Vedi il dettaglio del calcolo
+              </button>
+              {showBreakdown && (
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span>Conto usato: {saldoBreakdown.account}</span>
+                  <span>Saldo già a sistema per questo conto: € {fmtIT(saldoBreakdown.saldoAttuale, 2)}</span>
+                  <span>+ Totale righe lette dal CSV: € {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</span>
+                  <span>= Saldo sistema calcolato: € {fmtIT(saldoBreakdown.saldoSistema, 2)}</span>
+                  <span>− Nuovo saldo dichiarato: € {fmtIT(saldoBreakdown.nuovoSaldo, 2)}</span>
+                  <span style={{ fontWeight: 700 }}>= Doppioni attesi: € {fmtIT(targetGapDoppioni, 2)}</span>
+                  {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
+                    <span style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 2 }}>
+                      ⚠️ Saldo già a sistema per questo conto risulta 0 — se il conto ha già transazioni, il nome selezionato potrebbe non combaciare.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {!resolved && reconcileAccount && (
             <div style={{ marginTop: 8 }}>
               <button onClick={createTappo}
@@ -1008,11 +1054,21 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
           <span style={{ fontSize: 11, color: 'var(--text3)' }}>
             {selected.size} transazion{selected.size===1?'e':'i'} selezionat{selected.size===1?'a':'e'} verrann{selected.size===1?'o':'o'} eliminate al click su "Avanti"
           </span>
-          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
-            disabled={!resolved || committed} onClick={confirmReconcile}
-            title={resolved ? 'Conferma ed elimina i doppioni selezionati' : `Il saldo non torna ancora (differenza € ${fmtIT(Math.abs(remaining),2)})`}>
-            Avanti →
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {!resolved && (
+              <button onClick={skipReconcile} disabled={committed}
+                style={{ fontSize: 12, padding: '8px 14px', fontWeight: 600, background: 'transparent',
+                  color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer' }}
+                title="Prosegui senza chiudere il gap e senza creare rettifica del residuo">
+                ⏭️ Salta
+              </button>
+            )}
+            <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
+              disabled={!resolved || committed} onClick={confirmReconcile}
+              title={resolved ? 'Conferma ed elimina i doppioni selezionati' : `Il saldo non torna ancora (differenza € ${fmtIT(Math.abs(remaining),2)})`}>
+              Avanti →
+            </button>
+          </div>
         </div>
       )}
     </>
@@ -1541,10 +1597,12 @@ export default function ImportWizard({ onClose }) {
         {step && step.id === 'doppioni' && (() => {
           const targetGapDoppioni = step.src === 'conto' ? (results.conto?.targetGapDoppioni ?? null) : null
           const reconcileAccount = step.src === 'conto' ? results.conto?.account : null
+          const saldoBreakdown = step.src === 'conto' ? (results.conto?.saldoDoppioniBreakdown ?? null) : null
           return (
             <>
               <DoppioniStep src={step.src} srcTxs={importedTxs(step.src)} embedded registerUndo={registerUndo}
-                targetGapDoppioni={targetGapDoppioni} reconcileAccount={reconcileAccount} onNext={next} />
+                targetGapDoppioni={targetGapDoppioni} reconcileAccount={reconcileAccount}
+                saldoBreakdown={saldoBreakdown} onNext={next} />
               {targetGapDoppioni == null && <StepNav/>}
             </>
           )
