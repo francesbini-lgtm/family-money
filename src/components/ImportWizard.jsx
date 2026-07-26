@@ -1031,15 +1031,21 @@ export default function ImportWizard({ onClose }) {
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const apiKey            = appPrefs?.geminiKey || localStorage.getItem('fm-gemini-key') || ''
 
-  // Data ultima transazione registrata per ciascuna delle 3 sorgenti (richiesta
-  // utente 2026-07-14, così l'utente sa subito se un import è indietro) —
-  // sola lettura, nessun impatto sull'import vero e proprio.
-  const lastTxDates = useMemo(() => {
+  // Ultime transazioni registrate per ciascuna delle 3 sorgenti (richiesta
+  // utente 2026-07-14, poi estesa 2026-07-26 da "sola data" a "ultime 2
+  // transazioni" — l'utente aveva cancellato l'ultima transazione mostrata e
+  // la data non cambiava: NON è un bug di dati residui, è che `transactions`
+  // qui è la lista già filtrata da eliminazioni (deleteTransaction rimuove
+  // davvero il documento, vedi useStore.js) — mostrando le righe intere
+  // invece della sola data si vede subito se la data "ferma" è dovuta a
+  // un'ALTRA transazione della stessa giornata (caso normale) oppure no.
+  // Sola lettura, nessun impatto sull'import vero e proprio.
+  const lastTxInfo = useMemo(() => {
     const cardNames = new Set((userAccounts||[]).filter(a=>a.type==='carta_credito').map(a=>a.name))
     const contoNames = new Set((userAccounts||[]).filter(a=>a.type!=='carta_credito').map(a=>a.name))
-    let lastConto = null
-    const lastByCard = {}
-    let lastPaypal = null
+    const contoTxs = []
+    const byCard = {}
+    const paypalTxs = []
     transactions.forEach(t => {
       // Data valuta (t.date), non competenza/_effDate: qui interessa sapere
       // fino a quando arrivano davvero i dati bancari, non la vista contabile
@@ -1047,18 +1053,33 @@ export default function ImportWizard({ onClose }) {
       const d = t.date
       if (!d) return
       if (t.account && cardNames.has(t.account)) {
-        if (!lastByCard[t.account] || d > lastByCard[t.account]) lastByCard[t.account] = d
+        (byCard[t.account] ||= []).push(t)
       } else if (t.account && (contoNames.size ? contoNames.has(t.account) : true)) {
-        if (!lastConto || d > lastConto) lastConto = d
+        contoTxs.push(t)
       }
-      if (isPayPal(t)) {
-        if (!lastPaypal || d > lastPaypal) lastPaypal = d
-      }
+      if (isPayPal(t)) paypalTxs.push(t)
     })
-    const cards = Object.entries(lastByCard).map(([name,date]) => ({ name, date }))
-      .sort((a,b) => b.date.localeCompare(a.date))
-    return { conto: lastConto, cards, paypal: lastPaypal }
+    const top2 = arr => [...arr].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,2)
+    const cards = Object.entries(byCard).map(([name,arr]) => ({ name, txs: top2(arr) }))
+      .sort((a,b) => (b.txs[0]?.date||'').localeCompare(a.txs[0]?.date||''))
+    return { conto: top2(contoTxs), cards, paypal: top2(paypalTxs) }
   }, [transactions, userAccounts])
+
+  // Riga singola "data · descrizione · importo" per una transazione, usata nei
+  // 3 blocchi qui sotto.
+  function LastTxRow({ t }) {
+    const desc = (t.descAI || t.description || t.merchant || '—').toString().slice(0, 34)
+    return (
+      <span style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:2}}>
+        <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          <strong style={{color:'var(--text2)'}}>{fmtDate(t.date)}</strong> — {desc}
+        </span>
+        <span style={{flexShrink:0,fontFamily:'var(--font-mono)',color:t.amount<0?'var(--red)':'var(--green)'}}>
+          {t.amount<0?'−':'+'}€{Math.abs(t.amount).toLocaleString('it-IT',{minimumFractionDigits:2})}
+        </span>
+      </span>
+    )
+  }
 
   const [sources, setSources] = useState({ conto: true, carta: false, paypal: false })
   const [queue,   setQueue]   = useState(null)   // null = schermata di selezione
@@ -1462,22 +1483,23 @@ export default function ImportWizard({ onClose }) {
                     <span style={{fontSize:11,color:'var(--text3)'}}>{sub}</span>
                     <span style={{fontSize:10.5,color:'var(--text3)',display:'block',marginTop:5,lineHeight:1.5}}>
                       {key === 'conto' && (
-                        lastTxDates.conto
-                          ? <>📅 Ultima transazione: <strong style={{color:'var(--text2)'}}>{fmtDate(lastTxDates.conto)}</strong></>
+                        lastTxInfo.conto.length
+                          ? <>📅 Ultime transazioni:{lastTxInfo.conto.map(t => <LastTxRow key={t.txId} t={t}/>)}</>
                           : 'Nessuna transazione registrata finora'
                       )}
                       {key === 'carta' && (
-                        lastTxDates.cards.length
-                          ? lastTxDates.cards.map(c => (
-                              <span key={c.name} style={{display:'block'}}>
-                                📅 {c.name}: <strong style={{color:'var(--text2)'}}>{fmtDate(c.date)}</strong>
+                        lastTxInfo.cards.length
+                          ? lastTxInfo.cards.map(c => (
+                              <span key={c.name} style={{display:'block',marginTop:4}}>
+                                📅 {c.name}:
+                                {c.txs.map(t => <LastTxRow key={t.txId} t={t}/>)}
                               </span>
                             ))
                           : 'Nessuna transazione registrata finora'
                       )}
                       {key === 'paypal' && (
-                        lastTxDates.paypal
-                          ? <>📅 Ultima transazione: <strong style={{color:'var(--text2)'}}>{fmtDate(lastTxDates.paypal)}</strong></>
+                        lastTxInfo.paypal.length
+                          ? <>📅 Ultime transazioni:{lastTxInfo.paypal.map(t => <LastTxRow key={t.txId} t={t}/>)}</>
                           : 'Nessuna transazione registrata finora'
                       )}
                     </span>

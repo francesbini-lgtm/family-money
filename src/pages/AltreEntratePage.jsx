@@ -812,6 +812,28 @@ export default function AltreEntratePage() {
   const aeCats  = appPrefs?.aeCats || {}
   const aeReview = appPrefs?.aeReview || {}
   const nicknames = useMemo(() => getUserNicknames(), [])
+  // Rotella impostazioni categorie visibili (richiesta utente 2026-07-26,
+  // stesso pattern di SatispayPage "⚙️ Categorie da compensare"): quando vuota
+  // resta il comportamento attuale (nessuna restrizione oltre alla regola
+  // fissa cat1==='Entrate'||cat2==='Prestiti'||cat2==='Altro'); non appena
+  // l'utente aggiunge almeno una categoria, SOLO le transazioni bancarie con
+  // quel cat1/cat2 restano visibili (le entrate manuali non sono toccate:
+  // sono state aggiunte a mano, quindi sempre volute).
+  const aeCatFilters = appPrefs?.aeCatFilters || []
+  const [showCatConfig, setShowCatConfig] = useState(false)
+  const [catDraftL1, setCatDraftL1] = useState('')
+  const [catDraftL2, setCatDraftL2] = useState('')
+  const allCatsForFilter = useMemo(() => getMergedCats(customCats), [customCats])
+
+  function addAeCatFilter(cat1, cat2) {
+    if (!cat1) return
+    if (aeCatFilters.some(f => f.cat1===cat1 && f.cat2===cat2)) return
+    setAppPref('aeCatFilters', [...aeCatFilters, { cat1, cat2: cat2||null }])
+    setCatDraftL1(''); setCatDraftL2('')
+  }
+  function removeAeCatFilter(cat1, cat2) {
+    setAppPref('aeCatFilters', aeCatFilters.filter(f => !(f.cat1===cat1 && f.cat2===cat2)))
+  }
 
   const now    = new Date()
   const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
@@ -838,9 +860,13 @@ export default function AltreEntratePage() {
       if (t.cat1 === 'Satispay' || cat2low === 'satispay') return false
       if (desc.includes('SATISPAY') || merch.includes('SATISPAY')) return false
       if (t._forcedBalance) return false
-      return t.cat1 === 'Entrate' || t.cat2 === 'Prestiti' || t.cat2 === 'Altro'
+      if (!(t.cat1 === 'Entrate' || t.cat2 === 'Prestiti' || t.cat2 === 'Altro')) return false
+      // Filtro categorie configurato dall'utente (rotella ⚙️) — se vuoto nessuna
+      // restrizione aggiuntiva (comportamento invariato)
+      if (aeCatFilters.length > 0 && !aeCatFilters.some(f => f.cat1===t.cat1 && (!f.cat2 || f.cat2===t.cat2))) return false
+      return true
     })
-  }, [transactions, nicknames])
+  }, [transactions, nicknames, aeCatFilters])
 
   const allEntries = [...autoEntries, ...entries].sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
 
@@ -936,8 +962,67 @@ export default function AltreEntratePage() {
           <h1 className="ae-title">💸 Altre Entrate</h1>
           <div className="ae-sub">Rimborsi, prestiti ricevuti, trasferimenti e entrate varie</div>
         </div>
-        <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={14}/> Aggiungi</button>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <button onClick={()=>setShowCatConfig(v=>!v)} title="Configura categorie visibili in tabella"
+            style={{border:`1px solid ${showCatConfig?'var(--accent)':'var(--border)'}`,
+              borderRadius:8,padding:'7px 10px',background:showCatConfig?'var(--accent)':'var(--surface)',
+              color:showCatConfig?'#fff':'var(--text3)',cursor:'pointer',fontSize:14,
+              fontFamily:'var(--font-sans)'}}>
+            ⚙️
+          </button>
+          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={14}/> Aggiungi</button>
+        </div>
       </div>
+
+      {showCatConfig && (
+        <div style={{marginBottom:16,padding:'14px 16px',background:'var(--surface2)',
+          borderRadius:10,border:'1px solid var(--border)'}}>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:10,color:'var(--text2)'}}>
+            ⚙️ Categorie visibili in tabella (entrate bancarie)
+          </div>
+          <div style={{fontSize:11,color:'var(--text3)',marginBottom:10}}>
+            Vuoto = nessuna restrizione (comportamento predefinito). Le entrate aggiunte manualmente restano sempre visibili.
+          </div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
+            {aeCatFilters.map(f => (
+              <span key={`${f.cat1}-${f.cat2}`}
+                style={{display:'inline-flex',alignItems:'center',gap:4,
+                  padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:600,
+                  background:'var(--accent)20',color:'var(--accent)',
+                  border:'1px solid var(--accent)40'}}>
+                {f.cat1}{f.cat2 ? ` › ${f.cat2}` : ''}
+                <button onClick={()=>removeAeCatFilter(f.cat1, f.cat2)}
+                  style={{border:'none',background:'none',cursor:'pointer',
+                    color:'var(--accent)',fontSize:13,lineHeight:1,padding:'0 0 0 2px'}}>×</button>
+              </span>
+            ))}
+            {aeCatFilters.length === 0 && (
+              <span style={{fontSize:11,color:'var(--text3)'}}>Nessuna categoria configurata — mostra tutto</span>
+            )}
+          </div>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <select value={catDraftL1} onChange={e=>{setCatDraftL1(e.target.value);setCatDraftL2('')}}
+              style={{padding:'5px 8px',borderRadius:7,border:'1px solid var(--border)',
+                background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
+                fontFamily:'var(--font-sans)'}}>
+              <option value="">— L1 —</option>
+              {Object.keys(allCatsForFilter).map(c1=><option key={c1} value={c1}>{c1}</option>)}
+            </select>
+            <select value={catDraftL2} onChange={e=>setCatDraftL2(e.target.value)}
+              disabled={!catDraftL1}
+              style={{padding:'5px 8px',borderRadius:7,border:'1px solid var(--border)',
+                background:'var(--surface)',color:'var(--text)',fontSize:12,outline:'none',
+                fontFamily:'var(--font-sans)'}}>
+              <option value="">— tutte le L2 —</option>
+              {(allCatsForFilter[catDraftL1]?.sub||[]).map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+            <button onClick={()=>addAeCatFilter(catDraftL1, catDraftL2)} disabled={!catDraftL1}
+              className="btn btn-secondary" style={{fontSize:12,padding:'5px 12px'}}>
+              + Aggiungi
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="ae-kpis">
