@@ -662,6 +662,24 @@ export default function ContantiPage() {
     const e = row._raw
     const atmTx = row._atmTx
     if (!e || !atmTx) return
+
+    // Altre spese ancora NON registrate agganciate allo STESSO prelievo (richiesta
+    // esplicita utente 2026-07-26, verificata prima di procedere: "non è che una
+    // volta escluso il prelievo mi salta l'altra transazione?") — se presenti,
+    // dopo la registrazione le riagganciamo al residuo (se ne resta abbastanza),
+    // altrimenti avvisiamo prima di procedere.
+    const siblings = (cashEntries||[]).filter(o => o.id !== e.id && !o.posted && o.atmTxId === atmTx.txId)
+    const siblingsTotal = siblings.reduce((s,o)=>s+(o.amount||0),0)
+    const grossAbs = Math.abs(atmTx.amount)
+    const leftoverAfter = Math.round((grossAbs - e.amount) * 100) / 100
+    if (siblings.length > 0 && leftoverAfter < siblingsTotal - 0.01) {
+      if (!window.confirm(
+        `Attenzione: altre ${siblings.length} spesa/e sono abbinate allo stesso prelievo per un totale di € ${fmtIT(siblingsTotal,2)}, ` +
+        `ma dopo questa registrazione resterebbero solo € ${fmtIT(Math.max(0,leftoverAfter),2)} disponibili sul residuo — non basterebbero a coprirle tutte. ` +
+        `Procedere comunque? Dovrai poi riabbinarle manualmente a un altro prelievo.`
+      )) return
+    }
+
     if (!window.confirm(
       `Registrare "${row.label}" (€ ${fmtIT(e.amount,2)}) come transazione reale, consumando il prelievo del ${fmtDate(atmTx._effDate||atmTx.date)}? ` +
       `Il prelievo verrà escluso (con eventuale residuo separato se più grande del necessario).`
@@ -675,9 +693,15 @@ export default function ContantiPage() {
     }, atmTx, (expenseTxId) => updateCashEntry(e.id, { posted:true, expenseTxId, postedAt:new Date().toISOString() }))
     if (!res.ok) {
       showToast('⚠️ Saldo non invariato — registrazione annullata, nessuna modifica effettuata', 'error', 6000)
-    } else {
-      showToast('✅ Spesa registrata in Transazioni', 'success')
+      return
     }
+    // Riaggancia le "sorelle" al residuo appena creato, così il loro bottone
+    // Registra/Abbina torna subito a funzionare invece di restare orfano del
+    // vecchio txId (ora escluso).
+    if (res.leftoverTxId && siblings.length > 0) {
+      siblings.forEach(o => updateCashEntry(o.id, { atmTxId: res.leftoverTxId }))
+    }
+    showToast('✅ Spesa registrata in Transazioni', 'success')
   }
 
   function saveEntry() {

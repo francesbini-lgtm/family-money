@@ -65,8 +65,9 @@ export function postCashExpense(expenseDraft, atmTx, onPosted) {
     })
     rollbackOps.push(() => useStore.getState().updateTransaction(atmTx.txId, prevPatch))
 
+    let leftoverTxId = null
     if (leftoverAbs > 0.005) {
-      const leftoverTxId = '0000-' + (Date.now() + Math.floor(Math.random() * 1000)).toString(36).toUpperCase()
+      leftoverTxId = '0000-' + (Date.now() + Math.floor(Math.random() * 1000)).toString(36).toUpperCase()
       useStore.getState().addTransactions([{
         ...atmTx,
         txId: leftoverTxId,
@@ -88,7 +89,13 @@ export function postCashExpense(expenseDraft, atmTx, onPosted) {
     }
 
     onPosted?.(expenseTxId)
-    return { ok: true, expenseTxId }
+    // leftoverTxId: se presente, il chiamante deve riagganciare qui qualunque ALTRA
+    // fonte (es. altri cashEntries non ancora postati) che puntava ancora al txId
+    // originale del prelievo — ora escluso — altrimenti il suo aggancio si "rompe"
+    // silenziosamente (bug reale trovato dall'utente PRIMA di confermare, 2026-07-26:
+    // due spese contanti abbinate allo stesso prelievo, registrandone una la seconda
+    // perdeva sia il bottone Registra che Abbina, riferendosi a un txId ormai escluso).
+    return { ok: true, expenseTxId, leftoverTxId, leftoverAbs: leftoverTxId ? leftoverAbs : 0 }
   } catch (e) {
     for (let i = rollbackOps.length - 1; i >= 0; i--) { try { rollbackOps[i]() } catch (_) {} }
     return { ok: false, reason: 'errore', error: e }
