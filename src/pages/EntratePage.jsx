@@ -553,7 +553,7 @@ function BonusCell({ t, bonusMap, setBonusTx }) {
     <div style={{display:'flex',alignItems:'center',gap:5,justifyContent:'center'}}>
       <span style={{fontSize:11,fontWeight:700,color:'var(--accent)',
         background:'var(--accent-l)',padding:'2px 7px',borderRadius:10}}>
-        di cui € {fmtIT(bonus.amt,0)} bonus
+        di cui € {fmtIT(bonus.amt,0)}
       </span>
       <button onClick={()=>{setDraft(String(bonus.amt));setEditing(true)}}
         style={{border:'none',background:'transparent',cursor:'pointer',color:'var(--text3)',fontSize:11,padding:0}}>✏</button>
@@ -656,6 +656,9 @@ export default function EntratePage() {
   const [ralView,         setRalView]         = useState('netto') // 'ral' | 'netto'
   const [ralWithBonus,    setRalWithBonus]     = useState(false)
   const [showRalSettings, setShowRalSettings]  = useState(false)
+  // Richiesta utente 2026-07-26: la seconda riga (descrizione originale) nella
+  // tabella "Tutte le transazioni" tolta di default, riattivabile con un flag.
+  const [showOrigDesc,    setShowOrigDesc]     = useState(false)
 
   function saveRalData(newData)     { setAppPref('ralData', newData) }
   function saveRalSettings(s)       { setAppPref('ralSettings', s) }
@@ -990,11 +993,19 @@ export default function EntratePage() {
                     </div>
                   </div>
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={chartDataDisplay} barCategoryGap="35%" margin={{top:16,bottom:20}}>
+                    {/* Bug segnalato dall'utente 2026-07-26: la label del totale mancava
+                        SOLO nei mesi con bonus (es. Giu26) — non erano dati mancanti, era
+                        la barra più alta (bonus) che arrivava troppo vicino al bordo
+                        superiore del grafico, tagliando la label disegnata sopra (y-6).
+                        Fix: margin.top più ampio + dominio Y con "respiro" extra (15%)
+                        sopra il valore massimo, così anche la colonna più alta lascia
+                        sempre spazio per la label senza sovrapporsi/uscire dal canvas. */}
+                    <BarChart data={chartDataDisplay} barCategoryGap="35%" margin={{top:28,bottom:20}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                       <XAxis dataKey="label" tick={{fontSize:9,fill:'var(--text3)'}} axisLine={false} tickLine={false}
                         interval={0} angle={-35} textAnchor="end" height={44}/>
                       <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={52}
+                        domain={[0, dataMax => Math.ceil((dataMax||0) * 1.15)]}
                         tickFormatter={v => v>=1000 ? `€${(v/1000).toFixed(0)}K` : `€${v}`}/>
                       <Tooltip formatter={(v,n) => [`€ ${fmtIT(v,0)}`, n]}
                         contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
@@ -1055,7 +1066,7 @@ export default function EntratePage() {
                       </div>
                     </div>
                   </div>
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <LineChart data={ralChartData} margin={{top:8,bottom:4,left:0,right:4}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
                       <XAxis dataKey="year" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
@@ -1070,9 +1081,40 @@ export default function EntratePage() {
                       ))}
                     </LineChart>
                   </ResponsiveContainer>
+                  {/* 3 KPI (richiesta utente 2026-07-26, come nel chart "Entrate per
+                      fonte"): prima il chart restava "a ridosso del titolo" con un
+                      grande spazio bianco sotto, perché la card ha la stessa altezza
+                      del chart affiancato (grid) ma nessun contenuto extra la riempiva. */}
+                  {(() => {
+                    const yearVals = ralChartData
+                      .map(row => ralLines.reduce((s,l) => s + (row[l.key]||0), 0))
+                      .filter(v => v > 0)
+                    const lastVal = yearVals.length ? yearVals[yearVals.length-1] : 0
+                    const prevVal = yearVals.length > 1 ? yearVals[yearVals.length-2] : 0
+                    const growth  = prevVal > 0 ? (((lastVal-prevVal)/prevVal)*100).toFixed(1) : null
+                    const avgVal  = yearVals.length ? yearVals.reduce((s,v)=>s+v,0)/yearVals.length : 0
+                    return (
+                      <div style={{display:'flex',gap:10,marginTop:12}}>
+                        <div style={{flex:1,textAlign:'center',padding:'8px 6px',background:'var(--surface2)',borderRadius:8}}>
+                          <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Ultimo anno</div>
+                          <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)'}}>€ {fmtIT(Math.round(lastVal),0)}</div>
+                        </div>
+                        <div style={{flex:1,textAlign:'center',padding:'8px 6px',background:'var(--surface2)',borderRadius:8}}>
+                          <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Crescita YoY</div>
+                          <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:growth==null?'var(--text3)':(growth>=0?'var(--green)':'var(--red)')}}>
+                            {growth==null?'—':`${growth>0?'+':''}${growth}%`}
+                          </div>
+                        </div>
+                        <div style={{flex:1,textAlign:'center',padding:'8px 6px',background:'var(--surface2)',borderRadius:8}}>
+                          <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Media anni</div>
+                          <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)'}}>€ {fmtIT(Math.round(avgVal),0)}</div>
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {/* FX note */}
                   {hasNonEur && (
-                    <div style={{fontSize:10,color:'var(--text3)',textAlign:'right',marginTop:2,fontStyle:'italic'}}>
+                    <div style={{fontSize:10,color:'var(--text3)',textAlign:'right',marginTop:6,fontStyle:'italic'}}>
                       * valori convertiti in EUR al tasso di cambio dell'anno
                     </div>
                   )}
@@ -1181,7 +1223,17 @@ export default function EntratePage() {
             <div style={{padding:'14px 18px',borderBottom:'1px solid var(--border)',display:'flex',
               alignItems:'center',justifyContent:'space-between'}}>
               <span style={{fontSize:14,fontWeight:700}}>Tutte le transazioni</span>
-              <span style={{fontSize:12,color:'var(--text3)'}}>{incomeTxs.length} totali</span>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <button onClick={()=>setShowOrigDesc(v=>!v)}
+                  title="Mostra/nascondi la descrizione originale della banca"
+                  style={{padding:'3px 10px',border:`1px solid ${showOrigDesc?'var(--accent)':'var(--border)'}`,
+                    borderRadius:6,cursor:'pointer',fontSize:11,fontWeight:700,
+                    background:showOrigDesc?'var(--accent-l)':'transparent',
+                    color:showOrigDesc?'var(--accent)':'var(--text3)'}}>
+                  📄 Desc. originale
+                </button>
+                <span style={{fontSize:12,color:'var(--text3)'}}>{incomeTxs.length} totali</span>
+              </div>
             </div>
             {txsByYear.length === 0 ? (
               <div style={{padding:24,textAlign:'center',color:'var(--text3)',fontSize:13}}>
@@ -1214,7 +1266,7 @@ export default function EntratePage() {
                           </td>
                           <td>
                             <div style={{fontSize:13,fontWeight:500}}>{t.descAI || t.description}</div>
-                            <div style={{fontSize:11,color:'var(--text3)'}}>{t.description}</div>
+                            {showOrigDesc && <div style={{fontSize:11,color:'var(--text3)'}}>{t.description}</div>}
                           </td>
                           <td><SourceBadge cat2={t.cat2}/></td>
                           <td style={{textAlign:'right',fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:'var(--green)',whiteSpace:'nowrap'}}>
