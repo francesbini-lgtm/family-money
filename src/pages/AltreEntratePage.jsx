@@ -1091,8 +1091,20 @@ export default function AltreEntratePage() {
                 const compLink = compLinks[e.txId || e.id]
                 return (
                   <tr key={e.txId||e.id||i} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'9px 14px',fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                      {e.txId ? e.txId : <span title="Entrata manuale — non ha un codice transazione">—</span>}
+                    <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
+                      {/* Click sul codice per segnare "da rivedere" (richiesta utente 2026-07-26:
+                          "come nello sheet TRANSAZIONI, basta cliccare sul codice transazione")
+                          — stesso pattern del bottone COD in TransactionsPage.jsx: niente più
+                          icona separata, il codice stesso è il toggle. */}
+                      <button onClick={()=>toggleReview(entryKey)}
+                        title={aeReview[entryKey] ? 'Da rivedere — clicca per rimuovere il flag' : 'Clicca per segnare come "da rivedere"'}
+                        style={{fontSize:11,fontFamily:'var(--font-mono)',padding:'2px 6px',borderRadius:4,cursor:'pointer',
+                          background: aeReview[entryKey] ? 'rgba(245,158,11,.15)' : 'var(--surface2)',
+                          border: aeReview[entryKey] ? '1.5px solid rgba(245,158,11,.6)' : '1px solid var(--border)',
+                          color: aeReview[entryKey] ? '#92400e' : 'var(--text3)',
+                          fontWeight: aeReview[entryKey] ? 700 : 400}}>
+                        {e.txId ? e.txId : '—'}
+                      </button>
                     </td>
                     <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</td>
                     <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
@@ -1121,14 +1133,7 @@ export default function AltreEntratePage() {
                       <div style={{display:'flex',gap:4,marginTop:2,alignItems:'center'}}>
                         {e.manuale&&<span style={{fontSize:10,padding:'1px 5px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4}}>Manuale</span>}
                         {e.excluded&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(220,50,50,.1)',color:'var(--red)',borderRadius:4}}>Esclusa</span>}
-                        <button onClick={()=>toggleReview(entryKey)}
-                          title={aeReview[entryKey] ? 'Rimuovi flag “da rivedere”' : 'Segna come “da rivedere”'}
-                          style={{fontSize:10,padding:'1px 5px',borderRadius:4,cursor:'pointer',fontWeight:700,
-                            border:`1px solid ${aeReview[entryKey]?'#f59e0b':'var(--border)'}`,
-                            background:aeReview[entryKey]?'rgba(245,158,11,.12)':'transparent',
-                            color:aeReview[entryKey]?'#92400e':'var(--text3)'}}>
-                          🔍{aeReview[entryKey] ? ' Da rivedere' : ''}
-                        </button>
+                        {aeReview[entryKey]&&<span style={{fontSize:10,padding:'1px 5px',background:'rgba(245,158,11,.12)',color:'#92400e',borderRadius:4,fontWeight:700}}>🔍 Da rivedere</span>}
                       </div>
                     </td>
                     <td style={{padding:'9px 14px',whiteSpace:'nowrap'}}>
