@@ -4,9 +4,11 @@ import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { getYM, ymLabel } from '../hooks/useFinancials'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Plus, Trash2, Wallet, Link2, User } from 'lucide-react'
+import { Plus, Trash2, Wallet, Link2, User, CheckCircle2 } from 'lucide-react'
 import './ContantiPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
+import { postCashExpense } from '../data/cashPosting'
+import { showToast } from '../services/notifications'
 
 // ── ATM Meta storage (Firestore via appPrefs) ─────────────
 function getAtmMeta() { return useStore.getState()?.appPrefs?.atmMeta || {} }
@@ -597,6 +599,11 @@ export default function ContantiPage() {
       const pendPW  = e.atmTxId && !atmTx ? (pendingWithdrawals||[]).find(pw => pw.id === e.atmTxId) : null
       const satiM   = e.atmTxId && atmTx ? satiMatches[e.atmTxId] : null
       const l1 = e.cat1 || e.cat || '—'; const l2 = e.cat2 || ''
+      // Registra (task #137, richiesta utente 2026-07-26): come per Nanny/Colf, la
+      // spesa in contanti diventa una vera transazione SOLO su conferma esplicita —
+      // possibile solo se il prelievo collegato esiste ancora (non già consumato da
+      // un'altra registrazione) ed è abbastanza grande da coprire l'intero importo.
+      const canRegister = !e.posted && !!atmTx && Math.abs(atmTx.amount) >= (e.amount || 0) - 0.01
       rows.push({
         _id: e.id, tipo: 'manual',
         label: e.note || (l1 + (l2 ? ` › ${l2}` : '')),
@@ -606,6 +613,8 @@ export default function ContantiPage() {
         atmSource: e.atmSource || null,
         atmPending: pendPW || null,
         satiMatched: satiM?.status === 'matched', readonly: false,
+        posted: !!e.posted, expenseTxId: e.expenseTxId || null,
+        _atmTx: atmTx, _raw: e, canRegister,
       })
     })
 
@@ -645,6 +654,31 @@ export default function ContantiPage() {
 
   const thisAtm   = Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
   const thisSpent = cashEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
+
+  // Registra (task #137): promuove una spesa in contanti tracciata solo in
+  // cashEntries a vera transazione, consumando/spaccando il prelievo collegato —
+  // stesso motore condiviso (postCashExpense) usato per Nanny/Colf.
+  function handleRegistraCash(row) {
+    const e = row._raw
+    const atmTx = row._atmTx
+    if (!e || !atmTx) return
+    if (!window.confirm(
+      `Registrare "${row.label}" (€ ${fmtIT(e.amount,2)}) come transazione reale, consumando il prelievo del ${fmtDate(atmTx._effDate||atmTx.date)}? ` +
+      `Il prelievo verrà escluso (con eventuale residuo separato se più grande del necessario).`
+    )) return
+    const res = postCashExpense({
+      date: e.date, amount: e.amount,
+      cat1: e.cat1 || e.cat, cat2: e.cat2 || '',
+      description: e.note || (e.cat1 || e.cat || 'Spesa contanti'),
+      descAI: e.note || (e.cat1 || e.cat || 'Spesa contanti'),
+      note: `Spesa contanti registrata da Contanti. Prelievo: ${atmTx.txId}.`,
+    }, atmTx, (expenseTxId) => updateCashEntry(e.id, { posted:true, expenseTxId, postedAt:new Date().toISOString() }))
+    if (!res.ok) {
+      showToast('⚠️ Saldo non invariato — registrazione annullata, nessuna modifica effettuata', 'error', 6000)
+    } else {
+      showToast('✅ Spesa registrata in Transazioni', 'success')
+    }
+  }
 
   function saveEntry() {
     if (!form.amount||!form.cat1) return
@@ -886,8 +920,23 @@ export default function ContantiPage() {
                           : <span style={{color:'var(--text3)',opacity:.4,fontSize:12}}>—</span>
                         }
                       </td>
-                      <td style={{padding:'6px 10px',textAlign:'center'}}>
-                        {!row.readonly && (
+                      <td style={{padding:'6px 10px',textAlign:'center',whiteSpace:'nowrap'}}>
+                        {row.tipo === 'manual' && row.posted && (
+                          <span title={`Registrata in Transazioni (${row.expenseTxId})`}
+                            style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,fontWeight:700,color:'var(--green)'}}>
+                            <CheckCircle2 size={13}/> Registrata
+                          </span>
+                        )}
+                        {row.tipo === 'manual' && !row.posted && row.canRegister && (
+                          <button onClick={()=>handleRegistraCash(row)}
+                            title="Crea la spesa reale in Transazioni e consuma il prelievo collegato"
+                            style={{display:'inline-flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:12,
+                              fontSize:11,fontWeight:700,border:'1px solid var(--green)',background:'var(--green)18',
+                              cursor:'pointer',color:'var(--green)',fontFamily:'var(--font-sans)',marginRight:6}}>
+                            <CheckCircle2 size={12}/> Registra
+                          </button>
+                        )}
+                        {!row.readonly && !row.posted && (
                           <button className="btn btn-ghost" onClick={()=>deleteCashEntry(row._id)}>
                             <Trash2 size={12}/>
                           </button>
