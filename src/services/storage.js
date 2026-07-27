@@ -38,24 +38,40 @@ export async function uploadTransactionFiles(id, files, onProgress) {
     const file = files[i]
     const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const storageRef = ref(storage, `tx-attachments/${id}/${safeName}`)
-    const task = uploadBytesResumable(storageRef, file, { contentType: file.type })
-    await new Promise((resolve, reject) => {
-      task.on('state_changed',
-        snapshot => {
-          const filePct = snapshot.totalBytes ? snapshot.bytesTransferred / snapshot.totalBytes : 0
-          // Riserviamo il 100% al completamento reale (dopo getDownloadURL), così la barra
-          // non "finisce" mentre in realtà l'operazione è ancora in corso.
-          onProgress?.(Math.min(99, Math.round(((i + filePct) / files.length) * 100)))
-        },
-        reject,
-        resolve
-      )
-    })
+    try {
+      // Tentativo 1: upload "resumable" (a sessione, con progress reale).
+      await uploadResumableWithTimeout(storageRef, file, i, files.length, onProgress, 15000)
+    } catch (e) {
+      // Fallback: upload "semplice" (un solo POST, senza sessione) — alcune reti/proxy
+      // mobili bloccano silenziosamente la sessione resumable (nessun errore, nessuna
+      // risposta: si blocca e basta). Segnalazione utente 2026-07-27, confermata con
+      // errore riportato "tempo scaduto" senza alcun code Firebase — il problema è a
+      // livello di rete/richiesta, non di regole. Se anche questo fallback va in
+      // timeout, l'errore risale come prima al chiamante.
+      await uploadBytes(storageRef, file, { contentType: file.type })
+    }
     const url = await getDownloadURL(storageRef)
     results.push({ name: file.name, url, type: file.type, size: file.size, path: storageRef.fullPath })
   }
   onProgress?.(100)
   return results
+}
+
+function uploadResumableWithTimeout(storageRef, file, i, total, onProgress, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type })
+    const timer = setTimeout(() => { try { task.cancel() } catch {}; reject(new Error('resumable-timeout')) }, timeoutMs)
+    task.on('state_changed',
+      snapshot => {
+        const filePct = snapshot.totalBytes ? snapshot.bytesTransferred / snapshot.totalBytes : 0
+        // Riserviamo il 100% al completamento reale (dopo getDownloadURL), così la barra
+        // non "finisce" mentre in realtà l'operazione è ancora in corso.
+        onProgress?.(Math.min(99, Math.round(((i + filePct) / total) * 100)))
+      },
+      err => { clearTimeout(timer); reject(err) },
+      () => { clearTimeout(timer); resolve() }
+    )
+  })
 }
 
 /**

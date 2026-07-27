@@ -157,7 +157,7 @@ export default function MobileFotoRicevuta({ onClose }) {
   async function doAttachToTransaction(tx) {
     setSaving(true); setError(null); setShowErrorDetails(false); setProgress(0)
     try {
-      const uploaded = await withTimeout(uploadTransactionFiles(tx.txId, [file], setProgress), 30000, 'Caricamento foto')
+      const uploaded = await withTimeout(uploadTransactionFiles(tx.txId, [file], setProgress), 45000, 'Caricamento foto')
       updateTransaction(tx.txId, { attachments: [...(tx.attachments||[]), ...uploaded] })
       setStep('done')
     } catch (e) {
@@ -178,7 +178,7 @@ export default function MobileFotoRicevuta({ onClose }) {
     setSaving(true); setError(null); setShowErrorDetails(false); setProgress(0)
     try {
       const pendingId = 'pend-' + Date.now().toString(36)
-      const uploaded = await withTimeout(uploadTransactionFiles(pendingId, [file], setProgress), 30000, 'Caricamento foto')
+      const uploaded = await withTimeout(uploadTransactionFiles(pendingId, [file], setProgress), 45000, 'Caricamento foto')
       addPendingReceipt({
         date: manualDate,
         description: manualDesc.trim(),
