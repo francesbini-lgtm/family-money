@@ -263,8 +263,12 @@ export default function MobileFotoRicevuta({ onClose }) {
                 Scatta o carica la foto di una ricevuta/scontrino. Dopo ti chiediamo a quale transazione appartiene.
               </div>
               <label className="m-btn m-btn-primary" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, cursor:'pointer' }}>
-                📷 Scatta / Carica foto
+                📷 Scatta foto
                 <input type="file" accept="image/*" capture="environment" onChange={handlePickFile} style={{ display:'none' }}/>
+              </label>
+              <label className="m-btn m-btn-ghost" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, cursor:'pointer', marginTop:10 }}>
+                🖼️ Carica dalla galleria
+                <input type="file" accept="image/*" onChange={handlePickFile} style={{ display:'none' }}/>
               </label>
               <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>Annulla</button>
             </>
