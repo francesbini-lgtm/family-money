@@ -19,11 +19,20 @@
  *     prossimo import CSV (nuovo step dedicato in ImportWizard, match per
  *     importo+data, con conferma esplicita dell'utente).
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { uploadTransactionFiles } from '../services/storage'
 import Portal from './Portal'
 import { fmtIT, fmtDate } from '../utils/format'
+
+// Dimensione file leggibile (KB/MB) — richiesta utente 2026-07-27, mostrata
+// sotto l'anteprima così l'utente vede quanto pesa la foto prima di caricarla.
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
 
 // Ridimensiona+ricomprime l'immagine lato client (max 1600px, JPEG q.80) prima
 // dell'upload — le foto scattate da fotocamera possono essere 5-10MB, causando
@@ -83,6 +92,90 @@ function formatErrorDetails(e) {
   return lines.join('\n')
 }
 
+// Ritaglio veloce — richiesta utente 2026-07-27: l'utente trascina un
+// rettangolo sopra l'anteprima grande e conferma. Niente librerie esterne:
+// un semplice overlay trascinabile + canvas per estrarre la selezione alla
+// risoluzione naturale dell'immagine.
+function CropOverlay({ imageUrl, onCancel, onApply }) {
+  const containerRef = useRef(null)
+  const imgRef = useRef(null)
+  const [rect, setRect] = useState(null) // {x0,y0,x1,y1} in px, relativi al container
+  const draggingRef = useRef(false)
+
+  function getPos(e) {
+    const box = containerRef.current.getBoundingClientRect()
+    const t = e.touches ? e.touches[0] : e
+    return {
+      x: Math.min(Math.max(t.clientX - box.left, 0), box.width),
+      y: Math.min(Math.max(t.clientY - box.top, 0), box.height),
+    }
+  }
+  function start(e) {
+    e.preventDefault()
+    const p = getPos(e)
+    draggingRef.current = true
+    setRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+  }
+  function move(e) {
+    if (!draggingRef.current) return
+    e.preventDefault()
+    const p = getPos(e)
+    setRect(r => r ? { ...r, x1: p.x, y1: p.y } : r)
+  }
+  function end() { draggingRef.current = false }
+
+  function apply() {
+    const img = imgRef.current
+    const box = containerRef.current.getBoundingClientRect()
+    if (!rect || !img) { onCancel(); return }
+    const x0 = Math.min(rect.x0, rect.x1), x1 = Math.max(rect.x0, rect.x1)
+    const y0 = Math.min(rect.y0, rect.y1), y1 = Math.max(rect.y0, rect.y1)
+    if (x1 - x0 < 12 || y1 - y0 < 12) { onCancel(); return }
+    const scaleX = img.naturalWidth / box.width
+    const scaleY = img.naturalHeight / box.height
+    const sx = x0 * scaleX, sy = y0 * scaleY, sw = (x1 - x0) * scaleX, sh = (y1 - y0) * scaleY
+    const canvas = document.createElement('canvas')
+    canvas.width = sw; canvas.height = sh
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+    canvas.toBlob(blob => {
+      if (!blob) { onCancel(); return }
+      onApply(new File([blob], 'ricevuta-ritagliata.jpg', { type: 'image/jpeg' }))
+    }, 'image/jpeg', 0.85)
+  }
+
+  const selStyle = rect ? {
+    position: 'absolute',
+    left: Math.min(rect.x0, rect.x1), top: Math.min(rect.y0, rect.y1),
+    width: Math.abs(rect.x1 - rect.x0), height: Math.abs(rect.y1 - rect.y0),
+    border: '2px dashed #fff', boxShadow: '0 0 0 9999px rgba(0,0,0,.55)', pointerEvents: 'none',
+  } : null
+
+  return (
+    <>
+      <div style={{ fontSize:12.5, color:'var(--text3)', marginBottom:10, lineHeight:1.5 }}>
+        Trascina sull'immagine per selezionare l'area da ritagliare, poi conferma.
+      </div>
+      <div style={{ display:'flex', justifyContent:'center' }}>
+        {/* Wrapper inline-block: si adatta esattamente al riquadro renderizzato
+            dell'immagine (niente "barre" fantasma dovute al contenimento), così
+            le coordinate del container coincidono sempre con quelle dell'img. */}
+        <div ref={containerRef}
+          onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+          onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+          style={{ position:'relative', display:'inline-block', touchAction:'none', userSelect:'none' }}>
+          <img ref={imgRef} src={imageUrl} alt="" draggable={false}
+            style={{ display:'block', maxWidth:'100%', maxHeight:420, borderRadius:10 }}/>
+          {selStyle && <div style={selStyle}/>}
+        </div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:12 }}>
+        <button className="m-btn m-btn-ghost" onClick={onCancel}>Annulla</button>
+        <button className="m-btn m-btn-primary" disabled={!rect} onClick={apply}>✓ Applica ritaglio</button>
+      </div>
+    </>
+  )
+}
+
 export default function MobileFotoRicevuta({ onClose }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
@@ -103,8 +196,17 @@ export default function MobileFotoRicevuta({ onClose }) {
   const [showErrorDetails, setShowErrorDetails] = useState(false)
   const [copied, setCopied] = useState(false)
   const [duplicateWarning, setDuplicateWarning] = useState(null) // {name, run}
+  const [cropping, setCropping] = useState(false)
 
   const lastDate = transactions[0]?._effDate || transactions[0]?.date || null
+
+  async function applyCrop(croppedFile) {
+    const compressed = await compressImage(croppedFile)
+    setFile(compressed)
+    setPreview(URL.createObjectURL(compressed))
+    setDuplicateWarning(null)
+    setCropping(false)
+  }
 
   // Controllo duplicati richiesto dall'utente 2026-07-27: prima di caricare,
   // cerca una foto già allegata (a una transazione reale o a un pendingReceipt)
@@ -218,7 +320,13 @@ export default function MobileFotoRicevuta({ onClose }) {
       <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
         <div className="m-modal">
           <div className="m-modal-handle"/>
-          <div className="m-modal-title">📷 Foto ricevuta / scontrino</div>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div className="m-modal-title">📷 Foto ricevuta / scontrino</div>
+            <button onClick={onClose} title="Annulla e chiudi"
+              style={{ background:'none', border:'none', fontSize:20, lineHeight:1, color:'var(--text3)', padding:4, cursor:'pointer' }}>
+              ✕
+            </button>
+          </div>
 
           {error && (
             <div style={{ fontSize:12, color:'#c0392b', background:'rgba(192,57,43,.1)', padding:'8px 10px', borderRadius:8, marginBottom:12 }}>
@@ -274,10 +382,25 @@ export default function MobileFotoRicevuta({ onClose }) {
             </>
           )}
 
-          {step === 'question' && (
+          {step === 'question' && cropping && (
+            <CropOverlay imageUrl={preview} onCancel={() => setCropping(false)} onApply={applyCrop}/>
+          )}
+
+          {step === 'question' && !cropping && (
             <>
               {preview && (
-                <img src={preview} alt="" style={{ width:'100%', maxHeight:180, objectFit:'cover', borderRadius:10, marginBottom:14 }}/>
+                <>
+                  <img src={preview} alt="" style={{ width:'100%', maxHeight:360, objectFit:'contain', borderRadius:10, background:'var(--surface2,var(--surface))' }}/>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'6px 2px 14px' }}>
+                    <span style={{ fontSize:11, color:'var(--text3)', fontFamily:'var(--font-mono)' }}>
+                      {formatBytes(file?.size)}
+                    </span>
+                    <button onClick={() => setCropping(true)}
+                      style={{ background:'none', border:'none', color:'var(--accent,#e07b39)', fontSize:12, fontWeight:600, padding:0, cursor:'pointer' }}>
+                      ✂️ Ritaglia
+                    </button>
+                  </div>
+                </>
               )}
               <div style={{ fontSize:14, fontWeight:600, marginBottom:16, lineHeight:1.5 }}>
                 La transazione è avvenuta <strong>dopo</strong> il {lastDate ? fmtDate(lastDate) : '—'} (ultima data presente nel sistema)?
