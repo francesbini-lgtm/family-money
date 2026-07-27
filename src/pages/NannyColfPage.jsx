@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import Modal, { ModalFooter, FormRow, Input } from '../components/Modal'
 import { Plus, Trash2, CheckCircle, AlertCircle, XCircle, Search } from 'lucide-react'
 import { fmtIT, fmtDate } from '../utils/format'
+import { TxAttachmentBadge } from '../components/TxAttachments'
 
 const NANNY_RECON_KEY = 'nannyRecon'
 const COLF_RECON_KEY  = 'colfRecon'
@@ -912,8 +913,14 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                     </td>
                     <td style={{padding:'8px 6px',textAlign:'center',whiteSpace:'nowrap'}}>
                       {alreadyPosted ? (
-                        <span title={`Spesa registrata in Transazioni (${r.recon.expenseTxId})`} style={{color:'var(--green)',display:'inline-flex',alignItems:'center'}}>
-                          <CheckCircle size={16}/>
+                        <span style={{display:'inline-flex',alignItems:'center',gap:4}}>
+                          <span title={`Spesa registrata in Transazioni (${r.recon.expenseTxId})`} style={{color:'var(--green)',display:'inline-flex',alignItems:'center'}}>
+                            <CheckCircle size={16}/>
+                          </span>
+                          {(() => {
+                            const expTx = transactions.find(t=>t.txId===r.recon.expenseTxId)
+                            return expTx ? <TxAttachmentBadge tx={expTx}/> : null
+                          })()}
                         </span>
                       ) : canPost ? (
                         <button className="btn btn-ghost" title="Registra la spesa in Transazioni e consuma i prelievi abbinati"

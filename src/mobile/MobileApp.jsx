@@ -9,6 +9,7 @@ import MobileStaff     from './MobileStaff'
 import MobileQuality   from './MobileQuality'
 import MobileBlocNotes from './MobileBlocNotes'
 import MobileWelcome   from './MobileWelcome'
+import MobileFotoRicevuta from './MobileFotoRicevuta'
 import './mobile.css'
 
 // Bottom nav — Discovery & Accuracy live as icon shortcuts in the top bar instead (see topbar-actions)
@@ -48,6 +49,7 @@ export default function MobileApp() {
   const [tab,         setTab]         = useState('overview')
   const [showAdd,     setShowAdd]     = useState(false)
   const [showWelcome, setShowWelcome] = useState(true)
+  const [showFotoRicevuta, setShowFotoRicevuta] = useState(false)
   const [darkMode,    setDarkMode]    = useState(() => localStorage.getItem('fm-dark') === 'true')
 
   const {
@@ -81,8 +83,15 @@ export default function MobileApp() {
   // Close add modal when switching tabs
   function switchTab(id) { setTab(id); setShowAdd(false) }
 
-  // Welcome quick-actions: jump to the right tab and pop its "+" straight away
+  // Welcome quick-actions: jump to the right tab and pop its "+" straight away.
+  // "ricevuta" è un caso speciale — richiesta utente 2026-07-27: non cambia tab,
+  // apre direttamente il flusso dedicato MobileFotoRicevuta.
   function handleWelcomeAction(actionId) {
+    if (actionId === 'ricevuta') {
+      setShowFotoRicevuta(true)
+      setShowWelcome(false)
+      return
+    }
     setTab(WELCOME_TARGET_TAB[actionId] || 'overview')
     setShowAdd(true)
     setShowWelcome(false)
@@ -210,6 +219,10 @@ export default function MobileApp() {
           onAction={handleWelcomeAction}
           onClose={handleWelcomeClose}
         />
+      )}
+
+      {showFotoRicevuta && (
+        <MobileFotoRicevuta onClose={() => setShowFotoRicevuta(false)} />
       )}
     </div>
   )

@@ -30,6 +30,12 @@ const ACTIONS = [
     title: () => 'Nota prelievo',
     sub: 'Segna un prelievo ATM da abbinare dopo',
   },
+  {
+    id: 'ricevuta',
+    icon: '📷',
+    title: () => 'Foto ricevuta',
+    sub: 'Allega una foto a una transazione',
+  },
 ]
 
 export default function MobileWelcome({ nannyName, colfName, onAction, onClose }) {

@@ -11,6 +11,7 @@ import { Plus, Trash2, LogOut, Download, Copy, UserPlus, Check, Pencil } from 'l
 import { fmtIT, fmtDate } from '../utils/format'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
 import { saveTotpSecret, deleteTotpSecret } from '../services/firestore'
+import { deleteExpenseFile } from '../services/storage'
 import { ForcedBalanceModal } from './TransactionsPage'
 import DevlogPage from './DevlogPage'
 
@@ -1245,6 +1246,74 @@ function DeletedTxTab() {
   )
 }
 
+// ── PendingReceiptsTab — "Documenti da assegnare" ────────
+// Richiesta utente 2026-07-27, flusso mobile "📷 Foto ricevuta": foto di ricevute
+// scattate per transazioni NON ANCORA importate finiscono qui (pendingReceipts),
+// in attesa che il prossimo import CSV le abbini automaticamente (per importo+data,
+// nuovo step in ImportWizard). Da qui si può solo vedere/eliminare — l'abbinamento
+// vero e proprio avviene sempre nello step dedicato dell'import, mai qui.
+function PendingReceiptsTab() {
+  const pendingReceipts     = useStore(s => s.pendingReceipts)
+  const deletePendingReceipt = useStore(s => s.deletePendingReceipt)
+  const [preview, setPreview] = useState(null)
+  const list = [...(pendingReceipts||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''))
+
+  async function handleDelete(r) {
+    if (!window.confirm(`Eliminare il documento "${r.description}"?`)) return
+    if (r.attachment?.path) await deleteExpenseFile(r.attachment.path)
+    deletePendingReceipt(r.id)
+  }
+
+  return (
+    <div>
+      <div style={{fontSize:13,color:'var(--text3)',marginBottom:16,lineHeight:1.5}}>
+        Foto ricevuta caricate da mobile per transazioni non ancora presenti nel sistema.
+        Verranno abbinate automaticamente alla transazione corrispondente al prossimo import del conto
+        (step dedicato durante l'import, con conferma).
+      </div>
+      {list.length === 0 ? (
+        <div style={{textAlign:'center',padding:'40px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',color:'var(--text3)'}}>
+          <div style={{fontSize:32,marginBottom:10}}>📎</div>
+          <div style={{fontWeight:700,marginBottom:6}}>Nessun documento in sospeso</div>
+        </div>
+      ) : (
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead><tr>
+              {['','Data','Descrizione','Importo',''].map(h=>(
+                <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {list.map(r=>(
+                <tr key={r.id} style={{borderBottom:'1px solid var(--border)'}}>
+                  <td style={{padding:'6px 14px'}}>
+                    {r.attachment?.url && (
+                      <img src={r.attachment.url} alt="" onClick={()=>setPreview(r.attachment.url)}
+                        style={{width:34,height:34,objectFit:'cover',borderRadius:6,cursor:'pointer'}}/>
+                    )}
+                  </td>
+                  <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(r.date)}</td>
+                  <td style={{padding:'9px 14px',fontSize:13}}>{r.description}</td>
+                  <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',fontWeight:700}}>€ {fmtIT(Math.abs(r.amount||0),2)}</td>
+                  <td style={{padding:'6px 14px',textAlign:'right'}}>
+                    <button className="btn btn-ghost" title="Elimina" onClick={()=>handleDelete(r)}><Trash2 size={13}/></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {preview && (
+        <div onClick={()=>setPreview(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+          <img src={preview} alt="" style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:8}}/>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── CashCatsTab ───────────────────────────────────────────
 function CashCatsTab() {
   const { customCats } = useStore()
@@ -2433,6 +2502,7 @@ export default function SettingsPage() {
     {id:"ai-rules",      icon:"🤖", label:"Regole AI"},
     {id:"excluded",      icon:"⊘",  label:"Escluse"},
     {id:"deleted-tx",    icon:"🗑",  label:"Eliminate"},
+    {id:"pending-receipts", icon:"📎", label:"Documenti"},
     {id:"cash-cats",     icon:"💵", label:"Contanti"},
     {id:"notifications", icon:"🔔", label:"Notifiche"},
     {id:"nav-sections",  icon:"📋", label:"Sezioni"},
@@ -2452,6 +2522,7 @@ export default function SettingsPage() {
       {tab==="ai-rules"       && <AiRulesTab/>}
       {tab==="excluded"       && <ExcludedTab/>}
       {tab==="deleted-tx"     && <DeletedTxTab/>}
+      {tab==="pending-receipts" && <PendingReceiptsTab/>}
       {tab==="cash-cats"      && <CashCatsTab/>}
       {tab==="notifications"  && <NotificationsTab/>}
       {tab==="nav-sections"   && <NavSectionsTab/>}

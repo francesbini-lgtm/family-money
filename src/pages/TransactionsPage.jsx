@@ -15,6 +15,7 @@ import './TransactionsPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { netAmt } from '../data/compensation'
 import { txMatchesConditions, applyCatRulesTo } from '../data/ruleMatching'
+import { TxAttachmentBadge } from '../components/TxAttachments'
 
 const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
 
@@ -1415,8 +1416,9 @@ const ALL_COLUMNS = [
   { id:'amount',      label:'💰 Importo',              alwaysOn:true  },
   { id:'dataImport',  label:'📥 Data Import'                            },
   { id:'compensatedAmt', label:'💠 Compensato'                          },
+  { id:'attachments', label:'📎 Allegati'                                },
 ]
-const DEFAULT_VISIBLE = new Set(['date','emoji','descAI','note','city','time','card','user','cat','amount'])
+const DEFAULT_VISIBLE = new Set(['date','emoji','descAI','note','city','time','card','user','cat','amount','attachments'])
 const DEFAULT_ORDER   = ALL_COLUMNS.map(c=>c.id)
 
 // ── Scansione doppioni su tutto il DB (richiesta utente 2026-07-15) ─────────
@@ -3052,6 +3054,11 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
             {tx._compensatedAmt>0 ? `€ ${fmtIT(tx._compensatedAmt,2)}` : '—'}
           </td>
         )
+        if(id==='attachments') return (
+          <td key={id} style={{padding:'4px 8px',textAlign:'center'}}>
+            <TxAttachmentBadge tx={tx}/>
+          </td>
+        )
         if(id==='amount') return (
           <td key={id} className={'tx-amount'+amtClass} style={{position:'relative'}}>
             {tx._compensatedAmt>0 ? (
@@ -3867,6 +3874,7 @@ export default function TransactionsPage() {
                   if(id==='amount')      return <th key={id} className="tx-th" style={{textAlign:'right',width:120,cursor:'pointer'}} onClick={()=>toggleSort('amount')} title="Clicca sull'icona ▽ per cercare un importo preciso">Importo (€) {sortIcon('amount')}{filterBtn('amount')}</th>
                   if(id==='dataImport')  return <th key={id} className="tx-th" style={{width:80,textAlign:'center',cursor:'pointer'}} onClick={()=>toggleSort('importedAt')} title="Data in cui la transazione è stata importata nel sistema">📥 Import {sortIcon('importedAt')}</th>
                   if(id==='compensatedAmt') return <th key={id} className="tx-th" style={{width:100,textAlign:'right'}} title="Quota già compensata di questa transazione">💠 Compensato</th>
+                  if(id==='attachments')  return <th key={id} className="tx-th" style={{width:40,textAlign:'center',padding:'0 4px'}} title="Allegati (es. foto ricevuta)">📎</th>
                   return null
                 })}
               </tr>

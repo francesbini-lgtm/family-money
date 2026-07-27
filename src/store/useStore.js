@@ -112,6 +112,7 @@ export const useStore = create((set, get) => ({
   cashEntries:   [],   // manual cash spending log
   notePrelievi:        [],   // mobile ATM withdrawal notes (for future matching)
   pendingWithdrawals:  [],   // temporary withdrawals pending bank reconciliation
+  pendingReceipts:     [],   // mobile receipt photos for not-yet-imported transactions (matched at next CSV import)
   discoverySkipRules:  [],   // descAI strings permanently skipped in Discovery
   energyBills:   [],   // utility bills (luce/gas/acqua)
   salaries:      [],   // RAL e netto annui per persona
@@ -163,7 +164,7 @@ export const useStore = create((set, get) => ({
 
   // ── Load all from Firestore ───────────────────────────
   loadAllData: async (userId) => {
-    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi, skipRules, pendingW] = await Promise.all([
+    const [txs, lns, scd, veh, vehExp, vac, nan, col, port, sati, cec, cash, energy, chat, rules, rimb, sal, accts, notePrelievi, skipRules, pendingW, pendingR] = await Promise.all([
       loadCollection('transactions'),
       loadCollection('loans'),
       loadCollection('scadenze'),
@@ -185,6 +186,7 @@ export const useStore = create((set, get) => ({
       loadCollection('note_prelievi'),
       loadCollection('discovery_skip_rules'),
       loadCollection('pending_withdrawals'),
+      loadCollection('pending_receipts'),
     ])
     set({
       transactions: txs.map(enrichTx).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||'')),
@@ -192,7 +194,7 @@ export const useStore = create((set, get) => ({
       vehExpenses: vehExp, vacations: vac,
       nannyTS: nan, colfTS: col, portfolios: port, satiPots: sati,
       ceciliaGoals: cec, cashEntries: cash, energyBills: energy,
-      notePrelievi, discoverySkipRules: skipRules, pendingWithdrawals: pendingW,
+      notePrelievi, discoverySkipRules: skipRules, pendingWithdrawals: pendingW, pendingReceipts: pendingR,
       aiChatHistory: chat.sort((a,b)=>a.ts-b.ts),
       aiRules: rules,
       rimborsiCosts: rimb,
@@ -971,6 +973,27 @@ export const useStore = create((set, get) => ({
   deletePendingWithdrawal: (id) => {
     set(s => ({ pendingWithdrawals: s.pendingWithdrawals.filter(x => x.id!==id) }))
     deleteDocument('pending_withdrawals', id)
+  },
+
+  // ── Pending Receipts (foto ricevuta da mobile per transazioni non ancora
+  // importate) — richiesta utente 2026-07-27: flusso "📷 Foto ricevuta". Ogni
+  // voce: { id, date, description, amount, attachment:{name,url,type,size,path} }.
+  // Vengono abbinate automaticamente a una transazione reale nello step dedicato
+  // dell'ImportWizard (match per importo+data) e poi rimosse.
+  addPendingReceipt: (r) => {
+    const item = { ...r, id: uid() }
+    set(s => ({ pendingReceipts: [item, ...s.pendingReceipts] }))
+    saveDocument('pending_receipts', item.id, item)
+    return item.id
+  },
+  updatePendingReceipt: (id, patch) => {
+    set(s => ({ pendingReceipts: s.pendingReceipts.map(x => x.id===id ? {...x,...patch} : x) }))
+    const r = get().pendingReceipts.find(x => x.id===id)
+    if (r) saveDocument('pending_receipts', id, {...r,...patch})
+  },
+  deletePendingReceipt: (id) => {
+    set(s => ({ pendingReceipts: s.pendingReceipts.filter(x => x.id!==id) }))
+    deleteDocument('pending_receipts', id)
   },
 
   // ── Cash logic helpers ───────────────────────────────────

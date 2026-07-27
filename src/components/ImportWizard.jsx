@@ -1084,6 +1084,8 @@ export default function ImportWizard({ onClose }) {
   const appPrefs          = useStore(s => s.appPrefs)
   const setAppPref        = useStore(s => s.setAppPref)
   const userAccounts      = useStore(s => s.userAccounts)
+  const pendingReceipts      = useStore(s => s.pendingReceipts)
+  const deletePendingReceipt = useStore(s => s.deletePendingReceipt)
   const allCats           = useMemo(() => getMergedCats(customCats), [customCats])
   const apiKey            = appPrefs?.geminiKey || localStorage.getItem('fm-gemini-key') || ''
 
@@ -1179,6 +1181,9 @@ export default function ImportWizard({ onClose }) {
   // stesso pattern snackbar "Annulla" già usato in WeekendVacanzeV2Page, qui
   // centralizzato invece di duplicato in ogni componente ──
   const [wizUndo, setWizUndo] = useState(null) // { label, onUndo }
+  // Step 'ricevute' — override manuale delle proposte di abbinamento automatico
+  // (receiptId -> txId scelto, o null se l'utente ha deselezionato la proposta)
+  const [ricevuteSelected, setRicevuteSelected] = useState({})
   const undoTimerRef = useRef(null)
   function registerUndo(label, onUndo) {
     clearTimeout(undoTimerRef.current)
@@ -1259,9 +1264,14 @@ export default function ImportWizard({ onClose }) {
     // periodo, non allocate), tutte limitate SOLO alle transazioni di questo import
     // 'review' (richiesta utente 2026-07-12): ultima pagina PRIMA dei KPI con
     // l'elenco completo delle transazioni importate in questo flusso
-    q.push(
-      { id:'compensazioni' }, { id:'vacanze' }, { id:'review' }, { id:'summary' }
-    )
+    q.push({ id:'compensazioni' }, { id:'vacanze' })
+    // 'ricevute' — richiesta utente 2026-07-27: se ci sono documenti in sospeso
+    // (foto ricevuta caricate da mobile PRIMA che la transazione fosse importata,
+    // vedi PendingReceiptsTab in Impostazioni), tenta l'abbinamento automatico
+    // con le transazioni appena importate (match per importo+data) e chiede
+    // conferma. Incluso in coda solo se ce n'è almeno uno da provare ad abbinare.
+    if ((useStore.getState().pendingReceipts||[]).length > 0) q.push({ id:'ricevute' })
+    q.push({ id:'review' }, { id:'summary' })
     return q
   }
 
@@ -1430,6 +1440,7 @@ export default function ImportWizard({ onClose }) {
         : s.id === 'paypal-result' ? 'Esito PayPal'
         : s.id === 'vacanze' ? 'Vacanze'
         : s.id === 'compensazioni' ? 'Compensazioni'
+        : s.id === 'ricevute' ? 'Documenti'
         : s.id === 'review' ? 'Transazioni'
         : 'Riepilogo' })
     })
@@ -1762,6 +1773,84 @@ export default function ImportWizard({ onClose }) {
             <StepNav/>
           </>
         )}
+
+        {/* ── Documenti in sospeso (foto ricevuta da mobile per transazioni non
+            ancora importate, vedi pendingReceipts) — richiesta utente 2026-07-27:
+            tenta l'abbinamento automatico per importo+data con le transazioni
+            appena importate in QUESTO flusso, chiede conferma con Avanti. ── */}
+        {step && step.id === 'ricevute' && (() => {
+          const importedTxs = transactions.filter(t => importedIdSet.has(t.txId))
+          const proposals = pendingReceipts.map(r => {
+            const candidates = importedTxs.filter(t =>
+              (t._effDate||t.date||'').slice(0,10) === (r.date||'').slice(0,10) &&
+              Math.abs(Math.abs(t.amount) - Math.abs(r.amount||0)) < 0.01
+            )
+            return { receipt:r, candidates }
+          })
+          const withMatch = proposals.filter(p => p.candidates.length > 0)
+          const withoutMatch = proposals.filter(p => p.candidates.length === 0)
+          return (
+            <>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>📎 Documenti in sospeso</div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>
+                Foto ricevuta caricate da mobile prima che la transazione fosse importata. Confermando, la foto verrà allegata alla transazione trovata.
+              </div>
+              {withMatch.length === 0 ? (
+                <div style={{padding:'24px 20px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
+                  Nessun documento in sospeso corrisponde alle transazioni appena importate.
+                </div>
+              ) : (
+                <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:14}}>
+                  {withMatch.map(({receipt,candidates}) => {
+                    const chosen = ricevuteSelected[receipt.id] !== undefined ? ricevuteSelected[receipt.id] : candidates[0].txId
+                    return (
+                      <div key={receipt.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',border:'1px solid var(--border)',borderRadius:10}}>
+                        <input type="checkbox" checked={!!chosen} onChange={e=>setRicevuteSelected(s=>({...s,[receipt.id]: e.target.checked ? (candidates[0].txId) : null}))}/>
+                        {receipt.attachment?.url && <img src={receipt.attachment.url} alt="" style={{width:40,height:40,objectFit:'cover',borderRadius:6,flexShrink:0}}/>}
+                        <div style={{flex:1,minWidth:0,fontSize:12}}>
+                          <div style={{fontWeight:700}}>{receipt.description}</div>
+                          <div style={{color:'var(--text3)'}}>{fmtDate(receipt.date)} · € {fmtIT(Math.abs(receipt.amount||0),2)}</div>
+                        </div>
+                        <div style={{fontSize:11,color:'var(--text3)'}}>→</div>
+                        <div style={{flex:1,minWidth:0,fontSize:12,textAlign:'right'}}>
+                          {candidates.length === 1 ? (
+                            <>
+                              <div style={{fontWeight:700}}>{candidates[0].descAI||candidates[0].description||'—'}</div>
+                              <div style={{color:'var(--text3)'}}>{fmtDate(candidates[0]._effDate||candidates[0].date)}</div>
+                            </>
+                          ) : (
+                            <select value={chosen||''} onChange={e=>setRicevuteSelected(s=>({...s,[receipt.id]:e.target.value||null}))}
+                              style={{fontSize:11,padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)'}}>
+                              {candidates.map(c=>(
+                                <option key={c.txId} value={c.txId}>{fmtDate(c._effDate||c.date)} — {(c.descAI||c.description||'').slice(0,30)}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {withoutMatch.length > 0 && (
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:14}}>
+                  {withoutMatch.length} documento/i senza corrispondenza in questo import — resteranno in sospeso (visibili in Impostazioni → Documenti).
+                </div>
+              )}
+              <StepNav onNextClick={() => {
+                withMatch.forEach(({receipt,candidates}) => {
+                  const chosenId = ricevuteSelected[receipt.id] !== undefined ? ricevuteSelected[receipt.id] : candidates[0].txId
+                  if (!chosenId) return // utente ha deselezionato questo abbinamento
+                  const tx = transactions.find(t=>t.txId===chosenId)
+                  if (!tx || !receipt.attachment) return
+                  updateTransaction(tx.txId, { attachments:[...(tx.attachments||[]), receipt.attachment] })
+                  deletePendingReceipt(receipt.id)
+                })
+                next()
+              }}/>
+            </>
+          )
+        })()}
 
         {/* ── Riepilogo transazioni importate (richiesta utente 2026-07-12):
             ultima pagina PRIMA dei KPI — dentro al riquadro tutte le transazioni

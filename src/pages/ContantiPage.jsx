@@ -9,6 +9,7 @@ import './ContantiPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { postCashExpense } from '../data/cashPosting'
 import { showToast } from '../services/notifications'
+import { TxAttachmentBadge } from '../components/TxAttachments'
 
 // ── ATM Meta storage (Firestore via appPrefs) ─────────────
 function getAtmMeta() { return useStore.getState()?.appPrefs?.atmMeta || {} }
@@ -1043,9 +1044,15 @@ export default function ContantiPage() {
                       </td>
                       <td style={{padding:'6px 10px',textAlign:'center',whiteSpace:'nowrap'}}>
                         {row.tipo === 'manual' && row.posted && (
-                          <span title={`Registrata in Transazioni (${row.expenseTxId})`}
-                            style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,fontWeight:700,color:'var(--green)'}}>
-                            <CheckCircle2 size={13}/> Registrata
+                          <span style={{display:'inline-flex',alignItems:'center',gap:6}}>
+                            <span title={`Registrata in Transazioni (${row.expenseTxId})`}
+                              style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,fontWeight:700,color:'var(--green)'}}>
+                              <CheckCircle2 size={13}/> Registrata
+                            </span>
+                            {(() => {
+                              const expTx = transactions.find(t=>t.txId===row.expenseTxId)
+                              return expTx ? <TxAttachmentBadge tx={expTx}/> : null
+                            })()}
                           </span>
                         )}
                         {row.tipo === 'manual' && !row.posted && row.canRegister && (
