@@ -1,5 +1,5 @@
 import { storage } from '../firebase'
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage'
 
 /**
  * Upload files for a vehicle expense.
@@ -28,17 +28,33 @@ export async function uploadExpenseFiles(expenseId, files) {
  * pendingReceipt (per foto scattate PRIMA che la transazione sia stata importata).
  * @param {string} id
  * @param {File[]} files
+ * @param {(pct:number)=>void} [onProgress] — percentuale 0-100 (aggregata su più file), per mostrare
+ *   una barra di avanzamento reale invece di uno spinner generico (richiesta utente 2026-07-27).
  * @returns {Promise<{name, url, type, size, path}[]>}
  */
-export async function uploadTransactionFiles(id, files) {
+export async function uploadTransactionFiles(id, files, onProgress) {
   const results = []
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
     const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const storageRef = ref(storage, `tx-attachments/${id}/${safeName}`)
-    await uploadBytes(storageRef, file, { contentType: file.type })
+    const task = uploadBytesResumable(storageRef, file, { contentType: file.type })
+    await new Promise((resolve, reject) => {
+      task.on('state_changed',
+        snapshot => {
+          const filePct = snapshot.totalBytes ? snapshot.bytesTransferred / snapshot.totalBytes : 0
+          // Riserviamo il 100% al completamento reale (dopo getDownloadURL), così la barra
+          // non "finisce" mentre in realtà l'operazione è ancora in corso.
+          onProgress?.(Math.min(99, Math.round(((i + filePct) / files.length) * 100)))
+        },
+        reject,
+        resolve
+      )
+    })
     const url = await getDownloadURL(storageRef)
     results.push({ name: file.name, url, type: file.type, size: file.size, path: storageRef.fullPath })
   }
+  onProgress?.(100)
   return results
 }
 

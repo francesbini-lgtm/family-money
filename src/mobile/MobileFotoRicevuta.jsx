@@ -78,6 +78,7 @@ export default function MobileFotoRicevuta({ onClose }) {
   const [manualDesc, setManualDesc] = useState('')
   const [manualAmount, setManualAmount] = useState('')
   const [saving, setSaving] = useState(false)
+  const [progress, setProgress] = useState(0)
   const [error, setError] = useState(null)
 
   const lastDate = transactions[0]?._effDate || transactions[0]?.date || null
@@ -107,9 +108,9 @@ export default function MobileFotoRicevuta({ onClose }) {
 
   async function attachToTransaction(tx) {
     if (!file) return
-    setSaving(true); setError(null)
+    setSaving(true); setError(null); setProgress(0)
     try {
-      const uploaded = await withTimeout(uploadTransactionFiles(tx.txId, [file]), 30000, 'Caricamento foto')
+      const uploaded = await withTimeout(uploadTransactionFiles(tx.txId, [file], setProgress), 30000, 'Caricamento foto')
       updateTransaction(tx.txId, { attachments: [...(tx.attachments||[]), ...uploaded] })
       setStep('done')
     } catch (e) {
@@ -120,10 +121,10 @@ export default function MobileFotoRicevuta({ onClose }) {
 
   async function saveManual() {
     if (!manualDate || !manualDesc.trim() || !manualAmount || !file) return
-    setSaving(true); setError(null)
+    setSaving(true); setError(null); setProgress(0)
     try {
       const pendingId = 'pend-' + Date.now().toString(36)
-      const uploaded = await withTimeout(uploadTransactionFiles(pendingId, [file]), 30000, 'Caricamento foto')
+      const uploaded = await withTimeout(uploadTransactionFiles(pendingId, [file], setProgress), 30000, 'Caricamento foto')
       addPendingReceipt({
         date: manualDate,
         description: manualDesc.trim(),
@@ -135,6 +136,19 @@ export default function MobileFotoRicevuta({ onClose }) {
       setError((e.message||String(e)))
     }
     setSaving(false)
+  }
+
+  function ProgressBar() {
+    return (
+      <div style={{ marginTop:10 }}>
+        <div style={{ height:6, borderRadius:4, background:'rgba(255,255,255,.12)', overflow:'hidden' }}>
+          <div style={{ height:'100%', width:`${progress}%`, background:'var(--accent,#e07b39)', transition:'width .2s ease' }}/>
+        </div>
+        <div style={{ fontSize:11, color:'var(--text3)', marginTop:6, textAlign:'center', fontFamily:'var(--font-mono)' }}>
+          Caricamento… {progress}%
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -223,11 +237,14 @@ export default function MobileFotoRicevuta({ onClose }) {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                 <button className="m-btn m-btn-ghost" disabled={saving} onClick={() => setStep('select')}>← Indietro</button>
                 <button className="m-btn m-btn-primary" disabled={saving} onClick={() => attachToTransaction(detailTx)}>
-                  {saving ? '…' : '✓ È questa'}
+                  {saving ? `${progress}%` : '✓ È questa'}
                 </button>
               </div>
               {saving && (
-                <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>✕ Annulla caricamento</button>
+                <>
+                  <ProgressBar/>
+                  <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>✕ Annulla caricamento</button>
+                </>
               )}
             </>
           )}
@@ -256,11 +273,14 @@ export default function MobileFotoRicevuta({ onClose }) {
                 <button className="m-btn m-btn-ghost" disabled={saving} onClick={() => setStep('question')}>← Indietro</button>
                 <button className="m-btn m-btn-primary" disabled={saving || !manualDate || !manualDesc.trim() || !manualAmount}
                   onClick={saveManual}>
-                  {saving ? '…' : '✓ Salva'}
+                  {saving ? `${progress}%` : '✓ Salva'}
                 </button>
               </div>
               {saving && (
-                <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>✕ Annulla caricamento</button>
+                <>
+                  <ProgressBar/>
+                  <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>✕ Annulla caricamento</button>
+                </>
               )}
             </>
           )}
