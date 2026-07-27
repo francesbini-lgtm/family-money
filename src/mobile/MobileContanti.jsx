@@ -193,9 +193,22 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
   const [date,  setDate]  = useState(localDate)
   const [note,  setNote]  = useState('')
   const [amount, setAmount] = useState('')
+  // tipo: '' | 'nanny' | 'colf' | 'altro' — selettore rapido richiesto dall'utente
+  // 2026-07-27: "Altro" obbliga a scrivere una nota, "Nanny"/"Colf" precompilano
+  // la nota (rispettivamente "Nanny"/"COLF") e lasciano procedere subito.
+  const [tipo, setTipo] = useState('')
+
+  function pickTipo(t) {
+    setTipo(t)
+    if (t === 'nanny') setNote('Nanny')
+    else if (t === 'colf') setNote('COLF')
+    else if (t === 'altro') setNote('')
+  }
+
+  const canSave = !!date && (tipo !== 'altro' || note.trim().length > 0)
 
   function handleSave() {
-    if (!date) return
+    if (!canSave) return
     addNotaPrelievo({
       date, note: note.trim(),
       amount: amount ? parseFloat(amount) : null,
@@ -227,14 +240,30 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
         </div>
 
         <div className="m-field">
-          <label className="m-label">Nota / Luogo</label>
-          <input className="m-input" type="text" placeholder="Es: Banca Centro, usato per nanny…"
+          <label className="m-label">Tipo (opzionale)</label>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+            {[['nanny','👩‍🍼 Nanny'],['colf','🧹 Colf'],['altro','📝 Altro']].map(([t,label])=>(
+              <button key={t} type="button" onClick={() => pickTipo(t)}
+                className={'m-btn' + (tipo===t ? ' m-btn-primary' : ' m-btn-ghost')}
+                style={{ fontSize:12, padding:'8px 4px' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="m-field">
+          <label className="m-label">
+            Nota / Luogo{tipo==='altro' && <span style={{ color:'#d33' }}> *obbligatoria</span>}
+          </label>
+          <input className="m-input" type="text"
+            placeholder={tipo==='altro' ? 'Obbligatoria — es: Idraulico, regalo…' : 'Es: Banca Centro, usato per nanny…'}
             value={note} onChange={e => setNote(e.target.value)}/>
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:4 }}>
           <button className="m-btn m-btn-ghost" onClick={onClose}>Annulla</button>
-          <button className="m-btn m-btn-primary" onClick={handleSave} disabled={!date}>✓ Salva</button>
+          <button className="m-btn m-btn-primary" onClick={handleSave} disabled={!canSave}>✓ Salva</button>
         </div>
       </div>
     </div>

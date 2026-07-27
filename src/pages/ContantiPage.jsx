@@ -345,6 +345,72 @@ function DateRettCell({ tx }) {
   )
 }
 
+// ── Nota prelievo (editable, stored in atmMeta[txId].note) — colonna NOTA nel box
+// Storico Prelievi, identica alla versione in NannyColfPage.jsx (richiesta utente
+// 2026-07-27, stessa struttura di DateRettCell qui sopra).
+function PrelievoNoteCell({ txId }) {
+  const [editing, setEditing] = useState(false)
+  const stored = getAtmMeta()[txId]?.note || ''
+  const [val, setVal] = useState(stored)
+  const [, forceUpdate] = useState(0)
+
+  function save() {
+    const cur = getAtmMeta()
+    const entry = { ...(cur[txId] || {}) }
+    if (val.trim()) entry.note = val.trim()
+    else delete entry.note
+    saveAtmMeta({ ...cur, [txId]: entry })
+    setEditing(false)
+    forceUpdate(n=>n+1)
+  }
+
+  if (editing) return (
+    <div style={{display:'flex',gap:4,alignItems:'center',marginTop:3}} onClick={e=>e.stopPropagation()}>
+      <input value={val} onChange={e=>setVal(e.target.value)} autoFocus placeholder="Nota…"
+        onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') setEditing(false) }}
+        style={{flex:1,padding:'2px 6px',borderRadius:6,border:'1px solid var(--accent)',fontSize:10,background:'var(--bg)',color:'var(--text)'}}/>
+      <button className="btn btn-ghost" style={{padding:'1px 5px',fontSize:10}} onClick={save}>✓</button>
+    </div>
+  )
+
+  return (
+    <div onClick={e=>{e.stopPropagation(); setEditing(true)}} title="Clicca per modificare la nota"
+      style={{fontSize:10,color:stored?'var(--text2)':'var(--text3)',cursor:'pointer',marginTop:3,
+        fontStyle:stored?'normal':'italic',opacity:stored?1:.6}}>
+      {stored || '+ nota'}
+    </div>
+  )
+}
+
+const MESI_CONTANTI = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+function meseLabelContanti(ym) {
+  if (!ym) return '—'
+  const [y,m] = ym.split('-')
+  return `${MESI_CONTANTI[parseInt(m)-1]} ${String(y).slice(2)}`
+}
+
+// Prelievi ATM raggruppati per mese, con residuo post-abbinamento — stesso identico
+// pattern di computePrelieviByMonth in NannyColfPage.jsx (richiesta utente 2026-07-27:
+// "tabella storico prelievi come quella in nanny/colf, identica"), duplicato qui
+// volutamente (stessa convenzione di computeSaldoTotale in cashPosting.js).
+function computePrelieviByMonthContanti(atmTxs, computeAtmUsed) {
+  const map = {}
+  atmTxs.forEach(t => {
+    const mese = (t._effDate || t.date || '').slice(0,7)
+    if (!mese) return
+    const used    = computeAtmUsed(t.txId)
+    const importo = Math.abs(t.amount)
+    const residuo = Math.round((importo - used) * 100) / 100
+    if (!map[mese]) map[mese] = { mese, importo:0, totale:0, count:0, items:[] }
+    map[mese].importo += importo
+    map[mese].totale  += residuo
+    map[mese].count   += 1
+    map[mese].items.push({ txId: t.txId, date: (t._effDate||t.date||'').slice(0,10), importo, residuo })
+  })
+  Object.values(map).forEach(m => m.items.sort((a,b)=>b.date.localeCompare(a.date)))
+  return map
+}
+
 // ── Link summary badge ────────────────────────────────────
 function LinkBadge({ tx, onOpen }) {
   const autoLinks   = getAutoLinks(tx.txId)
@@ -489,11 +555,12 @@ function linkedAmt(tx) {
 
 // ── Main page ─────────────────────────────────────────────
 export default function ContantiPage() {
-  const { cashEntries, addCashEntry, deleteCashEntry, updateCashEntry, transactions, nannyTS, colfTS, vehExpenses, vehicles, appPrefs, setAppPref, pendingWithdrawals, addPendingWithdrawal, autoAssignAtm, rebalanceAutoAssignments } = useStore()
+  const { cashEntries, addCashEntry, deleteCashEntry, updateCashEntry, transactions, nannyTS, colfTS, vehExpenses, vehicles, appPrefs, setAppPref, pendingWithdrawals, addPendingWithdrawal, autoAssignAtm, rebalanceAutoAssignments, notePrelievi, deleteNotaPrelievo, computeAtmUsed } = useStore()
   const [showAdd, setShowAdd] = useState(false)
   const [linksTx, setLinksTx] = useState(null)
   const [atmOffset, setAtmOffset] = useState(0)
   const [abbinaTx, setAbbinaTx] = useState(null) // { rowId, tipo } — row waiting for ATM link
+  const [expandedPrelievoMese, setExpandedPrelievoMese] = useState(null) // mese espanso nel box Storico Prelievi
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0,10),
     cat1: 'Spesa e Alimentari', cat2: '',
@@ -535,6 +602,34 @@ export default function ContantiPage() {
       return d >= atmWindowStart && d <= atmWindowEnd
     }).sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
   , [atmTxsAll, atmWindowStart, atmWindowEnd])
+
+  // Box laterale "Storico Prelievi" — identico a quello di NannyColfPage.jsx
+  // (richiesta utente 2026-07-27: "a destra tabella snella prelievi storici,
+  // come quella in nanny e colf, identica")
+  const prelieviList = useMemo(() => {
+    const byMonth = computePrelieviByMonthContanti(atmTxsAll, computeAtmUsed)
+    return Object.values(byMonth).sort((a,b)=>b.mese.localeCompare(a.mese))
+  }, [atmTxsAll, computeAtmUsed])
+
+  // "Prelievi non registrati" — note prelievo create da mobile (notePrelievi) che
+  // NON hanno ancora una transazione bancaria reale corrispondente. Match euristico:
+  // stessa data (± nessuna tolleranza, si presume lo stesso giorno) e, se l'importo
+  // è stato indicato in mobile, stesso importo (±1 cent) — altrimenti basta la data,
+  // dato che il prelievo reale arriva quasi sempre lo stesso giorno in banca.
+  // Richiesta utente 2026-07-27: "prelievi inseriti tramite APP che il sistema non
+  // ha ancora trovato".
+  const prelieviNonRegistrati = useMemo(() => {
+    return (notePrelievi||[]).filter(n => {
+      const d = (n.date||'').slice(0,10)
+      const found = atmTxsAll.some(t => {
+        const td = (t._effDate||t.date||'').slice(0,10)
+        if (td !== d) return false
+        if (n.amount) return Math.abs(Math.abs(t.amount) - n.amount) < 0.01
+        return true
+      })
+      return !found
+    }).sort((a,b)=>(b.date||'').localeCompare(a.date||''))
+  }, [notePrelievi, atmTxsAll])
 
   // ── Utilizzo Contanti — unified rows ─────────────────────
   const nannyName   = appPrefs?.nannyName  || 'Nanny'
@@ -737,7 +832,7 @@ export default function ContantiPage() {
     <div className="cash-page">
       <div className="cash-header">
         <div>
-          <h1 className="cash-title">💵 Contanti</h1>
+          <h1 className="cash-title">💵 Contanti & Prelievi</h1>
           <div className="cash-sub">Prelievi ATM e tracking spese in contanti</div>
         </div>
         <div style={{display:'flex',gap:8}}>
@@ -865,14 +960,16 @@ export default function ContantiPage() {
         </div>
       </div>
 
-      {/* ── Utilizzo Contanti ── */}
+      {/* ── Utilizzo Contanti + Storico Prelievi (a destra) ── */}
+      <div style={{display:'flex',gap:24,alignItems:'flex-start',marginBottom:24}}>
+      <div style={{flex:1,minWidth:0}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
         <div style={{fontSize:15,fontWeight:700}}>📋 Utilizzo Contanti</div>
         <button className="btn btn-primary" onClick={()=>setShowAdd(true)} style={{fontSize:12,padding:'5px 14px'}}>
           <Plus size={13}/> Aggiungi
         </button>
       </div>
-      <div className="card" style={{padding:0,overflow:'hidden',marginBottom:24}}>
+      <div className="card" style={{padding:0,overflow:'hidden'}}>
         {utilizzoRows.length === 0
           ? <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
               Nessun utilizzo registrato. Abbina Nanny/Colf ai prelievi nella pagina dedicata, o aggiungi manualmente.
@@ -972,6 +1069,101 @@ export default function ContantiPage() {
               </tbody>
             </table>
         }
+      </div>
+      </div>
+
+      <aside style={{width:280,flexShrink:0,display:'flex',flexDirection:'column',gap:16}}>
+        {/* Prelievi non registrati — note prelievo da mobile senza transazione reale trovata */}
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <div style={{padding:'12px 14px',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+            <div style={{fontSize:12,fontWeight:700}}>⏳ Prelievi non registrati</div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Note prelievo da app, non ancora trovate in banca</div>
+          </div>
+          {prelieviNonRegistrati.length === 0 ? (
+            <div style={{padding:'16px 14px',textAlign:'center',color:'var(--text3)',fontSize:11}}>Nessuna nota in sospeso</div>
+          ) : (
+            <div style={{maxHeight:220,overflowY:'auto'}}>
+              {prelieviNonRegistrati.map(n=>(
+                <div key={n.id} style={{padding:'8px 14px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:600,color:'var(--text2)',fontFamily:'var(--font-mono)'}}>{fmtDate(n.date)}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.note||'—'}</div>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+                    {n.amount ? <span style={{fontSize:11,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>€ {fmtIT(n.amount,0)}</span> : null}
+                    <button className="btn btn-ghost" onClick={()=>deleteNotaPrelievo(n.id)} title="Elimina nota">
+                      <Trash2 size={11}/>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Storico Prelievi — identico al box in NannyColfPage.jsx */}
+        <div className="card" style={{padding:0,overflow:'hidden'}}>
+          <div style={{padding:'12px 14px',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+            <div style={{fontSize:12,fontWeight:700}}>💵 Storico Prelievi</div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Importo prelevato e residuo, per mese</div>
+          </div>
+          {prelieviList.length === 0 ? (
+            <div style={{padding:'20px 14px',textAlign:'center',color:'var(--text3)',fontSize:12}}>Nessun prelievo trovato</div>
+          ) : (
+            <div style={{maxHeight:420,overflowY:'auto'}}>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'4px 14px',fontSize:9,fontWeight:700,
+                letterSpacing:'.05em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)'}}>
+                <span>Mese</span>
+                <span style={{display:'flex',gap:14}}><span style={{minWidth:52,textAlign:'right'}}>Importo</span><span style={{minWidth:52,textAlign:'right'}}>Residuo</span></span>
+              </div>
+              {prelieviList.map(p=>{
+                const isExpandable = p.count > 1
+                const isOpen = expandedPrelievoMese === p.mese
+                return (
+                  <div key={p.mese} style={{borderBottom:'1px solid var(--border)'}}>
+                    <div onClick={()=>isExpandable && setExpandedPrelievoMese(isOpen?null:p.mese)}
+                      style={{padding:'10px 14px',display:'flex',justifyContent:'space-between',alignItems:'baseline',
+                        cursor:isExpandable?'pointer':'default',userSelect:'none'}}>
+                      <div>
+                        <div style={{fontSize:11,fontWeight:700,color:'var(--text2)',display:'flex',alignItems:'center',gap:4}}>
+                          {meseLabelContanti(p.mese)}
+                          {isExpandable && <span style={{fontSize:9,opacity:.5}}>{isOpen?'▲':'▼'}</span>}
+                        </div>
+                        <div style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</div>
+                        {!isExpandable && <PrelievoNoteCell txId={p.items[0].txId}/>}
+                      </div>
+                      <div style={{display:'flex',gap:14}}>
+                        <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>
+                          € {fmtIT(p.importo,0)}
+                        </span>
+                        <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:p.totale>0.01?'var(--red)':'var(--text3)'}}>
+                          € {fmtIT(p.totale,0)}
+                        </span>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{padding:'0 14px 8px 14px',background:'var(--surface2)'}}>
+                        {p.items.map(it=>(
+                          <div key={it.txId} style={{padding:'4px 0',borderTop:'1px solid var(--border)',fontSize:11}}>
+                            <div style={{display:'flex',justifyContent:'space-between'}}>
+                              <span style={{color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{fmtDate(it.date)}</span>
+                              <span style={{display:'flex',gap:14}}>
+                                <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text2)'}}>€ {fmtIT(it.importo,0)}</span>
+                                <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:it.residuo>0.01?'var(--red)':'var(--text3)'}}>€ {fmtIT(it.residuo,0)}</span>
+                              </span>
+                            </div>
+                            <PrelievoNoteCell txId={it.txId}/>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </aside>
       </div>
 
       {/* ATM withdrawals */}

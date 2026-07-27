@@ -14,6 +14,49 @@ function saveRecon(key, data) {
   useStore.getState()?.setAppPref?.(key, data)
 }
 
+// ATM Meta storage (Firestore via appPrefs) — stessa chiave/struttura usata da
+// ContantiPage.jsx (atmMeta[txId].effDate/.links/.note), duplicata qui volutamente
+// per restare indipendenti pagina per pagina (stessa convenzione di getRecon/saveRecon).
+function getAtmMeta() { return useStore.getState()?.appPrefs?.atmMeta || {} }
+function saveAtmMeta(d) { useStore.getState()?.setAppPref?.('atmMeta', d) }
+
+// ── Nota prelievo (editable, stored in atmMeta[txId].note) — colonna NOTA nel box
+// Storico Prelievi, richiesta utente 2026-07-27: "aggiungi colonna NOTA, identica
+// in Contanti e in Nanny/Colf" — stesso pattern di DateRettCell (ContantiPage.jsx).
+function PrelievoNoteCell({ txId }) {
+  const [editing, setEditing] = useState(false)
+  const stored = getAtmMeta()[txId]?.note || ''
+  const [val, setVal] = useState(stored)
+  const [, forceUpdate] = useState(0)
+
+  function save() {
+    const cur = getAtmMeta()
+    const entry = { ...(cur[txId] || {}) }
+    if (val.trim()) entry.note = val.trim()
+    else delete entry.note
+    saveAtmMeta({ ...cur, [txId]: entry })
+    setEditing(false)
+    forceUpdate(n=>n+1)
+  }
+
+  if (editing) return (
+    <div style={{display:'flex',gap:4,alignItems:'center',marginTop:3}} onClick={e=>e.stopPropagation()}>
+      <input value={val} onChange={e=>setVal(e.target.value)} autoFocus placeholder="Nota…"
+        onKeyDown={e=>{ if(e.key==='Enter') save(); if(e.key==='Escape') setEditing(false) }}
+        style={{flex:1,padding:'2px 6px',borderRadius:6,border:'1px solid var(--accent)',fontSize:10,background:'var(--bg)',color:'var(--text)'}}/>
+      <button className="btn btn-ghost" style={{padding:'1px 5px',fontSize:10}} onClick={save}>✓</button>
+    </div>
+  )
+
+  return (
+    <div onClick={e=>{e.stopPropagation(); setEditing(true)}} title="Clicca per modificare la nota"
+      style={{fontSize:10,color:stored?'var(--text2)':'var(--text3)',cursor:'pointer',marginTop:3,
+        fontStyle:stored?'normal':'italic',opacity:stored?1:.6}}>
+      {stored || '+ nota'}
+    </div>
+  )
+}
+
 // ATM/prelievo detection
 function isAtmWithdrawal(t) {
   if (t.excluded || t.amount >= 0) return false
@@ -917,6 +960,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                         {isExpandable && <span style={{fontSize:9,opacity:.5}}>{isOpen?'▲':'▼'}</span>}
                       </div>
                       <div style={{fontSize:10,color:'var(--text3)'}}>{p.count} prelievo/i</div>
+                      {!isExpandable && <PrelievoNoteCell txId={p.items[0].txId}/>}
                     </div>
                     <div style={{display:'flex',gap:14}}>
                       <span style={{minWidth:52,textAlign:'right',fontSize:13,fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text2)'}}>
@@ -930,13 +974,15 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                   {isOpen && (
                     <div style={{padding:'0 14px 8px 14px',background:'var(--surface2)'}}>
                       {p.items.map(it=>(
-                        <div key={it.txId} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',
-                          borderTop:'1px solid var(--border)',fontSize:11}}>
-                          <span style={{color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{fmtDate(it.date)}</span>
-                          <span style={{display:'flex',gap:14}}>
-                            <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text2)'}}>€ {fmtIT(it.importo,0)}</span>
-                            <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:it.residuo>0.01?'var(--red)':'var(--text3)'}}>€ {fmtIT(it.residuo,0)}</span>
-                          </span>
+                        <div key={it.txId} style={{padding:'4px 0',borderTop:'1px solid var(--border)',fontSize:11}}>
+                          <div style={{display:'flex',justifyContent:'space-between'}}>
+                            <span style={{color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{fmtDate(it.date)}</span>
+                            <span style={{display:'flex',gap:14}}>
+                              <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--text2)'}}>€ {fmtIT(it.importo,0)}</span>
+                              <span style={{minWidth:52,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:it.residuo>0.01?'var(--red)':'var(--text3)'}}>€ {fmtIT(it.residuo,0)}</span>
+                            </span>
+                          </div>
+                          <PrelievoNoteCell txId={it.txId}/>
                         </div>
                       ))}
                     </div>
