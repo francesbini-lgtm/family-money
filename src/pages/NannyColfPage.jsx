@@ -229,6 +229,37 @@ function postaSpesaNannyColf(entry, allocations, { entityLabel, expenseCat1, exp
           importoReale: (useStore.getState().transactions.find(t=>t.txId===leftoverTxId)||{}).amount,
           saldoDopoQuestoStep: computeSaldoTotale(useStore.getState().transactions),
         })
+
+        // Ripunta al NUOVO leftoverTxId qualunque ALTRA riconciliazione (Nanny o Colf,
+        // di qualunque altra entry) che puntava ancora al prelievo originale a.txId,
+        // ora escluso — altrimenti quell'allocazione si "rompe" silenziosamente.
+        // Stesso identico bug reale trovato e fixato in cashPosting.js/ContantiPage
+        // il 2026-07-26 (due spese/riconciliazioni diverse condividono lo stesso
+        // prelievo: la prima registrata orfanizzava la seconda). Verificato dall'utente
+        // PRIMA di confermare una registrazione su un prelievo condiviso con un'altra
+        // entry non ancora registrata (2026-07-27).
+        const prevReconSnapshots = []
+        ;[NANNY_RECON_KEY, COLF_RECON_KEY].forEach(otherKey => {
+          const otherRecon = { ...getRecon(otherKey) }
+          let changed = false
+          Object.keys(otherRecon).forEach(otherId => {
+            if (otherKey === reconKey && otherId === String(entry.id)) return // se stessa, gestita sotto
+            const or = otherRecon[otherId]
+            const allocs2 = reconAllocations(or)
+            if (!allocs2.some(al => al.txId === a.txId)) return
+            const newAllocs = allocs2.map(al => al.txId === a.txId ? { ...al, txId: leftoverTxId } : al)
+            otherRecon[otherId] = Array.isArray(or.allocations)
+              ? { ...or, allocations: newAllocs }
+              : { ...or, txId: leftoverTxId }
+            changed = true
+          })
+          if (changed) {
+            prevReconSnapshots.push({ key: otherKey, prev: getRecon(otherKey) })
+            saveRecon(otherKey, otherRecon)
+            dbgLog({ step:'sibling-repointed', otherKey, oldTxId:a.txId, newTxId:leftoverTxId })
+          }
+        })
+        rollbackOps.push(() => prevReconSnapshots.forEach(s => saveRecon(s.key, s.prev)))
       } else {
         dbgLog({ step:'no-leftover-needed', txId:a.txId, leftoverAbs })
       }
@@ -300,18 +331,32 @@ function computePrelieviByMonth(transactions, store) {
 
 function reconcileStatus(entry, transactions, reconKey=NANNY_RECON_KEY) {
   const recon = getRecon(reconKey)
-  if (recon[entry.id]) return { status:'ok', recon: recon[entry.id] }
+  const r = recon[entry.id]
+  if (r) {
+    // FIX bug reale 2026-07-27: prima ritornava 'ok' semplicemente perché esisteva
+    // un recon, senza controllare se la somma allocata copre davvero entry.totale —
+    // mostrava "✓ Verificato" anche con copertura parziale (es. Colf: 100 di 121
+    // coperti). Ora confronta allocatedTotal con entry.totale (o r.posted, che
+    // significa "già registrato come spesa reale", sempre coperto per costruzione).
+    const allocs = reconAllocations(r)
+    const allocatedTotal = Math.round(allocs.reduce((s,a)=>s+(a.amt||0),0)*100)/100
+    const covered = !!r.posted || allocatedTotal >= entry.totale - 0.01
+    const gap = Math.max(0, Math.round((entry.totale - allocatedTotal)*100)/100)
+    return { status: covered?'ok':'partial', found: allocatedTotal, recon: r, allocatedTotal, gap }
+  }
 
-  // Fallback: auto-search by exact amount in month
+  // Fallback: auto-search by exact amount in month — nessun recon reale salvato,
+  // quindi gap:null (non contribuisce al KPI "Contanti mancanti", che conta solo
+  // riconciliazioni reali sotto-coperte, non semplici match automatici non confermati)
   const month = entry.mese
   const atm = transactions.filter(t => isAtmWithdrawal(t) && (t._effDate||(t._effDate||t.date||'')).startsWith(month))
   const exact = atm.find(t => Math.abs(t.amount) === entry.totale)
-  if (exact) return { status:'ok', recon:{ txId: exact.txId, txAmt: Math.abs(exact.amount), nannyAmt: entry.totale, auto:true } }
+  if (exact) return { status:'ok', recon:{ txId: exact.txId, txAmt: Math.abs(exact.amount), nannyAmt: entry.totale, auto:true }, gap:0 }
 
   const partial = atm.find(t => Math.abs(t.amount) >= entry.totale * 0.9)
-  if (partial) return { status:'partial', found: Math.abs(partial.amount) }
+  if (partial) return { status:'partial', found: Math.abs(partial.amount), gap:null }
 
-  return { status:'missing', found:0 }
+  return { status:'missing', found:0, gap:null }
 }
 
 // Allocazioni di una riga recon (nuovo formato multi-prelievo o vecchio formato singolo)
@@ -653,18 +698,24 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
   // nuovo flusso "crea transazione" (recon con campo .gap valorizzato), sia Nanny che
   // Colf insieme — non stime su entry non ancora riconciliate.
   const contantiMancanti = (() => {
-    const nannyRecon = getRecon(NANNY_RECON_KEY)
-    const colfRecon  = getRecon(COLF_RECON_KEY)
+    // FIX 2026-07-27: il vecchio codice sommava un campo `.gap` sui recon che non
+    // veniva MAI valorizzato da nessuna parte (confirm() in ReconcileModal non lo
+    // scriveva) — il KPI mostrava sempre € 0,00 anche con riconciliazioni sotto-coperte
+    // reali (es. Colf: 100 di 121). Ora usa reconcileStatus (fixato) su TUTTE le entry
+    // Nanny+Colf, che calcola il gap vero dalla somma delle allocazioni.
     let tot = 0
-    ;[nannyRecon, colfRecon].forEach(recon => {
-      Object.values(recon || {}).forEach(r => { if (r?.gap > 0.005) tot += r.gap })
+    ;[[NANNY_RECON_KEY, store.nannyTS||[]], [COLF_RECON_KEY, store.colfTS||[]]].forEach(([rk, ents]) => {
+      ents.forEach(e => {
+        const r = reconcileStatus(e, transactions, rk)
+        if (r.gap > 0.005) tot += r.gap
+      })
     })
     return Math.round(tot*100)/100
   })()
 
   return (
     <div style={{padding:'28px 32px',display:'flex',gap:24,alignItems:'flex-start'}}>
-    <div style={{flex:1,maxWidth:860,minWidth:0}}>
+    <div style={{flex:1,maxWidth:1080,minWidth:0}}>
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:16}}>
         <div>
           <h1 style={{fontFamily:'var(--font-serif)',fontSize:26,fontWeight:600}}>{icon} {displayTitle}</h1>
@@ -715,19 +766,22 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
-              {['Mese','Ore','€/ora','Totale','Riconciliazione','Data Prelievo','Residuo Prelievi Mese','','',''].map((h,hi)=>(
-                <th key={h+hi} style={{padding:'10px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Residuo Prelievi Mese'].includes(h)?'right':'left'}}>{h}</th>
+              {['Mese','Ore','€/ora','Totale','Riconciliazione','Manca','Data Prelievo','Residuo Prelievi Mese','','',''].map((h,hi)=>(
+                <th key={h+hi} style={{padding:'8px 10px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:['Totale','Manca','Residuo Prelievi Mese'].includes(h)?'right':'left'}}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {[...entries].sort((a,b)=>b.mese.localeCompare(a.mese)).map(e=>{
                 const r=reconcileStatus(e,transactions,reconKey)
-                const allocs = r.status==='ok' ? reconAllocations(r.recon) : []
-                // Coperto al 100%+ dai prelievi selezionati E non ancora "postato" — richiesta
-                // utente 2026-07-21/22: il bottone "Registra spesa" compare SOLO in questo caso,
-                // mai se resta un residuo scoperto, mai se già eseguito (r.recon.posted)
-                const allocatedTotal = Math.round(allocs.reduce((s,a)=>s+a.amt,0)*100)/100
-                const canPost = r.status==='ok' && !r.recon?.posted && allocatedTotal >= e.totale - 0.01
+                // allocs viene mostrato per qualunque recon REALE esistente (ok O partial),
+                // non solo 'ok' come prima — un recon sotto-coperto ha comunque allocazioni
+                // valide da mostrare (data prelievo, breakdown) — fix 2026-07-27
+                const allocs = r.recon ? reconAllocations(r.recon) : []
+                // Coperto al 100%+ E non ancora "postato" — richiesta utente 2026-07-21/22:
+                // il bottone "Registra spesa" compare SOLO in questo caso, mai se resta un
+                // residuo scoperto, mai se già eseguito (r.recon.posted). r.status è già
+                // 'ok' solo se davvero coperto (reconcileStatus fixato), quindi basta quello.
+                const canPost = r.status==='ok' && !!r.recon && !r.recon.posted
                 const alreadyPosted = !!r.recon?.posted
                 const firstTx = allocs[0] ? transactions.find(t=>t.txId===allocs[0].txId) : null
                 const atmDate = firstTx ? (firstTx.date||'').slice(0,10) : null
@@ -739,17 +793,29 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                 const mesePrelievi = prelieviByMonth[e.mese]
                 return (
                   <tr key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-                    <td style={{padding:'10px 14px',fontWeight:600,whiteSpace:'nowrap'}}>{e.mese}</td>
-                    <td style={{padding:'10px 14px',color:'var(--text3)',whiteSpace:'nowrap'}}>{e.ore}h</td>
-                    <td style={{padding:'10px 14px',color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>€ {fmtIT(e.rate||0,2)}</td>
-                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap'}}>€ {fmtIT(e.totale, 2)}</td>
-                    <td style={{padding:'10px 14px',whiteSpace:'nowrap'}}>
+                    <td style={{padding:'8px 10px',fontWeight:600,whiteSpace:'nowrap'}}>{e.mese}</td>
+                    <td style={{padding:'8px 10px',color:'var(--text3)',whiteSpace:'nowrap'}}>{e.ore}h</td>
+                    <td style={{padding:'8px 10px',color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>€ {fmtIT(e.rate||0,2)}</td>
+                    <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap'}}>€ {fmtIT(e.totale, 2)}</td>
+                    <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>
                       <button onClick={()=>setReconEntry(e)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text2)',whiteSpace:'nowrap'}}>
                         <StatusIcon status={r.status}/>
                         {r.status==='ok'?'Verificato':r.status==='partial'?`Parziale (€${Math.round(r.found)})`:'Non trovato'}
                       </button>
                     </td>
-                    <td style={{padding:'10px 14px',fontSize:12,color:atmDate?'var(--text2)':'var(--text3)',fontFamily:atmDate?'var(--font-mono)':'inherit',whiteSpace:'nowrap'}}>
+                    <td style={{padding:'8px 10px',textAlign:'right'}}>
+                      {/* colonna "Manca" — task utente 2026-07-27: prima non si vedeva da nessuna
+                          parte in tabella il gap di copertura (es. €21 su Colf), solo riaprendo
+                          il modale di riconciliazione. Cliccabile → riapre ReconcileModal per
+                          completare l'abbinamento con un altro prelievo. */}
+                      {r.gap > 0.005 ? (
+                        <button onClick={()=>setReconEntry(e)} title="Clicca per completare la riconciliazione con un altro prelievo"
+                          style={{border:'none',background:'none',cursor:'pointer',padding:0,fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:'var(--red)'}}>
+                          € {fmtIT(r.gap,2)}
+                        </button>
+                      ) : <span style={{color:'var(--text3)',opacity:.35,fontSize:12}}>—</span>}
+                    </td>
+                    <td style={{padding:'8px 10px',fontSize:12,color:atmDate?'var(--text2)':'var(--text3)',fontFamily:atmDate?'var(--font-mono)':'inherit',whiteSpace:'nowrap'}}>
                       {atmDate ? (
                         <button onClick={()=>setPrelievoDetailEntry(e)}
                           title="Clicca per vedere data e importo"
@@ -758,11 +824,11 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                         </button>
                       ) : '—'}
                     </td>
-                    <td style={{padding:'10px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,color:mesePrelievi?'var(--text2)':'var(--text3)'}}
+                    <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,color:mesePrelievi?'var(--text2)':'var(--text3)'}}
                       title="Somma dei residui prelievi non ancora assegnati, fatti in questo mese">
                       {mesePrelievi ? `€ ${fmtIT(mesePrelievi.totale,0)}` : '—'}
                     </td>
-                    <td style={{padding:'10px 6px',textAlign:'center'}}>
+                    <td style={{padding:'8px 6px',textAlign:'center'}}>
                       <button onClick={()=>{setNoteDraft(e.note||''); setNoteEntry(e)}}
                         title={e.note ? e.note : 'Aggiungi nota'}
                         style={{border:'none',background:'none',cursor:'pointer',padding:4,display:'inline-flex',alignItems:'center',justifyContent:'center'}}>
@@ -771,7 +837,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                           border:`1.5px solid ${e.note?.trim() ? 'var(--text1,#222)' : 'var(--border)'}`}}/>
                       </button>
                     </td>
-                    <td style={{padding:'10px 6px',textAlign:'center',whiteSpace:'nowrap'}}>
+                    <td style={{padding:'8px 6px',textAlign:'center',whiteSpace:'nowrap'}}>
                       {alreadyPosted ? (
                         <span title={`Spesa registrata in Transazioni (${r.recon.expenseTxId})`} style={{color:'var(--green)',display:'inline-flex',alignItems:'center'}}>
                           <CheckCircle size={16}/>
@@ -784,7 +850,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                         </button>
                       ) : null}
                     </td>
-                    <td style={{padding:'6px 10px',whiteSpace:'nowrap'}}>
+                    <td style={{padding:'6px 8px',whiteSpace:'nowrap'}}>
                       <button className="btn btn-ghost" title="Modifica" onClick={()=>openEdit(e)} style={{marginRight:2}}>✏️</button>
                       <button className="btn btn-ghost" onClick={()=>store[deleteFn](e.id)}><Trash2 size={12}/></button>
                     </td>
