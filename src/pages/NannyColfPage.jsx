@@ -366,6 +366,59 @@ function reconAllocations(r) {
   return r.txId ? [{ txId: r.txId, amt: r.nannyAmt }] : []
 }
 
+// Auto-riconciliazione — richiesta utente 2026-07-27: se un'entry non ha ancora un
+// recon reale salvato, selezionare AUTOMATICAMENTE i prelievi andando a ritroso nel
+// tempo (più recenti prima, stesso ordine del picker manuale) fino a coprire l'intero
+// importo, e salvare subito la riconciliazione (flag auto:true, distinto in tabella
+// con colore/legenda diversi da una riconciliazione manuale). Usa lo stesso
+// computeAtmUsedExcluding già esistente (somma nannyRecon+colfRecon+cashEntries+
+// atmMeta.links) quindi Nanny e Colf non possono mai "scontrarsi" sullo stesso
+// prelievo: chiamando questa funzione in sequenza (mai in parallelo), ogni chiamata
+// vede sempre lo stato più aggiornato di quanto già allocato dall'altra entità.
+// Non tocca MAI le transazioni reali (solo appPrefs.nannyRecon/colfRecon) — è
+// bookkeeping reversibile con "Rimuovi riconciliazione", a differenza di "Registra"
+// che invece crea una spesa vera e va sempre confermato esplicitamente dall'utente.
+function tryAutoReconcile(entry, transactions, reconKey) {
+  const store = useStore.getState()
+  const meseCutoff = entry.mese
+  function residuoOf(txId) {
+    const used = store.computeAtmUsedExcluding(txId, entry.id, reconKey)
+    const tx = transactions.find(t => t.txId === txId)
+    if (!tx) return 0
+    return Math.round((Math.abs(tx.amount) - used) * 100) / 100
+  }
+  const atmTxs = transactions
+    .filter(t => isAtmWithdrawal(t) && (t._effDate||t.date||'').slice(0,7) <= meseCutoff)
+    .map(t => ({ ...t, _residuo: residuoOf(t.txId) }))
+    .filter(t => t._residuo > 0.01)
+    .sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+
+  let remaining = entry.totale
+  const allocations = []
+  for (const t of atmTxs) {
+    if (remaining <= 0.005) break
+    const amt = Math.min(t._residuo, remaining)
+    if (amt <= 0) continue
+    allocations.push({ txId: t.txId, amt: Math.round(amt*100)/100 })
+    remaining -= amt
+  }
+  if (remaining > 0.01) return false // non copribile con i prelievi disponibili, niente da salvare
+
+  const recon = { ...getRecon(reconKey) }
+  recon[entry.id] = {
+    allocations,
+    txId:  allocations[0]?.txId || null,
+    txAmt: allocations[0]?.amt  || 0,
+    nannyAmt: entry.totale,
+    contantiAmt: 0,
+    split: allocations.length > 1,
+    date: new Date().toISOString(),
+    auto: true,
+  }
+  saveRecon(reconKey, recon)
+  return true
+}
+
 function ReconcileModal({ entry, transactions, onClose, entityLabel='Nanny', reconKey=NANNY_RECON_KEY }) {
   const [tab, setTab]         = useState('atm')    // 'atm' | 'code'
   const [selectedIds, setSelectedIds] = useState(() => {
@@ -686,7 +739,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
   const yearEntries = entries.filter(e=>e.mese.startsWith(new Date().getFullYear().toString()))
   const totalYear = yearEntries.reduce((s,e)=>s+e.totale,0)
 
-  const StatusIcon=({status})=>status==='ok'?<CheckCircle size={14} color="var(--green)"/>:status==='partial'?<AlertCircle size={14} color="var(--gold)"/>:<XCircle size={14} color="var(--red)"/>
+  const StatusIcon=({status,auto})=>status==='ok'?<CheckCircle size={14} color={auto?'var(--blue)':'var(--green)'}/>:status==='partial'?<AlertCircle size={14} color="var(--gold)"/>:<XCircle size={14} color="var(--red)"/>
 
   // Prelievi ATM raggruppati per mese, con residuo post-abbinamento — richiesta
   // utente 2026-07-20: colonna "Prelievi nel mese" in tabella + box storico a destra
@@ -763,6 +816,17 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
           <div style={{fontSize:16,fontWeight:700,marginBottom:6}}>Nessun mese registrato</div>
         </div>
       ) : (
+        <>
+        {/* Legenda colori riconciliazione — richiesta utente 2026-07-27: distinguere
+            "Verificato" (prelievo/i scelti dall'utente o match esatto) da
+            "Auto-riconciliato" (il sistema ha scelto da solo i prelievi a ritroso
+            nel tempo fino a coprire l'importo — sempre revisionabile/rimuovibile). */}
+        <div style={{display:'flex',gap:16,alignItems:'center',flexWrap:'wrap',marginBottom:8,fontSize:11,color:'var(--text3)'}}>
+          <span style={{display:'flex',alignItems:'center',gap:4}}><CheckCircle size={12} color="var(--green)"/> Verificato</span>
+          <span style={{display:'flex',alignItems:'center',gap:4}}><CheckCircle size={12} color="var(--blue)"/> Auto-riconciliato (scelto dal sistema, verifica se corretto)</span>
+          <span style={{display:'flex',alignItems:'center',gap:4}}><AlertCircle size={12} color="var(--gold)"/> Parziale</span>
+          <span style={{display:'flex',alignItems:'center',gap:4}}><XCircle size={12} color="var(--red)"/> Non trovato</span>
+        </div>
         <div className="card" style={{padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
             <thead><tr>
@@ -798,9 +862,18 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
                     <td style={{padding:'8px 10px',color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>€ {fmtIT(e.rate||0,2)}</td>
                     <td style={{padding:'8px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:'var(--accent)',whiteSpace:'nowrap'}}>€ {fmtIT(e.totale, 2)}</td>
                     <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>
-                      <button onClick={()=>setReconEntry(e)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text2)',whiteSpace:'nowrap'}}>
-                        <StatusIcon status={r.status}/>
-                        {r.status==='ok'?'Verificato':r.status==='partial'?`Parziale (€${Math.round(r.found)})`:'Non trovato'}
+                      <button onClick={()=>{
+                        // Auto-riconciliazione — richiesta utente 2026-07-27: se non c'è ancora
+                        // un recon REALE salvato (r.recon falsy: status 'missing', o 'partial'
+                        // solo da euristica su importo), prova a selezionare e salvare da sola
+                        // andando a ritroso nel tempo, poi apre comunque il modale per mostrare
+                        // la selezione fatta (revisionabile/rimuovibile). Se un recon reale esiste
+                        // già (anche parziale, scelto manualmente dall'utente) non tocca nulla.
+                        if (!r.recon) tryAutoReconcile(e, transactions, reconKey)
+                        setReconEntry(e)
+                      }} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontFamily:'var(--font-sans)',fontSize:12,color:r.recon?.auto?'var(--blue)':'var(--text2)',whiteSpace:'nowrap'}}>
+                        <StatusIcon status={r.status} auto={r.recon?.auto}/>
+                        {r.status==='ok'?(r.recon?.auto?'Auto-riconciliato':'Verificato'):r.status==='partial'?`Parziale (€${Math.round(r.found)})`:'Non trovato'}
                       </button>
                     </td>
                     <td style={{padding:'8px 10px',textAlign:'right'}}>
@@ -860,6 +933,7 @@ function TimesheetPage({ title, icon, tsKey, addFn, deleteFn, updateFn, defaultR
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {showAdd && (
