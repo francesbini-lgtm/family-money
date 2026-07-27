@@ -25,6 +25,45 @@ import { uploadTransactionFiles } from '../services/storage'
 import Portal from './Portal'
 import { fmtIT, fmtDate } from '../utils/format'
 
+// Ridimensiona+ricomprime l'immagine lato client (max 1600px, JPEG q.80) prima
+// dell'upload — le foto scattate da fotocamera possono essere 5-10MB, causando
+// upload lentissimi su rete mobile che sembrano "bloccati" senza feedback.
+function compressImage(file, maxDim = 1600, quality = 0.8) {
+  return new Promise((resolve) => {
+    if (!file.type || !file.type.startsWith('image/')) { resolve(file); return }
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, width, height)
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(url)
+        if (!blob) { resolve(file); return }
+        resolve(new File([blob], (file.name || 'ricevuta').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }))
+      }, 'image/jpeg', quality)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
+  })
+}
+
+// Se l'upload non risponde entro N ms mostriamo un errore chiaro invece di
+// lasciare il bottone bloccato su "…" all'infinito (segnalazione utente).
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label}: tempo scaduto. Controlla la connessione e riprova.`)), ms)),
+  ])
+}
+
 export default function MobileFotoRicevuta({ onClose }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
@@ -43,11 +82,15 @@ export default function MobileFotoRicevuta({ onClose }) {
 
   const lastDate = transactions[0]?._effDate || transactions[0]?.date || null
 
-  function handlePickFile(e) {
+  async function handlePickFile(e) {
     const f = e.target.files?.[0]
     if (!f) return
-    setFile(f)
-    setPreview(URL.createObjectURL(f))
+    // Le foto scattate da fotocamera mobile possono pesare diversi MB: comprimiamo
+    // lato client prima di caricare, altrimenti su rete lenta l'upload sembra
+    // bloccato (segnalazione utente 2026-07-27).
+    const compressed = await compressImage(f)
+    setFile(compressed)
+    setPreview(URL.createObjectURL(compressed))
     setStep('question')
   }
 
@@ -66,11 +109,11 @@ export default function MobileFotoRicevuta({ onClose }) {
     if (!file) return
     setSaving(true); setError(null)
     try {
-      const uploaded = await uploadTransactionFiles(tx.txId, [file])
+      const uploaded = await withTimeout(uploadTransactionFiles(tx.txId, [file]), 30000, 'Caricamento foto')
       updateTransaction(tx.txId, { attachments: [...(tx.attachments||[]), ...uploaded] })
       setStep('done')
     } catch (e) {
-      setError('Errore durante il caricamento della foto: ' + (e.message||e))
+      setError((e.message||String(e)))
     }
     setSaving(false)
   }
@@ -80,7 +123,7 @@ export default function MobileFotoRicevuta({ onClose }) {
     setSaving(true); setError(null)
     try {
       const pendingId = 'pend-' + Date.now().toString(36)
-      const uploaded = await uploadTransactionFiles(pendingId, [file])
+      const uploaded = await withTimeout(uploadTransactionFiles(pendingId, [file]), 30000, 'Caricamento foto')
       addPendingReceipt({
         date: manualDate,
         description: manualDesc.trim(),
@@ -89,7 +132,7 @@ export default function MobileFotoRicevuta({ onClose }) {
       })
       setStep('done')
     } catch (e) {
-      setError('Errore durante il caricamento della foto: ' + (e.message||e))
+      setError((e.message||String(e)))
     }
     setSaving(false)
   }
@@ -178,11 +221,14 @@ export default function MobileFotoRicevuta({ onClose }) {
                 <div style={{ fontSize:15, fontWeight:700, fontFamily:'var(--font-mono)' }}>€ {fmtIT(Math.abs(detailTx.amount||0),2)}</div>
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                <button className="m-btn m-btn-ghost" onClick={() => setStep('select')}>← Indietro</button>
+                <button className="m-btn m-btn-ghost" disabled={saving} onClick={() => setStep('select')}>← Indietro</button>
                 <button className="m-btn m-btn-primary" disabled={saving} onClick={() => attachToTransaction(detailTx)}>
                   {saving ? '…' : '✓ È questa'}
                 </button>
               </div>
+              {saving && (
+                <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>✕ Annulla caricamento</button>
+              )}
             </>
           )}
 
@@ -193,7 +239,8 @@ export default function MobileFotoRicevuta({ onClose }) {
               </div>
               <div className="m-field">
                 <label className="m-label">Data</label>
-                <input className="m-input" type="date" value={manualDate} onChange={e => setManualDate(e.target.value)}/>
+                <input className="m-input" type="date" value={manualDate} onChange={e => setManualDate(e.target.value)}
+                  style={{ width:'auto', maxWidth:170 }}/>
               </div>
               <div className="m-field">
                 <label className="m-label">Descrizione</label>
@@ -206,12 +253,15 @@ export default function MobileFotoRicevuta({ onClose }) {
                   value={manualAmount} onChange={e => setManualAmount(e.target.value)}/>
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:4 }}>
-                <button className="m-btn m-btn-ghost" onClick={() => setStep('question')}>← Indietro</button>
+                <button className="m-btn m-btn-ghost" disabled={saving} onClick={() => setStep('question')}>← Indietro</button>
                 <button className="m-btn m-btn-primary" disabled={saving || !manualDate || !manualDesc.trim() || !manualAmount}
                   onClick={saveManual}>
                   {saving ? '…' : '✓ Salva'}
                 </button>
               </div>
+              {saving && (
+                <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>✕ Annulla caricamento</button>
+              )}
             </>
           )}
 
