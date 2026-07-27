@@ -33,7 +33,7 @@ const ACTIONS = [
   {
     id: 'ricevuta',
     icon: '📷',
-    title: () => 'Foto ricevuta',
+    title: () => 'Foto ricevuta / scontrino',
     sub: 'Allega una foto a una transazione',
   },
 ]

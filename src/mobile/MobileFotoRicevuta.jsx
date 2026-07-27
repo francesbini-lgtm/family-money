@@ -218,7 +218,7 @@ export default function MobileFotoRicevuta({ onClose }) {
       <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
         <div className="m-modal">
           <div className="m-modal-handle"/>
-          <div className="m-modal-title">📷 Foto ricevuta</div>
+          <div className="m-modal-title">📷 Foto ricevuta / scontrino</div>
 
           {error && (
             <div style={{ fontSize:12, color:'#c0392b', background:'rgba(192,57,43,.1)', padding:'8px 10px', borderRadius:8, marginBottom:12 }}>

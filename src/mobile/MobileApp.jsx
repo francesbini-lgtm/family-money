@@ -127,6 +127,10 @@ export default function MobileApp() {
           <div className="m-topbar-sub">{SUBS[tab]}</div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button onClick={() => setShowFotoRicevuta(true)} title="Foto ricevuta / scontrino"
+            style={topbarIconBtnStyle(false)}>
+            📷
+          </button>
           <button onClick={() => switchTab('discovery')} title="Discovery"
             style={topbarIconBtnStyle(tab === 'discovery')}>
             🔍
