@@ -405,6 +405,35 @@ function Root() {
   return <AppShell />
 }
 
+// Richiesta utente 2026-07-27: forzare la coerenza tra dispositivo reale e
+// versione servita — un telefono non deve poter restare sulla versione
+// desktop e viceversa. Rilevamento solo da User-Agent (solo telefoni, NON
+// iPad/tablet — coerente con la regola esistente "/mobile è solo per
+// telefoni", vedi memoria fmt-mobile-route-mobile-only): iPadOS si presenta
+// come "Macintosh" da Safari 13+ quindi non rientra in questo pattern e resta
+// sulla versione desktop, come già avveniva prima.
+function isPhoneDevice() {
+  return /iPhone|iPod|Android.*Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+}
+
 export default function App() {
+  const [deviceOk, setDeviceOk] = useState(false)
+
+  useEffect(() => {
+    const onMobilePath = window.location.pathname === '/mobile'
+    const phone = isPhoneDevice()
+    if (phone !== onMobilePath) {
+      // Redirect pieno (non solo cambio di stato React) così AuthContext/isMobile()
+      // ripartono già con il pathname corretto fin dal primo render.
+      window.location.replace((phone ? '/mobile' : '/') + window.location.search)
+      return
+    }
+    setDeviceOk(true)
+  }, [])
+
+  // Mentre decidiamo se serve un redirect non montiamo nulla, per evitare un
+  // flash della versione sbagliata prima che il browser navighi altrove.
+  if (!deviceOk) return null
+
   return <AuthProvider><Root /></AuthProvider>
 }
