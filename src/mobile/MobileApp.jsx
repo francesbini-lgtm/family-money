@@ -8,17 +8,30 @@ import MobileDiscovery from './MobileDiscovery'
 import MobileStaff     from './MobileStaff'
 import MobileQuality   from './MobileQuality'
 import MobileBlocNotes from './MobileBlocNotes'
+import MobileWelcome   from './MobileWelcome'
 import './mobile.css'
 
+// Bottom nav — Discovery & Accuracy live as icon shortcuts in the top bar instead (see topbar-actions)
 const TABS = [
   { id: 'overview',  icon: '🏠', label: 'Overview'  },
   { id: 'contanti',  icon: '💵', label: 'Contanti'  },
   { id: 'nanny',     icon: '👩', label: 'Nanny'     },
   { id: 'colf',      icon: '🧹', label: 'Colf'      },
-  { id: 'discovery', icon: '🔍', label: 'Discovery' },
-  { id: 'quality',   icon: '📊', label: 'Accuracy'  },
   { id: 'notes',     icon: '📝', label: 'Note'      },
 ]
+
+// Maps a MobileWelcome action id -> tab to open (the "+" is triggered right after)
+const WELCOME_TARGET_TAB = { nanny: 'nanny', colf: 'colf', contanti: 'contanti', prelievo: 'contanti' }
+
+function topbarIconBtnStyle(active) {
+  return {
+    width: 32, height: 32, borderRadius: 8,
+    border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
+    background: active ? 'rgba(100,140,255,.14)' : 'var(--bg)',
+    cursor: 'pointer', fontSize: 14, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', position: 'relative',
+  }
+}
 
 // Tabs that expose a "+" FAB
 const FAB_TABS = new Set(['contanti', 'nanny', 'colf'])
@@ -32,9 +45,10 @@ function getDiscoveryBadge(transactions) {
 
 export default function MobileApp() {
   const { user, householdId, logOut } = useAuth()
-  const [tab,      setTab]      = useState('overview')
-  const [showAdd,  setShowAdd]  = useState(false)
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('fm-dark') === 'true')
+  const [tab,         setTab]         = useState('overview')
+  const [showAdd,     setShowAdd]     = useState(false)
+  const [showWelcome, setShowWelcome] = useState(true)
+  const [darkMode,    setDarkMode]    = useState(() => localStorage.getItem('fm-dark') === 'true')
 
   const {
     loadAllData, startRealtimeSync, stopRealtimeSync, isDemoMode,
@@ -67,6 +81,17 @@ export default function MobileApp() {
   // Close add modal when switching tabs
   function switchTab(id) { setTab(id); setShowAdd(false) }
 
+  // Welcome quick-actions: jump to the right tab and pop its "+" straight away
+  function handleWelcomeAction(actionId) {
+    setTab(WELCOME_TARGET_TAB[actionId] || 'overview')
+    setShowAdd(true)
+    setShowWelcome(false)
+  }
+  function handleWelcomeClose() {
+    setTab('overview')
+    setShowWelcome(false)
+  }
+
   const discBadge  = getDiscoveryBadge(transactions)
   const nannyName  = appPrefs?.nannyName || 'Nanny'
   const colfName   = appPrefs?.colfName  || 'Colf'
@@ -92,17 +117,32 @@ export default function MobileApp() {
           <div className="m-topbar-title">💎 {TITLES[tab]}</div>
           <div className="m-topbar-sub">{SUBS[tab]}</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button onClick={() => switchTab('discovery')} title="Discovery"
+            style={topbarIconBtnStyle(tab === 'discovery')}>
+            🔍
+            {discBadge > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                background: 'var(--red)', color: '#fff',
+                borderRadius: '50%', width: 15, height: 15,
+                fontSize: 9, fontWeight: 800,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {discBadge > 99 ? '99' : discBadge}
+              </span>
+            )}
+          </button>
+          <button onClick={() => switchTab('quality')} title="Accuracy"
+            style={topbarIconBtnStyle(tab === 'quality')}>
+            📊
+          </button>
           <button onClick={() => setDarkMode(d => !d)}
-            style={{ width: 34, height: 34, borderRadius: 8, border: '1px solid var(--border)',
-              background: 'var(--bg)', cursor: 'pointer', fontSize: 15, display: 'flex',
-              alignItems: 'center', justifyContent: 'center' }}>
+            style={topbarIconBtnStyle(false)}>
             {darkMode ? '☀️' : '🌙'}
           </button>
           <button onClick={logOut} title="Esci"
-            style={{ width: 34, height: 34, borderRadius: 8, border: '1px solid var(--border)',
-              background: 'var(--bg)', cursor: 'pointer', fontSize: 14, display: 'flex',
-              alignItems: 'center', justifyContent: 'center', color: 'var(--text3)' }}>
+            style={{ ...topbarIconBtnStyle(false), color: 'var(--text3)' }}>
             ⏻
           </button>
         </div>
@@ -162,6 +202,15 @@ export default function MobileApp() {
           )
         })}
       </nav>
+
+      {showWelcome && (
+        <MobileWelcome
+          nannyName={nannyName}
+          colfName={colfName}
+          onAction={handleWelcomeAction}
+          onClose={handleWelcomeClose}
+        />
+      )}
     </div>
   )
 }
