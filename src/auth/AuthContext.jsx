@@ -103,8 +103,8 @@ export function AuthProvider({ children }) {
   async function verifyAndLogin(pin, totpCode) {
     if (!VALID_PINS.includes(pin)) throw new Error('PIN errato')
 
-    // TOTP: se configurato e non su mobile, richiedi il codice authenticator
-    if (totpSecret && !isMobile()) {
+    // TOTP temporaneamente disabilitato
+    if (false && totpSecret && !isMobile()) {
       const ok = await validateToken(totpSecret, (totpCode || '').trim())
       if (!ok) throw new Error('Codice authenticator non valido')
     }
