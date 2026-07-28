@@ -642,6 +642,13 @@ export default function ForecastPage() {
   const mortgageTaeg     = mortgagePrefs.taeg      ?? 3.5
   const mortgageStart    = mortgagePrefs.start     ?? defaultMortgageStart()
   const mortgageAnticipo = mortgagePrefs.anticipo  ?? 0
+  // Data anticipo personalizzata (2026-07-28, richiesta utente) — di default
+  // l'anticipo viene dedotto lo stesso mese di "Inizio" (vedi effectiveAnticipoYM
+  // sotto), ma spesso l'acconto/caparra viene versato PRIMA del rogito/erogazione
+  // del mutuo vero e proprio. Questo flag+data permette di scollegare il mese in
+  // cui l'anticipo esce dal saldo dal mese di inizio ammortamento.
+  const mortgageAnticipoDateOn  = mortgagePrefs.anticipoDateOn ?? false
+  const mortgageAnticipoDate    = mortgagePrefs.anticipoDate   ?? ''
   function setShowMortgage(v)     { patchMortgage({ panelOpen: typeof v === 'function' ? v(showMortgage) : v }) }
   function setMortgageOn(v)       { patchMortgage({ on: v }) }
   function setMortgageAmt(v)      { patchMortgage({ amt: v }) }
@@ -649,6 +656,8 @@ export default function ForecastPage() {
   function setMortgageTaeg(v)     { patchMortgage({ taeg: v }) }
   function setMortgageStart(v)    { patchMortgage({ start: v }) }
   function setMortgageAnticipo(v) { patchMortgage({ anticipo: v }) }
+  function setMortgageAnticipoDateOn(v) { patchMortgage({ anticipoDateOn: v }) }
+  function setMortgageAnticipoDate(v)   { patchMortgage({ anticipoDate: v }) }
 
   // Rimborso anticipato automatico "ogni X risparmiati" (2026-07-23, richiesta
   // utente) — quando i risparmi cumulati (entrate-spese-rata) superano la
@@ -1127,6 +1136,25 @@ export default function ForecastPage() {
     return mortgageStart > nowYM
   }, [mortgageStart])
 
+  // Mese effettivo in cui dedurre l'Anticipo dal saldo (2026-07-28) — se
+  // "Data anticipo" è attiva e valorizzata usa quella, altrimenti mantiene il
+  // comportamento storico (stesso mese di "Inizio"). Gate "not yet happened"
+  // calcolato separatamente da mortgageNotYetStarted: l'anticipo può cadere
+  // PRIMA del mese di inizio mutuo (tipico: caparra prima del rogito), quindi
+  // va confrontato con oggi indipendentemente dallo stato del mutuo stesso.
+  const effectiveAnticipoYM = (mortgageAnticipoDateOn && mortgageAnticipoDate) ? mortgageAnticipoDate : mortgageStart
+  const anticipoNotYetHappened = useMemo(() => {
+    if (!effectiveAnticipoYM) return false
+    const nowYM = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`
+    return effectiveAnticipoYM > nowYM
+  }, [effectiveAnticipoYM])
+  // Anno dell'effectiveAnticipoYM, per evidenziare la colonna Anticipo nella
+  // vista Annuale della tabella Proiezione (prima usava sempre mortgageStartYear).
+  const effectiveAnticipoYear = useMemo(() => {
+    if (!effectiveAnticipoYM) return mortgageStartYear
+    return parseInt(effectiveAnticipoYM.split('-')[0])
+  }, [effectiveAnticipoYM, mortgageStartYear])
+
   // (rimosso 2026-07-24: vedi forecastDataAnnual dopo forecastDataMonthly)
 
   // ── Forecast data, granularità MENSILE (richiesta utente 2026-07-19: poter
@@ -1232,7 +1260,7 @@ export default function ForecastPage() {
         incThisMonth = incParts.total
       }
 
-      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && mortgageNotYetStarted && mortgageStartYM && ym >= mortgageStartYM) {
+      if (mortgageOn && mortgageAnticipo > 0 && !anticipoApplied && anticipoNotYetHappened && effectiveAnticipoYM && ym >= effectiveAnticipoYM) {
         saldo -= mortgageAnticipo
         anticipoApplied = true
       }
@@ -1429,7 +1457,7 @@ export default function ForecastPage() {
       console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, effectiveAnticipoYM, anticipoNotYetHappened, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
 
   // ── Proiezione ANNUALE, derivata dalla Mensile (2026-07-24, richiesta
   // esplicita dell'utente: "la tabella Annuale deve essere semplicemente la
@@ -2060,7 +2088,9 @@ export default function ForecastPage() {
                       onChange={e=>setMortgageTaeg(Number(e.target.value))} step="0.1" placeholder="3.5"/>
                   </div>
                   <MoneyField label="Anticipo (€)" value={mortgageAnticipo} onChange={setMortgageAnticipo}
-                    placeholder="0" hint="Dedotto dal saldo il giorno prima dell'inizio del mutuo"/>
+                    placeholder="0" hint={mortgageAnticipoDateOn && mortgageAnticipoDate
+                      ? 'Dedotto dal saldo nel mese impostato in "Data anticipo" qui sotto'
+                      : "Dedotto dal saldo il giorno prima dell'inizio del mutuo"}/>
                   <div className="fc-mortgage-field">
                     <label className="form-lbl-sm">Durata (anni)</label>
                     <input className="fc-input" type="number" value={mortgageYears}
@@ -2073,6 +2103,35 @@ export default function ForecastPage() {
                     <div className="fc-input-hint">{mortgageStart ? ymToLabel(mortgageStart) : 'Mese di inizio'}</div>
                   </div>
                 </div>
+
+                {/* Data anticipo personalizzata (2026-07-28, richiesta utente) —
+                    l'acconto/caparra spesso viene versato PRIMA del rogito/inizio
+                    ammortamento vero e proprio: questo flag scollega il mese di
+                    deduzione dell'Anticipo dal mese di "Inizio" qui sopra. */}
+                {mortgageAnticipo > 0 && (
+                  <>
+                    <label className="fc-mortgage-toggle" style={{marginTop:10}}>
+                      <input type="checkbox" checked={mortgageAnticipoDateOn}
+                        onChange={e=>setMortgageAnticipoDateOn(e.target.checked)}/>
+                      <span className={`ob-toggle ${mortgageAnticipoDateOn?'on':''}`}/>
+                      <span style={{fontSize:13,fontWeight:600,color:mortgageAnticipoDateOn?'var(--text)':'var(--text3)'}}>
+                        Data anticipo diversa dall'inizio mutuo
+                      </span>
+                    </label>
+                    {mortgageAnticipoDateOn && (
+                      <div className="fc-mortgage-fields" style={{marginTop:8}}>
+                        <div className="fc-mortgage-field">
+                          <label className="form-lbl-sm">Data anticipo</label>
+                          <input className="fc-input" type="month" value={mortgageAnticipoDate}
+                            onChange={e=>setMortgageAnticipoDate(e.target.value)}/>
+                          <div className="fc-input-hint">
+                            {mortgageAnticipoDate ? ymToLabel(mortgageAnticipoDate) : 'Mese in cui versi l\'anticipo'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {/* Rimborso anticipato automatico "ogni X risparmiati" (2026-07-23,
                     richiesta utente) — quando i risparmi cumulati superano la soglia,
@@ -2379,7 +2438,7 @@ export default function ForecastPage() {
                               )}
                               {mortgageOn && mortgageAnticipo > 0 && (
                                 <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                                  {year === mortgageStartYear ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                                  {year === effectiveAnticipoYear ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
                                 </td>
                               )}
                               <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
@@ -2484,7 +2543,7 @@ export default function ForecastPage() {
                               )}
                               {mortgageOn && mortgageAnticipo > 0 && (
                                 <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--red)',fontSize:12}}>
-                                  {mortgageStart && d.ym === mortgageStart ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
+                                  {effectiveAnticipoYM && d.ym === effectiveAnticipoYM ? `−${fmtIT(mortgageAnticipo, 0)}` : '—'}
                                 </td>
                               )}
                               <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)',
