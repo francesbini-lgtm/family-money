@@ -137,7 +137,7 @@ function VerifyStep() {
   const [error,   setError]   = useState(null)
   const [loading, setLoading] = useState(false)
 
-  const needTotp  = false // TOTP temporaneamente disabilitato
+  const needTotp  = !!totpSecret && !isMobile
   const canSubmit = pin.length === 6 && (!needTotp || totp.length === 6)
 
   async function handleSubmit() {
