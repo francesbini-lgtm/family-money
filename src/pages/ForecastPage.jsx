@@ -604,6 +604,12 @@ export default function ForecastPage() {
   // Popup override mese/anno sulla tabella Proiezione — { granularity:'mensile'|'annuale', key: ym|year, label }
   const [overridePopup, setOverridePopup] = useState(null)
 
+  // Righe "Storico" nella tabella Proiezione (2026-07-28, richiesta utente) —
+  // raggruppate/chiuse di default all'apertura della pagina, stile "gruppo"
+  // Excel: un'unica riga con "+" che le espande a richiesta. Stato locale (non
+  // persistito): ogni apertura della pagina riparte chiuso, come richiesto.
+  const [historicoCollapsed, setHistoricoCollapsed] = useState(true)
+
   // ── Impostazioni persistenti (2026-07-23, richiesta utente: "questa pagina
   // deve salvare le impostazioni che vengono messe... non deve ogni volta che
   // si apre azzerarsi tutto") — growth/inflation/years, mutuo, vista tabella e
@@ -658,6 +664,20 @@ export default function ForecastPage() {
   function setMortgageAnticipo(v) { patchMortgage({ anticipo: v }) }
   function setMortgageAnticipoDateOn(v) { patchMortgage({ anticipoDateOn: v }) }
   function setMortgageAnticipoDate(v)   { patchMortgage({ anticipoDate: v }) }
+
+  // Colonne della tabella Proiezione — condivise fra header (thead) e colSpan
+  // della riga-gruppo "Storico" (2026-07-28). Va ricalcolata ad ogni render
+  // (dipende da projectionView/mortgageOn/mortgageAnticipo), quindi niente
+  // useMemo: è un array minuscolo, non serve.
+  const projCols = [
+    projectionView === 'annuale' ? 'Anno' : 'Mese',
+    'Entrate',
+    'Uscite',
+    mortgageOn ? (projectionView === 'annuale' ? 'Rata mutuo annua' : 'Rata mutuo') : null,
+    mortgageOn && mortgageAnticipo > 0 ? 'Anticipo' : null,
+    'Cash flow','Saldo previsto',
+    mortgageOn ? 'Debito residuo' : null,
+  ].filter(Boolean)
 
   // Rimborso anticipato automatico "ogni X risparmiati" (2026-07-23, richiesta
   // utente) — quando i risparmi cumulati (entrate-spese-rata) superano la
@@ -2336,15 +2356,7 @@ export default function ForecastPage() {
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr>
-                  {[
-                    projectionView === 'annuale' ? 'Anno' : 'Mese',
-                    'Entrate',
-                    'Uscite',
-                    mortgageOn ? (projectionView === 'annuale' ? 'Rata mutuo annua' : 'Rata mutuo') : null,
-                    mortgageOn && mortgageAnticipo > 0 ? 'Anticipo' : null,
-                    'Cash flow','Saldo previsto',
-                    mortgageOn ? 'Debito residuo' : null,
-                  ].filter(Boolean).map(h=>(
+                  {projCols.map(h=>(
                     <th key={h} style={{padding:'8px 12px',fontSize:10,fontWeight:700,
                       letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',
                       background:'var(--surface2)',borderBottom:'1px solid var(--border)',
@@ -2353,9 +2365,26 @@ export default function ForecastPage() {
                 </tr>
               </thead>
               <tbody>
-                {/* Storico reale — solo nella vista Annuale (i dati storici mensili
-                    non sono calcolati in questa pagina) */}
-                {projectionView === 'annuale' && historicalTableData.map(d => {
+                {/* Riga-gruppo "Storico" (2026-07-28, richiesta utente) — stile
+                    Excel group: chiusa di default all'apertura della pagina
+                    (historicoCollapsed parte da true), "+" la espande mostrando
+                    le righe storiche reali sotto, "−" la richiude. */}
+                {projectionView === 'annuale' && historicalTableData.length > 0 && (
+                  <tr style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+                    <td colSpan={projCols.length} style={{padding:'6px 12px'}}>
+                      <button onClick={() => setHistoricoCollapsed(c => !c)}
+                        style={{display:'inline-flex',alignItems:'center',gap:7,border:'1px solid var(--border)',
+                          background:'var(--surface)',borderRadius:5,padding:'3px 10px',cursor:'pointer',
+                          fontSize:11,fontWeight:700,color:'var(--text3)'}}>
+                        <span style={{fontFamily:'var(--font-mono)',width:12,textAlign:'center',color:'var(--accent)'}}>
+                          {historicoCollapsed ? '+' : '−'}
+                        </span>
+                        Storico ({historicalTableData.length} ann{historicalTableData.length===1?'o':'i'})
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {projectionView === 'annuale' && !historicoCollapsed && historicalTableData.map(d => {
                   const cf = d.inc - d.exp
                   return (
                     <tr key={d.label} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
@@ -2468,8 +2497,26 @@ export default function ForecastPage() {
                     (monthlyHistoricalTableData), stesso sfondo grigio delle righe
                     storiche della vista Annuale, nessun testo "storico" (basta
                     lo sfondo). Utile per vedere a colpo d'occhio quali mesi
-                    reali alimentano la media Teoriche. */}
-                {projectionView === 'mensile' && monthlyHistoricalTableData.map(d => {
+                    reali alimentano la media Teoriche.
+                    2026-07-28: raggruppate/chiuse di default come in Annuale —
+                    stessa riga-gruppo con "+" (stesso stato historicoCollapsed,
+                    condiviso fra le due viste). */}
+                {projectionView === 'mensile' && monthlyHistoricalTableData.length > 0 && (
+                  <tr style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
+                    <td colSpan={projCols.length} style={{padding:'6px 12px'}}>
+                      <button onClick={() => setHistoricoCollapsed(c => !c)}
+                        style={{display:'inline-flex',alignItems:'center',gap:7,border:'1px solid var(--border)',
+                          background:'var(--surface)',borderRadius:5,padding:'3px 10px',cursor:'pointer',
+                          fontSize:11,fontWeight:700,color:'var(--text3)'}}>
+                        <span style={{fontFamily:'var(--font-mono)',width:12,textAlign:'center',color:'var(--accent)'}}>
+                          {historicoCollapsed ? '+' : '−'}
+                        </span>
+                        Storico ({monthlyHistoricalTableData.length} mes{monthlyHistoricalTableData.length===1?'e':'i'})
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {projectionView === 'mensile' && !historicoCollapsed && monthlyHistoricalTableData.map(d => {
                   const cf = d.inc - d.exp
                   return (
                     <tr key={'hist-'+d.ym} style={{borderBottom:'1px solid var(--border)',background:'var(--surface2)',opacity:.85}}>
