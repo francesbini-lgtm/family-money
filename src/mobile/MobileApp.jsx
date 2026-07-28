@@ -23,6 +23,10 @@ const TABS = [
 
 // Maps a MobileWelcome action id -> tab to open (the "+" is triggered right after)
 const WELCOME_TARGET_TAB = { nanny: 'nanny', colf: 'colf', contanti: 'contanti', prelievo: 'contanti' }
+// Contanti ha 2 sotto-modali (Utilizzo/Nota Prelievo) — questo dice a MobileContanti
+// quale aprire DIRETTAMENTE, saltando lo step intermedio "Cosa vuoi aggiungere?"
+// richiesta utente 2026-07-28: niente doppia domanda contante/prelievo.
+const WELCOME_ADD_KIND = { contanti: 'utilizzo', prelievo: 'prelievo' }
 
 function topbarIconBtnStyle(active) {
   return {
@@ -33,9 +37,6 @@ function topbarIconBtnStyle(active) {
     alignItems: 'center', justifyContent: 'center', position: 'relative',
   }
 }
-
-// Tabs that expose a "+" FAB
-const FAB_TABS = new Set(['contanti', 'nanny', 'colf'])
 
 function getDiscoveryBadge(transactions) {
   return transactions.filter(t =>
@@ -48,6 +49,7 @@ export default function MobileApp() {
   const { user, householdId, logOut } = useAuth()
   const [tab,         setTab]         = useState('overview')
   const [showAdd,     setShowAdd]     = useState(false)
+  const [addKind,     setAddKind]     = useState(null)
   const [showWelcome, setShowWelcome] = useState(true)
   const [showFotoRicevuta, setShowFotoRicevuta] = useState(false)
   const [darkMode,    setDarkMode]    = useState(() => localStorage.getItem('fm-dark') === 'true')
@@ -81,7 +83,7 @@ export default function MobileApp() {
   }, [householdId, user, isDemoMode])
 
   // Close add modal when switching tabs
-  function switchTab(id) { setTab(id); setShowAdd(false) }
+  function switchTab(id) { setTab(id); setShowAdd(false); setAddKind(null) }
 
   // Welcome quick-actions: jump to the right tab and pop its "+" straight away.
   // "ricevuta" è un caso speciale — richiesta utente 2026-07-27: non cambia tab,
@@ -93,11 +95,14 @@ export default function MobileApp() {
       return
     }
     setTab(WELCOME_TARGET_TAB[actionId] || 'overview')
+    setAddKind(WELCOME_ADD_KIND[actionId] || null)
     setShowAdd(true)
     setShowWelcome(false)
   }
+  // Richiesta utente 2026-07-28: chiudere il quick-picker non deve più forzare
+  // il ritorno a Overview — se aperto dal "+" globale da un'altra scheda, l'utente
+  // resta dove si trovava.
   function handleWelcomeClose() {
-    setTab('overview')
     setShowWelcome(false)
   }
 
@@ -164,7 +169,10 @@ export default function MobileApp() {
       {/* Page content */}
       <div className="m-content">
         {tab === 'overview'  && <MobileOverview />}
-        {tab === 'contanti'  && <MobileContanti showAdd={showAdd} onCloseAdd={() => setShowAdd(false)} />}
+        {tab === 'contanti'  && (
+          <MobileContanti showAdd={showAdd} addKind={addKind}
+            onCloseAdd={() => { setShowAdd(false); setAddKind(null) }} />
+        )}
         {tab === 'nanny'     && (
           <MobileStaff role="nanny" name={nannyName}
             entries={nannyTS} addMonth={addNannyMonth} deleteMonth={deleteNannyMonth}
@@ -180,12 +188,12 @@ export default function MobileApp() {
         {tab === 'notes'     && <MobileBlocNotes />}
       </div>
 
-      {/* FAB — absolutely positioned within m-app so it stays inside the 430px container */}
-      {FAB_TABS.has(tab) && (
-        <button className="m-fab-inner" onClick={() => setShowAdd(true)} title="Aggiungi">
-          +
-        </button>
-      )}
+      {/* FAB — absolutely positioned within m-app so it stays inside the 430px container.
+          Richiesta utente 2026-07-28: presente in OGNI schermata, apre sempre il
+          quick-picker "Cosa registriamo?" (MobileWelcome) invece di un add diretto. */}
+      <button className="m-fab-inner" onClick={() => setShowWelcome(true)} title="Aggiungi">
+        +
+      </button>
 
       {/* Bottom nav — floating pill */}
       <nav className="m-nav">

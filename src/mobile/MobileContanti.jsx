@@ -187,30 +187,57 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry, pendingWithdrawals, 
 }
 
 // ── Nota Prelievo modal ───────────────────────────────────
+const TIPO_LABELS = { nanny: 'Nanny', colf: 'COLF', altro: 'Altro' }
+
 function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
   const now = new Date()
   const localDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
   const [date,  setDate]  = useState(localDate)
   const [note,  setNote]  = useState('')
   const [amount, setAmount] = useState('')
-  // tipo: '' | 'nanny' | 'colf' | 'altro' — selettore rapido richiesto dall'utente
-  // 2026-07-27: "Altro" obbliga a scrivere una nota, "Nanny"/"Colf" precompilano
-  // la nota (rispettivamente "Nanny"/"COLF") e lasciano procedere subito.
-  const [tipo, setTipo] = useState('')
+  // tipos: array di 'nanny' | 'colf' | 'altro' — selezione MULTIPLA richiesta
+  // dall'utente 2026-07-28: si può scegliere anche più di una categoria insieme
+  // (es. sia Nanny che Colf). Con 0 o 1 selezionata il comportamento è quello
+  // originale (prefill nota "Nanny"/"COLF", "Altro" obbliga testo libero).
+  // Con 2+ selezionate compare uno spaccato importi per categoria e la nota
+  // finale viene composta automaticamente (es. "Nanny 100€ + Colf 50€").
+  const [tipos, setTipos] = useState([])
+  const [subAmounts, setSubAmounts] = useState({})
 
-  function pickTipo(t) {
-    setTipo(t)
-    if (t === 'nanny') setNote('Nanny')
-    else if (t === 'colf') setNote('COLF')
-    else if (t === 'altro') setNote('')
+  const multiMode = tipos.length >= 2
+
+  function toggleTipo(t) {
+    setTipos(prev => {
+      const next = prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
+      if (next.length === 1) {
+        const only = next[0]
+        if (only === 'nanny') setNote('Nanny')
+        else if (only === 'colf') setNote('COLF')
+        else if (only === 'altro') setNote('')
+      }
+      return next
+    })
   }
 
-  const canSave = !!date && (tipo !== 'altro' || note.trim().length > 0)
+  function composedNote() {
+    return tipos.map(t => {
+      const amt = parseFloat(subAmounts[t])
+      const label = TIPO_LABELS[t]
+      return amt > 0 ? `${label} ${fmtIT(amt, 2)}€` : label
+    }).join(' + ')
+  }
+
+  const canSave = !!date && (
+    multiMode
+      ? tipos.every(t => parseFloat(subAmounts[t]) > 0)
+      : (!tipos.includes('altro') || note.trim().length > 0)
+  )
 
   function handleSave() {
     if (!canSave) return
+    const finalNote = multiMode ? composedNote() : note.trim()
     addNotaPrelievo({
-      date, note: note.trim(),
+      date, note: finalNote,
       amount: amount ? parseFloat(amount) : null,
       ts: Date.now(),
     })
@@ -240,11 +267,11 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
         </div>
 
         <div className="m-field">
-          <label className="m-label">Tipo (opzionale)</label>
+          <label className="m-label">Tipo (opzionale, selezione multipla)</label>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
             {[['nanny','👩‍🍼 Nanny'],['colf','🧹 Colf'],['altro','📝 Altro']].map(([t,label])=>(
-              <button key={t} type="button" onClick={() => pickTipo(t)}
-                className={'m-btn' + (tipo===t ? ' m-btn-primary' : ' m-btn-ghost')}
+              <button key={t} type="button" onClick={() => toggleTipo(t)}
+                className={'m-btn' + (tipos.includes(t) ? ' m-btn-primary' : ' m-btn-ghost')}
                 style={{ fontSize:12, padding:'8px 4px' }}>
                 {label}
               </button>
@@ -252,14 +279,35 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
           </div>
         </div>
 
-        <div className="m-field">
-          <label className="m-label">
-            Nota / Luogo{tipo==='altro' && <span style={{ color:'#d33' }}> *obbligatoria</span>}
-          </label>
-          <input className="m-input" type="text"
-            placeholder={tipo==='altro' ? 'Obbligatoria — es: Idraulico, regalo…' : 'Es: Banca Centro, usato per nanny…'}
-            value={note} onChange={e => setNote(e.target.value)}/>
-        </div>
+        {multiMode && (
+          <div className="m-field">
+            <label className="m-label">Spaccato importi (€) per categoria</label>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {tipos.map(t => (
+                <div key={t} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ fontSize:12, fontWeight:800, width:64, flexShrink:0 }}>{TIPO_LABELS[t]}</span>
+                  <input className="m-input" type="number" inputMode="decimal" placeholder="0.00"
+                    value={subAmounts[t] || ''}
+                    onChange={e => setSubAmounts(prev => ({ ...prev, [t]: e.target.value }))}/>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:'var(--text3)', marginTop:8, lineHeight:1.4 }}>
+              Nota generata: <strong>{composedNote() || '—'}</strong>
+            </div>
+          </div>
+        )}
+
+        {!multiMode && (
+          <div className="m-field">
+            <label className="m-label">
+              Nota / Luogo{tipos.includes('altro') && <span style={{ color:'#d33' }}> *obbligatoria</span>}
+            </label>
+            <input className="m-input" type="text"
+              placeholder={tipos.includes('altro') ? 'Obbligatoria — es: Idraulico, regalo…' : 'Es: Banca Centro, usato per nanny…'}
+              value={note} onChange={e => setNote(e.target.value)}/>
+          </div>
+        )}
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginTop:4 }}>
           <button className="m-btn m-btn-ghost" onClick={onClose}>Annulla</button>
@@ -271,7 +319,7 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
   )
 }
 
-export default function MobileContanti({ showAdd, onCloseAdd }) {
+export default function MobileContanti({ showAdd, onCloseAdd, addKind }) {
   const cashEntries     = useStore(s => s.cashEntries)
   const notePrelievi    = useStore(s => s.notePrelievi)
   const transactions    = useStore(s => s.transactions)
@@ -365,10 +413,13 @@ export default function MobileContanti({ showAdd, onCloseAdd }) {
   // Recent ATM for picker
   const recentAtm = useMemo(() => atmTxsAll.slice(0, 20), [atmTxsAll])
 
-  // Open chooser when showAdd triggers
+  // Open the right modal when showAdd triggers. Richiesta utente 2026-07-28:
+  // se il quick-picker globale ha già specificato "utilizzo" o "prelievo"
+  // (addKind), saltare del tutto lo step intermedio "Cosa vuoi aggiungere?"
+  // e aprire subito il modale giusto. addKind assente (es. vecchi percorsi) → fallback a 'scelta'.
   useMemo(() => {
-    if (showAdd && !addMode) setAddMode('scelta')
-  }, [showAdd])
+    if (showAdd && !addMode) setAddMode(addKind || 'scelta')
+  }, [showAdd, addKind])
 
   function handleClose() {
     setAddMode(null)
