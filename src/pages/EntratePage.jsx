@@ -5,7 +5,8 @@ import { netAmt } from '../data/compensation'
 import { useFinancials, getYM, ymLabel } from '../hooks/useFinancials'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, LineChart, Line, LabelList
+  Tooltip, ResponsiveContainer, LineChart, Line,
+  useXAxisScale, useYAxisScale
 } from 'recharts'
 import './EntratePage.css'
 import { fmtIT, fmtDate } from '../utils/format'
@@ -626,6 +627,44 @@ function buildRow(label, txs, bonusMap) {
   return row
 }
 
+// ── Etichetta totale sopra ogni colonna dello stack "Entrate per fonte" ────
+// 2026-07-28 — fix DEFINITIVO del bug "label mancante nei mesi con bonus"
+// (segnalato ripetutamente dal 2026-07-19 al 2026-07-28: le correzioni
+// precedenti — inclusa quella del 26/07 su margin/domain dell'asse Y —
+// agganciavano la posizione della label alla geometria (x/y/width) restituita
+// da Recharts per la SINGOLA serie "in cima allo stack" in quell'indice
+// (topCatForIndex + <LabelList> per-Bar). Nei mesi con bonus la serie in cima
+// è Fra-Bonus/Sofi-Bonus invece di Fra/Sofi, e quell'approccio si è dimostrato
+// inaffidabile lì (anche con margine extra, la label continuava a non comparire
+// — non era un problema di spazio). Component separato che usa gli hook
+// UFFICIALI di Recharts 3.8 (useXAxisScale/useYAxisScale, pensati apposta per
+// posizionare annotazioni custom sui dati) per calcolare x/y DIRETTAMENTE dalle
+// scale reali degli assi — indipendente da quale categoria sia effettivamente
+// in cima allo stack per un dato mese. Deve stare a livello di modulo (non
+// nested dentro EntratePage) perché è un vero componente React con hook propri.
+function IncomeStackTotals({ data, activeCats, fmtCompactK }) {
+  const xScale = useXAxisScale()
+  const yScale = useYAxisScale()
+  if (!xScale || !yScale) return null
+  return (
+    <g>
+      {data.map((row, i) => {
+        const total = activeCats.reduce((s, c) => s + (row[c] || 0), 0)
+        if (!total) return null
+        const x = xScale(row.label, { position: 'middle' })
+        const y = yScale(total)
+        if (x == null || y == null) return null
+        return (
+          <text key={row.label + '-' + i} x={x} y={y - 6} textAnchor="middle" fontSize={10}
+            fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
+            {fmtCompactK(total)}
+          </text>
+        )
+      })}
+    </g>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────
 export default function EntratePage() {
   const transactions = useStore(s => s.transactions)
@@ -819,36 +858,13 @@ export default function EntratePage() {
   // scorporato nel chart (si distingue lì solo per tonalità più chiara)
   const legendCats = activeCats.filter(c => c === 'Fra' || c === 'Sofi')
 
-  // Richiesta utente 2026-07-19 (bug in modalità "con bonus"): il totale non
-  // compariva più sopra le colonne perché era agganciato SEMPRE alla stessa
-  // categoria globale (l'ultima di activeCats, es. "Sofi-Bonus") — quando quella
-  // categoria vale 0 in un dato mese (il bonus non è mensile, capita 1-2 volte
-  // l'anno), la label si posiziona in modo inaffidabile. Ora si sceglie, PER OGNI
-  // colonna, l'ultima categoria con valore > 0 in quella colonna specifica —
-  // garantisce sempre un segmento con altezza reale a cui agganciare la label.
-  function topCatForIndex(index) {
-    for (let i = activeCats.length - 1; i >= 0; i--) {
-      if ((chartDataDisplay[index]?.[activeCats[i]] || 0) > 0) return activeCats[i]
-    }
-    return topCat
-  }
-
   // Richiesta utente 2026-07-19: totale in alto su ogni colonna dell'istogramma
-  // "Entrate per fonte (Fra + Sofi)", in formato breve (es. "50k" non "€50.000")
+  // "Entrate per fonte (Fra + Sofi)", in formato breve (es. "50k" non "€50.000").
+  // Il posizionamento vero e proprio della label è in IncomeStackTotals (fuori da
+  // questo componente, vedi commento lì) — qui resta solo il formatter numerico.
   function fmtCompactK(n) {
     if (!n) return ''
     return Math.abs(n) >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`
-  }
-  function IncomeBarTotalLabel({ x, y, width, index }) {
-    if (index == null || !chartDataDisplay[index]) return null
-    const total = activeCats.reduce((s, c) => s + (chartDataDisplay[index][c] || 0), 0)
-    if (!total) return null
-    return (
-      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={10}
-        fontWeight={700} fill="var(--text2)" style={{ pointerEvents: 'none' }}>
-        {fmtCompactK(total)}
-      </text>
-    )
   }
 
   // Richiesta utente 2026-07-19: 3 KPI (Media/Max/Min) sotto il chart, calcolati
@@ -1011,13 +1027,9 @@ export default function EntratePage() {
                         contentStyle={{fontSize:12,border:'1px solid var(--border)',borderRadius:8}}/>
                       {activeCats.map(cat => (
                         <Bar key={cat} dataKey={cat} name={cat} fill={COLORS[cat]} stackId="a"
-                          radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}>
-                          <LabelList content={(props) =>
-                            (props.index != null && topCatForIndex(props.index) === cat)
-                              ? <IncomeBarTotalLabel {...props}/> : null
-                          }/>
-                        </Bar>
+                          radius={cat === topCat ? [4,4,0,0] : [0,0,0,0]}/>
                       ))}
+                      <IncomeStackTotals data={chartDataDisplay} activeCats={activeCats} fmtCompactK={fmtCompactK}/>
                     </BarChart>
                   </ResponsiveContainer>
                   {/* 3 KPI richiesti dall'utente 2026-07-19: Media/Max/Min sui totali per
