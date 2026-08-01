@@ -1095,6 +1095,44 @@ export default function ForecastPage() {
     return d
   }, [catStats, catStatsTeoriche, forecastBasis, teoricheSpese, teoricheSpeseL2, excludedCats])
 
+  // Fix (2026-08, bug segnalato dall'utente): in modalità Storico › Puntuale il
+  // popup di override mese/anno pre-compilava SEMPRE la base "media" (defaultsByCat
+  // per le spese, teoricheFra/Sofi per le entrate), quindi il totale mostrato non
+  // coincideva col valore che la tabella usa per QUEL mese (lo storico puntuale di
+  // quel mese di calendario). Qui i default vengono scalati al totale effettivo del
+  // periodo, così popup e cella tornano. In Media/Teoriche non cambia nulla.
+  const puntualeMode = forecastBasis === 'storico' && forecastStoricoMode === 'puntuale'
+  function monthBaseExp(mn) {
+    return (puntualeMode && expenseByMonthNum[mn] != null)
+      ? Math.max(0, expenseByMonthNum[mn] - savedPerMonth) : effectiveExpense
+  }
+  function monthBaseInc(mn) {
+    return (puntualeMode && incomeByMonthNum[mn] != null) ? incomeByMonthNum[mn] : avgIncomeEffective
+  }
+  function periodTarget(baseFn, gran, key) {
+    if (gran === 'mensile') return baseFn(parseInt(String(key).split('-')[1], 10))
+    let s = 0; for (let mn = 1; mn <= 12; mn++) s += baseFn(mn); return s / 12
+  }
+  function scaledDefaultsByCat(gran, key) {
+    if (!puntualeMode) return defaultsByCat
+    const target = periodTarget(monthBaseExp, gran, key)
+    const cur = Object.values(defaultsByCat).reduce((s, v) => s + v, 0)
+    if (!(cur > 0) || !(target > 0)) return defaultsByCat
+    const k = target / cur
+    const out = {}
+    Object.keys(defaultsByCat).forEach(c1 => { out[c1] = defaultsByCat[c1] * k })
+    return out
+  }
+  function scaledIncomeDefaults(gran, key) {
+    const base = { fra: teoricheFraVal, sofi: teoricheSofiVal }
+    if (!puntualeMode) return base
+    const target = periodTarget(monthBaseInc, gran, key)
+    const cur = (teoricheFraVal || 0) + (teoricheSofiVal || 0)
+    if (!(cur > 0) || !(target > 0)) return base
+    const k = target / cur
+    return { fra: teoricheFraVal * k, sofi: teoricheSofiVal * k }
+  }
+
   // ── Override puntuali mese/anno sulla colonna ENTRATE (2026-07-23, richiesta
   // utente: stesso meccanismo delle Spese, ma per Fra/Sofi + una riga "Altro"
   // per un'entrata extra di quel periodo). Formato:
@@ -2740,7 +2778,7 @@ export default function ForecastPage() {
             // override stantio. Fix: in Teoriche usa la STESSA fonte di
             // defaultsByCat (catStatsTeoriche), coerente col resto della tab.
             catStats={forecastBasis === 'teoriche' ? catStatsTeoriche : catStats}
-            defaultsByCat={defaultsByCat}
+            defaultsByCat={scaledDefaultsByCat(overridePopup.granularity, overridePopup.key)}
             initialSpese={existing?.spese}
             initialSpeseL2={existing?.speseL2}
             initialCascade={existing?.cascade}
@@ -2794,8 +2832,8 @@ export default function ForecastPage() {
             initialCascade={existing?.cascade}
             initialAltro={existing?.altro}
             initialAltroCascade={existing?.altroCascade}
-            defaultFra={teoricheFraVal}
-            defaultSofi={teoricheSofiVal}
+            defaultFra={scaledIncomeDefaults(overrideIncomePopup.granularity, overrideIncomePopup.key).fra}
+            defaultSofi={scaledIncomeDefaults(overrideIncomePopup.granularity, overrideIncomePopup.key).sofi}
             hasExisting={!!existing}
             onClose={()=>setOverrideIncomePopup(null)}
             onRemove={()=>{
