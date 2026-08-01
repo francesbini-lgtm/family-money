@@ -460,11 +460,11 @@ function MonthPickerModal({ months, initialSelected, onSave, onClose }) {
 // un'entrata extra di quel periodo specifico, con un flag INDIPENDENTE
 // scelto dall'utente per decidere se anche "Altro" deve ripetersi nei periodi
 // successivi oppure valere solo per quello corrente).
-function IncomeOverrideModal({ title, initialEntrate, initialCascade, initialAltro, initialAltroCascade, defaultFra, defaultSofi, hasExisting, onSave, onRemove, onClose }) {
+function IncomeOverrideModal({ title, initialEntrate, initialCascade, initialAltro, initialAltroCascade, defaultFra, defaultSofi, defaultAltro, hasExisting, onSave, onRemove, onClose }) {
   const [fra, setFra]   = useState(Math.round(initialEntrate?.Fra  ?? defaultFra))
   const [sofi, setSofi] = useState(Math.round(initialEntrate?.Sofi ?? defaultSofi))
   const [cascade, setCascade] = useState(!!initialCascade)
-  const [altro, setAltro] = useState(Math.round(initialAltro || 0))
+  const [altro, setAltro] = useState(Math.round(initialAltro ?? defaultAltro ?? 0))
   const [altroCascade, setAltroCascade] = useState(!!initialAltroCascade)
   const total = (Number(fra)||0) + (Number(sofi)||0) + (Number(altro)||0)
 
@@ -890,6 +890,28 @@ export default function ForecastPage() {
     return map
   }, [incomeByMonth])
 
+  // Spaccato REALE per-categoria del mese di calendario (ultima occorrenza negli
+  // ultimi 12 mesi) — usato dal popup di override in modalità Puntuale per mostrare
+  // la composizione VERA di quel mese (es. Ago → per-categoria dell'ultimo agosto),
+  // non la media riscalata. Somma per costruzione = expenseByMonthNum di quel mese.
+  const expenseByCatMonthNum = useMemo(() => {
+    const map = {}
+    last6.forEach(ym => {
+      const perCat = {}
+      expList(transactions, [ym]).forEach(t => {
+        const c1 = t.cat1 || 'Non Categorizzato'
+        perCat[c1] = (perCat[c1] || 0) + Math.abs(netAmt(t))
+      })
+      map[parseInt(ym.split('-')[1], 10)] = perCat
+    })
+    return map
+  }, [transactions, last6])
+  const incomeByCatMonthNum = useMemo(() => {
+    const map = {}
+    incomeByMonth.forEach(e => { map[parseInt(e.ym.split('-')[1], 10)] = { fra: e.fra || 0, sofi: e.sofi || 0, other: e.other || 0 } })
+    return map
+  }, [incomeByMonth])
+
   // Effective income avg excluding deselected months (base storico)
   const effectiveIncomeMths = incomeByMonth.filter(m => !excludedMonths.includes(m.ym))
   const avgIncomeStorico = effectiveIncomeMths.length > 0
@@ -1102,35 +1124,27 @@ export default function ForecastPage() {
   // quel mese di calendario). Qui i default vengono scalati al totale effettivo del
   // periodo, così popup e cella tornano. In Media/Teoriche non cambia nulla.
   const puntualeMode = forecastBasis === 'storico' && forecastStoricoMode === 'puntuale'
-  function monthBaseExp(mn) {
-    return (puntualeMode && expenseByMonthNum[mn] != null)
-      ? Math.max(0, expenseByMonthNum[mn] - savedPerMonth) : effectiveExpense
-  }
-  function monthBaseInc(mn) {
-    return (puntualeMode && incomeByMonthNum[mn] != null) ? incomeByMonthNum[mn] : avgIncomeEffective
-  }
-  function periodTarget(baseFn, gran, key) {
-    if (gran === 'mensile') return baseFn(parseInt(String(key).split('-')[1], 10))
-    let s = 0; for (let mn = 1; mn <= 12; mn++) s += baseFn(mn); return s / 12
-  }
+  // In Storico › Puntuale il popup mostra lo spaccato REALE del mese di calendario
+  // (composizione per-categoria di quel mese storico), così totale E spaccati
+  // coincidono con la cella. Per l'anno (una sola composizione mensile) e per
+  // Media/Teoriche resta la base media (defaultsByCat / Fra+Sofi teorici), invariata.
   function scaledDefaultsByCat(gran, key) {
-    if (!puntualeMode) return defaultsByCat
-    const target = periodTarget(monthBaseExp, gran, key)
-    const cur = Object.values(defaultsByCat).reduce((s, v) => s + v, 0)
-    if (!(cur > 0) || !(target > 0)) return defaultsByCat
-    const k = target / cur
-    const out = {}
-    Object.keys(defaultsByCat).forEach(c1 => { out[c1] = defaultsByCat[c1] * k })
-    return out
+    if (puntualeMode && gran === 'mensile') {
+      const real = expenseByCatMonthNum[parseInt(String(key).split('-')[1], 10)]
+      if (real) {
+        const out = {}
+        Object.keys(defaultsByCat).forEach(c1 => { out[c1] = excludedCats.has(c1) ? 0 : Math.round(real[c1] || 0) })
+        return out
+      }
+    }
+    return defaultsByCat
   }
   function scaledIncomeDefaults(gran, key) {
-    const base = { fra: teoricheFraVal, sofi: teoricheSofiVal }
-    if (!puntualeMode) return base
-    const target = periodTarget(monthBaseInc, gran, key)
-    const cur = (teoricheFraVal || 0) + (teoricheSofiVal || 0)
-    if (!(cur > 0) || !(target > 0)) return base
-    const k = target / cur
-    return { fra: teoricheFraVal * k, sofi: teoricheSofiVal * k }
+    if (puntualeMode && gran === 'mensile') {
+      const real = incomeByCatMonthNum[parseInt(String(key).split('-')[1], 10)]
+      if (real) return { fra: Math.round(real.fra || 0), sofi: Math.round(real.sofi || 0), altro: Math.round(real.other || 0) }
+    }
+    return { fra: teoricheFraVal, sofi: teoricheSofiVal, altro: 0 }
   }
 
   // ── Override puntuali mese/anno sulla colonna ENTRATE (2026-07-23, richiesta
@@ -2825,6 +2839,7 @@ export default function ForecastPage() {
       {overrideIncomePopup && (() => {
         const isMonthly = overrideIncomePopup.granularity === 'mensile'
         const existing = isMonthly ? overridesEntrateMonthly[overrideIncomePopup.key] : overridesEntrateYearly[overrideIncomePopup.key]
+        const incDef = scaledIncomeDefaults(overrideIncomePopup.granularity, overrideIncomePopup.key)
         return (
           <IncomeOverrideModal
             title={`Modifica entrate — ${overrideIncomePopup.label}`}
@@ -2832,8 +2847,9 @@ export default function ForecastPage() {
             initialCascade={existing?.cascade}
             initialAltro={existing?.altro}
             initialAltroCascade={existing?.altroCascade}
-            defaultFra={scaledIncomeDefaults(overrideIncomePopup.granularity, overrideIncomePopup.key).fra}
-            defaultSofi={scaledIncomeDefaults(overrideIncomePopup.granularity, overrideIncomePopup.key).sofi}
+            defaultFra={incDef.fra}
+            defaultSofi={incDef.sofi}
+            defaultAltro={incDef.altro}
             hasExisting={!!existing}
             onClose={()=>setOverrideIncomePopup(null)}
             onRemove={()=>{
