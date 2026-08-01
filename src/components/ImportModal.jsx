@@ -5,6 +5,7 @@ import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiServi
 import { applyCatRulesTo } from '../data/ruleMatching'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
+import { fmtDate } from '../utils/format'
 import './ImportModal.css'
 // spin animation added via CSS
 
@@ -355,7 +356,10 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
   const appPrefs = useStore(s => s.appPrefs)
   const userAccounts = useMemo(() => {
     if (accountFilter === 'carta') return allAccounts.filter(a => a.type === 'carta_credito')
-    if (accountFilter === 'conto') return allAccounts.filter(a => a.type !== 'carta_credito')
+    // Modalità conto: solo conti veri (niente carte). I bancomat (carta_debito) sono
+    // esclusi apposta — qui si importa SOLO il conto corrente, mai un estratto bancomat
+    // (richiesta utente): così il menu mostra solo il/i conto/i e non li si può sbagliare.
+    if (accountFilter === 'conto') return allAccounts.filter(a => a.type !== 'carta_credito' && a.type !== 'carta_debito')
     return allAccounts
   }, [allAccounts, accountFilter])
   const [account, setAccount] = useState(userAccounts[0]?.name || '')
@@ -382,6 +386,16 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
   // di doppioni ci si aspetta di trovare — vedi targetGapDoppioni più sotto. Opzionale:
   // se lasciato vuoto, lo step Doppioni si comporta come oggi (nessun blocco).
   const [nuovoSaldo, setNuovoSaldo] = useState('')
+
+  // Ultime 2 transazioni del conto/carta selezionato — stesso blocco della pagina 1
+  // dell'import unificato: dà contesto su fino a quando arrivano già i dati prima di
+  // caricare un nuovo estratto. Cambia in base alla voce scelta nel menu Conto/Carta.
+  const lastAccountTxs = useMemo(() => {
+    if (!account) return []
+    return transactions.filter(t => t.account === account)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .slice(0, 2)
+  }, [transactions, account])
 
   // Build display label for each account: name · *card4 · owner nickname
   function accountLabel(a) {
@@ -1022,11 +1036,36 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
             </div>
 
             <label className="form-label">Conto / Carta</label>
-            <select className="form-select" value={account} onChange={e=>setAccount(e.target.value)}>
-              {userAccounts.map(a=>(
-                <option key={a.id} value={a.name}>{accountLabel(a)}</option>
-              ))}
-            </select>
+            {userAccounts.length > 1 ? (
+              <select className="form-select" value={account} onChange={e=>setAccount(e.target.value)}>
+                {userAccounts.map(a=>(
+                  <option key={a.id} value={a.name}>{accountLabel(a)}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="form-select" style={{display:'flex',alignItems:'center',background:'var(--surface)',cursor:'default'}}>
+                {userAccounts[0] ? accountLabel(userAccounts[0]) : '—'}
+              </div>
+            )}
+
+            {lastAccountTxs.length > 0 && (
+              <div style={{margin:'8px 0 2px',padding:'8px 12px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,fontSize:11.5,color:'var(--text3)',lineHeight:1.5}}>
+                📅 Ultime transazioni registrate:
+                {lastAccountTxs.map(t => {
+                  const desc = (t.descAI || t.description || t.merchant || '—').toString().slice(0,34)
+                  return (
+                    <span key={t.txId} style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:2}}>
+                      <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        <strong style={{color:'var(--text2)'}}>{fmtDate(t.date)}</strong> — {desc}
+                      </span>
+                      <span style={{flexShrink:0,fontFamily:'var(--font-mono)',color:t.amount<0?'var(--red)':'var(--green)'}}>
+                        {t.amount<0?'−':'+'}€{Math.abs(t.amount).toLocaleString('it-IT',{minimumFractionDigits:2})}
+                      </span>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
 
             {accountFilter === 'conto' && (
               <>
