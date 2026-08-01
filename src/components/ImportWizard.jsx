@@ -790,6 +790,12 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
   const [showAll, setShowAll] = useState(false)
   const [committed, setCommitted] = useState(false)
   const [showBreakdown, setShowBreakdown] = useState(false)
+  // Nuovo saldo (da banca) modificabile anche in questo step (richiesta utente):
+  // l'utente può ritoccare il valore inserito negli step precedenti e il gap /
+  // doppioni attesi si ricalcolano in tempo reale.
+  const [editedNuovoSaldo, setEditedNuovoSaldo] = useState(
+    saldoBreakdown && saldoBreakdown.nuovoSaldo != null ? String(saldoBreakdown.nuovoSaldo) : ''
+  )
 
   // Pre-seleziona i doppioni rilevati automaticamente al primo render di questo step
   const seededRef = useRef(false)
@@ -809,7 +815,18 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
   // PIN) per SOLO il residuo che non riesce a scovare — non l'intero gap, solo
   // quello che resta dopo aver selezionato tutti i doppioni reali che trova.
   const [tappoCovered, setTappoCovered] = useState(0) // quota di gap coperta dal tappo
-  const remaining = Math.round((targetGapDoppioni - selectedSum - tappoCovered) * 100) / 100
+  // Saldo nuovo effettivo (dall'input modificabile qui) e target ricalcolato:
+  // gap = saldo sistema (vecchio saldo + operazioni caricate) − nuovo saldo da banca.
+  const nuovoSaldoNum = (() => {
+    const n = parseFloat(String(editedNuovoSaldo).replace(',', '.'))
+    return Number.isFinite(n) ? n : (saldoBreakdown?.nuovoSaldo ?? 0)
+  })()
+  const effectiveTarget = reconciling
+    ? (saldoBreakdown
+        ? Math.round((saldoBreakdown.saldoSistema - nuovoSaldoNum) * 100) / 100
+        : targetGapDoppioni)
+    : null
+  const remaining = Math.round((effectiveTarget - selectedSum - tappoCovered) * 100) / 100
   const resolved = reconciling && Math.abs(remaining) < 0.01
   const hasTappo = Math.abs(tappoCovered) > 0.005
 
@@ -822,7 +839,7 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
   }
 
   function createTappo() {
-    const gapNow = Math.round((targetGapDoppioni - selectedSum - tappoCovered) * 100) / 100
+    const gapNow = Math.round((effectiveTarget - selectedSum - tappoCovered) * 100) / 100
     if (Math.abs(gapNow) < 0.01) return
     if (!window.confirm(
       `Stai per creare una rettifica nascosta di € ${fmtIT(Math.abs(gapNow), 2)} per il residuo che non riesci a spiegare come doppione. ` +
@@ -916,8 +933,30 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
             {resolved ? '✅ Il saldo torna — puoi proseguire' : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
           </div>
+          {saldoBreakdown && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', margin: '6px 0 10px', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ color: 'var(--text3)' }}>Vecchio saldo</span>
+                <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(saldoBreakdown.saldoAttuale, 2)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ color: 'var(--text3)' }}>Somma operazioni caricate</span>
+                <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <span style={{ color: 'var(--text3)' }}>Nuovo saldo (da banca)</span>
+                <input type="number" step="0.01" className="form-select"
+                  value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(e.target.value)}
+                  style={{ width: 120, height: 'auto', padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <span style={{ color: 'var(--text3)' }}>Gap (doppioni da trovare)</span>
+                <strong style={{ fontFamily: 'var(--font-mono)', color: resolved ? 'var(--green)' : '#b45309' }}>€ {fmtIT(effectiveTarget, 2)}</strong>
+              </div>
+            </div>
+          )}
           <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(targetGapDoppioni), 2)}</strong></span>
+            <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong></span>
             <span>Selezionati: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></span>
             {hasTappo && (
               <span>Rettifica: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></span>
@@ -938,8 +977,8 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
                   <span>Saldo già a sistema per questo conto: € {fmtIT(saldoBreakdown.saldoAttuale, 2)}</span>
                   <span>+ Totale righe lette dal CSV: € {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</span>
                   <span>= Saldo sistema calcolato: € {fmtIT(saldoBreakdown.saldoSistema, 2)}</span>
-                  <span>− Nuovo saldo dichiarato: € {fmtIT(saldoBreakdown.nuovoSaldo, 2)}</span>
-                  <span style={{ fontWeight: 700 }}>= Doppioni attesi: € {fmtIT(targetGapDoppioni, 2)}</span>
+                  <span>− Nuovo saldo dichiarato: € {fmtIT(nuovoSaldoNum, 2)}</span>
+                  <span style={{ fontWeight: 700 }}>= Doppioni attesi: € {fmtIT(effectiveTarget, 2)}</span>
                   {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
                     <span style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 2 }}>
                       ⚠️ Saldo già a sistema per questo conto risulta 0 — se il conto ha già transazioni, il nome selezionato potrebbe non combaciare.
