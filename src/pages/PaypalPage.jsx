@@ -677,6 +677,13 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
     onClose()
   }
 
+  // Ultime 2 transazioni PayPal già registrate — stesso blocco della pagina 1
+  // dell'import unificato (ImportWizard), per dare contesto su fino a quando
+  // arrivano i dati PayPal prima di caricare un nuovo screenshot.
+  const lastPaypalTxs = [...transactions.filter(isPayPal)]
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .slice(0, 2)
+
   return (
     <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="pp-modal">
@@ -688,6 +695,27 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
             ⚠️ Nessuna chiave API configurata. Aggiungila in <strong>Impostazioni → AI</strong>.
           </div>
         )}
+
+        <div style={{ margin: '4px 0 12px', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11.5, color: 'var(--text3)', lineHeight: 1.5 }}>
+          {lastPaypalTxs.length > 0 ? (
+            <>
+              📅 Ultime transazioni PayPal registrate:
+              {lastPaypalTxs.map(t => {
+                const desc = (t.descAI || t.description || t.merchant || '—').toString().slice(0, 34)
+                return (
+                  <span key={t.txId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <strong style={{ color: 'var(--text2)' }}>{fmtDate(t.date)}</strong> — {desc}
+                    </span>
+                    <span style={{ flexShrink: 0, fontFamily: 'var(--font-mono)', color: t.amount < 0 ? 'var(--red)' : 'var(--green)' }}>
+                      {t.amount < 0 ? '−' : '+'}€{Math.abs(t.amount).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                    </span>
+                  </span>
+                )
+              })}
+            </>
+          ) : 'Nessuna transazione PayPal registrata finora'}
+        </div>
 
         <div
           className="pp-dropzone"
