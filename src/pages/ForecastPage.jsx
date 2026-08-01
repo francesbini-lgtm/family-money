@@ -8,6 +8,7 @@ import {
 import './ForecastPage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import Modal, { ModalFooter } from '../components/Modal'
+import { SaveSnapshotModal, SnapshotsListModal, SnapshotOverlay } from '../components/ForecastSnapshots'
 // Importi NETTI post-compensazione (fix 2026-07-13: questa pagina era rimasta
 // indietro rispetto a UscitePage/RisparmioPage, che già usano netAmt — vedi
 // audit richiesto dall'utente sulla coerenza dei totali Uscite tra le 3 pagine)
@@ -623,6 +624,12 @@ export default function ForecastPage() {
   // proiezione annuale (una riga per anno) o mensile (una riga per mese)
   const projectionView = appPrefs?.forecastProjectionView || 'annuale' // 'annuale' | 'mensile'
   function setProjectionView(v) { setAppPref('forecastProjectionView', v) }
+
+  // Snapshot della tabella Proiezione (salva/consulta) — vedi ForecastSnapshots.jsx
+  const forecastSnapshots = appPrefs?.forecastSnapshots || []
+  const [snapSave, setSnapSave] = useState(false)
+  const [snapList, setSnapList] = useState(false)
+  const [snapOpen, setSnapOpen] = useState(null)
 
   // Adjustable parameters
   const growth    = appPrefs?.forecastGrowth    ?? 2
@@ -1633,6 +1640,83 @@ export default function ForecastPage() {
     (t.cat2 === 'Fra' || t.cat2 === 'Sofi')
   ) ? 'stipendi Fra+Sofi' : 'tutte le entrate'
 
+  // ── Snapshot forecast: periodi/colonne disponibili, valori-colonna, salvataggio,
+  //    e valori REALI per periodo (dalle transazioni) per il confronto ──────────
+  const snapPeriods = (projectionView === 'annuale' ? forecastDataAnnual : forecastDataMonthly)
+    .map(d => ({ key: projectionView === 'annuale' ? d.label : d.ym, label: d.label }))
+  const snapSelectableCols = projCols.filter(c => c !== (projectionView === 'annuale' ? 'Anno' : 'Mese'))
+
+  function snapRowValues(d) {
+    if (projectionView === 'annuale') {
+      const inc = d.income, exp = d.expense
+      const rataAnnua = d.mortgageRata || 0, extraAnnua = d.mortgageExtra || 0
+      const cf = (inc - exp) * 12 - rataAnnua - extraAnnua + (d.mortgageCapital || 0)
+      return {
+        'Anno': d.label,
+        'Entrate': Math.round(inc * 12 + (d.mortgageCapital || 0)),
+        'Uscite': -Math.round(exp * 12),
+        'Rata mutuo annua': -Math.round(rataAnnua + extraAnnua),
+        'Anticipo': (mortgageAnticipo > 0 && parseInt(d.label) === effectiveAnticipoYear) ? -mortgageAnticipo : 0,
+        'Cash flow': Math.round(cf),
+        'Saldo previsto': d.forecast,
+        'Debito residuo': d.residual != null ? d.residual : null,
+      }
+    }
+    const inc = d.income, exp = d.expense
+    const rataMese = d.mortgageRata || 0, extraMese = d.mortgageExtra || 0
+    const cf = (inc - exp) - rataMese - extraMese
+    return {
+      'Mese': d.label,
+      'Entrate': Math.round(inc),
+      'Uscite': -Math.round(exp),
+      'Rata mutuo': -Math.round(rataMese + extraMese),
+      'Anticipo': (mortgageAnticipo > 0 && effectiveAnticipoYM && d.ym === effectiveAnticipoYM) ? -mortgageAnticipo : 0,
+      'Cash flow': Math.round(cf),
+      'Saldo previsto': d.forecast,
+      'Debito residuo': d.residual != null ? d.residual : null,
+    }
+  }
+
+  function saveSnapshot({ title, columns, upToKey }) {
+    const data = projectionView === 'annuale' ? forecastDataAnnual : forecastDataMonthly
+    const rows = []
+    for (const d of data) {
+      const key = projectionView === 'annuale' ? d.label : d.ym
+      const vals = snapRowValues(d)
+      const cells = {}
+      columns.forEach(c => { cells[c] = vals[c] })
+      rows.push({ key, label: d.label, cells, fRisparmio: vals['Cash flow'], fSaldo: vals['Saldo previsto'] })
+      if (key === upToKey) break
+    }
+    const snap = { id: 's' + Date.now(), createdAt: new Date().toISOString(), title, view: projectionView, columns, rows }
+    setAppPref('forecastSnapshots', [snap, ...forecastSnapshots])
+    setSnapSave(false)
+  }
+
+  function deleteSnapshot(id) {
+    if (!window.confirm('Eliminare questo salvataggio?')) return
+    setAppPref('forecastSnapshots', forecastSnapshots.filter(s => s.id !== id))
+  }
+
+  // Valori REALI di un periodo (year 'YYYY' o mese 'YYYY-MM') dalle transazioni:
+  // risparmio = entrate − uscite del periodo; saldo = saldo cumulato a fine periodo.
+  // Ritorna null per i periodi interamente nel futuro (nessun dato reale ancora).
+  const nowYM = now.toISOString().slice(0, 7)
+  function computeActual(key) {
+    const isYear = /^\d{4}$/.test(String(key))
+    const startYM = isYear ? `${key}-01` : String(key)
+    if (startYM.slice(0, 7) > nowYM) return null
+    const upTo = isYear ? `${key}-12-31` : `${key}-31`
+    const startPrefix = isYear ? `${key}-` : String(key)
+    const dOf = t => (t._effDate || t.date || '')
+    const active = transactions.filter(t => !t.excluded)
+    const saldo = active.filter(t => dOf(t) <= upTo).reduce((s, t) => s + t.amount, 0)
+    const inP = active.filter(t => dOf(t).startsWith(startPrefix))
+    const inc = inP.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+    const exp = Math.abs(inP.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+    return { risparmio: Math.round(inc - exp), saldo: Math.round(saldo) }
+  }
+
   return (
     <div className="fc-page">
       {/* Header */}
@@ -2339,8 +2423,13 @@ export default function ForecastPage() {
                   🤔 what if incluso
                 </span>
               )}
-              {/* Toggle Annuale/Mensile — richiesta utente 2026-07-19 */}
-              <div style={{marginLeft:'auto',display:'flex',gap:4,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
+              <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
+                <button onClick={()=>setSnapSave(true)} title="Salva questa vista in un salvataggio"
+                  style={{padding:'5px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',cursor:'pointer',fontSize:11,fontWeight:700}}>💾 Salva</button>
+                <button onClick={()=>setSnapList(true)} title="Apri le viste salvate"
+                  style={{padding:'5px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',cursor:'pointer',fontSize:11,fontWeight:700}}>📂 Salvataggi{forecastSnapshots.length>0?` (${forecastSnapshots.length})`:''}</button>
+                {/* Toggle Annuale/Mensile — richiesta utente 2026-07-19 */}
+                <div style={{display:'flex',gap:4,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:2}}>
                 {[{v:'annuale',l:'Annuale'},{v:'mensile',l:'Mensile'}].map(opt=>(
                   <button key={opt.v} onClick={()=>setProjectionView(opt.v)}
                     style={{padding:'4px 12px',borderRadius:6,border:'none',
@@ -2351,8 +2440,20 @@ export default function ForecastPage() {
                     {opt.l}
                   </button>
                 ))}
+                </div>
               </div>
             </div>
+            {snapSave && (
+              <SaveSnapshotModal view={projectionView} selectableCols={snapSelectableCols} periods={snapPeriods}
+                onSave={saveSnapshot} onClose={()=>setSnapSave(false)} />
+            )}
+            {snapList && (
+              <SnapshotsListModal snapshots={forecastSnapshots}
+                onOpen={s=>{ setSnapOpen(s); setSnapList(false) }} onDelete={deleteSnapshot} onClose={()=>setSnapList(false)} />
+            )}
+            {snapOpen && (
+              <SnapshotOverlay snapshot={snapOpen} computeActual={computeActual} onClose={()=>setSnapOpen(null)} />
+            )}
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr>
