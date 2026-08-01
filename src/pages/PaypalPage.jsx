@@ -545,6 +545,10 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
   const [results, setResults]   = useState(null)
   const [selected, setSelected] = useState(new Set())
   const [duplicates, setDuplicates] = useState(new Set())
+  // Sottoinsieme dei doppioni rilevati confrontando con le transazioni PayPal GIÀ
+  // presenti a ledger (stesso nome+data+importo), oltre al registro paypalImports —
+  // per segnalarli con un badge dedicato "già in transazioni".
+  const [ledgerDupes, setLedgerDupes] = useState(new Set())
   const [importYear, setImportYear] = useState(new Date().getFullYear())
 
   function handleFiles(newFiles) {
@@ -621,14 +625,21 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
       // doppione (l'utente resta libero di deselezionarlo o tenerlo comunque,
       // la selezione automatica esclude sempre i sospetti doppioni per default).
       const looseKey = r => `${r.date}|${Math.round(Math.abs(r.amount||0)*100)}`
+      // Doppioni contro le transazioni PayPal GIÀ a ledger: stessa chiave
+      // data|nome|importo (dupKey). Copre il caso in cui l'operazione è già stata
+      // importata come transazione ma non figura (più) nel registro paypalImports.
+      const ledgerPaypalKeys = new Set((transactions || []).filter(isPayPal).map(t => dupKey(t)))
       const dupSet = new Set()
+      const ledgerDupSet = new Set()
       const batchSeen = new Set()
       const batchSeenLoose = new Set()
       allResults.forEach((r, i) => {
         const k = dupKey(r)
         const lk = looseKey(r)
-        if (isAlreadyImported(r, paypalImports) || batchSeen.has(k) || batchSeenLoose.has(lk)) {
+        const inLedger = ledgerPaypalKeys.has(k)
+        if (isAlreadyImported(r, paypalImports) || inLedger || batchSeen.has(k) || batchSeenLoose.has(lk)) {
           dupSet.add(i)
+          if (inLedger) ledgerDupSet.add(i)
         } else {
           batchSeen.add(k)
           batchSeenLoose.add(lk)
@@ -637,6 +648,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
 
       setResults(allResults)
       setDuplicates(dupSet)
+      setLedgerDupes(ledgerDupSet)
       // Auto-select solo i non-doppioni E non in valuta estera non riconciliata:
       // se l'AI riporta un currency diverso da EUR (nessun equivalente € visibile
       // sullo screenshot), l'importo NON va assunto come euro — va confermato a mano
@@ -819,7 +831,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
                         {isDup && (
                           <span style={{ marginLeft:6, fontSize:10, color:'#b45309',
                             background:'#fef3c7', borderRadius:4, padding:'1px 5px',
-                            border:'1px solid #fcd34d', verticalAlign:'middle' }}>🔁 già importata</span>
+                            border:'1px solid #fcd34d', verticalAlign:'middle' }}>🔁 {ledgerDupes.has(i) ? 'già in transazioni' : 'già importata'}</span>
                         )}
                         {isForeign && (
                           <span title="Importo in valuta estera: verifica manualmente il controvalore in euro prima di importare"
