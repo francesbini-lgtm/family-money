@@ -745,7 +745,12 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
     let targetGapDoppioni = null
     let saldoDoppioniBreakdown = null
     if (accountFilter === 'conto' && nuovoSaldo !== '' && !isNaN(parseFloat(nuovoSaldo))) {
-      const saldoAttuale   = computeSaldoAccount(useStore.getState().transactions, account)
+      // Saldo "pre import" = lo STESSO saldo mostrato in topbar/KPI "Saldo Conto"
+      // (computeSaldoConto: tutte le transazioni non escluse + rettifiche), così combacia
+      // con quello che l'utente vede in app ed è quello che "fa fede" (richiesta utente
+      // 2026-08). Il per-conto computeSaldoAccount escludeva movimenti dello stesso conto
+      // salvati con un account diverso, dando un saldo più basso del reale.
+      const saldoAttuale   = computeSaldoConto(useStore.getState().transactions)
       const rawParsedTotal = allParsed.reduce((s, t) => s + t.amount, 0)
       const saldoSistema   = saldoAttuale + rawParsedTotal
       const nuovoSaldoNum  = parseFloat(nuovoSaldo)

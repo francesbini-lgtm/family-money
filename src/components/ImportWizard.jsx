@@ -766,6 +766,23 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   return results
 }
 
+// Etichetta colorata (chip) per un valore di saldo — terminologia unificata nello step
+// Doppioni. Definita a livello di modulo (non dentro il componente) per non rimontare
+// l'input "Nuovo saldo" ad ogni render e non perderne il focus mentre si digita.
+function MetricChip({ label, fg, bg, value, strong, children }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 10px',
+      borderRadius: 10, background: bg, border: `1px solid ${fg}` }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: fg }}>{label}</span>
+      {children != null ? children : (
+        <strong style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text)', fontWeight: strong ? 800 : 600 }}>
+          € {value}
+        </strong>
+      )}
+    </span>
+  )
+}
+
 function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
@@ -915,6 +932,13 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
     setHandled(h => ({ ...h, [d.t.txId]: true }))
   }
 
+  // Segno del gap (punto 3, richiesta utente): saldo sistema calcolato − saldo banca.
+  //  gap > 0 → il sistema calcola PIÙ della banca: lo scarto va colmato togliendo doppioni.
+  //  gap < 0 → il sistema calcola MENO della banca: NON possono esserci doppioni (toglierli
+  //            peggiorerebbe), l'unica è una rettifica "tappo"; l'utente decide se crearla.
+  const gapPositive = reconciling && effectiveTarget > 0.01
+  const gapNegative = reconciling && effectiveTarget < -0.01
+
   return (
     <>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>
@@ -930,41 +954,47 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
         <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14,
           background: resolved ? 'var(--green-l)' : 'rgba(245,158,11,.08)',
           border: `1px solid ${resolved ? 'var(--green)' : '#f59e0b'}` }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-            {resolved ? '✅ Il saldo torna — puoi proseguire' : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
+            {resolved
+              ? '✅ Il saldo torna — puoi proseguire'
+              : gapNegative
+                ? '⚠️ Saldo di sistema INFERIORE al saldo banca — non ci possono essere doppioni'
+                : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
           </div>
           {saldoBreakdown && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', margin: '6px 0 10px', fontSize: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ color: 'var(--text3)' }}>Vecchio saldo</span>
-                <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(saldoBreakdown.saldoAttuale, 2)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ color: 'var(--text3)' }}>Somma operazioni caricate</span>
-                <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                <span style={{ color: 'var(--text3)' }}>Nuovo saldo (da banca)</span>
-                <input type="number" step="0.01" className="form-select"
-                  value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(e.target.value)}
-                  style={{ width: 120, height: 'auto', padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }} />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                <span style={{ color: 'var(--text3)' }}>Gap (doppioni da trovare)</span>
-                <strong style={{ fontFamily: 'var(--font-mono)', color: resolved ? 'var(--green)' : '#b45309' }}>€ {fmtIT(effectiveTarget, 2)}</strong>
-              </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '2px 0 10px', alignItems: 'center' }}>
+              <MetricChip label="Saldo pre import" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoAttuale, 2)} />
+              <MetricChip label="Somma operazioni caricate" fg="var(--gold)" bg="var(--gold-l)" value={fmtIT(saldoBreakdown.rawParsedTotal, 2)} />
+              <MetricChip label="Saldo sistema calcolato" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoSistema, 2)} />
+              <MetricChip label="Nuovo saldo (da banca)" fg="var(--green)" bg="var(--green-l)">
+                <input type="number" step="0.01" value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(e.target.value)}
+                  style={{ width: 108, padding: '2px 6px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12,
+                    border: '1px solid var(--green)', borderRadius: 6, background: 'var(--surface, #fff)', color: 'var(--text)' }} />
+              </MetricChip>
+              <MetricChip label="Gap" strong value={fmtIT(effectiveTarget, 2)}
+                fg={resolved ? 'var(--green)' : 'var(--red)'} bg={resolved ? 'var(--green-l)' : 'var(--red-l)'} />
             </div>
           )}
-          <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong></span>
-            <span>Selezionati: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></span>
-            {hasTappo && (
-              <span>Rettifica: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></span>
-            )}
-            <span style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>
-              Differenza: € {fmtIT(Math.abs(remaining), 2)}
-            </span>
-          </div>
+          {gapPositive && (
+            <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong></span>
+              <span>Selezionati: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></span>
+              {hasTappo && (
+                <span>Rettifica: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></span>
+              )}
+              <span style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>
+                Differenza: € {fmtIT(Math.abs(remaining), 2)}
+              </span>
+            </div>
+          )}
+          {gapNegative && !resolved && (
+            <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.5 }}>
+              Il sistema calcola <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> in <strong>meno</strong> del saldo
+              che hai dichiarato dalla banca. Togliere doppioni abbasserebbe ancora il saldo, quindi qui non è possibile:
+              puoi creare una rettifica (tappo) di <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> per allineare al
+              saldo banca, oppure lasciare così e proseguire (Salta).
+            </div>
+          )}
           {saldoBreakdown && (
             <div style={{ marginTop: 8 }}>
               <button onClick={() => setShowBreakdown(v => !v)}
@@ -974,14 +1004,14 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
               {showBreakdown && (
                 <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <span>Conto usato: {saldoBreakdown.account}</span>
-                  <span>Saldo già a sistema per questo conto: € {fmtIT(saldoBreakdown.saldoAttuale, 2)}</span>
-                  <span>+ Totale righe lette dal CSV: € {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</span>
+                  <span>Saldo pre import: € {fmtIT(saldoBreakdown.saldoAttuale, 2)}</span>
+                  <span>+ Somma operazioni caricate: € {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</span>
                   <span>= Saldo sistema calcolato: € {fmtIT(saldoBreakdown.saldoSistema, 2)}</span>
-                  <span>− Nuovo saldo dichiarato: € {fmtIT(nuovoSaldoNum, 2)}</span>
-                  <span style={{ fontWeight: 700 }}>= Doppioni attesi: € {fmtIT(effectiveTarget, 2)}</span>
+                  <span>− Nuovo saldo (da banca): € {fmtIT(nuovoSaldoNum, 2)}</span>
+                  <span style={{ fontWeight: 700 }}>= Gap: € {fmtIT(effectiveTarget, 2)}</span>
                   {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
                     <span style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 2 }}>
-                      ⚠️ Saldo già a sistema per questo conto risulta 0 — se il conto ha già transazioni, il nome selezionato potrebbe non combaciare.
+                      ⚠️ Saldo pre import risulta 0 — se hai già transazioni registrate, qualcosa non torna nel calcolo del saldo.
                     </span>
                   )}
                 </div>
@@ -993,7 +1023,9 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
               <button onClick={createTappo}
                 style={{ fontSize: 11, background: 'none', border: '1px solid #f59e0b', color: '#92400e',
                   borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                ⚠️ Non trovo altri doppioni — crea rettifica per il residuo (protetta da PIN)
+                {gapNegative
+                  ? `🧾 Crea rettifica di € ${fmtIT(Math.abs(effectiveTarget), 2)} per allineare al saldo banca (protetta da PIN)`
+                  : '⚠️ Non trovo altri doppioni — crea rettifica per il residuo (protetta da PIN)'}
               </button>
             </div>
           )}
