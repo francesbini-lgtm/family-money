@@ -247,7 +247,7 @@ function WhatIfPanel({ catStats, excludedCats, onToggle }) {
 // modificare la composizione delle spese (L1) di QUEL mese/anno specifico,
 // con opzione "applica da qui in avanti" (cascata, si ferma da sola al
 // prossimo override — vedi commenti su overridesMonthly/overridesYearly).
-function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, initialSpeseL2, initialCascade, hasExisting, onSave, onRemove, onClose }) {
+function ExpenseOverrideModal({ title, catStats, defaultsByCat, defaultsByCatL2, initialSpese, initialSpeseL2, initialCascade, hasExisting, onSave, onRemove, onClose }) {
   const [values, setValues] = useState(() => {
     const v = {}
     Object.keys(catStats).forEach(c1 => { v[c1] = Math.round(initialSpese?.[c1] ?? defaultsByCat[c1] ?? 0) })
@@ -276,7 +276,7 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
   function l1Total(c1) {
     if (hasL2(c1)) {
       const subs = catStats[c1]?.subs || {}
-      return Object.keys(subs).reduce((s, c2) => s + (valuesL2[c1]?.[c2] ?? subs[c2] ?? 0), 0)
+      return Object.keys(subs).reduce((s, c2) => s + (valuesL2[c1]?.[c2] ?? defaultsByCatL2?.[c1]?.[c2] ?? subs[c2] ?? 0), 0)
     }
     return Number(values[c1]) || 0
   }
@@ -335,7 +335,7 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
               {isOpen && subs.length > 0 && (
                 <div className="fc-whatif-subs">
                   {subs.map(([c2, avgC2]) => {
-                    const valC2 = l2v[c2] ?? avgC2
+                    const valC2 = l2v[c2] ?? (defaultsByCatL2?.[c1]?.[c2] ?? avgC2)
                     return (
                       <div key={c2} className="fc-whatif-l2">
                         <span style={{fontSize:12,color:'var(--text2)',minWidth:0,flex:1,
@@ -375,13 +375,26 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
           <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi override</button>
         )}
         <button className="btn btn-primary" onClick={()=>{
-          // Il totale per-L1 salvato in "spese" è sempre il flattening (somma
-          // L2 se presente, altrimenti il valore L1 diretto) — così il motore
-          // di proiezione (overrideTotal/catEffectiveBase) non deve sapere
-          // nulla della scomposizione L2, che resta solo per ri-editing futuro.
-          const flatSpese = {}
-          Object.keys(catStats).forEach(c1 => { flatSpese[c1] = l1Total(c1) })
-          onSave(flatSpese, valuesL2, cascade)
+          // Override PARZIALE: salva SOLO le voci davvero cambiate rispetto ai default
+          // reali del mese (pin). Il resto continua a fluttuare col Puntuale nel motore
+          // di proiezione — così "da qui in avanti" forza solo le L2/L1 che hai toccato.
+          const pinnedL1 = {}, pinnedL2 = {}
+          Object.keys(catStats).forEach(c1 => {
+            const editedL2 = valuesL2[c1] || {}
+            const l2keys = Object.keys(editedL2)
+            if (l2keys.length > 0) {
+              l2keys.forEach(c2 => {
+                const val = Math.round(Number(editedL2[c2]) || 0)
+                const def = Math.round(defaultsByCatL2?.[c1]?.[c2] ?? (catStats[c1]?.subs?.[c2] || 0))
+                if (Math.abs(val - def) > 0.5) (pinnedL2[c1] || (pinnedL2[c1] = {}))[c2] = val
+              })
+            } else {
+              const val = Math.round(Number(values[c1]) || 0)
+              const def = Math.round(defaultsByCat[c1] ?? 0)
+              if (Math.abs(val - def) > 0.5) pinnedL1[c1] = val
+            }
+          })
+          onSave({ pinnedL1, pinnedL2, cascade })
         }}>Salva</button>
       </ModalFooter>
     </Modal>
@@ -932,6 +945,23 @@ export default function ForecastPage() {
     incomeByMonth.forEach(e => { map[parseInt(e.ym.split('-')[1], 10)] = { fra: e.fra || 0, sofi: e.sofi || 0, other: e.other || 0 } })
     return map
   }, [incomeByMonth])
+  // Spaccato REALE per sotto-categoria (L2) del mese di calendario — serve al popup
+  // di override (semina L2 reali) e al loop per i "pin" parziali: quando l'utente
+  // fissa solo alcune L2 "da qui in avanti", il resto deve continuare a fluttuare col
+  // Puntuale, quindi va tolto dal totale il valore reale di quella L2 (non la media).
+  const expenseByCatL2MonthNum = useMemo(() => {
+    const map = {}
+    last6.forEach(ym => {
+      const perCat = {}
+      expList(transactions, [ym]).forEach(t => {
+        const c1 = t.cat1 || 'Non Categorizzato'
+        const c2 = t.cat2 || 'Altro'
+        ;(perCat[c1] || (perCat[c1] = {}))[c2] = (perCat[c1][c2] || 0) + Math.abs(netAmt(t))
+      })
+      map[parseInt(ym.split('-')[1], 10)] = perCat
+    })
+    return map
+  }, [transactions, last6])
 
   // Effective income avg excluding deselected months (base storico)
   const effectiveIncomeMths = incomeByMonth.filter(m => !excludedMonths.includes(m.ym))
@@ -1167,6 +1197,26 @@ export default function ForecastPage() {
     }
     return { fra: teoricheFraVal, sofi: teoricheSofiVal, altro: 0 }
   }
+  // Spaccato L2 di default per il popup: reale del mese (Puntuale, mensile) oppure medie.
+  function scaledDefaultsL2(gran, key) {
+    const out = {}
+    if (puntualeMode && gran === 'mensile') {
+      const real = expenseByCatL2MonthNum[parseInt(String(key).split('-')[1], 10)]
+      if (real) {
+        Object.keys(real).forEach(c1 => {
+          if (excludedCats.has(c1)) return
+          out[c1] = {}
+          Object.keys(real[c1]).forEach(c2 => { if (!excludedCats.has(`${c1}:::${c2}`)) out[c1][c2] = Math.round(real[c1][c2]) })
+        })
+        return out
+      }
+    }
+    Object.keys(catStats).forEach(c1 => {
+      out[c1] = {}
+      Object.keys(catStats[c1]?.subs || {}).forEach(c2 => { out[c1][c2] = Math.round(catStats[c1].subs[c2]) })
+    })
+    return out
+  }
 
   // ── Override puntuali mese/anno sulla colonna ENTRATE (2026-07-23, richiesta
   // utente: stesso meccanismo delle Spese, ma per Fra/Sofi + una riga "Altro"
@@ -1280,7 +1330,27 @@ export default function ForecastPage() {
     // override incontrato) per far vincere il valore cascata sul ricalcolo
     // puntuale nei mesi successivi, finché non arriva un nuovo override.
     let incCascadeActive = false
-    let expCascadeActive = false
+    let expCascadePins = null  // override "pin" parziali attivi in cascata sulle spese
+    // Valore REALE (mese-sorgente in Puntuale, media altrove) di una L1/L2 — usato
+    // per togliere dal floating le voci pinnate. Le voci escluse (what-if) contano 0.
+    const realExpL1 = (mnum, c1) => {
+      if (excludedCats.has(c1)) return 0
+      if (puntualeMode && expenseByCatMonthNum[mnum]) return expenseByCatMonthNum[mnum][c1] || 0
+      return catEffectiveBase(c1)
+    }
+    const realExpL2 = (mnum, c1, c2) => {
+      if (excludedCats.has(c1) || excludedCats.has(`${c1}:::${c2}`)) return 0
+      if (puntualeMode && expenseByCatL2MonthNum[mnum] && expenseByCatL2MonthNum[mnum][c1]) return expenseByCatL2MonthNum[mnum][c1][c2] || 0
+      return (catStats[c1]?.subs?.[c2]) || 0
+    }
+    // Normalizza un override al formato pin { pinnedL1, pinnedL2, cascade }. Retrocompat:
+    // i vecchi override (spese = TUTTE le L1) diventano pin di tutte le L1 → stesso
+    // comportamento "congela tutto" di prima, finché non li ri-salvi in formato parziale.
+    const normalizeExpPins = (ov) => {
+      if (!ov) return null
+      if (ov.pinnedL1 || ov.pinnedL2) return ov
+      return { pinnedL1: ov.spese || {}, pinnedL2: {}, cascade: ov.cascade }
+    }
     const gMonthly = Math.pow(1 + growth / 100, 1 / 12)
     const iMonthly = Math.pow(1 + inflation / 100, 1 / 12)
     const mortgageStartYM = mortgageStart || null
@@ -1328,21 +1398,32 @@ export default function ForecastPage() {
       // overridesMonthly sopra. preOverrideExp serve a "far ripartire" la
       // traiettoria normale il mese dopo se l'override NON è a cascata.
       const ovM = overridesMonthly[ym]
-      const preOverrideExp = exp
-      // Storico "puntuale" (2026-07-24): il mese futuro usa come base il
-      // totale REALE dello stesso mese di calendario di un anno fa (invece
-      // della media annua), scalato per crescita/inflazione come la media.
-      // Un override manuale su questo mese specifico vince comunque su
-      // entrambe le modalità (controllo subito sotto, invariato).
       const gfExp = Math.pow(iMonthly, m)
-      let expThisMonth = (expCascadeActive && !ovM)
-        ? exp
-        : (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && expenseByMonthNum[d.getMonth()+1] != null)
-          ? (expenseByMonthNum[d.getMonth()+1] - savedPerMonth) * gfExp
-          : exp
-      if (ovM) {
-        const total = overrideTotal(ovM)
-        if (total != null) expThisMonth = total
+      const mnum = d.getMonth() + 1
+      // Base "floating" del mese (non inflazionata): in Puntuale = totale reale del
+      // mese-sorgente di un anno fa; altrimenti la base media. I pin si applicano qui.
+      const baseTot = (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && expenseByMonthNum[mnum] != null)
+        ? (expenseByMonthNum[mnum] - savedPerMonth)
+        : effectiveExpense
+      // Pin attivi: override di QUESTO mese (vince), altrimenti la cascata attiva.
+      const expPins = normalizeExpPins(ovM) || expCascadePins
+      const nPinL1 = expPins ? Object.keys(expPins.pinnedL1 || {}).length : 0
+      const nPinL2 = expPins ? Object.keys(expPins.pinnedL2 || {}).length : 0
+      let expThisMonth
+      if (expPins && (nPinL1 || nPinL2)) {
+        // Solo le voci PINNATE sono forzate: si tolgono dal floating (che si inflaziona
+        // col resto) e si riaggiungono a valore FISSO non inflazionato. TODO (richiesta
+        // utente 2026-08): opzione per inflazionare anche i pin — vedi memoria
+        // family-money-forecast-pinned-inflation-todo.
+        let floating = baseTot
+        let pinnedSum = 0
+        Object.entries(expPins.pinnedL1 || {}).forEach(([c1, val]) => { floating -= realExpL1(mnum, c1); pinnedSum += (val || 0) })
+        Object.entries(expPins.pinnedL2 || {}).forEach(([c1, subs]) => {
+          Object.entries(subs || {}).forEach(([c2, val]) => { floating -= realExpL2(mnum, c1, c2); pinnedSum += (val || 0) })
+        })
+        expThisMonth = floating * gfExp + pinnedSum
+      } else {
+        expThisMonth = baseTot * gfExp
       }
       // Override puntuale ENTRATE su questo mese (2026-07-23) — vedi
       // overrideIncomeParts/overridesEntrateMonthly sopra.
@@ -1550,14 +1631,11 @@ export default function ForecastPage() {
       } else {
         inc *= gMonthly
       }
-      if (ovM && overrideTotal(ovM) != null) {
-        // Cascata → il valore di questo mese diventa la nuova base che continua
-        // a inflazionarsi; puntuale → si riparte da dove si sarebbe comunque
-        // arrivati (il mese "blip" non lascia traccia sul futuro).
-        exp = (ovM.cascade ? expThisMonth : preOverrideExp) * iMonthly
-        expCascadeActive = ovM.cascade
-      } else {
-        exp *= iMonthly
+      if (ovM && ovM.cascade) {
+        // Cascata: i pin di questo override restano attivi da qui in avanti (finché
+        // non ne arriva un altro). Non-cascade → valgono solo per questo mese e la
+        // cascata eventualmente già attiva riprende dal mese successivo.
+        expCascadePins = normalizeExpPins(ovM)
       }
     }
     if (typeof window !== 'undefined' && mortgageOn && mortgage) {
@@ -1566,7 +1644,7 @@ export default function ForecastPage() {
       console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, effectiveAnticipoYM, anticipoNotYetHappened, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats, rataCostsMonthly, rataCostsYearly])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, effectiveAnticipoYM, anticipoNotYetHappened, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats, rataCostsMonthly, rataCostsYearly, expenseByCatMonthNum, expenseByCatL2MonthNum])
 
   // ── Proiezione ANNUALE, derivata dalla Mensile (2026-07-24, richiesta
   // esplicita dell'utente: "la tabella Annuale deve essere semplicemente la
@@ -2806,6 +2884,10 @@ export default function ForecastPage() {
       {overridePopup && (() => {
         const isMonthly = overridePopup.granularity === 'mensile'
         const existing = isMonthly ? overridesMonthly[overridePopup.key] : overridesYearly[overridePopup.key]
+        // Retrocompat: vecchi override (spese = tutte le L1) → pin di tutte le L1.
+        const exPins = existing
+          ? ((existing.pinnedL1 || existing.pinnedL2) ? existing : { pinnedL1: existing.spese || {}, pinnedL2: existing.speseL2 || {}, cascade: existing.cascade })
+          : null
         return (
           <ExpenseOverrideModal
             title={`Modifica spese — ${overridePopup.label}`}
@@ -2823,8 +2905,9 @@ export default function ForecastPage() {
             // defaultsByCat (catStatsTeoriche), coerente col resto della tab.
             catStats={forecastBasis === 'teoriche' ? catStatsTeoriche : catStats}
             defaultsByCat={scaledDefaultsByCat(overridePopup.granularity, overridePopup.key)}
-            initialSpese={existing?.spese}
-            initialSpeseL2={existing?.speseL2}
+            defaultsByCatL2={scaledDefaultsL2(overridePopup.granularity, overridePopup.key)}
+            initialSpese={exPins?.pinnedL1}
+            initialSpeseL2={exPins?.pinnedL2}
             initialCascade={existing?.cascade}
             hasExisting={!!existing}
             onClose={()=>setOverridePopup(null)}
@@ -2833,8 +2916,8 @@ export default function ForecastPage() {
               else removeOverrideYearly(overridePopup.key)
               setOverridePopup(null)
             }}
-            onSave={(values, valuesL2, cascade)=>{
-              const entry = { spese: values, speseL2: valuesL2, cascade }
+            onSave={({ pinnedL1, pinnedL2, cascade })=>{
+              const entry = { pinnedL1, pinnedL2, cascade }
               if (isMonthly) saveOverrideMonthly(overridePopup.key, entry)
               else saveOverrideYearly(overridePopup.key, entry)
               setOverridePopup(null)
