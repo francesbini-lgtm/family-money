@@ -393,19 +393,29 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, initialSpese, in
 // tabella Proiezione) — importo one-off che riduce il capitale residuo, la
 // rata viene ricalcolata mantenendo la stessa scadenza (stesso principio del
 // rimborso automatico "ogni X risparmiati").
-function MortgageExtraPaymentModal({ title, initialAmount, hasExisting, onSave, onRemove, onClose }) {
+function MortgageExtraPaymentModal({ title, initialAmount, initialRataCost, initialRataCostCascade, hasExisting, onSave, onRemove, onClose }) {
   const [amount, setAmount] = useState(initialAmount || 0)
+  const [rataCost, setRataCost] = useState(initialRataCost || 0)
+  const [rataCascade, setRataCascade] = useState(!!initialRataCostCascade)
   return (
     <Modal title={title} onClose={onClose} width={400}>
-      <div style={{fontSize:11,color:'var(--text3)',marginBottom:14,lineHeight:1.5}}>
-        Importo da versare in questo periodo per estinguere anticipatamente parte del mutuo, oltre alla rata normale. Il capitale residuo si riduce e la rata viene ricalcolata (stessa scadenza, rata più bassa da quel momento in poi). L'importo esce anche dal saldo conto previsto.
+      <div style={{fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>
+        <strong>Altri costi rata</strong> ricorrenti (es. assicurazione casa / vita): si sommano alla rata mensile ed escono dal saldo. Spunta <strong>"da qui in avanti"</strong> per farli valere anche sui mesi successivi (finché non li cambi).
       </div>
-      <MoneyField label="Importo estinzione (€)" value={amount} onChange={setAmount} placeholder="0"/>
+      <MoneyField label="Altri costi rata (€ / mese)" value={rataCost} onChange={setRataCost} placeholder="0"/>
+      <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,margin:'8px 0 16px',cursor:'pointer'}}>
+        <input type="checkbox" checked={rataCascade} onChange={e=>setRataCascade(e.target.checked)}/>
+        Applica da qui in avanti
+      </label>
+      <div style={{borderTop:'1px solid var(--border)',paddingTop:12,fontSize:11,color:'var(--text3)',marginBottom:10,lineHeight:1.5}}>
+        <strong>Estinzione anticipata</strong> (una tantum): importo versato SOLO in questo periodo per estinguere parte del mutuo. Il capitale residuo si riduce e la rata viene ricalcolata (stessa scadenza, rata più bassa da lì in poi). Esce anche dal saldo.
+      </div>
+      <MoneyField label="Importo estinzione (€) — una tantum" value={amount} onChange={setAmount} placeholder="0"/>
       <ModalFooter>
         {hasExisting && (
           <button className="btn btn-secondary" style={{color:'var(--red)'}} onClick={onRemove}>Rimuovi</button>
         )}
-        <button className="btn btn-primary" onClick={()=>onSave(Number(amount) || 0)}>Salva</button>
+        <button className="btn btn-primary" onClick={()=>onSave({ estinzione: Number(amount)||0, rataCost: Number(rataCost)||0, rataCascade })}>Salva</button>
       </ModalFooter>
     </Modal>
   )
@@ -738,6 +748,17 @@ export default function ForecastPage() {
     const next = { ...mortgageExtraYearly }; delete next[year]
     setAppPref('forecastMortgageExtraYearly', next)
   }
+  // Altri costi rata RICORRENTI (assicurazione casa/vita, ecc.) — a differenza
+  // dell'estinzione (una tantum, sopra) sono un'uscita mensile in più che si somma
+  // alla rata e NON tocca il capitale del mutuo. Supportano "da qui in avanti"
+  // (cascade). Formato: { [ym|year]: { amount, cascade } }.
+  const rataCostsMonthly = appPrefs?.forecastRataCostsMonthly || {}
+  const rataCostsYearly  = appPrefs?.forecastRataCostsYearly  || {}
+  function saveRataCostMonthly(ym, entry) { setAppPref('forecastRataCostsMonthly', { ...rataCostsMonthly, [ym]: entry }) }
+  function removeRataCostMonthly(ym) { const n = { ...rataCostsMonthly }; delete n[ym]; setAppPref('forecastRataCostsMonthly', n) }
+  function saveRataCostYearly(year, entry) { setAppPref('forecastRataCostsYearly', { ...rataCostsYearly, [year]: entry }) }
+  function removeRataCostYearly(year) { const n = { ...rataCostsYearly }; delete n[year]; setAppPref('forecastRataCostsYearly', n) }
+
   // Popup estinzione anticipata mese/anno — { granularity:'mensile'|'annuale', key: ym|year, label }
   const [mortgageExtraPopup, setMortgageExtraPopup] = useState(null)
 
@@ -1267,6 +1288,7 @@ export default function ForecastPage() {
     // Erogazione capitale mutuo (2026-07-23) — vedi commento gemello nel loop
     // annuale sopra: evento one-off, indipendente dall'anticipo.
     let mortgageCapitalCredited = false
+    let rataCostCascade = 0   // altri costi rata ricorrenti attivi (da un override cascade)
 
     // Stato dinamico del mutuo (2026-07-23) — vedi commento analogo nel loop
     // annuale sopra: rimborsi anticipati automatici "ogni X risparmiati" +
@@ -1451,7 +1473,15 @@ export default function ForecastPage() {
           })
         }
       }
-      saldo += (incThisMonth - expThisMonth - mortgageMonthly - mortgageExtra + bonusExtra)
+      // Altri costi rata ricorrenti di QUESTO mese (assicurazioni ecc.), con
+      // "da qui in avanti" (cascade). Il mensile vince sull'annuale; un override
+      // cascade resta attivo finché non ne arriva un altro. Non tocca il capitale.
+      const _rcY = rataCostsYearly[ym.slice(0, 4)]
+      const _rcM = rataCostsMonthly[ym]
+      let rataCostThisMonth = rataCostCascade
+      if (_rcY != null) { rataCostThisMonth = _rcY.amount || 0; if (_rcY.cascade) rataCostCascade = _rcY.amount || 0 }
+      if (_rcM != null) { rataCostThisMonth = _rcM.amount || 0; if (_rcM.cascade) rataCostCascade = _rcM.amount || 0 }
+      saldo += (incThisMonth - expThisMonth - mortgageMonthly - rataCostThisMonth - mortgageExtra + bonusExtra)
 
       const residual = mortgageOn && mortgage && mortgageStartYM && ym >= mortgageStartYM ? mortBalance : null
 
@@ -1501,7 +1531,7 @@ export default function ForecastPage() {
         hasIncomeOverride: !!ovME,
         // Rata/estinzione anticipata di QUESTO mese (2026-07-23) — usate dalla
         // tabella "Proiezione Mensile" invece della rata statica mortgage.rata.
-        mortgageRata:  Math.round(mortgageMonthly),
+        mortgageRata:  Math.round(mortgageMonthly + rataCostThisMonth),
         mortgageExtra: Math.round(mortgageExtra),
         hasMortgageExtra: !!(mortgageExtraMonthly[ym]),
         // Quota capitale/interessi (2026-07-23, nuovi KPI) — effettive (con
@@ -1536,7 +1566,7 @@ export default function ForecastPage() {
       console.log('[mortgageAuto] dettaglio completo in window.__fmtMortgageDebug')
     }
     return pts
-  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, effectiveAnticipoYM, anticipoNotYetHappened, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats])
+  }, [avgIncomeEffective, effectiveExpense, growth, inflation, years, currentSaldo, mortgage, mortgageOn, mortgageStart, mortgageNotYetStarted, mortgageAmt, mortgageYears, mortgageTaeg, mortgageAnticipo, effectiveAnticipoYM, anticipoNotYetHappened, extraRepayEnabled, extraRepayThreshold, extraRepayStrategy, extraRepayBaseOverride, mortgageExtraMonthly, forecastBasis, forecastStoricoMode, expenseByMonthNum, incomeByMonthNum, savedPerMonth, teoricheBonus, teoricheFraVal, teoricheSofiVal, bonusMonths, overridesMonthly, overridesEntrateMonthly, catStats, teoricheSpese, teoricheSpeseL2, excludedCats, rataCostsMonthly, rataCostsYearly])
 
   // ── Proiezione ANNUALE, derivata dalla Mensile (2026-07-24, richiesta
   // esplicita dell'utente: "la tabella Annuale deve essere semplicemente la
@@ -2815,21 +2845,30 @@ export default function ForecastPage() {
 
       {mortgageExtraPopup && (() => {
         const isMonthly = mortgageExtraPopup.granularity === 'mensile'
-        const existing = isMonthly ? mortgageExtraMonthly[mortgageExtraPopup.key] : mortgageExtraYearly[mortgageExtraPopup.key]
+        const k = mortgageExtraPopup.key
+        const estinzione = isMonthly ? mortgageExtraMonthly[k] : mortgageExtraYearly[k]
+        const rataC = isMonthly ? rataCostsMonthly[k] : rataCostsYearly[k]
         return (
           <MortgageExtraPaymentModal
-            title={`Estingui mutuo — ${mortgageExtraPopup.label}`}
-            initialAmount={existing}
-            hasExisting={!!existing}
+            title={`Rata mutuo — ${mortgageExtraPopup.label}`}
+            initialAmount={estinzione}
+            initialRataCost={rataC?.amount}
+            initialRataCostCascade={rataC?.cascade}
+            hasExisting={!!(estinzione || rataC)}
             onClose={()=>setMortgageExtraPopup(null)}
             onRemove={()=>{
-              if (isMonthly) removeMortgageExtraMonthly(mortgageExtraPopup.key)
-              else removeMortgageExtraYearly(mortgageExtraPopup.key)
+              if (isMonthly) { removeMortgageExtraMonthly(k); removeRataCostMonthly(k) }
+              else { removeMortgageExtraYearly(k); removeRataCostYearly(k) }
               setMortgageExtraPopup(null)
             }}
-            onSave={(amount)=>{
-              if (isMonthly) saveMortgageExtraMonthly(mortgageExtraPopup.key, amount)
-              else saveMortgageExtraYearly(mortgageExtraPopup.key, amount)
+            onSave={({ estinzione, rataCost, rataCascade })=>{
+              if (isMonthly) {
+                if (estinzione > 0) saveMortgageExtraMonthly(k, estinzione); else removeMortgageExtraMonthly(k)
+                if (rataCost > 0) saveRataCostMonthly(k, { amount: rataCost, cascade: rataCascade }); else removeRataCostMonthly(k)
+              } else {
+                if (estinzione > 0) saveMortgageExtraYearly(k, estinzione); else removeMortgageExtraYearly(k)
+                if (rataCost > 0) saveRataCostYearly(k, { amount: rataCost, cascade: rataCascade }); else removeRataCostYearly(k)
+              }
               setMortgageExtraPopup(null)
             }}
           />
