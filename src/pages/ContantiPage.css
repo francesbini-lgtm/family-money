@@ -18,3 +18,14 @@
 .cash-cat-val { font-size:12px; font-weight:700; font-family:var(--font-mono); min-width:70px; text-align:right; }
 
 .cash-empty { text-align:center; padding:50px 24px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); }
+
+/* Tabella "Utilizzo Contanti" — allineamento pulito: tutte le celle centrate in
+   verticale, e Data (col 1) + Importo (col 3) mai a capo (era la causa del "€"
+   staccato dal numero sugli importi a 4 cifre). */
+.cash-util-table td,
+.cash-util-table th { vertical-align: middle; padding: 10px 14px; }
+.cash-util-table td:nth-child(1),
+.cash-util-table td:nth-child(3),
+.cash-util-table th:nth-child(1),
+.cash-util-table th:nth-child(3) { white-space: nowrap; }
+.cash-util-table td:nth-child(3) { text-align: right; }

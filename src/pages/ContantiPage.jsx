@@ -975,7 +975,7 @@ export default function ContantiPage() {
           ? <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
               Nessun utilizzo registrato. Abbina Nanny/Colf ai prelievi nella pagina dedicata, o aggiungi manualmente.
             </div>
-          : <table style={{width:'100%',borderCollapse:'collapse'}}>
+          : <table className="cash-util-table" style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr>
                 {['Data','Descrizione','Importo','Abbinato Prelievo','Abbinato Satispay',''].map(h=>(
                   <th key={h} style={{padding:'9px 14px',fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left'}}>{h}</th>
