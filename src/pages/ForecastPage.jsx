@@ -265,6 +265,15 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, defaultsByCatL2,
     Object.keys(initialSpeseL2 || {}).filter(c1 => Object.keys(initialSpeseL2[c1] || {}).length > 0)
   ))
   const [cascade, setCascade] = useState(!!initialCascade)
+  // Voci che l'utente ha DAVVERO toccato → sono quelle da "pinnare" (forzare) da qui in
+  // avanti, anche se il valore coincide con quello attuale del mese (es. Nanny 1200
+  // fissa). Precompilate dai pin di un override già esistente (initialSpese/L2).
+  const [touchedL1, setTouchedL1] = useState(() => new Set(Object.keys(initialSpese || {})))
+  const [touchedL2, setTouchedL2] = useState(() => {
+    const s = new Set()
+    Object.keys(initialSpeseL2 || {}).forEach(c1 => Object.keys(initialSpeseL2[c1] || {}).forEach(c2 => s.add(`${c1}:::${c2}`)))
+    return s
+  })
 
   function hasL2(c1) { return Object.keys(valuesL2[c1] || {}).length > 0 }
   function toggleExpand(c1) {
@@ -272,6 +281,7 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, defaultsByCatL2,
   }
   function setValueL2(c1, c2, val) {
     setValuesL2(v => ({ ...v, [c1]: { ...(v[c1] || {}), [c2]: val } }))
+    setTouchedL2(t => { const n = new Set(t); n.add(`${c1}:::${c2}`); return n })
   }
   function l1Total(c1) {
     if (hasL2(c1)) {
@@ -325,7 +335,7 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, defaultsByCatL2,
                   <span style={{fontSize:10,color:'var(--text3)'}}>€</span>
                   <input type="number" value={catHasL2 ? l1Total(c1) : values[c1]} disabled={catHasL2}
                     title={catHasL2 ? 'Calcolato come somma delle sotto-categorie — modifica quelle' : undefined}
-                    onChange={e=>setValues(v=>({...v,[c1]:Number(e.target.value)||0}))}
+                    onChange={e=>{ setValues(v=>({...v,[c1]:Number(e.target.value)||0})); setTouchedL1(t=>{ const n=new Set(t); n.add(c1); return n }) }}
                     style={{width:58,padding:'3px 4px',borderRadius:5,border:'1px solid var(--border)',
                       background:'var(--surface)',color:'var(--red)',fontWeight:700,opacity:catHasL2?0.7:1,
                       fontFamily:'var(--font-mono)',fontSize:12,textAlign:'right'}}/>
@@ -379,21 +389,11 @@ function ExpenseOverrideModal({ title, catStats, defaultsByCat, defaultsByCatL2,
           // reali del mese (pin). Il resto continua a fluttuare col Puntuale nel motore
           // di proiezione — così "da qui in avanti" forza solo le L2/L1 che hai toccato.
           const pinnedL1 = {}, pinnedL2 = {}
-          Object.keys(catStats).forEach(c1 => {
-            const editedL2 = valuesL2[c1] || {}
-            const l2keys = Object.keys(editedL2)
-            if (l2keys.length > 0) {
-              l2keys.forEach(c2 => {
-                const val = Math.round(Number(editedL2[c2]) || 0)
-                const def = Math.round(defaultsByCatL2?.[c1]?.[c2] ?? (catStats[c1]?.subs?.[c2] || 0))
-                if (Math.abs(val - def) > 0.5) (pinnedL2[c1] || (pinnedL2[c1] = {}))[c2] = val
-              })
-            } else {
-              const val = Math.round(Number(values[c1]) || 0)
-              const def = Math.round(defaultsByCat[c1] ?? 0)
-              if (Math.abs(val - def) > 0.5) pinnedL1[c1] = val
-            }
+          touchedL2.forEach(kk => {
+            const i = kk.indexOf(':::'); const c1 = kk.slice(0, i), c2 = kk.slice(i + 3)
+            ;(pinnedL2[c1] || (pinnedL2[c1] = {}))[c2] = Math.round(Number(valuesL2[c1]?.[c2]) || 0)
           })
+          touchedL1.forEach(c1 => { if (!hasL2(c1)) pinnedL1[c1] = Math.round(Number(values[c1]) || 0) })
           onSave({ pinnedL1, pinnedL2, cascade })
         }}>Salva</button>
       </ModalFooter>
@@ -1402,8 +1402,11 @@ export default function ForecastPage() {
       const mnum = d.getMonth() + 1
       // Base "floating" del mese (non inflazionata): in Puntuale = totale reale del
       // mese-sorgente di un anno fa; altrimenti la base media. I pin si applicano qui.
-      const baseTot = (forecastBasis === 'storico' && forecastStoricoMode === 'puntuale' && expenseByMonthNum[mnum] != null)
-        ? (expenseByMonthNum[mnum] - savedPerMonth)
+      // Base "floating" = somma reale NON esclusa del mese-sorgente (coerente col totale
+      // mostrato nel popup di override), oppure la base media. Prima si usava
+      // expenseByMonthNum − savedPerMonth (media what-if), che non tornava col popup.
+      const baseTot = (puntualeMode && expenseByCatMonthNum[mnum])
+        ? Object.keys(expenseByCatMonthNum[mnum]).reduce((s, c1) => s + realExpL1(mnum, c1), 0)
         : effectiveExpense
       // Pin attivi: override di QUESTO mese (vince), altrimenti la cascata attiva.
       const expPins = normalizeExpPins(ovM) || expCascadePins
