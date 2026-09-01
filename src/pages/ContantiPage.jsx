@@ -561,6 +561,7 @@ export default function ContantiPage() {
   const [linksTx, setLinksTx] = useState(null)
   const [atmOffset, setAtmOffset] = useState(0)
   const [abbinaTx, setAbbinaTx] = useState(null) // { rowId, tipo } — row waiting for ATM link
+  const [monthDetail, setMonthDetail] = useState(null) // ym: apre la lista prelievi del mese cliccato nel chart
   const [expandedPrelievoMese, setExpandedPrelievoMese] = useState(null) // mese espanso nel box Storico Prelievi
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0,10),
@@ -722,6 +723,7 @@ export default function ContantiPage() {
   const cashOnHand     = totalWithdrawn - totalSpent
 
   const chartData = last12.map(ym=>({
+    ym,
     label:    ymLabel(ym),
     prelievi: Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(ym)).reduce((s,t)=>s+t.amount,0)),
     speso:    cashEntries.filter(e=>(e.date||'').startsWith(ym)).reduce((s,e)=>s+(e.amount||0),0),
@@ -869,7 +871,8 @@ export default function ContantiPage() {
         <div className="card cash-chart">
           <div style={{fontSize:14,fontWeight:700,marginBottom:14}}>Prelievi vs Spese registrate</div>
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={chartData} barCategoryGap="35%">
+            <BarChart data={chartData} barCategoryGap="35%" style={{cursor:'pointer'}}
+              onClick={e=>{ const ym = e?.activePayload?.[0]?.payload?.ym; if (ym) setMonthDetail(ym) }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
               <XAxis dataKey="label" tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
               <YAxis tick={{fontSize:11,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={45}
@@ -880,7 +883,40 @@ export default function ContantiPage() {
               <Bar dataKey="speso"    name="speso"    fill="var(--accent)" radius={[4,4,0,0]}/>
             </BarChart>
           </ResponsiveContainer>
+          <div style={{fontSize:11,color:'var(--text3)',marginTop:6,textAlign:'center'}}>💡 Clicca un mese per vedere i prelievi</div>
         </div>
+
+        {monthDetail && (() => {
+          const rows = atmTxsAll
+            .filter(t => (t._effDate||t.date||'').startsWith(monthDetail))
+            .sort((a,b)=>(b._effDate||b.date||'').localeCompare(a._effDate||a.date||''))
+          const tot = Math.abs(rows.reduce((s,t)=>s+t.amount,0))
+          const fmtD = d => d && d.length>=10 ? `${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(2,4)}` : (d||'—')
+          return (
+            <div onClick={e=>e.target===e.currentTarget&&setMonthDetail(null)}
+              style={{position:'fixed',inset:0,background:'rgba(0,0,0,.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+              <div style={{background:'var(--surface)',color:'var(--text)',borderRadius:14,padding:22,width:'100%',maxWidth:460,maxHeight:'80vh',overflow:'auto',boxShadow:'0 12px 40px rgba(0,0,0,.25)'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                  <div style={{fontSize:16,fontWeight:700}}>🏧 Prelievi — {ymLabel(monthDetail)}</div>
+                  <button onClick={()=>setMonthDetail(null)} style={{border:'none',background:'none',fontSize:18,cursor:'pointer',color:'var(--text3)'}}>✕</button>
+                </div>
+                <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>{rows.length} prelievo/i · totale € {fmtIT(tot,2)}</div>
+                {rows.length===0
+                  ? <div style={{fontSize:13,color:'var(--text3)',padding:'12px 0'}}>Nessun prelievo ATM in questo mese.</div>
+                  : rows.map(t=>(
+                      <div key={t.txId} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'9px 2px',borderBottom:'1px solid var(--border)'}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.descAI||t.description||t.merchant||'Prelievo ATM'}</div>
+                          <div style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{fmtD(t._effDate||t.date)}</div>
+                        </div>
+                        <div style={{fontSize:13,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--blue)',whiteSpace:'nowrap'}}>€ {fmtIT(Math.abs(t.amount),2)}</div>
+                      </div>
+                    ))
+                }
+              </div>
+            </div>
+          )
+        })()}
 
         {catList.length > 0 && (
           <div className="card cash-chart">

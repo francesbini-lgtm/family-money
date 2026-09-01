@@ -187,6 +187,72 @@ function UtilizzoModal({ onClose, atmOptions, addCashEntry, pendingWithdrawals, 
 }
 
 // ── Nota Prelievo modal ───────────────────────────────────
+// ── Modifica di un utilizzo GIÀ inserito (richiesta utente 2026-08: tap su una
+// voce manuale per cambiarne importo/categoria/descrizione/data anche dopo) ──
+function EditCashEntryModal({ entry, onClose, updateCashEntry, deleteCashEntry }) {
+  const customCats = useStore(s => s.customCats)
+  const [amount, setAmount] = useState(entry.amount != null ? String(entry.amount) : '')
+  const [cat1,   setCat1]   = useState(entry.cat1 || 'Spesa e Alimentari')
+  const [cat2,   setCat2]   = useState(entry.cat2 || '')
+  const [desc,   setDesc]   = useState(entry.note || '')
+  const [date,   setDate]   = useState(entry.date || '')
+  const _mcats = getMergedCats(customCats)
+  const cats = Object.keys(_mcats).filter(c => c !== 'Entrate' && c !== 'Non Categorizzato')
+  const subs = _mcats[cat1]?.sub || []
+  function handleSave() {
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) return
+    updateCashEntry(entry.id, { amount: amt, cat1, cat2: cat2 || null, note: desc || cat1, date })
+    onClose()
+  }
+  return (
+    <Portal>
+    <div className="m-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="m-modal">
+        <div className="m-modal-handle"/>
+        <div className="m-modal-title">✏️ Modifica utilizzo</div>
+        <div className="m-field">
+          <label className="m-label">Importo (€)</label>
+          <input className="m-input" type="number" inputMode="decimal" placeholder="0.00"
+            value={amount} onChange={e => setAmount(e.target.value)}
+            style={{ fontSize:24, fontWeight:800, textAlign:'center', letterSpacing:'-.03em' }} autoFocus/>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
+          <div className="m-field" style={{ marginBottom:0 }}>
+            <label className="m-label">Categoria</label>
+            <select className="m-select" value={cat1} onChange={e => { setCat1(e.target.value); setCat2('') }}>
+              {cats.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="m-field" style={{ marginBottom:0 }}>
+            <label className="m-label">Sottocategoria</label>
+            <select className="m-select" value={cat2} onChange={e => setCat2(e.target.value)}>
+              <option value="">— Nessuna —</option>
+              {subs.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="m-field">
+          <label className="m-label">Descrizione</label>
+          <input className="m-input" type="text" placeholder="Es: Verdura al mercato"
+            value={desc} onChange={e => setDesc(e.target.value)}/>
+        </div>
+        <div className="m-field">
+          <label className="m-label">Data</label>
+          <input className="m-input" type="date" value={date} onChange={e => setDate(e.target.value)}/>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'auto 1fr 1fr', gap:10, marginTop:4 }}>
+          <button className="m-btn m-btn-ghost" style={{ color:'var(--red)' }}
+            onClick={() => { deleteCashEntry(entry.id); onClose() }} title="Elimina">🗑</button>
+          <button className="m-btn m-btn-ghost" onClick={onClose}>Annulla</button>
+          <button className="m-btn m-btn-primary" onClick={handleSave} disabled={!amount}>✓ Salva</button>
+        </div>
+      </div>
+    </div>
+    </Portal>
+  )
+}
+
 const TIPO_LABELS = { nanny: 'Nanny', colf: 'COLF', altro: 'Altro' }
 
 function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
@@ -321,6 +387,7 @@ function NotaPrelievoModal({ onClose, addNotaPrelievo }) {
 
 export default function MobileContanti({ showAdd, onCloseAdd, addKind }) {
   const cashEntries     = useStore(s => s.cashEntries)
+  const updateCashEntry = useStore(s => s.updateCashEntry)
   const notePrelievi    = useStore(s => s.notePrelievi)
   const transactions    = useStore(s => s.transactions)
   const addCashEntry    = useStore(s => s.addCashEntry)
@@ -338,6 +405,7 @@ export default function MobileContanti({ showAdd, onCloseAdd, addKind }) {
   const appPrefs        = useStore(s => s.appPrefs)
 
   const [addMode, setAddMode] = useState(null) // null | 'scelta' | 'utilizzo' | 'prelievo'
+  const [editEntry, setEditEntry] = useState(null) // cashEntry in modifica (tap su riga manuale)
 
   const nannyName  = appPrefs?.nannyName  || 'Nanny'
   const colfName   = appPrefs?.colfName   || 'Colf'
@@ -466,7 +534,8 @@ export default function MobileContanti({ showAdd, onCloseAdd, addKind }) {
             const dateStr = row.date?.slice(0,7).split('-').reverse().join('/') || '—'
             return (
               <div key={row._id} className="m-list-item"
-                style={{ background: row.readonly ? 'var(--surface2)' : undefined }}>
+                onClick={row.readonly ? undefined : () => { const ce = (cashEntries||[]).find(c => c.id === row._id); if (ce) setEditEntry(ce) }}
+                style={{ background: row.readonly ? 'var(--surface2)' : undefined, cursor: row.readonly ? undefined : 'pointer' }}>
                 <div className="m-list-icon"
                   style={{ background: badge.bg, fontSize:14, color:badge.color }}>
                   {badge.label.length <= 2 ? badge.label : badge.label[0]}
@@ -490,7 +559,7 @@ export default function MobileContanti({ showAdd, onCloseAdd, addKind }) {
                     € {fmtIT(row.amount||0, 0)}
                   </div>
                   {!row.readonly && (
-                    <button onClick={() => deleteCashEntry(row._id)}
+                    <button onClick={(e) => { e.stopPropagation(); deleteCashEntry(row._id) }}
                       style={{ border:'none', background:'transparent', cursor:'pointer',
                         color:'var(--text3)', fontSize:14, padding:'2px' }}>×</button>
                   )}
@@ -542,6 +611,14 @@ export default function MobileContanti({ showAdd, onCloseAdd, addKind }) {
         <NotaPrelievoModal
           onClose={handleClose}
           addNotaPrelievo={addNotaPrelievo}
+        />
+      )}
+      {editEntry && (
+        <EditCashEntryModal
+          entry={editEntry}
+          onClose={() => setEditEntry(null)}
+          updateCashEntry={updateCashEntry}
+          deleteCashEntry={deleteCashEntry}
         />
       )}
     </div>
