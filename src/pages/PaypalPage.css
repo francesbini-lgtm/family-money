@@ -415,6 +415,10 @@
   color: var(--text);
 }
 
+/* Colonna Data (3ª): mai a capo — era troppo stretta e spezzava "15 Aug 26" su due righe */
+.pp-results-table td:nth-child(3),
+.pp-results-table th:nth-child(3) { white-space: nowrap; }
+
 .pp-import-selected-btn {
   width: 100%;
   padding: 10px;
