@@ -614,35 +614,21 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
         allResults = allResults.concat(parsed)
       }
 
-      // Detect duplicates: against existing imports + intra-batch.
-      // Chiave "loose" (data+importo, senza merchant) aggiunta 2026-07-14: il
-      // merchant estratto dall'AI da screenshot diversi della STESSA transazione
-      // può variare leggermente (OCR/formattazione), facendo sfuggire doppioni
-      // reali alla chiave stretta dupKey() — utente ha segnalato doppioni visibili
-      // non rilevati. Qui si aggiunge un secondo controllo più permissivo: stessa
-      // data+importo nello stesso batch è quasi sempre lo stesso movimento reale
-      // per un conto personale, quindi va comunque segnalato come possibile
-      // doppione (l'utente resta libero di deselezionarlo o tenerlo comunque,
-      // la selezione automatica esclude sempre i sospetti doppioni per default).
-      const looseKey = r => `${r.date}|${Math.round(Math.abs(r.amount||0)*100)}`
-      // Doppioni contro le transazioni PayPal GIÀ a ledger: stessa chiave
-      // data|nome|importo (dupKey). Copre il caso in cui l'operazione è già stata
-      // importata come transazione ma non figura (più) nel registro paypalImports.
+      // Rileva i doppioni SOLO verso import PRECEDENTI, MAI dentro lo stesso import
+      // (richiesta utente 2026-09): lo stesso importo+data può ripetersi legittimamente
+      // più volte nello stesso giorno (es. 3 soste EasyPark da 0,12 €), quindi NON va
+      // dedotto all'interno dello stesso screenshot. Due sorgenti di doppione "reale":
+      //  - registro paypalImports → già importata in un import passato ("già importata")
+      //  - transazioni PayPal già a ledger, stessa chiave data|nome|importo (dupKey)
+      //    ("già in transazioni") — copre il caso già importato ma non più nel registro.
       const ledgerPaypalKeys = new Set((transactions || []).filter(isPayPal).map(t => dupKey(t)))
       const dupSet = new Set()
       const ledgerDupSet = new Set()
-      const batchSeen = new Set()
-      const batchSeenLoose = new Set()
       allResults.forEach((r, i) => {
-        const k = dupKey(r)
-        const lk = looseKey(r)
-        const inLedger = ledgerPaypalKeys.has(k)
-        if (isAlreadyImported(r, paypalImports) || inLedger || batchSeen.has(k) || batchSeenLoose.has(lk)) {
+        const inLedger = ledgerPaypalKeys.has(dupKey(r))
+        if (isAlreadyImported(r, paypalImports) || inLedger) {
           dupSet.add(i)
           if (inLedger) ledgerDupSet.add(i)
-        } else {
-          batchSeen.add(k)
-          batchSeenLoose.add(lk)
         }
       })
 
