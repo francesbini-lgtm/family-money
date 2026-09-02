@@ -539,7 +539,7 @@ function getMerchantCatSuggestion(merchant, transactions) {
 
 // ── Import Modal ──────────────────────────────────────────
 // export: riusato anche dal wizard di importazione unificata (ImportWizard.jsx)
-export function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImports }) {
+export function PaypalImportModal({ onClose, onImport, transactions, apiKey, paypalImports, embedded = false }) {
   const [files, setFiles]       = useState([])
   const [processing, setProc]   = useState(false)
   const [results, setResults]   = useState(null)
@@ -684,10 +684,9 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     .slice(0, 2)
 
-  return (
-    <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="pp-modal">
-        <button className="pp-modal-close" onClick={onClose}>✕</button>
+  const content = (
+      <>
+        {!embedded && <button className="pp-modal-close" onClick={onClose}>✕</button>}
         <div className="pp-modal-title">📤 Importa screenshot PayPal</div>
 
         {!apiKey && (
@@ -855,9 +854,16 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
             </button>
           </>
         )}
-      </div>
-    </div>
+      </>
   )
+
+  return embedded
+    ? <div className="pp-embedded">{content}</div>
+    : (
+      <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+        <div className="pp-modal">{content}</div>
+      </div>
+    )
 }
 
 // ── Unmatched overlay ─────────────────────────────────────

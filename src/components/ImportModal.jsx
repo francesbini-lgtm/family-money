@@ -351,7 +351,7 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
 //   { savedTxIds, ruleAppliedIds, total, dupes, aiCount, rulesAppliedCount } INVECE di
 //   chiudere da soli il modale — il wizard usa questi dati per gli step di rifinitura.
 // Standalone (senza props) il comportamento resta identico a prima.
-export default function ImportModal({ onClose, accountFilter = null, onFlowDone = null }) {
+export default function ImportModal({ onClose, accountFilter = null, onFlowDone = null, embedded = false }) {
   const { userAccounts: allAccounts, addTransactions, updateTransaction, transactions, aiRules } = useStore()
   const appPrefs = useStore(s => s.appPrefs)
   const userAccounts = useMemo(() => {
@@ -1017,16 +1017,15 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
 
   const isRunning = status !== null
 
-  return (
-    <>
-    <div className="modal-backdrop" onClick={(!isRunning && !cardReconcile) ? onClose : undefined}>
-      <div className="modal import-modal" onClick={e => e.stopPropagation()}>
-
-        {/* Header */}
-        <div className="modal-header">
-          <h3><Upload size={16}/> Importa CSV</h3>
-          {!isRunning && !cardReconcile && <button className="btn btn-ghost" onClick={onClose}><X size={16}/></button>}
-        </div>
+  const inner = (
+      <>
+        {/* Header — nascosto in modalità embedded (il wizard ha già titolo + step) */}
+        {!embedded && (
+          <div className="modal-header">
+            <h3><Upload size={16}/> Importa CSV</h3>
+            {!isRunning && !cardReconcile && <button className="btn btn-ghost" onClick={onClose}><X size={16}/></button>}
+          </div>
+        )}
 
         {/* Setup form — nascosto mentre in corso, a operazione conclusa (done), durante la
             riconciliazione carta, E quando c'è un errore/rollback da mostrare (prima il form
@@ -1271,8 +1270,18 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
             <button className="btn btn-secondary" onClick={()=>setError(null)}>Riprova</button>
           </div>
         )}
-      </div>
-    </div>
+      </>
+    )
+
+  return (
+    <>
+    {embedded
+      ? <div className="modal import-modal" style={{ width:'100%', maxWidth:'none', maxHeight:'none', boxShadow:'none', background:'transparent', padding:0 }}>{inner}</div>
+      : (
+        <div className="modal-backdrop" onClick={(!isRunning && !cardReconcile) ? onClose : undefined}>
+          <div className="modal import-modal" onClick={e => e.stopPropagation()}>{inner}</div>
+        </div>
+      )}
 
     {/* Riconciliazione mensile carta di credito — PRIMA di AI/salvataggio */}
     {cardReconcile && (

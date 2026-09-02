@@ -1561,48 +1561,12 @@ export default function ImportWizard({ onClose }) {
     )
   }
 
-  // Import conto/carta/PayPal riusano ImportModal/PaypalImportModal, che hanno
-  // il proprio backdrop+box a schermo intero — sovrapporre anche il frame del
-  // wizard sopra creava 2 modali impilati di dimensioni diverse (richiesta
-  // utente 2026-07-13, punto 3: "si aprono diversi tab uno sopra l'altro, di
-  // dimensioni diverse"). Fix: durante questo step, il wizard non renderizza il
-  // proprio frame — resta visibile solo il modulo di import, poi al termine
-  // (onFlowDone/onImport) si torna al frame uniforme del wizard per gli step successivi.
-  if (step && step.id === 'import') {
-    return (
-      <>
-        {step.src !== 'paypal' ? (
-          <ImportModal
-            accountFilter={step.src}
-            onClose={()=>skipSource(step.src)}
-            onFlowDone={res => { setResults(r => ({ ...r, [step.src]: res })); next() }}
-          />
-        ) : (
-          <PaypalImportModal
-            onClose={()=>{
-              // se non è stato importato niente, salta anche la schermata esito
-              setStepIdx(i => ppImportedRef.current ? i + 1 : i + 2)
-            }}
-            onImport={(items)=>{
-              const res = applyPaypalImport(items, { paypalImports: appPrefs?.paypalImports || [], transactions, updateTransaction, setAppPref })
-              setResults(r => ({ ...r, paypal: res }))
-              ppImportedRef.current = true
-            }}
-            transactions={transactions}
-            apiKey={apiKey}
-            paypalImports={appPrefs?.paypalImports || []}
-          />
-        )}
-        {rulePopup && (
-          <RuleApplyPopup
-            tx={rulePopup.tx} match={rulePopup.match} newDesc={rulePopup.newDesc}
-            txId={rulePopup.tx.txId} txDate={rulePopup.tx._effDate || rulePopup.tx.date}
-            onApply={handleApplyRule} onClose={()=>setRulePopup(null)}
-          />
-        )}
-      </>
-    )
-  }
+  // Import conto/carta/PayPal: ora renderizzati EMBEDDED dentro la cornice del wizard
+  // (vedi blocco step.id === 'import' più sotto, nell'area contenuto), così hanno la
+  // stessa barra step + header degli altri step — richiesta utente 2026-09 "più
+  // uniforme". Prima erano un modale a sé (backdrop+box) sovrapposto, per evitare due
+  // modali impilati di misure diverse; ora ImportModal/PaypalImportModal hanno una
+  // prop `embedded` che rende solo il contenuto (niente backdrop/box proprio).
 
   return (
     <div style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.55)',backdropFilter:'blur(3px)',
@@ -1681,6 +1645,29 @@ export default function ImportWizard({ onClose }) {
               Avvia importazione →
             </button>
           </>
+        )}
+
+        {/* ── Import conto/carta/PayPal — EMBEDDED nella cornice (uniforme con gli altri step) ── */}
+        {step && step.id === 'import' && (
+          step.src !== 'paypal'
+            ? <ImportModal
+                embedded
+                accountFilter={step.src}
+                onClose={()=>skipSource(step.src)}
+                onFlowDone={res => { setResults(r => ({ ...r, [step.src]: res })); next() }}
+              />
+            : <PaypalImportModal
+                embedded
+                onClose={()=>{ setStepIdx(i => ppImportedRef.current ? i + 1 : i + 2) }}
+                onImport={(items)=>{
+                  const res = applyPaypalImport(items, { paypalImports: appPrefs?.paypalImports || [], transactions, updateTransaction, setAppPref })
+                  setResults(r => ({ ...r, paypal: res }))
+                  ppImportedRef.current = true
+                }}
+                transactions={transactions}
+                apiKey={apiKey}
+                paypalImports={appPrefs?.paypalImports || []}
+              />
         )}
 
         {/* ── Rifinitura (a/b): 3 schermate per sorgente ── */}
