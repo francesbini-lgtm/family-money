@@ -1188,11 +1188,17 @@ export default function ImportWizard({ onClose }) {
       }
       if (isPayPal(t)) paypalTxs.push(t)
     })
-    const top2 = arr => [...arr].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,2)
-    const cards = Object.entries(byCard).map(([name,arr]) => ({ name, txs: top2(arr) }))
+    const topN = arr => [...arr].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,15)
+    const cardCode = {}
+    ;(userAccounts||[]).filter(a=>a.type==='carta_credito').forEach(a=>{ cardCode[a.name] = a.card4 })
+    const cards = Object.entries(byCard).map(([name,arr]) => ({ name, card4: cardCode[name], txs: topN(arr) }))
       .sort((a,b) => (b.txs[0]?.date||'').localeCompare(a.txs[0]?.date||''))
-    return { conto: top2(contoTxs), cards, paypal: top2(paypalTxs) }
-  }, [transactions, userAccounts])
+    // PayPal: SOLO le operazioni realmente importate da PayPal (registro paypalImports),
+    // non un filtro testuale su "paypal" (che prendeva "Paypal Europe"/commissioni del conto).
+    const paypal = [...(appPrefs?.paypalImports || [])].filter(p => p.date)
+      .sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,15)
+    return { conto: topN(contoTxs), cards, paypal }
+  }, [transactions, userAccounts, appPrefs?.paypalImports])
 
   // Riga singola "data · descrizione · importo" per una transazione, usata nei
   // 3 blocchi qui sotto.
@@ -1204,7 +1210,7 @@ export default function ImportWizard({ onClose }) {
           <strong style={{color:'var(--text2)'}}>{fmtDate(t.date)}</strong> — {desc}
         </span>
         <span style={{flexShrink:0,fontFamily:'var(--font-mono)',color:t.amount<0?'var(--red)':'var(--green)'}}>
-          {t.amount<0?'−':'+'}€{Math.abs(t.amount).toLocaleString('it-IT',{minimumFractionDigits:2})}
+          {t.amount<0?'−':'+'}€{fmtIT(Math.abs(t.amount||0), 2)}
         </span>
       </span>
     )
@@ -1638,54 +1644,58 @@ export default function ImportWizard({ onClose }) {
 
         {/* ── Selezione sorgenti ── */}
         {!queue && (
-          <>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12,marginBottom:18}}>
+          <div style={{display:'flex',flexDirection:'column',minHeight:'100%'}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:18}}>
               {[
                 ['conto',  '🏦 Conto corrente', 'File CSV/Excel del conto (UniCredit, Fineco, …)'],
                 ['carta',  '💳 Carte di credito', 'CSV/Excel della carta, con riconciliazione mensile estratti'],
                 ['paypal', '🅿️ PayPal', 'Screenshot, PDF o incolla (⌘V) — abbinamento automatico'],
               ].map(([key,label,sub]) => (
-                <label key={key} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'14px 16px',
+                <label key={key} style={{display:'flex',flexDirection:'column',gap:8,padding:'16px 18px',
                   borderRadius:12,cursor:'pointer',
                   border:`2px solid ${sources[key]?'var(--accent)':'var(--border)'}`,
                   background:sources[key]?'var(--accent-l)':'var(--surface2)'}}>
-                  <input type="checkbox" checked={sources[key]}
-                    onChange={()=>setSources(s=>({...s,[key]:!s[key]}))} style={{marginTop:2,cursor:'pointer'}}/>
-                  <span>
-                    <span style={{fontSize:14,fontWeight:700,display:'block'}}>{label}</span>
-                    <span style={{fontSize:11,color:'var(--text3)'}}>{sub}</span>
-                    <span style={{fontSize:10.5,color:'var(--text3)',display:'block',marginTop:5,lineHeight:1.5}}>
-                      {key === 'conto' && (
-                        lastTxInfo.conto.length
-                          ? <>📅 Ultime transazioni:{lastTxInfo.conto.map(t => <LastTxRow key={t.txId} t={t}/>)}</>
-                          : 'Nessuna transazione registrata finora'
-                      )}
-                      {key === 'carta' && (
-                        lastTxInfo.cards.length
-                          ? lastTxInfo.cards.map(c => (
-                              <span key={c.name} style={{display:'block',marginTop:4}}>
-                                📅 {c.name}:
-                                {c.txs.map(t => <LastTxRow key={t.txId} t={t}/>)}
-                              </span>
-                            ))
-                          : 'Nessuna transazione registrata finora'
-                      )}
-                      {key === 'paypal' && (
-                        lastTxInfo.paypal.length
-                          ? <>📅 Ultime transazioni:{lastTxInfo.paypal.map(t => <LastTxRow key={t.txId} t={t}/>)}</>
-                          : 'Nessuna transazione registrata finora'
-                      )}
+                  <span style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+                    <input type="checkbox" checked={sources[key]}
+                      onChange={()=>setSources(s=>({...s,[key]:!s[key]}))} style={{marginTop:3,cursor:'pointer'}}/>
+                    <span style={{minWidth:0}}>
+                      <span style={{fontSize:14,fontWeight:700,display:'block'}}>{label}</span>
+                      <span style={{fontSize:11,color:'var(--text3)'}}>{sub}</span>
                     </span>
+                  </span>
+                  <span style={{fontSize:10.5,color:'var(--text3)',display:'block',lineHeight:1.6,maxHeight:360,overflowY:'auto'}}>
+                    {key === 'conto' && (
+                      lastTxInfo.conto.length
+                        ? <>📅 Ultime transazioni:{lastTxInfo.conto.map(t => <LastTxRow key={t.txId} t={t}/>)}</>
+                        : 'Nessuna transazione registrata finora'
+                    )}
+                    {key === 'carta' && (
+                      lastTxInfo.cards.length
+                        ? lastTxInfo.cards.map(c => (
+                            <span key={c.name} style={{display:'block',marginTop:4}}>
+                              📅 {c.name}{c.card4 ? <span style={{color:'var(--text2)',fontFamily:'var(--font-mono)'}}> · *{c.card4}</span> : null}:
+                              {c.txs.map(t => <LastTxRow key={t.txId} t={t}/>)}
+                            </span>
+                          ))
+                        : 'Nessuna transazione registrata finora'
+                    )}
+                    {key === 'paypal' && (
+                      lastTxInfo.paypal.length
+                        ? <>📅 Ultime operazioni importate:{lastTxInfo.paypal.map(t => <LastTxRow key={t.id||t.txId} t={t}/>)}</>
+                        : 'Nessuna operazione importata da PayPal finora'
+                    )}
                   </span>
                 </label>
               ))}
             </div>
-            <button disabled={!sources.conto && !sources.carta && !sources.paypal}
-              className="btn btn-primary" style={{fontSize:14,padding:'9px 26px',fontWeight:700}}
-              onClick={()=>{ setQueue(buildQueue()); setStepIdx(0) }}>
-              Avvia importazione →
-            </button>
-          </>
+            <div style={{marginTop:'auto',display:'flex',justifyContent:'flex-end',paddingTop:16}}>
+              <button disabled={!sources.conto && !sources.carta && !sources.paypal}
+                className="btn btn-primary" style={{fontSize:14,padding:'10px 30px',fontWeight:700}}
+                onClick={()=>{ setQueue(buildQueue()); setStepIdx(0) }}>
+                Avvia importazione →
+              </button>
+            </div>
+          </div>
         )}
 
         {/* ── Import conto/carta/PayPal — EMBEDDED nella cornice (uniforme con gli altri step) ── */}
