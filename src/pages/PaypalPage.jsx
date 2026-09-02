@@ -689,10 +689,12 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
     onClose()
   }
 
-  // Ultime 2 transazioni PayPal già registrate — stesso blocco della pagina 1
-  // dell'import unificato (ImportWizard), per dare contesto su fino a quando
-  // arrivano i dati PayPal prima di caricare un nuovo screenshot.
-  const lastPaypalTxs = [...transactions.filter(isPayPal)]
+  // Ultime 2 operazioni REALMENTE importate da PayPal (screenshot/PDF), per dare
+  // contesto su fino a quando arrivano i dati prima di caricare un nuovo import.
+  // Fonte = registro paypalImports (appPrefs), NON un filtro testuale su "paypal"
+  // (che prenderebbe anche gli addebiti "Paypal Europe" del conto e le commissioni).
+  const lastPaypalTxs = [...(paypalImports || [])]
+    .filter(p => p.date)
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     .slice(0, 2)
 
@@ -711,22 +713,23 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
         <div style={{ margin: '4px 0 12px', padding: '8px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11.5, color: 'var(--text3)', lineHeight: 1.5 }}>
           {lastPaypalTxs.length > 0 ? (
             <>
-              📅 Ultime transazioni PayPal registrate:
+              📅 Ultime operazioni importate da PayPal:
               {lastPaypalTxs.map(t => {
-                const desc = (t.descAI || t.description || t.merchant || '—').toString().slice(0, 34)
+                const desc = (t.merchant || 'PayPal').toString().slice(0, 34)
+                const amt = t.amount || 0
                 return (
-                  <span key={t.txId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
+                  <span key={t.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 2 }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <strong style={{ color: 'var(--text2)' }}>{fmtDate(t.date)}</strong> — {desc}
                     </span>
-                    <span style={{ flexShrink: 0, fontFamily: 'var(--font-mono)', color: t.amount < 0 ? 'var(--red)' : 'var(--green)' }}>
-                      {t.amount < 0 ? '−' : '+'}€{Math.abs(t.amount).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                    <span style={{ flexShrink: 0, fontFamily: 'var(--font-mono)', color: amt < 0 ? 'var(--red)' : 'var(--green)' }}>
+                      {amt < 0 ? '−' : '+'}€{Math.abs(amt).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
                     </span>
                   </span>
                 )
               })}
             </>
-          ) : 'Nessuna transazione PayPal registrata finora'}
+          ) : 'Nessuna operazione importata da PayPal finora'}
         </div>
 
         <div
