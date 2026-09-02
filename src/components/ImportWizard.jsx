@@ -1317,18 +1317,15 @@ export default function ImportWizard({ onClose }) {
     // dentro lo step 'import' stesso (ImportModal.jsx, sincrona subito dopo il
     // salvataggio) — spostare questo step non evita quella chiamata, evita solo
     // il lavoro di rifinitura manuale su righe poi eliminate come doppioni.
-    // PayPal per PRIMO (richiesta utente 2026-07-14: "subito quando ti chiede
-    // cosa vuoi importare, utente sceglie... e subito chiede di caricare i
-    // file" — prima veniva chiesto per ultimo, dopo tutti gli step di conto/
-    // carta). Se l'utente seleziona più fonti, l'upload PayPal parte per primo,
-    // poi si passa a conto/carta.
-    if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
+    // Ordine: CONTO → CARTE → PayPal (richiesta utente 2026-09). Prima PayPal era il
+    // primo; ora si importano prima i dati bancari (conto, poi carte) e per ultimo PayPal.
     if (sources.conto) q.push({ id:'import', src:'conto' },
       { id:'doppioni', src:'conto' },
       { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' })
     if (sources.carta) q.push({ id:'import', src:'carta' },
       { id:'doppioni', src:'carta' },
       { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
+    if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
     // 'compensazioni' PRIMA di 'vacanze' (richiesta utente 2026-07-13, punto 1:
     // spostare il mega-step Vacanze dopo Compensazioni)
     // 'vacanze': mega-step con le 4 sezioni (prenotazioni, candidate, fuori
@@ -1526,7 +1523,7 @@ export default function ImportWizard({ onClose }) {
     const GMETA = { paypal:{icon:'💙',label:'PayPal'}, conto:{icon:'🏦',label:'Conto'}, carte:{icon:'💳',label:'Carte'} }
     const RMETA = { compensazioni:{icon:'🔗',label:'Comp.'}, vacanze:{icon:'🏖️',label:'Vacanze'}, ricevute:{icon:'📄',label:'Doc.'}, review:{icon:'✅',label:'Transaz.'}, summary:{icon:'🎯',label:'Riepilogo'} }
     const withState = labels.map((l,i)=>({ ...l, done:i<curIdx, current:i===curIdx }))
-    const importGroups = ['paypal','conto','carte']
+    const importGroups = ['conto','carte','paypal']
       .map(g => ({ g, ...GMETA[g], subs: withState.filter(l => groupOf(l.key)===g) }))
       .filter(x => x.subs.length)
     const refineSteps = withState.filter(l => groupOf(l.key)===null)
