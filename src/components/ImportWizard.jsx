@@ -1517,26 +1517,70 @@ export default function ImportWizard({ onClose }) {
     })
     const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id === 'doppioni' ? `doppioni-${step.src}` : step.id
     const curIdx = labels.findIndex(l => l.key === curKey)
+    // Raggruppa in due macro-fasi (richiesta utente 2026-09): IMPORT base dati
+    // (PayPal / Conto / Carte, ciascuno coi suoi sotto-step come pallini) e RIFINITURA
+    // (Compensazioni / Vacanze / Documenti / Transazioni / Riepilogo). Compatto, a
+    // icone, con divisore netto — niente più scroll orizzontale.
+    const groupOf = k => (k.startsWith('import-paypal') || k === 'paypal-result') ? 'paypal'
+      : k.endsWith('-conto') ? 'conto' : k.endsWith('-carta') ? 'carte' : null
+    const GMETA = { paypal:{icon:'💙',label:'PayPal'}, conto:{icon:'🏦',label:'Conto'}, carte:{icon:'💳',label:'Carte'} }
+    const RMETA = { compensazioni:{icon:'🔗',label:'Comp.'}, vacanze:{icon:'🏖️',label:'Vacanze'}, ricevute:{icon:'📄',label:'Doc.'}, review:{icon:'✅',label:'Transaz.'}, summary:{icon:'🎯',label:'Riepilogo'} }
+    const withState = labels.map((l,i)=>({ ...l, done:i<curIdx, current:i===curIdx }))
+    const importGroups = ['paypal','conto','carte']
+      .map(g => ({ g, ...GMETA[g], subs: withState.filter(l => groupOf(l.key)===g) }))
+      .filter(x => x.subs.length)
+    const refineSteps = withState.filter(l => groupOf(l.key)===null)
+    const secLabel = { fontSize:9, fontWeight:800, letterSpacing:'.06em', textTransform:'uppercase', color:'var(--text3)' }
     return (
-      <div style={{display:'flex',alignItems:'flex-start',marginBottom:18,overflowX:'auto',paddingBottom:2,flexShrink:0}}>
-        {labels.map((l,i) => (
-          <Fragment key={l.key}>
-            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:62,flexShrink:0}}>
-              <div style={{width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
-                fontSize:11,fontWeight:700,flexShrink:0,
-                background: i<curIdx ? 'var(--green)' : i===curIdx ? 'var(--accent)' : 'var(--surface2)',
-                color: i<=curIdx ? '#fff' : 'var(--text3)',
-                border: i===curIdx ? '2px solid var(--accent)' : '1px solid var(--border)'}}>
-                {i<curIdx ? '✓' : i+1}
-              </div>
-              <div style={{fontSize:9.5,fontWeight:i===curIdx?700:500,color:i===curIdx?'var(--accent)':'var(--text3)',
-                textAlign:'center',maxWidth:74,lineHeight:1.2}}>{l.label}</div>
+      <div style={{display:'flex',alignItems:'stretch',gap:16,rowGap:12,marginBottom:18,flexShrink:0,flexWrap:'wrap'}}>
+        {/* ── Import base dati ── */}
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          <div style={secLabel}>📥 Import dati</div>
+          <div style={{display:'flex',gap:12}}>
+            {importGroups.map(grp => {
+              const active = grp.subs.some(s=>s.current)
+              const allDone = grp.subs.every(s=>s.done)
+              return (
+                <div key={grp.g} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:50}}>
+                  <div style={{width:34,height:34,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,
+                    background: active?'var(--accent)':allDone?'var(--green-l)':'var(--surface2)',
+                    border: active?'2px solid var(--accent)':allDone?'1px solid var(--green)':'1px solid var(--border)'}}>
+                    {grp.icon}
+                  </div>
+                  <div style={{fontSize:10,fontWeight:active?700:600,color:active?'var(--accent)':allDone?'var(--green)':'var(--text2)'}}>{grp.label}</div>
+                  <div style={{display:'flex',gap:3}}>
+                    {grp.subs.map(s=>(
+                      <span key={s.key} title={s.label} style={{width:6,height:6,borderRadius:'50%',
+                        background: s.done?'var(--green)':s.current?'var(--accent)':'var(--border)'}}/>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        {refineSteps.length>0 && <div style={{width:1,background:'var(--border)',alignSelf:'stretch',margin:'0 2px'}}/>}
+        {/* ── Fine tuning ── */}
+        {refineSteps.length>0 && (
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            <div style={secLabel}>✨ Rifinitura</div>
+            <div style={{display:'flex',gap:10}}>
+              {refineSteps.map(s=>{
+                const meta = RMETA[s.key] || {icon:'•',label:s.label}
+                return (
+                  <div key={s.key} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:44}}>
+                    <div style={{width:30,height:30,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,
+                      background: s.current?'var(--accent)':s.done?'var(--green-l)':'var(--surface2)',
+                      border: s.current?'2px solid var(--accent)':s.done?'1px solid var(--green)':'1px solid var(--border)'}}>
+                      {s.done?'✓':meta.icon}
+                    </div>
+                    <div style={{fontSize:10,fontWeight:s.current?700:500,color:s.current?'var(--accent)':s.done?'var(--green)':'var(--text3)'}}>{meta.label}</div>
+                  </div>
+                )
+              })}
             </div>
-            {i < labels.length-1 && (
-              <div style={{flex:'0 0 20px',height:2,background:i<curIdx?'var(--green)':'var(--border)',marginTop:11}}/>
-            )}
-          </Fragment>
-        ))}
+          </div>
+        )}
       </div>
     )
   }
