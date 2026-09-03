@@ -1,18 +1,56 @@
+// ── Provenienza riga (derivata dai marcatori esistenti sulla transazione) ──
+// Non esiste un singolo campo "origine": lo deduciamo dai vari flag/prefissi txId
+// impostati alla creazione della riga (import, split, unione, manuale, rettifiche,
+// cash-sync). Retroattivo: funziona su tutte le righe già a DB.
+export function deriveOrigine(t) {
+  if (t._doppioniTappo)          return 'Rettifica doppioni'
+  if (t.cardImportCorrection)    return 'Rettifica carta'
+  if (t._source === 'cash-sync') return 'Cash/Veicoli'
+  if (t._mergedFrom)             return 'Unione'
+  if (t._splitFrom)              return 'Split'
+  if (String(t.txId || '').includes('-MAN-')) return 'Manuale'
+  if (t.cardImportCard4)         return `Import carta *${t.cardImportCard4}`
+  if (t.importedAt)              return 'Import conto'
+  return '—'
+}
+function rifOrigine(t) {
+  if (t._splitFrom) return t._splitFrom
+  if (Array.isArray(t._mergedFrom)) return t._mergedFrom.join(' | ')
+  return ''
+}
+function fmtImportDate(iso) {
+  return iso ? String(iso).slice(0, 16).replace('T', ' ') : ''
+}
+function compensataLabel(t) {
+  if (!(t._compensatedAmt > 0) && !t._compensatedBy) return ''
+  const by = Array.isArray(t._compensatedBy) ? t._compensatedBy.join(' | ') : (t._compensatedBy || '')
+  return by ? `Sì (con ${by})` : 'Sì'
+}
+
 // ── CSV Export ────────────────────────────────────────────
 export function exportTransactionsCSV(transactions, filename = 'family-money-transazioni.csv') {
-  const headers = ['Data', 'Descrizione AI', 'Descrizione originale', 'Conto', 'Categoria', 'Sottocategoria', 'Importo', 'Tipo']
+  const headers = ['Data', 'Descrizione AI', 'Descrizione originale', 'Conto', 'Categoria', 'Sottocategoria', 'Importo', 'Tipo',
+    'Origine', 'Data import', 'Rif. origine', 'Abbinata PayPal', 'Compensata', 'txId']
+
+  const q = s => `"${(s ?? '').toString().replace(/"/g, '""')}"`
 
   const rows = transactions
     .filter(t => !t.excluded)
     .map(t => [
       t.date,
-      `"${(t.descAI || '').replace(/"/g, '""')}"`,
-      `"${(t.description || '').replace(/"/g, '""')}"`,
-      `"${(t.account || '').replace(/"/g, '""')}"`,
-      `"${(t.cat1 || '').replace(/"/g, '""')}"`,
-      `"${(t.cat2 || '').replace(/"/g, '""')}"`,
+      q(t.descAI),
+      q(t.description),
+      q(t.account),
+      q(t.cat1),
+      q(t.cat2),
       t.amount.toFixed(2).replace('.', ','),
       t.type === 'Income' ? 'Entrata' : 'Uscita',
+      q(deriveOrigine(t)),
+      fmtImportDate(t.importedAt),
+      q(rifOrigine(t)),
+      t._paypalOverride ? 'Sì' : '',
+      q(compensataLabel(t)),
+      q(t.txId),
     ].join(';'))
 
   const csv = [headers.join(';'), ...rows].join('\n')
