@@ -2215,7 +2215,9 @@ export default function ImportWizard({ onClose }) {
                 📄 Transazioni importate in questo flusso ({rows.length})
               </div>
               <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>
-                Controllo finale prima del riepilogo — così vedi esattamente cosa è entrato nel database.
+                Controllo finale: puoi ancora <strong>modificare tutto</strong> — categoria (L1), sottocategoria (L2),
+                descrizione e città — direttamente qui. Le modifiche si salvano subito. Con
+                <strong> ✓ Conferma tutto</strong> chiudi l'import e vai al riepilogo.
               </div>
               {rows.length === 0 ? (
                 <div style={{padding:'32px 20px',textAlign:'center',color:'var(--text3)',fontSize:13}}>
@@ -2223,47 +2225,15 @@ export default function ImportWizard({ onClose }) {
                   {results.paypal ? ' (le operazioni PayPal vivono nel registro PayPal, vedi pagina precedente)' : ''}.
                 </div>
               ) : (
-                <div style={{overflow:'auto',maxHeight:'56vh',border:'1px solid var(--border)',borderRadius:10}}>
-                  <table style={{width:'100%',borderCollapse:'collapse',minWidth:820}}>
-                    <thead>
-                      <tr>
-                        {['Data','Fonte','✨ AI Descrizione','Descrizione','Categoria','Importo'].map((h,i)=>(
-                          <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',
-                            textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',
-                            borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',
-                            whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map(t => (
-                        <tr key={t.txId} style={{borderBottom:'1px solid var(--border)'}}>
-                          <td style={{padding:'7px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                            {fmtDate(t._effDate||t.date)}
-                          </td>
-                          <td style={{padding:'7px 10px',whiteSpace:'nowrap',fontSize:11,fontWeight:700}}>
-                            {t.cardImportCard4 ? `💳 *${t.cardImportCard4}` : '🏦 Conto'}
-                          </td>
-                          <td style={{padding:'7px 10px',fontSize:12,fontWeight:600,maxWidth:170,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.descAI||''}>
-                            {t.descAI || <span style={{opacity:.4}}>—</span>}
-                          </td>
-                          <td style={{padding:'7px 10px',fontSize:11,color:'var(--text3)',maxWidth:230,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.description||''}>
-                            {(t.description||'').slice(0,70)}
-                          </td>
-                          <td style={{padding:'7px 10px',fontSize:12,whiteSpace:'nowrap'}}>
-                            {t.cat1 ? `${t.cat1}${t.cat2 ? ' › '+t.cat2 : ''}` : <span style={{color:'var(--red)',fontWeight:700}}>—</span>}
-                          </td>
-                          <td style={{padding:'7px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,
-                            fontWeight:700,color:t.amount>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
-                            {t.amount>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount),2)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <RefineTable
+                  txs={rows}
+                  allCats={allCats}
+                  updateTransaction={updateTransaction}
+                  onOpenRulePopup={setRulePopup}
+                  emptyMsg="Nessuna transazione da rivedere."
+                />
               )}
-              <StepNav/>
+              <StepNav nextLabel="✓ Conferma tutto →"/>
             </>
           )
         })()}
