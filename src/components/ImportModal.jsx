@@ -1258,7 +1258,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
 
         {/* Footer */}
         {!isRunning && !done && !error && !cardReconcile && (
-          <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'auto'}}>
             <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
             <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
               Continua →
@@ -1276,7 +1276,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
   return (
     <>
     {embedded
-      ? <div className="modal import-modal" style={{ width:'100%', maxWidth:'none', maxHeight:'none', boxShadow:'none', background:'transparent', padding:0 }}>{inner}</div>
+      ? <div className="modal import-modal" style={{ width:'100%', maxWidth:'none', maxHeight:'none', boxShadow:'none', background:'transparent', padding:0, border:'none', borderRadius:0, display:'flex', flexDirection:'column', minHeight:'100%' }}>{inner}</div>
       : (
         <div className="modal-backdrop" onClick={(!isRunning && !cardReconcile) ? onClose : undefined}>
           <div className="modal import-modal" onClick={e => e.stopPropagation()}>{inner}</div>

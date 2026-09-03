@@ -765,7 +765,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
           <span style={{ fontSize:11, color:'var(--text3)' }}>L'anno verrà usato per interpretare le date nello screenshot</span>
         </div>
 
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginTop:12 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginTop:(results||processing) ? 12 : 'auto' }}>
           <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
           <button className="btn btn-primary" onClick={analyze}
             disabled={!files.length || !apiKey || processing}
@@ -859,7 +859,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
   )
 
   return embedded
-    ? <div className="pp-embedded">{content}</div>
+    ? <div className="pp-embedded" style={{display:'flex',flexDirection:'column',minHeight:'100%'}}>{content}</div>
     : (
       <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
         <div className="pp-modal">{content}</div>
