@@ -756,7 +756,15 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   srcTxs.filter(t => !t.excluded).forEach(t => {
     const origDesc = (t.description || '').trim()
     if (!origDesc) return
-    const dbMatch = dbPool.find(e => e.date === t.date && (e.description || '').trim() === origDesc)
+    // Doppione = STESSO importo + STESSA data + STESSA descrizione (richiesta utente
+    // 2026-09). Prima si ignorava l'importo: voci ricorrenti con la stessa descrizione
+    // (Satispay, Paypal Europe, Commissioni, affitto…) venivano segnalate come doppioni
+    // anche quando erano pagamenti distinti, gonfiando i doppioni rilevati ben oltre lo
+    // scarto di saldo reale. Aggiungendo l'importo si scartano quasi tutti i falsi positivi.
+    const dbMatch = dbPool.find(e =>
+      e.date === t.date
+      && Math.abs((e.amount || 0) - (t.amount || 0)) < 0.01
+      && (e.description || '').trim() === origDesc)
     if (dbMatch) results.push({ t, match: dbMatch })
   })
   return results
@@ -973,9 +981,9 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
         🔁 Possibili doppioni — {SRC_LABEL_MAP[src]} ({dupes.length})
       </div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        Transazioni appena lette dal CSV con la STESSA data e la STESSA descrizione originale (esatta, non simile)
-        di una transazione già presente nel database, nella stessa categoria ({src === 'carta' ? 'carte contro carte' : 'conto contro conto'}).
-        Controllo più severo di quello automatico in import (che confronta anche l'importo e scarta senza chiedere).
+        Transazioni appena lette dal CSV con lo STESSO importo, la STESSA data e la STESSA descrizione originale
+        (esatta, non simile) di una transazione già presente nel database, nella stessa categoria
+        ({src === 'carta' ? 'carte contro carte' : 'conto contro conto'}).
       </div>
 
       {reconciling && (
