@@ -1147,6 +1147,14 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
 }
 const SRC_LABEL_MAP = { conto: '🏦 Conto corrente', carta: '💳 Carte di credito' }
 
+// Giorni tra oggi e una data 'YYYY-MM-DD' (per il KPI "ultima operazione") — null se assente.
+function daysSince(dateStr) {
+  if (!dateStr) return null
+  const d = new Date(dateStr); d.setHours(0,0,0,0)
+  const now = new Date(); now.setHours(0,0,0,0)
+  return Math.max(0, Math.round((now - d) / 86400000))
+}
+
 // ═══════════════════════════════ WIZARD ═════════════════════════════════════
 export default function ImportWizard({ onClose }) {
   const transactions      = useStore(s => s.transactions)
@@ -1191,13 +1199,13 @@ export default function ImportWizard({ onClose }) {
     const topN = arr => [...arr].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,15)
     const cardCode = {}
     ;(userAccounts||[]).filter(a=>a.type==='carta_credito').forEach(a=>{ cardCode[a.name] = a.card4 })
-    const cards = Object.entries(byCard).map(([name,arr]) => ({ name, card4: cardCode[name], txs: topN(arr) }))
+    const cards = Object.entries(byCard).map(([name,arr]) => ({ name, card4: cardCode[name], txs: topN(arr), count: arr.length }))
       .sort((a,b) => (b.txs[0]?.date||'').localeCompare(a.txs[0]?.date||''))
     // PayPal: SOLO le operazioni realmente importate da PayPal (registro paypalImports),
     // non un filtro testuale su "paypal" (che prendeva "Paypal Europe"/commissioni del conto).
-    const paypal = [...(appPrefs?.paypalImports || [])].filter(p => p.date)
-      .sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,15)
-    return { conto: topN(contoTxs), cards, paypal }
+    const ppAll = [...(appPrefs?.paypalImports || [])].filter(p => p.date)
+      .sort((a,b) => (b.date||'').localeCompare(a.date||''))
+    return { conto: topN(contoTxs), contoCount: contoTxs.length, cards, paypal: ppAll.slice(0,15), paypalCount: ppAll.length }
   }, [transactions, userAccounts, appPrefs?.paypalImports])
 
   // Riga singola "data · descrizione · importo" per una transazione, usata nei
@@ -1644,53 +1652,84 @@ export default function ImportWizard({ onClose }) {
 
         {/* ── Selezione sorgenti ── */}
         {!queue && (
-          <div style={{display:'flex',flexDirection:'column',minHeight:'100%'}}>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:18}}>
+          <div style={{display:'flex',flexDirection:'column',height:'100%',minHeight:0}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,flex:1,minHeight:0}}>
               {[
                 ['conto',  '🏦 Conto corrente', 'File CSV/Excel del conto (UniCredit, Fineco, …)'],
                 ['carta',  '💳 Carte di credito', 'CSV/Excel della carta, con riconciliazione mensile estratti'],
                 ['paypal', '🅿️ PayPal', 'Screenshot, PDF o incolla (⌘V) — abbinamento automatico'],
-              ].map(([key,label,sub]) => (
-                <label key={key} style={{display:'flex',flexDirection:'column',gap:8,padding:'16px 18px',
-                  borderRadius:12,cursor:'pointer',
-                  border:`2px solid ${sources[key]?'var(--accent)':'var(--border)'}`,
-                  background:sources[key]?'var(--accent-l)':'var(--surface2)'}}>
-                  <span style={{display:'flex',gap:10,alignItems:'flex-start'}}>
-                    <input type="checkbox" checked={sources[key]}
-                      onChange={()=>setSources(s=>({...s,[key]:!s[key]}))} style={{marginTop:3,cursor:'pointer'}}/>
-                    <span style={{minWidth:0}}>
-                      <span style={{fontSize:14,fontWeight:700,display:'block'}}>{label}</span>
-                      <span style={{fontSize:11,color:'var(--text3)'}}>{sub}</span>
+              ].map(([key,label,sub]) => {
+                const on = !!sources[key]
+                const lastDate = key === 'conto' ? lastTxInfo.conto[0]?.date
+                  : key === 'paypal' ? lastTxInfo.paypal[0]?.date
+                  : lastTxInfo.cards[0]?.txs[0]?.date
+                const count = key === 'conto' ? lastTxInfo.contoCount
+                  : key === 'paypal' ? lastTxInfo.paypalCount
+                  : lastTxInfo.cards.reduce((s,c)=>s+(c.count||0),0)
+                const dd = daysSince(lastDate)
+                const ddCol = dd == null ? 'var(--text3)' : dd <= 3 ? 'var(--green)' : dd <= 21 ? 'var(--gold)' : 'var(--red)'
+                const kpiBox = { flex:1, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:9, padding:'7px 10px' }
+                const kpiLbl = { fontSize:8.5, textTransform:'uppercase', letterSpacing:'.05em', color:'var(--text3)', fontWeight:800 }
+                const kpiVal = { fontSize:16, fontWeight:800, fontFamily:'var(--font-mono)', lineHeight:1.25 }
+                return (
+                  <label key={key} style={{display:'flex',flexDirection:'column',minHeight:0,padding:'15px 16px',
+                    borderRadius:14,cursor:'pointer',transition:'border-color .15s',
+                    border:`2px solid ${on?'var(--accent)':'var(--border)'}`,
+                    background:on?'var(--accent-l)':'var(--surface2)'}}>
+                    <span style={{display:'flex',gap:10,alignItems:'flex-start',flexShrink:0}}>
+                      <input type="checkbox" checked={on}
+                        onChange={()=>setSources(s=>({...s,[key]:!s[key]}))} style={{marginTop:3,cursor:'pointer'}}/>
+                      <span style={{minWidth:0}}>
+                        <span style={{fontSize:15,fontWeight:800,display:'block'}}>{label}</span>
+                        <span style={{fontSize:11,color:'var(--text3)',display:'block',lineHeight:1.4}}>{sub}</span>
+                      </span>
                     </span>
-                  </span>
-                  <span style={{fontSize:10.5,color:'var(--text3)',display:'block',lineHeight:1.6,maxHeight:360,overflowY:'auto'}}>
-                    {key === 'conto' && (
-                      lastTxInfo.conto.length
-                        ? <>📅 Ultime transazioni:{lastTxInfo.conto.map(t => <LastTxRow key={t.txId} t={t}/>)}</>
-                        : 'Nessuna transazione registrata finora'
-                    )}
-                    {key === 'carta' && (
-                      lastTxInfo.cards.length
-                        ? lastTxInfo.cards.map(c => (
-                            <span key={c.name} style={{display:'block',marginTop:4}}>
-                              📅 {c.name}{c.card4 ? <span style={{color:'var(--text2)',fontFamily:'var(--font-mono)'}}> · *{c.card4}</span> : null}:
-                              {c.txs.map(t => <LastTxRow key={t.txId} t={t}/>)}
-                            </span>
-                          ))
-                        : 'Nessuna transazione registrata finora'
-                    )}
-                    {key === 'paypal' && (
-                      lastTxInfo.paypal.length
-                        ? <>📅 Ultime operazioni importate:{lastTxInfo.paypal.map(t => <LastTxRow key={t.id||t.txId} t={t}/>)}</>
-                        : 'Nessuna operazione importata da PayPal finora'
-                    )}
-                  </span>
-                </label>
-              ))}
+
+                    {/* KPI: giorni dall'ultima operazione + numero registrate */}
+                    <div style={{display:'flex',gap:8,margin:'12px 0 10px',flexShrink:0}}>
+                      <div style={kpiBox}>
+                        <div style={kpiLbl}>🕐 Ultima op.</div>
+                        <div style={{...kpiVal,color:ddCol}}>{dd == null ? '—' : dd === 0 ? 'oggi' : `${dd} g fa`}</div>
+                      </div>
+                      <div style={kpiBox}>
+                        <div style={kpiLbl}>🧾 Registrate</div>
+                        <div style={{...kpiVal,color:'var(--text)'}}>{count || 0}</div>
+                      </div>
+                    </div>
+
+                    <div style={{fontSize:10,fontWeight:800,letterSpacing:'.04em',textTransform:'uppercase',color:'var(--text3)',marginBottom:4,flexShrink:0}}>
+                      Ultime operazioni
+                    </div>
+                    <div style={{fontSize:10.5,color:'var(--text3)',lineHeight:1.6,flex:1,minHeight:0,overflowY:'auto',
+                      borderTop:'1px solid var(--border)',paddingTop:6}}>
+                      {key === 'conto' && (
+                        lastTxInfo.conto.length
+                          ? lastTxInfo.conto.map(t => <LastTxRow key={t.txId} t={t}/>)
+                          : 'Nessuna transazione registrata finora'
+                      )}
+                      {key === 'carta' && (
+                        lastTxInfo.cards.length
+                          ? lastTxInfo.cards.map(c => (
+                              <span key={c.name} style={{display:'block',marginTop:4}}>
+                                <span style={{fontWeight:700,color:'var(--text2)'}}>{c.name}{c.card4 ? <span style={{fontFamily:'var(--font-mono)'}}> · *{c.card4}</span> : null}</span>
+                                {c.txs.map(t => <LastTxRow key={t.txId} t={t}/>)}
+                              </span>
+                            ))
+                          : 'Nessuna transazione registrata finora'
+                      )}
+                      {key === 'paypal' && (
+                        lastTxInfo.paypal.length
+                          ? lastTxInfo.paypal.map(t => <LastTxRow key={t.id||t.txId} t={t}/>)
+                          : 'Nessuna operazione importata da PayPal finora'
+                      )}
+                    </div>
+                  </label>
+                )
+              })}
             </div>
-            <div style={{marginTop:'auto',display:'flex',justifyContent:'flex-end',paddingTop:16}}>
+            <div style={{display:'flex',justifyContent:'flex-end',paddingTop:14,flexShrink:0}}>
               <button disabled={!sources.conto && !sources.carta && !sources.paypal}
-                className="btn btn-primary" style={{fontSize:14,padding:'10px 30px',fontWeight:700}}
+                className="btn btn-primary" style={{fontSize:14,padding:'11px 32px',fontWeight:700}}
                 onClick={()=>{ setQueue(buildQueue()); setStepIdx(0) }}>
                 Avvia importazione →
               </button>
