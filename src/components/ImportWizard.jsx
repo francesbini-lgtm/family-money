@@ -1650,92 +1650,53 @@ export default function ImportWizard({ onClose }) {
 
         <div style={{flex:1,overflowY:'auto',minHeight:0}}>
 
-        {/* ── Selezione sorgenti ── */}
-        {!queue && (
-          <div style={{display:'flex',flexDirection:'column',height:'100%',minHeight:0}}>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,flex:1,minHeight:0}}>
-              {[
-                ['conto',  '🏦 Conto corrente', 'File CSV/Excel del conto (UniCredit, Fineco, …)'],
-                ['carta',  '💳 Carte di credito', 'CSV/Excel della carta, con riconciliazione mensile'],
-                ['paypal', '🅿️ PayPal', 'Screenshot, PDF — abbinamento auto'],
-              ].map(([key,label,sub]) => {
-                const on = !!sources[key]
-                const lastDate = key === 'conto' ? lastTxInfo.conto[0]?.date
-                  : key === 'paypal' ? lastTxInfo.paypal[0]?.date
-                  : lastTxInfo.cards[0]?.txs[0]?.date
-                const count = key === 'conto' ? lastTxInfo.contoCount
-                  : key === 'paypal' ? lastTxInfo.paypalCount
-                  : lastTxInfo.cards.reduce((s,c)=>s+(c.count||0),0)
-                const dd = daysSince(lastDate)
-                const ddCol = dd == null ? 'var(--text3)' : dd <= 3 ? 'var(--green)' : dd <= 21 ? 'var(--gold)' : 'var(--red)'
-                const kpiBox = { flex:1, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:9, padding:'7px 10px' }
-                const kpiLbl = { fontSize:8.5, textTransform:'uppercase', letterSpacing:'.05em', color:'var(--text3)', fontWeight:800 }
-                const kpiVal = { fontSize:16, fontWeight:800, fontFamily:'var(--font-mono)', lineHeight:1.25 }
-                return (
-                  <label key={key} style={{display:'flex',flexDirection:'column',minHeight:0,padding:'15px 16px',
-                    borderRadius:14,cursor:'pointer',transition:'border-color .15s',
-                    border:`2px solid ${on?'var(--accent)':'var(--border)'}`,
-                    background:on?'var(--accent-l)':'var(--surface2)'}}>
-                    <span style={{display:'flex',gap:10,alignItems:'flex-start',flexShrink:0}}>
-                      <input type="checkbox" checked={on}
-                        onChange={()=>setSources(s=>({...s,[key]:!s[key]}))} style={{marginTop:3,cursor:'pointer'}}/>
-                      <span style={{minWidth:0}}>
-                        <span style={{fontSize:15,fontWeight:800,display:'block'}}>{label}</span>
-                        <span style={{fontSize:11,color:'var(--text3)',display:'block',lineHeight:1.4}}>{sub}</span>
-                      </span>
-                    </span>
-
-                    {/* KPI: giorni dall'ultima operazione + numero registrate */}
-                    <div style={{display:'flex',gap:8,margin:'12px 0 24px',flexShrink:0}}>
-                      <div style={kpiBox}>
-                        <div style={kpiLbl}>🕐 Ultima op.</div>
-                        <div style={{...kpiVal,color:ddCol}}>{dd == null ? '—' : dd === 0 ? 'oggi' : `${dd} g fa`}</div>
-                      </div>
-                      <div style={kpiBox}>
-                        <div style={kpiLbl}>🧾 Registrate</div>
-                        <div style={{...kpiVal,color:'var(--text)'}}>{count || 0}</div>
-                      </div>
+        {/* ── Selezione sorgenti — compatta, solo 3 icone grandi (richiesta utente
+            2026-09: niente storico/KPI, si sceglie e si avvia il flusso già esistente) ── */}
+        {!queue && (() => {
+          const nSel = (sources.conto?1:0) + (sources.carta?1:0) + (sources.paypal?1:0)
+          return (
+          <div style={{display:'flex',flexDirection:'column',height:'100%',minHeight:0,alignItems:'center',justifyContent:'center'}}>
+            <div style={{width:'100%',maxWidth:560}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:24}}>
+                {[
+                  ['conto',  '🏦', 'Conto corrente'],
+                  ['carta',  '💳', 'Carte di credito'],
+                  ['paypal', '🅿️', 'PayPal'],
+                ].map(([key,icon,label]) => {
+                  const on = !!sources[key]
+                  return (
+                    <div key={key} onClick={()=>setSources(s=>({...s,[key]:!s[key]}))}
+                      style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',
+                        gap:12,padding:'24px 12px 20px',borderRadius:16,cursor:'pointer',userSelect:'none',
+                        transition:'all .15s ease',textAlign:'center',
+                        border:`2px solid ${on?'var(--accent)':'var(--border)'}`,
+                        background:on?'var(--accent-l)':'var(--surface2)',
+                        boxShadow:on?'0 4px 14px rgba(210,98,44,.14)':'none'}}>
+                      <div style={{position:'absolute',top:10,right:10,width:22,height:22,borderRadius:'50%',
+                        display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:'#fff',
+                        border:`2px solid ${on?'var(--accent)':'var(--border)'}`,
+                        background:on?'var(--accent)':'var(--surface)'}}>{on?'✓':''}</div>
+                      <div style={{fontSize:52,lineHeight:1,filter:on?'none':'grayscale(.15)'}}>{icon}</div>
+                      <div style={{fontSize:15,fontWeight:700,color:'var(--text)'}}>{label}</div>
                     </div>
-
-                    <div style={{fontSize:10,fontWeight:800,letterSpacing:'.04em',textTransform:'uppercase',color:'var(--text3)',marginBottom:4,flexShrink:0}}>
-                      Ultime operazioni
-                    </div>
-                    <div style={{fontSize:10.5,color:'var(--text3)',lineHeight:1.6,flex:1,minHeight:0,overflowY:'auto',
-                      borderTop:'1px solid var(--border)',paddingTop:6}}>
-                      {key === 'conto' && (
-                        lastTxInfo.conto.length
-                          ? lastTxInfo.conto.map(t => <LastTxRow key={t.txId} t={t}/>)
-                          : 'Nessuna transazione registrata finora'
-                      )}
-                      {key === 'carta' && (
-                        lastTxInfo.cards.length
-                          ? lastTxInfo.cards.map(c => (
-                              <span key={c.name} style={{display:'block',marginTop:4}}>
-                                <span style={{fontWeight:700,color:'var(--text2)'}}>{c.name}{c.card4 ? <span style={{fontFamily:'var(--font-mono)'}}> · *{c.card4}</span> : null}</span>
-                                {c.txs.map(t => <LastTxRow key={t.txId} t={t}/>)}
-                              </span>
-                            ))
-                          : 'Nessuna transazione registrata finora'
-                      )}
-                      {key === 'paypal' && (
-                        lastTxInfo.paypal.length
-                          ? lastTxInfo.paypal.map(t => <LastTxRow key={t.id||t.txId} t={t}/>)
-                          : 'Nessuna operazione importata da PayPal finora'
-                      )}
-                    </div>
-                  </label>
-                )
-              })}
-            </div>
-            <div style={{display:'flex',justifyContent:'flex-end',paddingTop:14,flexShrink:0}}>
-              <button disabled={!sources.conto && !sources.carta && !sources.paypal}
-                className="btn btn-primary" style={{fontSize:14,padding:'11px 32px',fontWeight:700}}
-                onClick={()=>{ setQueue(buildQueue()); setStepIdx(0) }}>
-                Avvia importazione →
-              </button>
+                  )
+                })}
+              </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                borderTop:'1px solid var(--border)',paddingTop:18}}>
+                <div style={{fontSize:13,color:'var(--text3)'}}>
+                  <b style={{color:'var(--text)'}}>{nSel}</b> {nSel===1?'selezionato':'selezionati'}
+                </div>
+                <button disabled={nSel===0}
+                  className="btn btn-primary" style={{fontSize:14,padding:'12px 26px',fontWeight:700}}
+                  onClick={()=>{ setQueue(buildQueue()); setStepIdx(0) }}>
+                  Avvia importazione →
+                </button>
+              </div>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* ── Import conto/carta/PayPal — EMBEDDED nella cornice (uniforme con gli altri step) ── */}
         {step && step.id === 'import' && (
