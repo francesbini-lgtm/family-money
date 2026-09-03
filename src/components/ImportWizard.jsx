@@ -1632,8 +1632,10 @@ export default function ImportWizard({ onClose }) {
           facendo next scambia pagina, ma non grandezza o UI"): solo il contenuto
           scorre (area interna flex:1 con overflow), l'header e lo stepper restano
           sempre nella stessa posizione. */}
-      <div style={{background:'var(--surface)',borderRadius:16,padding:'24px 28px',
-        width:1040,height:'82vh',maxWidth:'96vw',maxHeight:'92vh',
+      <div style={{background:'var(--surface)',borderRadius:16,
+        padding: queue ? '24px 28px' : '26px 30px',
+        width: queue ? 1040 : 600, height: queue ? '82vh' : 'auto',
+        maxWidth:'96vw', maxHeight:'92vh',
         display:'flex',flexDirection:'column',position:'relative',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
         <button onClick={handleWizardClose} disabled={wizClosing} title="Chiudi il wizard"
           style={{position:'absolute',top:14,right:16,background:'none',border:'none',
@@ -1643,20 +1645,22 @@ export default function ImportWizard({ onClose }) {
 
         <div style={{fontSize:18,fontWeight:800,marginBottom:2,flexShrink:0}}>📥 Importa</div>
         <div style={{fontSize:12,color:'var(--text3)',marginBottom:16,flexShrink:0}}>
-          Import unificato: conto, carte e PayPal in un unico flusso guidato, con rifinitura e compensazioni.
+          {queue
+            ? 'Import unificato: conto, carte e PayPal in un unico flusso guidato, con rifinitura e compensazioni.'
+            : 'Scegli cosa importare, poi avvia il flusso guidato.'}
         </div>
 
         {queue && step && <StepProgress/>}
 
-        <div style={{flex:1,overflowY:'auto',minHeight:0}}>
+        <div style={{flex: queue ? 1 : 'none', overflowY: queue ? 'auto' : 'visible', minHeight:0}}>
 
         {/* ── Selezione sorgenti — compatta, solo 3 icone grandi (richiesta utente
             2026-09: niente storico/KPI, si sceglie e si avvia il flusso già esistente) ── */}
         {!queue && (() => {
           const nSel = (sources.conto?1:0) + (sources.carta?1:0) + (sources.paypal?1:0)
           return (
-          <div style={{display:'flex',flexDirection:'column',height:'100%',minHeight:0,alignItems:'center',justifyContent:'center'}}>
-            <div style={{width:'100%',maxWidth:560}}>
+          <div>
+            <div style={{width:'100%'}}>
               <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,marginBottom:24}}>
                 {[
                   ['conto',  '🏦', 'Conto corrente'],
