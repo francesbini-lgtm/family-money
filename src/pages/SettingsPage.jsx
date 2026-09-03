@@ -6,7 +6,8 @@ import { useAuth } from '../auth/AuthContext'
 import Modal, { ModalFooter, FormRow, Input, Select } from '../components/Modal'
 import { CATS, CAT_NAMES, getMergedCats } from '../data/categories'
 import { createInvite } from '../services/invite'
-import { exportTransactionsCSV, exportSummaryCSV, exportVacanzeBackupJSON } from '../services/export'
+import { exportSummaryCSV, exportVacanzeBackupJSON } from '../services/export'
+import ExportWizard from '../components/ExportWizard'
 import { Plus, Trash2, LogOut, Download, Copy, UserPlus, Check, Pencil } from 'lucide-react'
 import { fmtIT, fmtDate } from '../utils/format'
 import { generateSecret, validateToken, qrCodeUrl, formatSecret } from '../services/totp'
@@ -524,6 +525,7 @@ function ProfileTab() {
   const { userAccounts, setUserAccounts, transactions } = useStore()
   const appPrefs = useStore(s => s.appPrefs)
   const [showAdd, setShowAdd] = useState(false)
+  const [showExport, setShowExport] = useState(false)
   const [addType, setAddType] = useState("conto")
   const [form, setForm] = useState({ name:"", bank:"", iban4:"", parentId:"", memberId:"", card4:"", circuito:"" })
   const [inviteLink, setInviteLink] = useState("")
@@ -718,8 +720,8 @@ function ProfileTab() {
           {transactions.length} transazioni disponibili
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn btn-secondary" onClick={()=>exportTransactionsCSV(transactions)}>
-            <Download size={13}/> Tutte le transazioni (.csv)
+          <button className="btn btn-secondary" onClick={()=>setShowExport(true)}>
+            <Download size={13}/> Transazioni (.csv)…
           </button>
           <button className="btn btn-secondary" onClick={()=>exportSummaryCSV(transactions)}>
             <Download size={13}/> Riepilogo per categoria (.csv)
@@ -745,6 +747,8 @@ function ProfileTab() {
         </div>
         <DeleteAllTransactionsButton/>
       </div>
+
+      {showExport && <ExportWizard transactions={transactions} onClose={()=>setShowExport(false)}/>}
 
       {showAdd && (() => {
         const conti = userAccounts.filter(a=>a.type==='conto')

@@ -27,35 +27,44 @@ function compensataLabel(t) {
   return by ? `Sì (con ${by})` : 'Sì'
 }
 
-// ── CSV Export ────────────────────────────────────────────
+// ── Definizione colonne export ────────────────────────────
+// Ogni colonna: key, label, get(t)->valore stringa per la cella. `quote:false` per i
+// campi che non vanno racchiusi tra virgolette nel CSV (date, importi, sì/no).
+// Usata sia dall'export CSV sia dall'anteprima nel wizard di export.
+export const EXPORT_COLUMNS = [
+  { key: 'data',       label: 'Data',                  get: t => t.date || '',                                 quote: false },
+  { key: 'descAI',     label: 'Descrizione AI',        get: t => t.descAI || '' },
+  { key: 'descOrig',   label: 'Descrizione originale', get: t => t.description || '' },
+  { key: 'conto',      label: 'Conto',                 get: t => t.account || '' },
+  { key: 'cat1',       label: 'Categoria',             get: t => t.cat1 || '' },
+  { key: 'cat2',       label: 'Sottocategoria',        get: t => t.cat2 || '' },
+  { key: 'importo',    label: 'Importo',               get: t => (t.amount ?? 0).toFixed(2).replace('.', ','), quote: false },
+  { key: 'tipo',       label: 'Tipo',                  get: t => (t.type === 'Income' ? 'Entrata' : 'Uscita'), quote: false },
+  { key: 'origine',    label: 'Origine',               get: t => deriveOrigine(t) },
+  { key: 'dataImport', label: 'Data import',           get: t => fmtImportDate(t.importedAt),                  quote: false },
+  { key: 'rifOrigine', label: 'Rif. origine',          get: t => rifOrigine(t) },
+  { key: 'paypal',     label: 'Abbinata PayPal',       get: t => (t._paypalOverride ? 'Sì' : ''),              quote: false },
+  { key: 'compensata', label: 'Compensata',            get: t => compensataLabel(t) },
+  { key: 'txId',       label: 'txId',                  get: t => t.txId || '' },
+]
+
+const csvCell = (col, t) => {
+  const v = col.get(t)
+  return col.quote === false ? String(v ?? '') : `"${String(v ?? '').replace(/"/g, '""')}"`
+}
+
+// ── Export CSV di righe e colonne SELEZIONATE (usato dal wizard di export) ──
+export function exportRowsCSV(rows, columnKeys, filename = 'family-money-transazioni.csv') {
+  const cols = EXPORT_COLUMNS.filter(c => columnKeys.includes(c.key))
+  const header = cols.map(c => c.label).join(';')
+  const body = rows.map(t => cols.map(c => csvCell(c, t)).join(';'))
+  const csv = [header, ...body].join('\n')
+  downloadFile('﻿' + csv, filename, 'text/csv;charset=utf-8') // BOM per Excel
+}
+
+// ── CSV Export (tutte le colonne, righe non escluse) — retrocompatibile ──
 export function exportTransactionsCSV(transactions, filename = 'family-money-transazioni.csv') {
-  const headers = ['Data', 'Descrizione AI', 'Descrizione originale', 'Conto', 'Categoria', 'Sottocategoria', 'Importo', 'Tipo',
-    'Origine', 'Data import', 'Rif. origine', 'Abbinata PayPal', 'Compensata', 'txId']
-
-  const q = s => `"${(s ?? '').toString().replace(/"/g, '""')}"`
-
-  const rows = transactions
-    .filter(t => !t.excluded)
-    .map(t => [
-      t.date,
-      q(t.descAI),
-      q(t.description),
-      q(t.account),
-      q(t.cat1),
-      q(t.cat2),
-      t.amount.toFixed(2).replace('.', ','),
-      t.type === 'Income' ? 'Entrata' : 'Uscita',
-      q(deriveOrigine(t)),
-      fmtImportDate(t.importedAt),
-      q(rifOrigine(t)),
-      t._paypalOverride ? 'Sì' : '',
-      q(compensataLabel(t)),
-      q(t.txId),
-    ].join(';'))
-
-  const csv = [headers.join(';'), ...rows].join('\n')
-  const bom = '\uFEFF' // UTF-8 BOM for Excel
-  downloadFile(bom + csv, filename, 'text/csv;charset=utf-8')
+  exportRowsCSV(transactions.filter(t => !t.excluded), EXPORT_COLUMNS.map(c => c.key), filename)
 }
 
 // ── Export filtered by category ───────────────────────────
@@ -84,7 +93,7 @@ export function exportSummaryCSV(transactions) {
   ].join(';'))
 
   const csv = [headers.join(';'), ...rows].join('\n')
-  downloadFile('\uFEFF' + csv, 'family-money-riepilogo.csv', 'text/csv;charset=utf-8')
+  downloadFile('﻿' + csv, 'family-money-riepilogo.csv', 'text/csv;charset=utf-8')
 }
 
 // ── Backup vacanze (appPrefs.calendarVacations / calendarNotVacationDates) ──
