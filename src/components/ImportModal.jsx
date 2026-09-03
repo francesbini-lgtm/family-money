@@ -1258,11 +1258,11 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
 
         {/* Footer */}
         {!isRunning && !done && !error && !cardReconcile && (
-          <div className="modal-footer">
-            <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
-              <Upload size={14}/> Importa
-            </button>
+          <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+            <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
+              Continua →
+            </button>
           </div>
         )}
         {error && !isRunning && (

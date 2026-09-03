@@ -687,7 +687,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
   const content = (
       <>
         {!embedded && <button className="pp-modal-close" onClick={onClose}>✕</button>}
-        <div className="pp-modal-title">📤 Importa screenshot PayPal</div>
+        {!embedded && <div className="pp-modal-title">📤 Importa screenshot PayPal</div>}
 
         {!apiKey && (
           <div style={{ padding:'8px 12px', background:'#fef9c3', borderRadius:8, fontSize:12, color:'#92400e', marginBottom:12, border:'1px solid #fcd34d' }}>
@@ -765,13 +765,14 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
           <span style={{ fontSize:11, color:'var(--text3)' }}>L'anno verrà usato per interpretare le date nello screenshot</span>
         </div>
 
-        <button
-          className="pp-analyze-btn"
-          onClick={analyze}
-          disabled={!files.length || !apiKey || processing}
-        >
-          {processing ? '⏳ Analisi in corso...' : '🔍 Analizza con AI'}
-        </button>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginTop:12 }}>
+          <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+          <button className="btn btn-primary" onClick={analyze}
+            disabled={!files.length || !apiKey || processing}
+            style={{ fontSize:14, padding:'9px 26px', fontWeight:700 }}>
+            {processing ? '⏳ Analisi…' : 'Continua →'}
+          </button>
+        </div>
 
         {processing && (
           <div className="pp-spinner">Analisi in corso… potrebbe richiedere qualche secondo</div>

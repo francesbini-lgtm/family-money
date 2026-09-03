@@ -1541,7 +1541,7 @@ export default function ImportWizard({ onClose }) {
       .map(g => ({ g, ...GMETA[g], subs: withState.filter(l => groupOf(l.key)===g) }))
       .filter(x => x.subs.length)
     const refineSteps = withState.filter(l => groupOf(l.key)===null)
-    const secLabel = { fontSize:9, fontWeight:800, letterSpacing:'.06em', textTransform:'uppercase', color:'var(--text3)' }
+    const secLabel = { fontSize:10.5, fontWeight:800, letterSpacing:'.06em', textTransform:'uppercase', color:'var(--text3)', marginBottom:2 }
     return (
       <div style={{display:'flex',alignItems:'stretch',gap:16,rowGap:12,marginBottom:18,flexShrink:0,flexWrap:'wrap'}}>
         {/* ── Import base dati ── */}
@@ -1553,15 +1553,15 @@ export default function ImportWizard({ onClose }) {
               const allDone = grp.subs.every(s=>s.done)
               return (
                 <div key={grp.g} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:50}}>
-                  <div style={{width:34,height:34,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,
+                  <div style={{width:44,height:44,borderRadius:13,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,
                     background: active?'var(--accent)':allDone?'var(--green-l)':'var(--surface2)',
                     border: active?'2px solid var(--accent)':allDone?'1px solid var(--green)':'1px solid var(--border)'}}>
                     {grp.icon}
                   </div>
-                  <div style={{fontSize:10,fontWeight:active?700:600,color:active?'var(--accent)':allDone?'var(--green)':'var(--text2)'}}>{grp.label}</div>
-                  <div style={{display:'flex',gap:3}}>
+                  <div style={{fontSize:11.5,fontWeight:active?700:600,color:active?'var(--accent)':allDone?'var(--green)':'var(--text2)'}}>{grp.label}</div>
+                  <div style={{display:'flex',gap:4}}>
                     {grp.subs.map(s=>(
-                      <span key={s.key} title={s.label} style={{width:6,height:6,borderRadius:'50%',
+                      <span key={s.key} title={s.label} style={{width:7,height:7,borderRadius:'50%',
                         background: s.done?'var(--green)':s.current?'var(--accent)':'var(--border)'}}/>
                     ))}
                   </div>
@@ -1580,12 +1580,12 @@ export default function ImportWizard({ onClose }) {
                 const meta = RMETA[s.key] || {icon:'•',label:s.label}
                 return (
                   <div key={s.key} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:44}}>
-                    <div style={{width:30,height:30,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,
+                    <div style={{width:40,height:40,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:19,
                       background: s.current?'var(--accent)':s.done?'var(--green-l)':'var(--surface2)',
                       border: s.current?'2px solid var(--accent)':s.done?'1px solid var(--green)':'1px solid var(--border)'}}>
                       {s.done?'✓':meta.icon}
                     </div>
-                    <div style={{fontSize:10,fontWeight:s.current?700:500,color:s.current?'var(--accent)':s.done?'var(--green)':'var(--text3)'}}>{meta.label}</div>
+                    <div style={{fontSize:11.5,fontWeight:s.current?700:500,color:s.current?'var(--accent)':s.done?'var(--green)':'var(--text3)'}}>{meta.label}</div>
                   </div>
                 )
               })}
