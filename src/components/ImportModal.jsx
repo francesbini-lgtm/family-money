@@ -5,7 +5,8 @@ import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiServi
 import { applyCatRulesTo } from '../data/ruleMatching'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
-import { fmtDate, parseDecimalIT } from '../utils/format'
+import { fmtDate, fmtIT, parseDecimalIT } from '../utils/format'
+import { DoppioniStep } from './ImportWizard'
 import './ImportModal.css'
 // spin animation added via CSS
 
@@ -418,6 +419,11 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
   const [error,              setError]              = useState(null)
   // In attesa di riconciliazione mensile per un conto "carta" — { account, monthGroups, candidates, allParsed }
   const [cardReconcile,      setCardReconcile]      = useState(null)
+  // Carte nel wizard (2026-09): anteprima/selezione righe parsate PRIMA della riconciliazione,
+  // e step Doppioni PRIMA del salvataggio.
+  const [cardPreview,        setCardPreview]        = useState(null)  // array righe parsate
+  const [cardPreviewSel,     setCardPreviewSel]     = useState(() => new Set())
+  const [cardDoppioni,       setCardDoppioni]       = useState(null)  // bundle riconciliazione + txsToImport
   // 'normal' | 'card' — quale sequenza di step mostrare nella schermata di progresso
   // (richiesta utente: vedere tutti gli step reali, non solo un generico "AI Gemini")
   const [flowKind,           setFlowKind]           = useState('normal')
@@ -776,18 +782,23 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       return
     }
 
+    // ── Carte nel wizard (2026-09): anteprima/selezione PRIMA della riconciliazione. ──
+    // Lo standalone (non embedded) salta l'anteprima e va dritto alla riconciliazione.
+    if (embedded && accountFilter === 'carta') {
+      snapshotTxsRef.current = null
+      setStatus(null)
+      setCardPreviewSel(new Set(allParsed.map((_, i) => i)))
+      setCardPreview(allParsed)
+      return
+    }
+
     // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──
     // NOTA: solo "carta_credito" — è l'unico tipo con un estratto conto mensile
     // aggregato da riconciliare; una carta di debito addebita in tempo reale,
     // riga per riga, quindi non ha un "estratto" con cui fare il match.
     const selectedAccountObj = userAccounts.find(a => a.name === account)
     if (selectedAccountObj?.type === 'carta_credito' && selectedAccountObj?.card4) {
-      const monthGroups = buildMonthGroups(allParsed)
-      const candidates  = findEstrattoCandidates(useStore.getState().transactions, selectedAccountObj)
-      snapshotTxsRef.current = null   // niente ancora salvato, nessun rollback necessario
-      setStatus(null)
-      setFlowKind('card')
-      setCardReconcile({ account: selectedAccountObj, monthGroups, candidates, allParsed })
+      startCardReconcile(allParsed)
       return  // in attesa della conferma dell'utente in CardImportReconcileModal
     }
 
@@ -859,45 +870,79 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
   // metà operazione, sia — richiesta esplicita dell'utente dopo un caso reale di token
   // sprecati — che l'AI non venga MAI invocata se poi tutto viene annullato: la spesa di
   // token Gemini avviene solo quando siamo già certi che l'operazione è valida e resterà.
-  async function handleCardReconcileConfirm({ matchedMonths, estrattoTxIdsToExclude }) {
+  // Avvia la riconciliazione mensile per un set di righe carta (estratto da handleImport
+  // per poterla richiamare dopo l'anteprima/selezione — 2026-09).
+  function startCardReconcile(rows) {
+    const selectedAccountObj = userAccounts.find(a => a.name === account)
+    if (!(selectedAccountObj?.type === 'carta_credito' && selectedAccountObj?.card4)) return
+    const monthGroups = buildMonthGroups(rows)
+    const candidates  = findEstrattoCandidates(useStore.getState().transactions, selectedAccountObj)
+    snapshotTxsRef.current = null
+    setStatus(null)
+    setFlowKind('card')
+    setCardReconcile({ account: selectedAccountObj, monthGroups, candidates, allParsed: rows })
+  }
+
+  // ── Conferma riconciliazione carta — PREPARAZIONE (2026-09) ──
+  // Nel wizard (embedded) NON si salva qui: si preparano le righe da importare e si passa
+  // allo step Doppioni (verifica vs DB PRIMA di salvare, così non si importano doppioni —
+  // richiesta utente). Solo dopo i doppioni cardFinalCommit salva + esclude estratti +
+  // verifica saldo invariato + AI. Lo standalone salva subito come prima.
+  function handleCardReconcileConfirm({ matchedMonths, estrattoTxIdsToExclude }) {
     const { account: acc, monthGroups, allParsed } = cardReconcile
     const card4 = acc.card4
     const allTxsNow = useStore.getState().transactions
-
-    // Saldo PRIMA di qualunque modifica — usato dal check di sicurezza finale (vedi sotto,
-    // dopo il commit del batch): richiesto esplicitamente dall'utente dopo un incidente in
-    // cui il saldo era salito di migliaia di euro senza che l'app se ne accorgesse.
+    // Saldo PRIMA di qualunque modifica — usato dal check di sicurezza finale.
     const saldoBefore = computeSaldoConto(allTxsNow)
 
-    // Tutta l'operazione (import dettaglio + eventuale rettifica + esclusione estratti) deve
-    // essere UN'UNICA voce nello stack Undo dell'app: un solo "Annulla" deve disfare tutto
-    // insieme, altrimenti l'estratto resta escluso anche dopo che il dettaglio importato è
-    // stato rimosso con Undo (bug segnalato dall'utente — richiedeva un ripristino manuale).
-    useStore.getState().beginTxUndoBatch()
-
-    // 1. Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
+    // Solo le transazioni dei mesi abbinati vengono importate, taggate con la carta di origine
     const matchedMonthSet = new Map(matchedMonths.map(m => [m.month, m.estrattoTxId]))
     const txsToImport = allParsed
       .filter(t => matchedMonthSet.has(cardMonthKey(t)))
       .map(t => ({
         ...t,
-        // Anche nella colonna standard `card` del DB (richiesta utente 2026-07-12):
-        // le righe di dettaglio carta devono portare il codice della carta come
-        // qualsiasi altra transazione, non solo nel campo tecnico cardImportCard4
         card: t.card || card4,
         cardImportCard4: card4,
         cardImportEstrattoTxId: matchedMonthSet.get(cardMonthKey(t)),
       }))
 
-    // 1b. Rettifica automatica per garantire saldo invariato (vedi nota sopra)
+    // Doppioni controllati solo contro precedenti import della STESSA carta
+    const dedupAgainst = allTxsNow.filter(t => t.cardImportCard4 === card4)
+    // Mesi non abbinati (es. estratto non ancora arrivato) restano fuori — si reimporta più avanti
+    const skippedMonths = monthGroups.filter(g => !matchedMonthSet.has(g.month)).map(g => g.label)
+
+    const bundle = { acc, card4, matchedMonths, estrattoTxIdsToExclude, saldoBefore, dedupAgainst, skippedMonths }
+
+    setCardReconcile(null)
+    if (embedded) {
+      // Doppioni PRIMA del salvataggio (righe ancora non salvate, confronto vs DB)
+      setCardDoppioni({ ...bundle, txsToImport })
+      return
+    }
+    // Standalone: salva subito (nessun doppioni-step separato)
+    cardFinalCommit(bundle, txsToImport, [])
+  }
+
+  // ── Commit finale carta: salva i superstiti + esclude estratti + verifica saldo + AI ──
+  async function cardFinalCommit(bundle, survivors, extraTxs = []) {
+    const { acc, card4, matchedMonths, estrattoTxIdsToExclude, saldoBefore, dedupAgainst, skippedMonths } = bundle
+    const allTxsNow = useStore.getState().transactions
+
+    setCardDoppioni(null)
+    // Tutta l'operazione (import dettaglio + rettifica + esclusione estratti) = UN'UNICA voce Undo.
+    useStore.getState().beginTxUndoBatch()
+
+    // Rettifica automatica per garantire saldo invariato — RICALCOLATA sui SUPERSTITI: se i
+    // doppioni hanno tolto delle righe, il residuo per mese si aggiorna di conseguenza così
+    // il saldo del conto resta comunque invariato dopo l'esclusione dell'estratto.
     const yr2 = String(new Date().getFullYear()).slice(2)
     const correctionTxs = []
     matchedMonths.forEach(({ month, estrattoTxId }) => {
-      const g         = monthGroups.find(mm => mm.month === month)
       const estrattoTx = allTxsNow.find(t => t.txId === estrattoTxId)
-      if (!g || !estrattoTx) return
-      const residual = Math.round((estrattoTx.amount - g.net) * 100) / 100
-      if (Math.abs(residual) < 0.01) return   // combacia già al centesimo, nessuna rettifica necessaria
+      if (!estrattoTx) return
+      const survivorNet = survivors.filter(t => cardMonthKey(t) === month).reduce((s, t) => s + t.amount, 0)
+      const residual = Math.round((estrattoTx.amount - survivorNet) * 100) / 100
+      if (Math.abs(residual) < 0.01) return
       correctionTxs.push({
         txId:          `${yr2}-RETT-${Date.now()}-${month}`,
         date:          estrattoTx.date,
@@ -920,19 +965,12 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       })
     })
 
-    // 3. Doppioni controllati solo contro precedenti import della STESSA carta
-    const dedupAgainst = allTxsNow.filter(t => t.cardImportCard4 === card4)
-
-    // 4. Mesi non abbinati (es. estratto non ancora arrivato) restano fuori — si reimporta più avanti
-    const skippedMonths = monthGroups.filter(g => !matchedMonthSet.has(g.month)).map(g => g.label)
-
-    setCardReconcile(null)
     setFlowKind('card')
     startTimeRef.current = Date.now()
     let saveResult = false
     try {
-      // 1. Salva PRIMA il dettaglio + le rettifiche — SENZA AI (vedi ORDINE DI SICUREZZA sopra).
-      saveResult = await saveTxs(txsToImport, { dedupAgainst, extraTxs: correctionTxs })
+      // 1. Salva PRIMA il dettaglio (superstiti ai doppioni) + le rettifiche — SENZA AI.
+      saveResult = await saveTxs(survivors, { dedupAgainst, extraTxs: [...correctionTxs, ...extraTxs] })
       // 2. Escludi gli estratti abbinati SOLO se il salvataggio è andato a buon fine —
       // se l'utente ha annullato a metà (saveTxs torna false), non tocchiamo il
       // conto: niente di nuovo è stato salvato, quindi niente estratto va escluso
@@ -1044,7 +1082,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
             riconciliazione carta, E quando c'è un errore/rollback da mostrare (prima il form
             riappariva comunque sopra l'errore, dando l'impressione che l'app fosse "tornata
             indietro da sola" invece di mostrare chiaramente cosa non ha funzionato) */}
-        {!isRunning && !done && !error && !cardReconcile && (
+        {!isRunning && !done && !error && !cardReconcile && !cardPreview && !cardDoppioni && (
           <>
             <div className="info-box">
               Supportato: <strong>UniCredit, Fineco, BNL, Banco BPM, BPER, Credem, Widiba</strong> e altri
@@ -1269,8 +1307,72 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
           </div>
         )}
 
+        {/* Anteprima/selezione righe parsate (carte) — PRIMA della riconciliazione */}
+        {cardPreview && !isRunning && !cardReconcile && !cardDoppioni && (() => {
+          const rows = cardPreview
+          const allSel = rows.length > 0 && cardPreviewSel.size === rows.length
+          const toggle = i => setCardPreviewSel(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
+          const toggleAll = () => setCardPreviewSel(allSel ? new Set() : new Set(rows.map((_, i) => i)))
+          const selCount = cardPreviewSel.size
+          const selSum = rows.reduce((s, t, i) => cardPreviewSel.has(i) ? s + (t.amount || 0) : s, 0)
+          return (
+            <div style={{display:'flex',flexDirection:'column',minHeight:0,flex:1}}>
+              <div style={{fontSize:14,fontWeight:700,marginBottom:2}}>📋 Anteprima — 💳 Carte di credito ({rows.length} lette dal file)</div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:10}}>
+                Seleziona le transazioni da importare (di default tutte). Con <strong>Continua</strong> si passa alla
+                riconciliazione mensile; con <strong>Annulla</strong> l'importazione della carta viene annullata.
+              </div>
+              <div style={{display:'flex',gap:10,marginBottom:10,fontSize:12}}>
+                <span style={{padding:'4px 10px',borderRadius:8,background:'var(--accent-l)',border:'1px solid var(--accent)',fontWeight:700}}>✅ {selCount} selezionate</span>
+                <span style={{padding:'4px 10px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'var(--font-mono)',fontWeight:700,color:selSum<0?'var(--red)':'var(--green)'}}>Σ {selSum<0?'−':'+'}€ {fmtIT(Math.abs(selSum),2)}</span>
+              </div>
+              <div style={{overflow:'auto',flex:1,minHeight:0,border:'1px solid var(--border)',borderRadius:10}}>
+                <table style={{width:'100%',borderCollapse:'collapse',minWidth:560}}>
+                  <thead>
+                    <tr>
+                      <th style={{padding:'8px 10px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:1,width:36}}>
+                        <input type="checkbox" checked={allSel} onChange={toggleAll} title="Seleziona/deseleziona tutte"/>
+                      </th>
+                      {['Data','Descrizione','Importo'].map((h,i)=>(
+                        <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((t,i)=>{
+                      const on = cardPreviewSel.has(i)
+                      return (
+                        <tr key={t.txId||i} onClick={()=>toggle(i)} style={{borderBottom:'1px solid var(--border)',cursor:'pointer',opacity:on?1:.45,background:on?'transparent':'var(--surface2)'}}>
+                          <td style={{padding:'6px 10px',textAlign:'center'}}><input type="checkbox" checked={on} onChange={()=>toggle(i)} onClick={e=>e.stopPropagation()}/></td>
+                          <td style={{padding:'6px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(t._effDate||t.date)}</td>
+                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:320,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.description||''}>{t.descAI || (t.description||'').slice(0,80) || '—'}</td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:(t.amount||0)>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>{(t.amount||0)>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount||0),2)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,
+                position:'sticky',bottom:0,background:'var(--surface)',paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                <button className="btn btn-secondary" onClick={()=>{ setCardPreview(null); onClose() }}>Annulla</button>
+                <button className="btn btn-primary" disabled={selCount===0}
+                  onClick={()=>{ const selected = rows.filter((_,i)=>cardPreviewSel.has(i)); setCardPreview(null); startCardReconcile(selected) }}>
+                  Continua →
+                </button>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Doppioni carte — PRIMA del salvataggio (verifica vs DB sulle righe non salvate) */}
+        {cardDoppioni && !isRunning && (
+          <DoppioniStep src="carta" srcTxs={cardDoppioni.txsToImport} embedded unsaved
+            onCommit={(survivors) => cardFinalCommit(cardDoppioni, survivors)} />
+        )}
+
         {/* Footer */}
-        {!isRunning && !done && !error && !cardReconcile && (
+        {!isRunning && !done && !error && !cardReconcile && !cardPreview && !cardDoppioni && (
           <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'auto'}}>
             <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
             <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>

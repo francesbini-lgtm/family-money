@@ -743,7 +743,7 @@ function VacanzeMegaStep({ importedIdSet, vacMinDate, vacMaxDate, registerUndo }
 // automatico e silenzioso già fatto da addTransactions() in fase di salvataggio
 // (che invece confronta data+importo+prime 60 char della descrizione, e scarta
 // senza mostrare nulla). Qui l'utente vede ogni possibile doppione e decide.
-function findDuplicatesForSource(src, srcTxs, allTransactions) {
+export function findDuplicatesForSource(src, srcTxs, allTransactions) {
   const isCarta = t => !!t.cardImportCard4
   const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
   const srcIds = new Set(srcTxs.map(t => t.txId))
@@ -787,7 +787,7 @@ function MetricChip({ label, fg, bg, value, strong, children }) {
   )
 }
 
-function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown, unsaved = false, onCommit = null }) {
+export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown, unsaved = false, onCommit = null }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const addTransactions   = useStore(s => s.addTransactions)
@@ -1415,8 +1415,9 @@ export default function ImportWizard({ onClose }) {
       { id:'preview', src:'conto' },
       { id:'doppioni', src:'conto' },
       { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' })
+    // Carte (2026-09): anteprima + riconciliazione + DOPPIONI (prima del salvataggio) sono
+    // ora fasi INTERNE allo step 'import' (ImportModal), non più uno step doppioni a sé.
     if (sources.carta) q.push({ id:'import', src:'carta' },
-      { id:'doppioni', src:'carta' },
       { id:'refine', src:'carta', kind:'l2' }, { id:'refine', src:'carta', kind:'desc' }, { id:'refine', src:'carta', kind:'ai' })
     if (sources.paypal) q.push({ id:'import', src:'paypal' }, { id:'paypal-result' })
     // 'compensazioni' PRIMA di 'vacanze' (richiesta utente 2026-07-13, punto 1:
