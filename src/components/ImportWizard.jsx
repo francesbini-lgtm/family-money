@@ -1656,8 +1656,8 @@ export default function ImportWizard({ onClose }) {
             <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14,flex:1,minHeight:0}}>
               {[
                 ['conto',  '🏦 Conto corrente', 'File CSV/Excel del conto (UniCredit, Fineco, …)'],
-                ['carta',  '💳 Carte di credito', 'CSV/Excel della carta, con riconciliazione mensile estratti'],
-                ['paypal', '🅿️ PayPal', 'Screenshot, PDF o incolla (⌘V) — abbinamento automatico'],
+                ['carta',  '💳 Carte di credito', 'CSV/Excel della carta, con riconciliazione mensile'],
+                ['paypal', '🅿️ PayPal', 'Screenshot, PDF — abbinamento auto'],
               ].map(([key,label,sub]) => {
                 const on = !!sources[key]
                 const lastDate = key === 'conto' ? lastTxInfo.conto[0]?.date
@@ -1686,7 +1686,7 @@ export default function ImportWizard({ onClose }) {
                     </span>
 
                     {/* KPI: giorni dall'ultima operazione + numero registrate */}
-                    <div style={{display:'flex',gap:8,margin:'12px 0 10px',flexShrink:0}}>
+                    <div style={{display:'flex',gap:8,margin:'12px 0 24px',flexShrink:0}}>
                       <div style={kpiBox}>
                         <div style={kpiLbl}>🕐 Ultima op.</div>
                         <div style={{...kpiVal,color:ddCol}}>{dd == null ? '—' : dd === 0 ? 'oggi' : `${dd} g fa`}</div>
