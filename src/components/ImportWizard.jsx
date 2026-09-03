@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 import { getMergedCats } from '../data/categories'
-import { fmtIT } from '../utils/format'
+import { fmtIT, parseDecimalIT } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
@@ -835,7 +835,7 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
   // Saldo nuovo effettivo (dall'input modificabile qui) e target ricalcolato:
   // gap = saldo sistema (vecchio saldo + operazioni caricate) − nuovo saldo da banca.
   const nuovoSaldoNum = (() => {
-    const n = parseFloat(String(editedNuovoSaldo).replace(',', '.'))
+    const n = parseDecimalIT(editedNuovoSaldo)
     return Number.isFinite(n) ? n : (saldoBreakdown?.nuovoSaldo ?? 0)
   })()
   const effectiveTarget = reconciling
@@ -993,9 +993,9 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '2px 0 10px', alignItems: 'center' }}>
               <MetricChip label="Saldo pre import" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoAttuale, 2)} />
               <MetricChip label="Somma operazioni caricate" fg="var(--gold)" bg="var(--gold-l)" value={fmtIT(saldoBreakdown.rawParsedTotal, 2)} />
-              <MetricChip label="Saldo sistema calcolato" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoSistema, 2)} />
+              <MetricChip label="Saldo post import" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoSistema, 2)} />
               <MetricChip label="Nuovo saldo (da banca)" fg="var(--green)" bg="var(--green-l)">
-                <input type="number" step="0.01" value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(e.target.value)}
+                <input type="text" inputMode="decimal" value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(e.target.value)}
                   style={{ width: 108, padding: '2px 6px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12,
                     border: '1px solid var(--green)', borderRadius: 6, background: 'var(--surface, #fff)', color: 'var(--text)' }} />
               </MetricChip>
@@ -1034,7 +1034,7 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
                   <span>Conto usato: {saldoBreakdown.account}</span>
                   <span>Saldo pre import: € {fmtIT(saldoBreakdown.saldoAttuale, 2)}</span>
                   <span>+ Somma operazioni caricate: € {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</span>
-                  <span>= Saldo sistema calcolato: € {fmtIT(saldoBreakdown.saldoSistema, 2)}</span>
+                  <span>= Saldo post import: € {fmtIT(saldoBreakdown.saldoSistema, 2)}</span>
                   <span>− Nuovo saldo (da banca): € {fmtIT(nuovoSaldoNum, 2)}</span>
                   <span style={{ fontWeight: 700 }}>= Gap: € {fmtIT(effectiveTarget, 2)}</span>
                   {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
@@ -1104,18 +1104,38 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
           {dupes.length === 0 && (
             <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>Nessun doppione rilevato automaticamente — se il saldo non torna, cercalo qui sotto fra tutte le transazioni.</div>
           )}
-          <div style={{ maxHeight: '28vh', overflow: 'auto', marginBottom: 12 }}>
-            {dupes.map(d => (
-              <label key={d.t.txId} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12,
-                border: '1px solid var(--border)', borderRadius: 8, padding: '7px 12px', marginBottom: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={selected.has(d.t.txId)} onChange={() => toggleSelected(d.t.txId)}/>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(d.t.date)}</span>
-                <span style={{ flex: 1, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {d.t.descAI || d.t.description?.slice(0, 50)}
-                </span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--red)' }}>−€ {fmtIT(Math.abs(d.t.amount), 2)}</span>
-              </label>
-            ))}
+          {/* Confronto a due colonne (richiesta utente 2026-09): a sinistra la transazione
+              GIÀ nel DB, a destra la NUOVA in arrivo dal CSV — così si verifica se è davvero
+              un doppione prima di eliminarla. */}
+          <div style={{ display:'flex', gap:8, padding:'0 12px 4px 32px', fontSize:10, fontWeight:800, letterSpacing:'.04em', textTransform:'uppercase', color:'var(--text3)' }}>
+            <span style={{flex:1}}>🗄️ Già nel DB</span>
+            <span style={{width:16}}/>
+            <span style={{flex:1}}>📥 In arrivo dal CSV</span>
+          </div>
+          <div style={{ maxHeight: '34vh', overflow: 'auto', marginBottom: 12 }}>
+            {dupes.map(d => {
+              const cell = (tx, bg) => (
+                <div style={{ flex:1, minWidth:0, background:bg, borderRadius:6, padding:'5px 8px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', gap:6 }}>
+                    <span style={{ fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11 }}>{fmtDate(tx.date)}</span>
+                    <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, color:tx.amount<0?'var(--red)':'var(--green)' }}>
+                      {tx.amount<0?'−':'+'}€ {fmtIT(Math.abs(tx.amount),2)}
+                    </span>
+                  </div>
+                  <div style={{ fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:11.5 }}
+                    title={tx.descAI||tx.description||''}>{tx.descAI || (tx.description||'').slice(0,60)}</div>
+                </div>
+              )
+              return (
+                <label key={d.t.txId} style={{ display:'flex', alignItems:'center', gap:8,
+                  border:`1px solid ${selected.has(d.t.txId)?'var(--accent)':'var(--border)'}`, borderRadius:8, padding:'6px 10px', marginBottom:6, cursor:'pointer' }}>
+                  <input type="checkbox" checked={selected.has(d.t.txId)} onChange={() => toggleSelected(d.t.txId)}/>
+                  {cell(d.match, 'var(--surface2)')}
+                  <span style={{ color:'var(--text3)', fontSize:14, flexShrink:0 }}>≈</span>
+                  {cell(d.t, 'var(--gold-l)')}
+                </label>
+              )
+            })}
           </div>
           <button onClick={() => setShowAll(v => !v)}
             style={{ fontSize: 12, background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, marginBottom: 8 }}>
@@ -1151,7 +1171,8 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
       {/* Modalità non-salvata (conto) senza controllo saldo: il pulsante Avanti salva
           i superstiti (il wizard non aggiunge una propria StepNav in questo caso). */}
       {unsaved && !reconciling && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14,
+          position: 'sticky', bottom: 0, background: 'var(--surface)', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           <span style={{ fontSize: 11, color: 'var(--text3)' }}>
             {dropped.size > 0
               ? `${dropped.size} scartat${dropped.size===1?'a':'e'} · ${srcTxs.length - dropped.size} da importare`
@@ -1164,7 +1185,8 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
         </div>
       )}
       {reconciling && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14,
+          position: 'sticky', bottom: 0, background: 'var(--surface)', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           <span style={{ fontSize: 11, color: 'var(--text3)' }}>
             {selected.size} transazion{selected.size===1?'e':'i'} selezionat{selected.size===1?'a':'e'} verrann{selected.size===1?'o':'o'} eliminate al click su "Avanti"
           </span>
@@ -1879,7 +1901,8 @@ export default function ImportWizard({ onClose }) {
                   </tbody>
                 </table>
               </div>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,
+                position:'sticky',bottom:0,background:'var(--surface)',paddingTop:12,borderTop:'1px solid var(--border)'}}>
                 <button className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px',fontWeight:700}}
                   onClick={()=>{ setPendingParsed(null); skipSource('conto') }}>
                   Annulla

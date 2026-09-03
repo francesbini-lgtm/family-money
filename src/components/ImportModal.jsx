@@ -5,7 +5,7 @@ import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiServi
 import { applyCatRulesTo } from '../data/ruleMatching'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
-import { fmtDate } from '../utils/format'
+import { fmtDate, parseDecimalIT } from '../utils/format'
 import './ImportModal.css'
 // spin animation added via CSS
 
@@ -744,7 +744,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
     // userà per bloccare l'avanzamento finché non torna a zero.
     let targetGapDoppioni = null
     let saldoDoppioniBreakdown = null
-    if (accountFilter === 'conto' && nuovoSaldo !== '' && !isNaN(parseFloat(nuovoSaldo))) {
+    if (accountFilter === 'conto' && nuovoSaldo !== '' && !isNaN(parseDecimalIT(nuovoSaldo))) {
       // Saldo "pre import" = lo STESSO saldo mostrato in topbar/KPI "Saldo Conto"
       // (computeSaldoConto: tutte le transazioni non escluse + rettifiche), così combacia
       // con quello che l'utente vede in app ed è quello che "fa fede" (richiesta utente
@@ -753,7 +753,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       const saldoAttuale   = computeSaldoConto(useStore.getState().transactions)
       const rawParsedTotal = allParsed.reduce((s, t) => s + t.amount, 0)
       const saldoSistema   = saldoAttuale + rawParsedTotal
-      const nuovoSaldoNum  = parseFloat(nuovoSaldo)
+      const nuovoSaldoNum  = parseDecimalIT(nuovoSaldo)
       targetGapDoppioni = Math.round((saldoSistema - nuovoSaldoNum) * 100) / 100
       // Esposto allo step Doppioni (vedi ImportWizard.jsx) per debug: se il gap mostrato
       // sembra sballato (es. grande quanto l'intero saldo invece dei soli doppioni), qui
@@ -1089,7 +1089,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
                 <label className="form-label" style={{marginTop:14}}>
                   Nuovo saldo (dal tuo conto in banca, dopo questo estratto) — opzionale
                 </label>
-                <input type="number" step="0.01" className="form-select" placeholder="es. 3245,50"
+                <input type="text" inputMode="decimal" className="form-select" placeholder="es. 3245,50"
                   value={nuovoSaldo} onChange={e=>setNuovoSaldo(e.target.value)}/>
                 <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>
                   Se lo inserisci, nello step Doppioni ti diremo esattamente quanti euro di doppioni

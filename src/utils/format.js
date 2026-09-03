@@ -2,6 +2,18 @@
 // Italian format: thousands separator = ".", decimal = ","
 // Works in all browsers and Node.js (no locale dependency).
 
+// Parsing di un numero digitato in formato italiano: virgola = decimale, punto =
+// migliaia (es. "274.907,22" o "274907,22" → 274907.22). Se non c'è la virgola si
+// assume il punto come decimale ("274907.22" → 274907.22, "274907" → 274907). Ritorna
+// NaN per stringhe vuote/non numeriche. Usato dagli input saldo dell'import.
+export function parseDecimalIT(s) {
+  if (s == null) return NaN
+  let str = String(s).trim()
+  if (str === '') return NaN
+  if (str.includes(',')) str = str.replace(/\./g, '').replace(',', '.')
+  return parseFloat(str)
+}
+
 export function fmtIT(n, decimals = 0) {
   const fixed = Math.abs(Number(n) || 0).toFixed(decimals)
   const [int, dec] = fixed.split('.')
