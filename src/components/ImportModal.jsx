@@ -351,7 +351,7 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
 //   { savedTxIds, ruleAppliedIds, total, dupes, aiCount, rulesAppliedCount } INVECE di
 //   chiudere da soli il modale — il wizard usa questi dati per gli step di rifinitura.
 // Standalone (senza props) il comportamento resta identico a prima.
-export default function ImportModal({ onClose, accountFilter = null, onFlowDone = null, embedded = false }) {
+export default function ImportModal({ onClose, accountFilter = null, onFlowDone = null, onParsed = null, embedded = false }) {
   const { userAccounts: allAccounts, addTransactions, updateTransaction, transactions, aiRules } = useStore()
   const appPrefs = useStore(s => s.appPrefs)
   const userAccounts = useMemo(() => {
@@ -761,6 +761,19 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
       // che "account" non combaciava con nessuna transazione già salvata per questo conto
       // (bug reale trovato il 2026-07-26, vedi fix su useEffect di sync di "account" sopra).
       saldoDoppioniBreakdown = { saldoAttuale, rawParsedTotal, saldoSistema, nuovoSaldo: nuovoSaldoNum, account }
+    }
+
+    // ── Flusso wizard "differito" (SOLO conto, richiesta utente 2026-09) ──
+    // Se il wizard passa onParsed, NON salviamo qui: gli consegniamo le righe appena
+    // parsate. Il wizard le mostra in anteprima (selezione righe da importare), poi fa i
+    // doppioni su dati ANCORA NON salvati (confronto vs DB), e SOLO alla fine salva + AI.
+    // Lo standalone (App.jsx, senza onParsed) e le carte proseguono col salvataggio
+    // immediato qui sotto — invariati.
+    if (onParsed && accountFilter === 'conto') {
+      snapshotTxsRef.current = null
+      setStatus(null)
+      onParsed({ parsedTxs: allParsed, account, targetGapDoppioni, saldoBreakdown: saldoDoppioniBreakdown })
+      return
     }
 
     // ── Carta di credito: riconciliazione mensile PRIMA di AI/salvataggio ──

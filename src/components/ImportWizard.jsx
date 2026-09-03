@@ -5,6 +5,7 @@ import { fmtIT } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
+import { commitParsedTxs } from '../data/importCommit'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
 import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException, SALDO_PIN } from '../pages/TransactionsPage'
@@ -748,20 +749,15 @@ function findDuplicatesForSource(src, srcTxs, allTransactions) {
   const srcIds = new Set(srcTxs.map(t => t.txId))
   const dbPool = allTransactions.filter(t => !srcIds.has(t.txId) && !t.excluded && sameCategory(t))
   const results = []
-  // Doppioni DENTRO lo stesso batch appena importato (bug segnalato 2026-07-14:
-  // dbPool esclude sempre il batch corrente, quindi due righe identiche lette
-  // dallo stesso CSV — o da più file con intervalli di date sovrapposti — non
-  // venivano mai confrontate fra loro, solo contro il DB preesistente).
-  const seenInBatch = new Map() // `${date}|${descrizione}` -> prima tx vista
+  // Doppioni verificati SEMPRE contro il DB (richiesta utente 2026-09: "i doppioni
+  // devono SEMPRE verificare con i dati a DB, non quelli derivanti da questa import").
+  // Il vecchio confronto intra-batch (due righe identiche nello stesso CSV) è stato
+  // rimosso — coerente con la stessa scelta già fatta per PayPal.
   srcTxs.filter(t => !t.excluded).forEach(t => {
     const origDesc = (t.description || '').trim()
     if (!origDesc) return
     const dbMatch = dbPool.find(e => e.date === t.date && (e.description || '').trim() === origDesc)
-    if (dbMatch) { results.push({ t, match: dbMatch }); return }
-    const key = `${t.date}|${origDesc}`
-    const prevInBatch = seenInBatch.get(key)
-    if (prevInBatch) results.push({ t, match: prevInBatch, _sameBatch: true })
-    else seenInBatch.set(key, t)
+    if (dbMatch) results.push({ t, match: dbMatch })
   })
   return results
 }
@@ -783,11 +779,15 @@ function MetricChip({ label, fg, bg, value, strong, children }) {
   )
 }
 
-function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown }) {
+function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown, unsaved = false, onCommit = null }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const addTransactions   = useStore(s => s.addTransactions)
   const [handled, setHandled] = useState({})
+  // Modalità "unsaved" (conto, 2026-09): le righe non sono ancora salvate. "Eliminare"
+  // un doppione qui significa NON importarlo — teniamo traccia degli id scartati e a
+  // conferma salviamo solo i superstiti via onCommit (niente deleteTransaction).
+  const [dropped, setDropped] = useState(() => new Set())
 
   const dupes = useMemo(
     () => findDuplicatesForSource(src, srcTxs, transactions).filter(d => !handled[d.t.txId]),
@@ -872,27 +872,37 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
     setTappoCovered(0)
   }
 
+  // Riga di rettifica ("tappo") per il residuo non spiegabile con doppioni reali —
+  // già completa/categorizzata (nessuna AI necessaria), esclusa dal saldo.
+  function buildTappoRow() {
+    return {
+      txId: '0000-' + Date.now().toString(36).toUpperCase(),
+      date: srcTxs.reduce((m, t) => (!m || (t.date||'') < m) ? (t.date||m) : m, null) || new Date().toISOString().slice(0,10),
+      amount: Math.round(-tappoCovered * 100) / 100,
+      description: `Rettifica doppioni non trovati — import del ${fmtDate(new Date().toISOString().slice(0,10))}`,
+      descAI: 'Rettifica doppioni non trovati',
+      cat1: 'Altro', cat2: 'Altro',
+      account: reconcileAccount, conf: 100, aiEnriched: true,
+      excluded: true,
+      excludedAt: new Date().toISOString(),
+      excludedType: 'manual',
+      excludedReason: 'Rettifica saldo — doppioni non trovati durante import (protetta da PIN)',
+      _doppioniTappo: true,
+    }
+  }
+
   function confirmReconcile() {
     if (!resolved || committed) return
     setCommitted(true)
-    selected.forEach(txId => deleteTransaction(txId))
-    if (hasTappo && reconcileAccount) {
-      const tappoTxId = '0000-' + Date.now().toString(36).toUpperCase()
-      addTransactions([{
-        txId: tappoTxId,
-        date: srcTxs.reduce((m, t) => (!m || (t.date||'') < m) ? (t.date||m) : m, null) || new Date().toISOString().slice(0,10),
-        amount: Math.round(-tappoCovered * 100) / 100,
-        description: `Rettifica doppioni non trovati — import del ${fmtDate(new Date().toISOString().slice(0,10))}`,
-        descAI: 'Rettifica doppioni non trovati',
-        cat1: 'Altro', cat2: 'Altro',
-        account: reconcileAccount, conf: 100, aiEnriched: true,
-        excluded: true,
-        excludedAt: new Date().toISOString(),
-        excludedType: 'manual',
-        excludedReason: 'Rettifica saldo — doppioni non trovati durante import (protetta da PIN)',
-        _doppioniTappo: true,
-      }])
+    // Modalità non-salvata (conto): non cancelliamo nulla — salviamo solo i superstiti.
+    if (unsaved) {
+      const survivors = srcTxs.filter(t => !selected.has(t.txId))
+      const extra = (hasTappo && reconcileAccount) ? [buildTappoRow()] : []
+      onCommit?.(survivors, extra)
+      return
     }
+    selected.forEach(txId => deleteTransaction(txId))
+    if (hasTappo && reconcileAccount) addTransactions([buildTappoRow()])
     if (selected.size > 0) {
       registerUndo?.(`${selected.size} doppioni eliminati`, () => {
         for (let i = 0; i < selected.size; i++) useStore.getState().undoLastTx?.()
@@ -914,6 +924,11 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
         : `Proseguire senza cercare altri doppioni? NESSUNA rettifica verrà creata per il residuo di € ${fmtIT(Math.abs(remaining), 2)}.`
     )) return
     setCommitted(true)
+    if (unsaved) {
+      const survivors = srcTxs.filter(t => !selected.has(t.txId))
+      onCommit?.(survivors, [])
+      return
+    }
     selected.forEach(txId => deleteTransaction(txId))
     if (selected.size > 0) {
       registerUndo?.(`${selected.size} doppioni eliminati`, () => {
@@ -923,7 +938,20 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
     onNext?.()
   }
 
+  // Conferma in modalità non-salvata, ramo NON-reconciling (nessun saldo dichiarato):
+  // salva le righe superstiti (tolte quelle marcate come doppione).
+  function confirmUnsavedPlain() {
+    if (committed) return
+    setCommitted(true)
+    onCommit?.(srcTxs.filter(t => !dropped.has(t.txId)), [])
+  }
+
   function removeDupe(d) {
+    if (unsaved) {
+      setDropped(prev => new Set(prev).add(d.t.txId))
+      setHandled(h => ({ ...h, [d.t.txId]: true }))
+      return
+    }
     deleteTransaction(d.t.txId)
     setHandled(h => ({ ...h, [d.t.txId]: true }))
     registerUndo?.('Doppione eliminato', () => useStore.getState().undoLastTx?.())
@@ -1120,6 +1148,21 @@ function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDo
           </button>
         </div>
       )}
+      {/* Modalità non-salvata (conto) senza controllo saldo: il pulsante Avanti salva
+          i superstiti (il wizard non aggiunge una propria StepNav in questo caso). */}
+      {unsaved && !reconciling && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+          <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+            {dropped.size > 0
+              ? `${dropped.size} scartat${dropped.size===1?'a':'e'} · ${srcTxs.length - dropped.size} da importare`
+              : `${srcTxs.length} transazioni da importare`}
+          </span>
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
+            disabled={committed} onClick={confirmUnsavedPlain}>
+            Avanti → salva e importa
+          </button>
+        </div>
+      )}
       {reconciling && (
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
           <span style={{ fontSize: 11, color: 'var(--text3)' }}>
@@ -1228,6 +1271,11 @@ export default function ImportWizard({ onClose }) {
   const [queue,   setQueue]   = useState(null)   // null = schermata di selezione
   const [stepIdx, setStepIdx] = useState(0)
   const [results, setResults] = useState({})     // { conto: {...}, carta: {...}, paypal: {...} }
+  // Flusso "differito" conto (2026-09): righe parsate ma NON ancora salvate, in attesa di
+  // anteprima/selezione + doppioni. Solo dopo i doppioni vengono salvate (commitParsedTxs).
+  const [pendingParsed, setPendingParsed] = useState(null) // { src, parsedTxs, account, targetGapDoppioni, saldoBreakdown }
+  const [previewSel, setPreviewSel] = useState(() => new Set()) // indici selezionati in anteprima
+  const [committing, setCommitting] = useState(null)      // stato avanzamento durante il salvataggio finale
   const [rulePopup, setRulePopup] = useState(null) // { tx, match, newDesc }
   // Fix reale (2026-07-26, richiesta utente): prima, chiudere il wizard a metà con la X
   // NON annullava nulla — il conto (e la carta) vengono scritti su Firestore subito nello
@@ -1334,6 +1382,7 @@ export default function ImportWizard({ onClose }) {
     // Ordine: CONTO → CARTE → PayPal (richiesta utente 2026-09). Prima PayPal era il
     // primo; ora si importano prima i dati bancari (conto, poi carte) e per ultimo PayPal.
     if (sources.conto) q.push({ id:'import', src:'conto' },
+      { id:'preview', src:'conto' },
       { id:'doppioni', src:'conto' },
       { id:'refine', src:'conto', kind:'l2' }, { id:'refine', src:'conto', kind:'desc' }, { id:'refine', src:'conto', kind:'ai' })
     if (sources.carta) q.push({ id:'import', src:'carta' },
@@ -1362,16 +1411,17 @@ export default function ImportWizard({ onClose }) {
   // Torna allo step nativo precedente, saltando eventuali step 'import' (che non
   // vanno mai riattraversati all'indietro — richiederebbero un nuovo import CSV,
   // non hanno senso come "pagina precedente") — richiesta utente 2026-07-13, punto 5
+  const NO_BACK_INTO = new Set(['import', 'preview']) // richiederebbero un nuovo parse
   function back() {
     setWizUndo(null)
     setStepIdx(i => {
-      for (let j = i - 1; j >= 0; j--) if (queue[j].id !== 'import') return j
+      for (let j = i - 1; j >= 0; j--) if (!NO_BACK_INTO.has(queue[j].id)) return j
       return i
     })
   }
   function canGoBack() {
     if (!queue) return false
-    for (let j = stepIdx - 1; j >= 0; j--) if (queue[j].id !== 'import') return true
+    for (let j = stepIdx - 1; j >= 0; j--) if (!NO_BACK_INTO.has(queue[j].id)) return true
     return false
   }
 
@@ -1389,6 +1439,37 @@ export default function ImportWizard({ onClose }) {
   function importedTxs(src) {
     const ids = new Set(results[src]?.savedTxIds || [])
     return transactions.filter(t => ids.has(t.txId) && !t.excluded)
+  }
+
+  // ── Flusso differito conto (2026-09) ──
+  // ImportModal ha solo parsato: teniamo le righe in attesa e andiamo all'anteprima.
+  function handleParsed(data) {
+    setPendingParsed({ src: 'conto', ...data })
+    setPreviewSel(new Set((data.parsedTxs || []).map((_, i) => i))) // di default tutte selezionate
+    next()
+  }
+  // Salvataggio finale (DOPO i doppioni): salva le righe superstiti + AI + regole.
+  async function commitConto(survivors, extraTxs = []) {
+    const pp = pendingParsed
+    if (!pp) return
+    setCommitting({ phase: 'save', pct: 0, current: 0, total: survivors.length, message: 'Avvio salvataggio…' })
+    let res = null
+    try {
+      res = await commitParsedTxs(survivors, {
+        onStatus: setCommitting,
+        extraTxs,
+        batchLabel: `Import ${pp.account}`,
+      })
+    } catch (e) {
+      console.error('[wizard] commitConto:', e)
+      setCommitting(null)
+      showToast('Errore durante il salvataggio dell’import: ' + (e?.message || e), 'error')
+      return
+    }
+    setCommitting(null)
+    setResults(r => ({ ...r, conto: { ...(res || {}), account: pp.account } }))
+    setPendingParsed(null)
+    next()
   }
 
   // Tutti i txId importati in QUESTO flusso (conto + carte) — usati per limitare
@@ -1512,13 +1593,14 @@ export default function ImportWizard({ onClose }) {
     const labels = []
     const seen = new Set()
     queue.forEach(s => {
-      const key = s.id === 'refine' ? `rifinisci-${s.src}` : s.id === 'import' ? `import-${s.src}` : s.id === 'doppioni' ? `doppioni-${s.src}` : s.id
+      const key = s.id === 'refine' ? `rifinisci-${s.src}` : s.id === 'import' ? `import-${s.src}` : s.id === 'preview' ? `preview-${s.src}` : s.id === 'doppioni' ? `doppioni-${s.src}` : s.id
       if (seen.has(key)) return
       seen.add(key)
       labels.push({ key, label:
         s.id === 'import' ? SRC_LABEL[s.src]
         : s.id === 'refine' ? `Rifinisci ${s.src}`
         : s.id === 'doppioni' ? `Doppioni ${s.src}`
+        : s.id === 'preview' ? `Anteprima ${s.src}`
         : s.id === 'paypal-result' ? 'Esito PayPal'
         : s.id === 'vacanze' ? 'Vacanze'
         : s.id === 'compensazioni' ? 'Compensazioni'
@@ -1526,7 +1608,7 @@ export default function ImportWizard({ onClose }) {
         : s.id === 'review' ? 'Transazioni'
         : 'Riepilogo' })
     })
-    const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id === 'doppioni' ? `doppioni-${step.src}` : step.id
+    const curKey = step.id === 'refine' ? `rifinisci-${step.src}` : step.id === 'import' ? `import-${step.src}` : step.id === 'preview' ? `preview-${step.src}` : step.id === 'doppioni' ? `doppioni-${step.src}` : step.id
     const curIdx = labels.findIndex(l => l.key === curKey)
     // Raggruppa in due macro-fasi (richiesta utente 2026-09): IMPORT base dati
     // (PayPal / Conto / Carte, ciascuno coi suoi sotto-step come pallini) e RIFINITURA
@@ -1704,7 +1786,14 @@ export default function ImportWizard({ onClose }) {
 
         {/* ── Import conto/carta/PayPal — EMBEDDED nella cornice (uniforme con gli altri step) ── */}
         {step && step.id === 'import' && (
-          step.src !== 'paypal'
+          step.src === 'conto'
+            ? <ImportModal
+                embedded
+                accountFilter="conto"
+                onClose={()=>skipSource('conto')}
+                onParsed={handleParsed}
+              />
+          : step.src !== 'paypal'
             ? <ImportModal
                 embedded
                 accountFilter={step.src}
@@ -1724,6 +1813,104 @@ export default function ImportWizard({ onClose }) {
                 paypalImports={appPrefs?.paypalImports || []}
               />
         )}
+
+        {/* ── Anteprima / selezione righe parsate (conto, 2026-09) — PRIMA del salvataggio ── */}
+        {step && step.id === 'preview' && pendingParsed && (() => {
+          const rows = pendingParsed.parsedTxs || []
+          const allSel = rows.length > 0 && previewSel.size === rows.length
+          const toggle = i => setPreviewSel(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
+          const toggleAll = () => setPreviewSel(allSel ? new Set() : new Set(rows.map((_, i) => i)))
+          const selCount = previewSel.size
+          const selSum = rows.reduce((s, t, i) => previewSel.has(i) ? s + (t.amount || 0) : s, 0)
+          return (
+            <>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
+                📋 Anteprima — {SRC_LABEL.conto} ({rows.length} lette dal file)
+              </div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:10}}>
+                Seleziona le transazioni da importare (di default sono tutte selezionate). Quelle deselezionate
+                verranno ignorate. Con <strong>Continua</strong> si passa al controllo doppioni; con <strong>Annulla</strong>
+                l'importazione del conto viene annullata.
+              </div>
+              <div style={{display:'flex',gap:10,marginBottom:10,fontSize:12}}>
+                <span style={{padding:'4px 10px',borderRadius:8,background:'var(--accent-l)',border:'1px solid var(--accent)',fontWeight:700}}>
+                  ✅ {selCount} selezionate
+                </span>
+                <span style={{padding:'4px 10px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'var(--font-mono)',fontWeight:700,color:selSum<0?'var(--red)':'var(--green)'}}>
+                  Σ {selSum<0?'−':'+'}€ {fmtIT(Math.abs(selSum),2)}
+                </span>
+              </div>
+              <div style={{overflow:'auto',maxHeight:'52vh',border:'1px solid var(--border)',borderRadius:10}}>
+                <table style={{width:'100%',borderCollapse:'collapse',minWidth:620}}>
+                  <thead>
+                    <tr>
+                      <th style={{padding:'8px 10px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:1,width:36}}>
+                        <input type="checkbox" checked={allSel} onChange={toggleAll} title="Seleziona/deseleziona tutte"/>
+                      </th>
+                      {['Data','Descrizione','Importo'].map((h,i)=>(
+                        <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
+                          color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',
+                          textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((t,i)=>{
+                      const on = previewSel.has(i)
+                      return (
+                        <tr key={t.txId||i} onClick={()=>toggle(i)}
+                          style={{borderBottom:'1px solid var(--border)',cursor:'pointer',opacity:on?1:.45,background:on?'transparent':'var(--surface2)'}}>
+                          <td style={{padding:'6px 10px',textAlign:'center'}}>
+                            <input type="checkbox" checked={on} onChange={()=>toggle(i)} onClick={e=>e.stopPropagation()}/>
+                          </td>
+                          <td style={{padding:'6px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
+                            {fmtDate(t._effDate||t.date)}
+                          </td>
+                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:340,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.description||''}>
+                            {t.descAI || (t.description||'').slice(0,80) || '—'}
+                          </td>
+                          <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
+                            color:(t.amount||0)>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
+                            {(t.amount||0)>=0?'+':'−'}€ {fmtIT(Math.abs(t.amount||0),2)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14}}>
+                <button className="btn btn-ghost" style={{fontSize:13,padding:'8px 18px',fontWeight:700}}
+                  onClick={()=>{ setPendingParsed(null); skipSource('conto') }}>
+                  Annulla
+                </button>
+                <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}}
+                  disabled={selCount===0}
+                  onClick={()=>{
+                    const selected = rows.filter((_,i)=>previewSel.has(i))
+                    setPendingParsed(pp => {
+                      // Se l'utente ha deselezionato righe in anteprima, il "saldo sistema" e
+                      // quindi il gap doppioni vanno ricalcolati SOLO sulle righe che verranno
+                      // davvero importate (altrimenti resterebbero calcolati su tutte le righe).
+                      const bd = pp.saldoBreakdown
+                      let targetGapDoppioni = pp.targetGapDoppioni
+                      let saldoBreakdown = bd
+                      if (bd) {
+                        const rawParsedTotal = Math.round(selected.reduce((s,t)=>s+(t.amount||0),0)*100)/100
+                        const saldoSistema = Math.round((bd.saldoAttuale + rawParsedTotal)*100)/100
+                        targetGapDoppioni = Math.round((saldoSistema - bd.nuovoSaldo)*100)/100
+                        saldoBreakdown = { ...bd, rawParsedTotal, saldoSistema }
+                      }
+                      return { ...pp, parsedTxs: selected, targetGapDoppioni, saldoBreakdown }
+                    })
+                    next()
+                  }}>
+                  Continua →
+                </button>
+              </div>
+            </>
+          )
+        })()}
 
         {/* ── Rifinitura (a/b): 3 schermate per sorgente ── */}
         {step && step.id === 'refine' && (
@@ -1746,9 +1933,27 @@ export default function ImportWizard({ onClose }) {
           </>
         )}
 
-        {/* ── Doppioni (richiesta utente 2026-07-13, punto 4): subito dopo la
-            rifinitura della sorgente, verifica contro il DB della stessa categoria ── */}
-        {step && step.id === 'doppioni' && (() => {
+        {/* ── Doppioni: verifica SEMPRE contro il DB (mai contro le righe di questo
+            stesso import). Per il conto (2026-09) opera sulle righe ANCORA NON salvate
+            (pendingParsed) e, a conferma, salva le superstiti via commitConto. ── */}
+        {step && step.id === 'doppioni' && committing && (
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'40vh',gap:14,textAlign:'center'}}>
+            <div style={{fontSize:15,fontWeight:700}}>💾 Salvataggio in corso…</div>
+            <div style={{width:'70%',maxWidth:420,height:8,borderRadius:6,background:'var(--surface2)',overflow:'hidden'}}>
+              <div style={{width:`${committing.pct||0}%`,height:'100%',background:'var(--accent)',transition:'width .2s'}}/>
+            </div>
+            <div style={{fontSize:12,color:'var(--text3)'}}>{committing.message || ''}</div>
+            {committing.eta && <div style={{fontSize:11,color:'var(--text3)'}}>{committing.eta}</div>}
+          </div>
+        )}
+        {step && step.id === 'doppioni' && !committing && step.src === 'conto' && pendingParsed && (
+          <DoppioniStep src="conto" srcTxs={pendingParsed.parsedTxs} embedded registerUndo={registerUndo}
+            unsaved onCommit={commitConto}
+            targetGapDoppioni={pendingParsed.targetGapDoppioni ?? null}
+            reconcileAccount={pendingParsed.account}
+            saldoBreakdown={pendingParsed.saldoBreakdown ?? null} onNext={next} />
+        )}
+        {step && step.id === 'doppioni' && !committing && !(step.src === 'conto' && pendingParsed) && (() => {
           const targetGapDoppioni = step.src === 'conto' ? (results.conto?.targetGapDoppioni ?? null) : null
           const reconcileAccount = step.src === 'conto' ? results.conto?.account : null
           const saldoBreakdown = step.src === 'conto' ? (results.conto?.saldoDoppioniBreakdown ?? null) : null
