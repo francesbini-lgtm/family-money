@@ -846,13 +846,13 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
                 })}
               </tbody>
             </table>
-            <button
-              className="pp-import-selected-btn"
-              onClick={doImport}
-              disabled={selected.size === 0}
-            >
-              ✅ Importa {selected.size} selezionati
-            </button>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginTop:14 }}>
+              <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+              <button className="btn btn-primary" onClick={doImport} disabled={selected.size === 0}
+                style={{ fontSize:14, padding:'9px 26px', fontWeight:700 }}>
+                ✅ Importa {selected.size} →
+              </button>
+            </div>
           </>
         )}
       </>
