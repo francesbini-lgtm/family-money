@@ -179,10 +179,13 @@ function CropOverlay({ imageUrl, onCancel, onApply }) {
 export default function MobileFotoRicevuta({ onClose }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
-  const pendingReceipts   = useStore(s => s.pendingReceipts)
-  const addPendingReceipt = useStore(s => s.addPendingReceipt)
+  const pendingReceipts      = useStore(s => s.pendingReceipts)
+  const addPendingReceipt    = useStore(s => s.addPendingReceipt)
+  const updatePendingReceipt = useStore(s => s.updatePendingReceipt)
+  const deletePendingReceipt = useStore(s => s.deletePendingReceipt)
 
-  const [step, setStep] = useState('photo') // photo | question | select | detail | manual | done
+  const [step, setStep] = useState('photo') // photo | question | select | detail | manual | done | history | historyEdit
+  const [histEdit, setHistEdit] = useState(null) // { kind:'pending'|'tx', id, date, desc, amount, url }
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [search, setSearch] = useState('')
@@ -378,7 +381,113 @@ export default function MobileFotoRicevuta({ onClose }) {
                 🖼️ Carica dalla galleria
                 <input type="file" accept="image/*" onChange={handlePickFile} style={{ display:'none' }}/>
               </label>
+              <button className="m-btn m-btn-ghost" onClick={() => setStep('history')}
+                style={{ marginTop:10, width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+                🗂 Storico caricamenti
+              </button>
               <button className="m-btn m-btn-ghost" onClick={onClose} style={{ marginTop:10, width:'100%' }}>Annulla</button>
+            </>
+          )}
+
+          {/* ── Storico caricamenti completati (richiesta utente 2026-09) ── */}
+          {step === 'history' && (() => {
+            const attached = transactions
+              .filter(t => Array.isArray(t.attachments) && t.attachments.length)
+              .sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
+            const thumb = url => url
+              ? <img src={url} alt="" style={{ width:44, height:44, objectFit:'cover', borderRadius:8, flexShrink:0 }}/>
+              : <div style={{ width:44, height:44, borderRadius:8, background:'rgba(255,255,255,.08)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>📄</div>
+            const Row = ({ url, title, sub, amount, onClick }) => (
+              <button onClick={onClick} style={{ display:'flex', alignItems:'center', gap:12, width:'100%', textAlign:'left',
+                background:'var(--m-card,rgba(255,255,255,.05))', border:'1px solid rgba(255,255,255,.08)', borderRadius:12, padding:'10px 12px', marginBottom:8, cursor:'pointer' }}>
+                {thumb(url)}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{title || '—'}</div>
+                  <div style={{ fontSize:11, color:'var(--text3)' }}>{sub}</div>
+                </div>
+                {amount != null && <div style={{ fontSize:13, fontWeight:800, fontFamily:'var(--font-mono)', color: amount>=0?'var(--green,#3fb56b)':'var(--red,#e0574f)' }}>{amount>=0?'+':'−'}€ {fmtIT(Math.abs(amount),2)}</div>}
+              </button>
+            )
+            return (
+              <>
+                <div style={{ fontSize:12.5, color:'var(--text3)', marginBottom:14, lineHeight:1.5 }}>
+                  Caricamenti completati. Tocca una voce per rivedere la foto e modificarne i dati.
+                </div>
+                {pendingReceipts.length === 0 && attached.length === 0 && (
+                  <div style={{ padding:'30px 10px', textAlign:'center', color:'var(--text3)', fontSize:13 }}>
+                    Nessun caricamento ancora.
+                  </div>
+                )}
+                {pendingReceipts.length > 0 && (
+                  <>
+                    <div style={{ fontSize:11, fontWeight:800, letterSpacing:'.05em', textTransform:'uppercase', color:'var(--text3)', margin:'2px 0 8px' }}>⏳ In attesa di abbinamento</div>
+                    {pendingReceipts.map(r => (
+                      <Row key={r.id} url={r.attachment?.url} title={r.description} sub={fmtDate(r.date)} amount={r.amount}
+                        onClick={() => { setHistEdit({ kind:'pending', id:r.id, date:r.date||'', desc:r.description||'', amount:String(r.amount ?? ''), url:r.attachment?.url }); setStep('historyEdit') }}/>
+                    ))}
+                  </>
+                )}
+                {attached.length > 0 && (
+                  <>
+                    <div style={{ fontSize:11, fontWeight:800, letterSpacing:'.05em', textTransform:'uppercase', color:'var(--text3)', margin:'14px 0 8px' }}>📎 Allegate a transazioni</div>
+                    {attached.map(t => (
+                      <Row key={t.txId} url={t.attachments[0]?.url} title={t.descAI || t.description} sub={fmtDate(t._effDate||t.date)} amount={t.amount}
+                        onClick={() => { setHistEdit({ kind:'tx', id:t.txId, date:(t._effDate||t.date)||'', desc:t.descAI||'', amount:String(t.amount ?? ''), url:t.attachments[0]?.url }); setStep('historyEdit') }}/>
+                    ))}
+                  </>
+                )}
+                <button className="m-btn m-btn-ghost" onClick={() => setStep('photo')} style={{ marginTop:14, width:'100%' }}>← Indietro</button>
+              </>
+            )
+          })()}
+
+          {step === 'historyEdit' && histEdit && (
+            <>
+              <div className="m-modal-title" style={{ fontSize:15, marginBottom:12 }}>
+                {histEdit.kind === 'pending' ? '⏳ Caricamento in attesa' : '📎 Caricamento allegato'}
+              </div>
+              {histEdit.url
+                ? <a href={histEdit.url} target="_blank" rel="noreferrer"><img src={histEdit.url} alt="ricevuta"
+                    style={{ width:'100%', maxHeight:260, objectFit:'contain', borderRadius:10, background:'rgba(0,0,0,.2)' }}/></a>
+                : <div style={{ padding:24, textAlign:'center', color:'var(--text3)' }}>Foto non disponibile</div>}
+              <div style={{ marginTop:14 }}>
+                <div className="m-field">
+                  <label className="m-label">Data</label>
+                  <input type="date" className="m-input" value={histEdit.date} onChange={e=>setHistEdit(h=>({...h,date:e.target.value}))} style={{ width:'auto', maxWidth:170 }}/>
+                </div>
+                <div className="m-field">
+                  <label className="m-label">Descrizione</label>
+                  <input className="m-input" type="text" value={histEdit.desc} onChange={e=>setHistEdit(h=>({...h,desc:e.target.value}))} placeholder="Descrizione"/>
+                </div>
+                <div className="m-field">
+                  <label className="m-label">Importo (€)</label>
+                  <input type="number" step="0.01" className="m-input" value={histEdit.amount} onChange={e=>setHistEdit(h=>({...h,amount:e.target.value}))} placeholder="es. −41.42"/>
+                </div>
+                {histEdit.kind === 'tx' && <div style={{ fontSize:11, color:'var(--text3)' }}>Modifica la transazione collegata a questa foto.</div>}
+              </div>
+              <div style={{ display:'flex', gap:8, marginTop:16 }}>
+                <button className="m-btn m-btn-ghost" onClick={() => setStep('history')} style={{ flex:1 }}>← Indietro</button>
+                <button className="m-btn m-btn-primary" style={{ flex:1 }}
+                  onClick={() => {
+                    const amt = parseFloat(String(histEdit.amount).replace(',', '.'))
+                    if (histEdit.kind === 'pending') {
+                      updatePendingReceipt(histEdit.id, { date: histEdit.date, description: histEdit.desc.trim(), amount: isNaN(amt) ? null : amt })
+                    } else {
+                      const patch = { descAI: histEdit.desc.trim(), date: histEdit.date }
+                      if (!isNaN(amt)) patch.amount = amt
+                      updateTransaction(histEdit.id, patch)
+                    }
+                    setStep('history')
+                  }}>
+                  💾 Salva
+                </button>
+              </div>
+              {histEdit.kind === 'pending' && (
+                <button className="m-btn m-btn-ghost" style={{ width:'100%', marginTop:8, color:'var(--red,#e0574f)' }}
+                  onClick={() => { if (window.confirm('Eliminare questo caricamento in attesa?')) { deletePendingReceipt(histEdit.id); setStep('history') } }}>
+                  🗑 Elimina caricamento
+                </button>
+              )}
             </>
           )}
 
