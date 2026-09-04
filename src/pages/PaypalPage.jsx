@@ -11,6 +11,7 @@ import { showToast } from '../services/notifications'
 import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
 import { PaypalIcon } from '../components/BrandIcons'
 import CompDaConfermare from '../components/CompDaConfermare'
+import HoverTip from '../components/HoverTip'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
@@ -767,11 +768,13 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
 
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginTop:(results||processing) ? 12 : 'auto' }}>
           <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
-          <button className="btn btn-primary" onClick={analyze}
-            disabled={!files.length || !apiKey || processing}
-            style={{ fontSize:14, padding:'9px 26px', fontWeight:700 }}>
-            {processing ? '⏳ Analisi…' : 'Continua →'}
-          </button>
+          <HoverTip text="Analizza screenshot/PDF con l’AI e proponi gli abbinamenti alle transazioni.">
+            <button className="btn btn-primary" onClick={analyze}
+              disabled={!files.length || !apiKey || processing}
+              style={{ fontSize:14, padding:'9px 26px', fontWeight:700 }}>
+              {processing ? '⏳ Analisi…' : 'Continua →'}
+            </button>
+          </HoverTip>
         </div>
 
         {processing && (

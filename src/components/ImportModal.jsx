@@ -6,6 +6,7 @@ import { applyCatRulesTo } from '../data/ruleMatching'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import { fmtDate, fmtIT, parseDecimalIT } from '../utils/format'
+import HoverTip from './HoverTip'
 import { DoppioniStep } from './ImportWizard'
 import './ImportModal.css'
 // spin animation added via CSS
@@ -1356,10 +1357,12 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
               <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,
                 position:'sticky',bottom:0,background:'var(--surface)',paddingTop:12,borderTop:'1px solid var(--border)'}}>
                 <button className="btn btn-secondary" onClick={()=>{ setCardPreview(null); onClose() }}>Annulla</button>
-                <button className="btn btn-primary" disabled={selCount===0}
-                  onClick={()=>{ const selected = rows.filter((_,i)=>cardPreviewSel.has(i)); setCardPreview(null); startCardReconcile(selected) }}>
-                  Continua →
-                </button>
+                <HoverTip text="Conferma la selezione e avvia la riconciliazione mensile con gli estratti del conto.">
+                  <button className="btn btn-primary" disabled={selCount===0}
+                    onClick={()=>{ const selected = rows.filter((_,i)=>cardPreviewSel.has(i)); setCardPreview(null); startCardReconcile(selected) }}>
+                    Continua →
+                  </button>
+                </HoverTip>
               </div>
             </div>
           )
@@ -1375,9 +1378,13 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
         {!isRunning && !done && !error && !cardReconcile && !cardPreview && !cardDoppioni && (
           <div className="modal-footer" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'auto'}}>
             <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
-            <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
-              Continua →
-            </button>
+            <HoverTip text={accountFilter === 'carta'
+              ? 'Leggi il file e mostra l’anteprima delle transazioni della carta.'
+              : 'Leggi il file e mostra l’anteprima delle transazioni da importare.'}>
+              <button className="btn btn-primary" onClick={handleImport} disabled={!files.length}>
+                Continua →
+              </button>
+            </HoverTip>
           </div>
         )}
         {error && !isRunning && (

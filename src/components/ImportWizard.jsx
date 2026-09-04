@@ -6,6 +6,7 @@ import { showToast } from '../services/notifications'
 import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
 import { commitParsedTxs } from '../data/importCommit'
+import HoverTip from './HoverTip'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
 import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException, SALDO_PIN } from '../pages/TransactionsPage'
@@ -1186,10 +1187,12 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               ? `${dropped.size} scartat${dropped.size===1?'a':'e'} · ${srcTxs.length - dropped.size} da importare`
               : `${srcTxs.length} transazioni da importare`}
           </span>
-          <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
-            disabled={committed} onClick={confirmUnsavedPlain}>
-            Avanti → salva e importa
-          </button>
+          <HoverTip text={`Salva ${srcTxs.length - dropped.size} transazioni e passa alla rifinitura delle categorie.`}>
+            <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
+              disabled={committed} onClick={confirmUnsavedPlain}>
+              Avanti → salva e importa
+            </button>
+          </HoverTip>
         </div>
       )}
       {reconciling && (
@@ -1207,11 +1210,14 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                 ⏭️ Salta
               </button>
             )}
-            <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
-              disabled={!resolved || committed} onClick={confirmReconcile}
-              title={resolved ? 'Conferma ed elimina i doppioni selezionati' : `Il saldo non torna ancora (differenza € ${fmtIT(Math.abs(remaining),2)})`}>
-              Avanti →
-            </button>
+            <HoverTip text={resolved
+              ? 'Elimina i doppioni selezionati, salva le transazioni e passa alla rifinitura.'
+              : `Il saldo non torna ancora: differenza € ${fmtIT(Math.abs(remaining),2)} da azzerare prima di proseguire.`}>
+              <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
+                disabled={!resolved || committed} onClick={confirmReconcile}>
+                Avanti →
+              </button>
+            </HoverTip>
           </div>
         </div>
       )}
@@ -1712,7 +1718,7 @@ export default function ImportWizard({ onClose }) {
   // Barra di navigazione condivisa: "← Indietro" (richiesta utente 2026-07-13,
   // punto 5 — disabilitato quando non c'è un precedente step "nativo" a cui
   // tornare, es. subito dopo un import CSV) + "Avanti →"/label custom
-  function StepNav({ nextLabel = 'Avanti →', onNextClick = next }) {
+  function StepNav({ nextLabel = 'Avanti →', onNextClick = next, tip = null }) {
     const canBack = canGoBack()
     return (
       <div style={{display:'flex',justifyContent:'space-between',marginTop:14}}>
@@ -1722,9 +1728,11 @@ export default function ImportWizard({ onClose }) {
             opacity:canBack?1:.5}}>
           ← Indietro
         </button>
-        <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={onNextClick}>
-          {nextLabel}
-        </button>
+        <HoverTip text={tip}>
+          <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}} onClick={onNextClick}>
+            {nextLabel}
+          </button>
+        </HoverTip>
       </div>
     )
   }
@@ -1916,6 +1924,7 @@ export default function ImportWizard({ onClose }) {
                   onClick={()=>{ setPendingParsed(null); skipSource('conto') }}>
                   Annulla
                 </button>
+                <HoverTip text="Conferma le transazioni selezionate e passa al controllo dei doppioni.">
                 <button className="btn btn-primary" style={{fontSize:13,padding:'8px 22px',fontWeight:700}}
                   disabled={selCount===0}
                   onClick={()=>{
@@ -1939,6 +1948,7 @@ export default function ImportWizard({ onClose }) {
                   }}>
                   Continua →
                 </button>
+                </HoverTip>
               </div>
             </>
           )
@@ -1961,7 +1971,11 @@ export default function ImportWizard({ onClose }) {
               onOpenRulePopup={setRulePopup}
               emptyMsg={KIND_LABEL[step.kind].empty}
             />
-            <StepNav/>
+            <StepNav tip={
+              step.kind === 'l2'   ? 'Conferma le sottocategorie e passa alla rifinitura delle descrizioni.'
+              : step.kind === 'desc' ? 'Conferma le descrizioni e passa alla verifica delle categorie AI.'
+              : 'Conferma le categorie AI e prosegui con l’import (compensazioni o prossima sorgente).'
+            }/>
           </>
         )}
 
@@ -1994,7 +2008,7 @@ export default function ImportWizard({ onClose }) {
               <DoppioniStep src={step.src} srcTxs={importedTxs(step.src)} embedded registerUndo={registerUndo}
                 targetGapDoppioni={targetGapDoppioni} reconcileAccount={reconcileAccount}
                 saldoBreakdown={saldoBreakdown} onNext={next} />
-              {targetGapDoppioni == null && <StepNav/>}
+              {targetGapDoppioni == null && <StepNav tip="Conferma i doppioni e prosegui con la rifinitura delle transazioni."/>}
             </>
           )
         })()}
@@ -2082,7 +2096,7 @@ export default function ImportWizard({ onClose }) {
                   </div>
                 </>
               )}
-              <StepNav/>
+              <StepNav tip="Conferma l’esito PayPal e passa alle compensazioni."/>
             </>
           )
         })()}
@@ -2109,7 +2123,7 @@ export default function ImportWizard({ onClose }) {
                 <CompDaConfermare txs={transactions.filter(t => !t.excluded && t.cardImportCard4)} scope="carte" incomeLabel="📥 Rimborso carta" limitTxIds={importedIdSet}/>
               </div>
             </div>
-            <StepNav/>
+            <StepNav tip="Conferma le compensazioni e passa al riconoscimento di vacanze e weekend."/>
           </>
         )}
 
@@ -2120,7 +2134,7 @@ export default function ImportWizard({ onClose }) {
         {step && step.id === 'vacanze' && (
           <>
             <VacanzeMegaStep importedIdSet={importedIdSet} vacMinDate={vacMinDate} vacMaxDate={vacMaxDate} registerUndo={registerUndo} />
-            <StepNav/>
+            <StepNav tip="Conferma vacanze e weekend e passa al riepilogo delle transazioni importate."/>
           </>
         )}
 
@@ -2197,7 +2211,7 @@ export default function ImportWizard({ onClose }) {
                   deletePendingReceipt(receipt.id)
                 })
                 next()
-              }}/>
+              }} tip="Abbina le ricevute selezionate alle transazioni e passa al riepilogo."/>
             </>
           )
         })()}
@@ -2233,7 +2247,7 @@ export default function ImportWizard({ onClose }) {
                   emptyMsg="Nessuna transazione da rivedere."
                 />
               )}
-              <StepNav nextLabel="✓ Conferma tutto →"/>
+              <StepNav nextLabel="✓ Conferma tutto →" tip="Conferma tutte le transazioni importate e vai al riepilogo finale dell’import."/>
             </>
           )
         })()}
