@@ -20,6 +20,19 @@ import { findVacationForDate, isVacationEligible } from './vacationRules'
 
 const IMPORT_ENRICH_BATCH = 15  // stesso batch size di AI Enrichment in Transazioni
 
+// ── Storico import (appPrefs.importLog) ──
+// Registra un record per ogni import completato, così la prima schermata dell'import
+// può mostrare lo storico (data, tipo, somma, n. transazioni, vecchio/nuovo saldo, tappo).
+// Cap a 200 record, più recente in testa.
+export function logImport(entry) {
+  const { appPrefs, setAppPref } = useStore.getState()
+  const rec = { id: 'imp-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    at: new Date().toISOString(), ...entry }
+  const prev = Array.isArray(appPrefs?.importLog) ? appPrefs.importLog : []
+  setAppPref('importLog', [rec, ...prev].slice(0, 200))
+  return rec
+}
+
 function calcETA(startTime, doneCount, totalCount) {
   if (!startTime || doneCount === 0) return null
   const elapsed = (Date.now() - startTime) / 1000

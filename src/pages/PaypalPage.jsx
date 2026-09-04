@@ -12,6 +12,7 @@ import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from 
 import { PaypalIcon } from '../components/BrandIcons'
 import CompDaConfermare from '../components/CompDaConfermare'
 import HoverTip from '../components/HoverTip'
+import { logImport } from '../data/importCommit'
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
@@ -136,6 +137,13 @@ export function applyPaypalImport(newItems, { paypalImports, transactions, updat
   })
 
   setAppPref('paypalImports', afterMatch)
+
+  // Storico import (PayPal): le operazioni PayPal arricchiscono righe del conto già
+  // esistenti, quindi non modificano il saldo → oldSaldo/newSaldo/tappo non applicabili.
+  try {
+    const sum = Math.round(withId.reduce((s, i) => s + (i.amount || 0), 0) * 100) / 100
+    logImport({ type: 'paypal', count: withId.length, sum, oldSaldo: null, newSaldo: null, tappo: null })
+  } catch (e) { console.warn('[paypal] logImport', e) }
 
   const isNew = (imp) => withId.some(w => w.id === imp.id)
   return {

@@ -5,8 +5,9 @@ import { fmtIT, parseDecimalIT } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
-import { commitParsedTxs } from '../data/importCommit'
+import { commitParsedTxs, logImport } from '../data/importCommit'
 import HoverTip from './HoverTip'
+import ImportHistoryModal from './ImportHistoryModal'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
 import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException, SALDO_PIN } from '../pages/TransactionsPage'
@@ -1304,6 +1305,7 @@ export default function ImportWizard({ onClose }) {
   }
 
   const [sources, setSources] = useState({ conto: true, carta: false, paypal: false })
+  const [showHistory, setShowHistory] = useState(false)  // storico import (prima schermata)
   const [queue,   setQueue]   = useState(null)   // null = schermata di selezione
   const [stepIdx, setStepIdx] = useState(0)
   const [results, setResults] = useState({})     // { conto: {...}, carta: {...}, paypal: {...} }
@@ -1504,6 +1506,16 @@ export default function ImportWizard({ onClose }) {
       return
     }
     setCommitting(null)
+    // Storico import (richiesta utente 2026-09): registra data, tipo, somma, n. tx,
+    // vecchio/nuovo saldo e tappo per la schermata "Storico import".
+    try {
+      const sum = Math.round(survivors.reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
+      const tappo = Math.round((extraTxs || []).filter(t => t._doppioniTappo).reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
+      const oldSaldo = pp.saldoBreakdown?.saldoAttuale ?? null
+      const newSaldo = oldSaldo != null ? Math.round((oldSaldo + sum) * 100) / 100 : null
+      logImport({ type: 'conto', account: pp.account, count: survivors.length, sum,
+        oldSaldo, newSaldo, tappo, declaredSaldo: pp.saldoBreakdown?.nuovoSaldo ?? null })
+    } catch (e) { console.warn('[wizard] logImport conto', e) }
     setResults(r => ({ ...r, conto: { ...(res || {}), account: pp.account } }))
     setPendingParsed(null)
     next()
@@ -1808,9 +1820,17 @@ export default function ImportWizard({ onClose }) {
                 })}
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-                borderTop:'1px solid var(--border)',paddingTop:18}}>
-                <div style={{fontSize:13,color:'var(--text3)'}}>
-                  <b style={{color:'var(--text)'}}>{nSel}</b> {nSel===1?'selezionato':'selezionati'}
+                borderTop:'1px solid var(--border)',paddingTop:18,gap:12}}>
+                <div style={{display:'flex',alignItems:'center',gap:14}}>
+                  <button onClick={()=>setShowHistory(true)}
+                    style={{fontSize:13,padding:'8px 14px',fontWeight:700,borderRadius:8,cursor:'pointer',
+                      background:'transparent',border:'1px solid var(--border)',color:'var(--text2)'}}
+                    title="Storico di tutti gli import effettuati">
+                    🕘 Storico import
+                  </button>
+                  <span style={{fontSize:13,color:'var(--text3)'}}>
+                    <b style={{color:'var(--text)'}}>{nSel}</b> {nSel===1?'selezionato':'selezionati'}
+                  </span>
                 </div>
                 <button disabled={nSel===0}
                   className="btn btn-primary" style={{fontSize:14,padding:'12px 26px',fontWeight:700}}
@@ -1822,6 +1842,8 @@ export default function ImportWizard({ onClose }) {
           </div>
           )
         })()}
+
+        {showHistory && <ImportHistoryModal onClose={()=>setShowHistory(false)}/>}
 
         {/* ── Import conto/carta/PayPal — EMBEDDED nella cornice (uniforme con gli altri step) ── */}
         {step && step.id === 'import' && (

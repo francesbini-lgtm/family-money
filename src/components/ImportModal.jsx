@@ -7,6 +7,7 @@ import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
 import { fmtDate, fmtIT, parseDecimalIT } from '../utils/format'
 import HoverTip from './HoverTip'
+import { logImport } from '../data/importCommit'
 import { DoppioniStep } from './ImportWizard'
 import './ImportModal.css'
 // spin animation added via CSS
@@ -1030,6 +1031,13 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
     }
     setStatus({ phase:'verify', pct:100, current:0, total:0, eta:null, message:'✓ Saldo confermato invariato' })
     await new Promise(r => setTimeout(r, 150))
+
+    // Storico import (carte): saldo invariato per costruzione (oldSaldo == newSaldo).
+    try {
+      const sum = Math.round(survivors.reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
+      logImport({ type: 'carta', account: acc.name, card4, count: survivors.length, sum,
+        oldSaldo: saldoBefore, newSaldo: saldoAfter, tappo: 0 })
+    } catch (e) { console.warn('[import] logImport carta', e) }
 
     // ── Saldo validato: SOLO ORA gira l'AI ──────────────────────────
     const enrichResult = await runEnrichmentStep(saveResult.savedTxs)
