@@ -34,6 +34,12 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
+// Riconosce un PDF sia da un File (type/name) sia da un attachment salvato (type/name/url).
+function isPdfFile(f) {
+  if (!f) return false
+  return f.type === 'application/pdf' || /\.pdf($|\?)/i.test(f.name || f.url || '')
+}
+
 // Ridimensiona+ricomprime l'immagine lato client (max 1600px, JPEG q.80) prima
 // dell'upload — le foto scattate da fotocamera possono essere 5-10MB, causando
 // upload lentissimi su rete mobile che sembrano "bloccati" senza feedback.
@@ -378,8 +384,8 @@ export default function MobileFotoRicevuta({ onClose }) {
                 <input type="file" accept="image/*" capture="environment" onChange={handlePickFile} style={{ display:'none' }}/>
               </label>
               <label className="m-btn m-btn-ghost" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, cursor:'pointer', marginTop:10 }}>
-                🖼️ Carica dalla galleria
-                <input type="file" accept="image/*" onChange={handlePickFile} style={{ display:'none' }}/>
+                🖼️ Carica foto o PDF
+                <input type="file" accept="image/*,application/pdf" onChange={handlePickFile} style={{ display:'none' }}/>
               </label>
               <button className="m-btn m-btn-ghost" onClick={() => setStep('history')}
                 style={{ marginTop:10, width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
@@ -394,13 +400,13 @@ export default function MobileFotoRicevuta({ onClose }) {
             const attached = transactions
               .filter(t => Array.isArray(t.attachments) && t.attachments.length)
               .sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
-            const thumb = url => url
-              ? <img src={url} alt="" style={{ width:44, height:44, objectFit:'cover', borderRadius:8, flexShrink:0 }}/>
-              : <div style={{ width:44, height:44, borderRadius:8, background:'rgba(255,255,255,.08)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>📄</div>
-            const Row = ({ url, title, sub, amount, onClick }) => (
+            const thumb = att => (att?.url && !isPdfFile(att))
+              ? <img src={att.url} alt="" style={{ width:44, height:44, objectFit:'cover', borderRadius:8, flexShrink:0 }}/>
+              : <div style={{ width:44, height:44, borderRadius:8, background:'rgba(255,255,255,.08)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:20 }}>📄</div>
+            const Row = ({ att, title, sub, amount, onClick }) => (
               <button onClick={onClick} style={{ display:'flex', alignItems:'center', gap:12, width:'100%', textAlign:'left',
                 background:'var(--m-card,rgba(255,255,255,.05))', border:'1px solid rgba(255,255,255,.08)', borderRadius:12, padding:'10px 12px', marginBottom:8, cursor:'pointer' }}>
-                {thumb(url)}
+                {thumb(att)}
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:13, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{title || '—'}</div>
                   <div style={{ fontSize:11, color:'var(--text3)' }}>{sub}</div>
@@ -422,8 +428,8 @@ export default function MobileFotoRicevuta({ onClose }) {
                   <>
                     <div style={{ fontSize:11, fontWeight:800, letterSpacing:'.05em', textTransform:'uppercase', color:'var(--text3)', margin:'2px 0 8px' }}>⏳ In attesa di abbinamento</div>
                     {pendingReceipts.map(r => (
-                      <Row key={r.id} url={r.attachment?.url} title={r.description} sub={fmtDate(r.date)} amount={r.amount}
-                        onClick={() => { setHistEdit({ kind:'pending', id:r.id, date:r.date||'', desc:r.description||'', amount:String(r.amount ?? ''), url:r.attachment?.url }); setStep('historyEdit') }}/>
+                      <Row key={r.id} att={r.attachment} title={r.description} sub={fmtDate(r.date)} amount={r.amount}
+                        onClick={() => { setHistEdit({ kind:'pending', id:r.id, date:r.date||'', desc:r.description||'', amount:String(r.amount ?? ''), url:r.attachment?.url, pdf:isPdfFile(r.attachment), name:r.attachment?.name }); setStep('historyEdit') }}/>
                     ))}
                   </>
                 )}
@@ -431,8 +437,8 @@ export default function MobileFotoRicevuta({ onClose }) {
                   <>
                     <div style={{ fontSize:11, fontWeight:800, letterSpacing:'.05em', textTransform:'uppercase', color:'var(--text3)', margin:'14px 0 8px' }}>📎 Allegate a transazioni</div>
                     {attached.map(t => (
-                      <Row key={t.txId} url={t.attachments[0]?.url} title={t.descAI || t.description} sub={fmtDate(t._effDate||t.date)} amount={t.amount}
-                        onClick={() => { setHistEdit({ kind:'tx', id:t.txId, date:(t._effDate||t.date)||'', desc:t.descAI||'', amount:String(t.amount ?? ''), url:t.attachments[0]?.url }); setStep('historyEdit') }}/>
+                      <Row key={t.txId} att={t.attachments[0]} title={t.descAI || t.description} sub={fmtDate(t._effDate||t.date)} amount={t.amount}
+                        onClick={() => { setHistEdit({ kind:'tx', id:t.txId, date:(t._effDate||t.date)||'', desc:t.descAI||'', amount:String(t.amount ?? ''), url:t.attachments[0]?.url, pdf:isPdfFile(t.attachments[0]), name:t.attachments[0]?.name }); setStep('historyEdit') }}/>
                     ))}
                   </>
                 )}
@@ -446,10 +452,20 @@ export default function MobileFotoRicevuta({ onClose }) {
               <div className="m-modal-title" style={{ fontSize:15, marginBottom:12 }}>
                 {histEdit.kind === 'pending' ? '⏳ Caricamento in attesa' : '📎 Caricamento allegato'}
               </div>
-              {histEdit.url
-                ? <a href={histEdit.url} target="_blank" rel="noreferrer"><img src={histEdit.url} alt="ricevuta"
-                    style={{ width:'100%', maxHeight:260, objectFit:'contain', borderRadius:10, background:'rgba(0,0,0,.2)' }}/></a>
-                : <div style={{ padding:24, textAlign:'center', color:'var(--text3)' }}>Foto non disponibile</div>}
+              {!histEdit.url
+                ? <div style={{ padding:24, textAlign:'center', color:'var(--text3)' }}>Documento non disponibile</div>
+                : histEdit.pdf
+                  ? <a href={histEdit.url} target="_blank" rel="noreferrer" style={{ textDecoration:'none' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:12, padding:'18px 14px', borderRadius:10, background:'rgba(0,0,0,.2)', border:'1px solid rgba(255,255,255,.08)' }}>
+                        <span style={{ fontSize:34 }}>📄</span>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{histEdit.name || 'documento.pdf'}</div>
+                          <div style={{ fontSize:11, color:'var(--accent,#e07b39)' }}>Apri PDF ↗</div>
+                        </div>
+                      </div>
+                    </a>
+                  : <a href={histEdit.url} target="_blank" rel="noreferrer"><img src={histEdit.url} alt="ricevuta"
+                      style={{ width:'100%', maxHeight:260, objectFit:'contain', borderRadius:10, background:'rgba(0,0,0,.2)' }}/></a>}
               <div style={{ marginTop:14 }}>
                 <div className="m-field">
                   <label className="m-label">Data</label>
@@ -499,15 +515,25 @@ export default function MobileFotoRicevuta({ onClose }) {
             <>
               {preview && (
                 <>
-                  <img src={preview} alt="" style={{ width:'100%', maxHeight:360, objectFit:'contain', borderRadius:10, background:'var(--surface2,var(--surface))' }}/>
+                  {isPdfFile(file)
+                    ? <div style={{ display:'flex', alignItems:'center', gap:12, padding:'18px 14px', borderRadius:10, background:'var(--surface2,var(--surface))' }}>
+                        <span style={{ fontSize:34 }}>📄</span>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{file?.name || 'documento.pdf'}</div>
+                          <div style={{ fontSize:11, color:'var(--text3)' }}>PDF</div>
+                        </div>
+                      </div>
+                    : <img src={preview} alt="" style={{ width:'100%', maxHeight:360, objectFit:'contain', borderRadius:10, background:'var(--surface2,var(--surface))' }}/>}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'6px 2px 14px' }}>
                     <span style={{ fontSize:11, color:'var(--text3)', fontFamily:'var(--font-mono)' }}>
                       {formatBytes(file?.size)}
                     </span>
-                    <button onClick={() => setCropping(true)}
-                      style={{ background:'none', border:'none', color:'var(--accent,#e07b39)', fontSize:12, fontWeight:600, padding:0, cursor:'pointer' }}>
-                      ✂️ Ritaglia
-                    </button>
+                    {!isPdfFile(file) && (
+                      <button onClick={() => setCropping(true)}
+                        style={{ background:'none', border:'none', color:'var(--accent,#e07b39)', fontSize:12, fontWeight:600, padding:0, cursor:'pointer' }}>
+                        ✂️ Ritaglia
+                      </button>
+                    )}
                   </div>
                 </>
               )}
