@@ -5,7 +5,7 @@ import { enrichBatch, hasGeminiKey, cleanRawDescFallback } from '../data/aiServi
 import { applyCatRulesTo } from '../data/ruleMatching'
 import { findVacationForDate, isVacationEligible } from '../data/vacationRules'
 import { X, Upload, Sparkles, Clock, Search } from 'lucide-react'
-import { fmtDate, fmtIT, parseDecimalIT } from '../utils/format'
+import { fmtDate, fmtIT, parseDecimalIT, formatThousandsTyping } from '../utils/format'
 import HoverTip from './HoverTip'
 import { logImport } from '../data/importCommit'
 import { DoppioniStep } from './ImportWizard'
@@ -1123,7 +1123,7 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
                         <strong style={{color:'var(--text2)'}}>{fmtDate(t.date)}</strong> — {desc}
                       </span>
                       <span style={{flexShrink:0,fontFamily:'var(--font-mono)',color:t.amount<0?'var(--red)':'var(--green)'}}>
-                        {t.amount<0?'−':'+'}€{Math.abs(t.amount).toLocaleString('it-IT',{minimumFractionDigits:2})}
+                        {t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}
                       </span>
                     </span>
                   )
@@ -1136,8 +1136,8 @@ export default function ImportModal({ onClose, accountFilter = null, onFlowDone 
                 <label className="form-label" style={{marginTop:14}}>
                   Nuovo saldo (dal tuo conto in banca, dopo questo estratto) — opzionale
                 </label>
-                <input type="text" inputMode="decimal" className="form-select" placeholder="es. 3245,50"
-                  value={nuovoSaldo} onChange={e=>setNuovoSaldo(e.target.value)}/>
+                <input type="text" inputMode="decimal" className="form-select" placeholder="es. 3.245,50"
+                  value={nuovoSaldo} onChange={e=>setNuovoSaldo(formatThousandsTyping(e.target.value))}/>
                 <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>
                   Se lo inserisci, nello step Doppioni ti diremo esattamente quanti euro di doppioni
                   cercare (differenza tra il saldo che dichiari e quello che il sistema calcola dalle

@@ -10,8 +10,41 @@ export function parseDecimalIT(s) {
   if (s == null) return NaN
   let str = String(s).trim()
   if (str === '') return NaN
-  if (str.includes(',')) str = str.replace(/\./g, '').replace(',', '.')
-  return parseFloat(str)
+  const neg = str.startsWith('-')
+  str = str.replace(/[^\d.,]/g, '')
+  if (str === '') return NaN
+  if (str.includes(',')) {
+    // virgola = decimale, punti = migliaia
+    str = str.replace(/\./g, '').replace(',', '.')
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(str)) {
+    // nessuna virgola ma punti a gruppi di 3 (es. "5.500", "1.234.567") = migliaia
+    str = str.replace(/\./g, '')
+  }
+  // altrimenti un singolo punto con 1-2 (o 4+) cifre resta decimale (es. "274907.22")
+  const n = parseFloat(str)
+  return Number.isNaN(n) ? NaN : (neg ? -n : n)
+}
+
+// Formattazione LIVE mentre l'utente digita un numero in stile italiano: migliaia col
+// punto, decimali con la virgola. Tollera stati intermedi ("1.234," o "1.234,5"). La
+// virgola è il separatore decimale; i punti sono solo raggruppamento (rimossi e
+// ricalcolati). Da usare come: onChange={e => set(formatThousandsTyping(e.target.value))}.
+// L'accoppiata con parseDecimalIT è esatta: parseDecimalIT("273.320,33") === 273320.33.
+export function formatThousandsTyping(raw) {
+  let s = String(raw ?? '').replace(/[^\d.,-]/g, '')
+  const neg = s.startsWith('-')
+  s = s.replace(/-/g, '').replace(/\./g, '')          // via segno e punti migliaia esistenti
+  const firstComma = s.indexOf(',')
+  let intPart, decPart
+  if (firstComma === -1) { intPart = s; decPart = null }
+  else {
+    intPart = s.slice(0, firstComma)
+    decPart = s.slice(firstComma + 1).replace(/,/g, '').slice(0, 2)  // una sola virgola, max 2 decimali
+  }
+  intPart = intPart.replace(/^0+(?=\d)/, '')          // niente zeri iniziali superflui
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  const out = decPart != null ? `${grouped || '0'},${decPart}` : grouped
+  return (neg ? '-' : '') + out
 }
 
 export function fmtIT(n, decimals = 0) {

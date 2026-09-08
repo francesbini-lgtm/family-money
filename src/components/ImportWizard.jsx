@@ -1,13 +1,14 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useStore } from '../store/useStore'
 import { getMergedCats } from '../data/categories'
-import { fmtIT, parseDecimalIT } from '../utils/format'
+import { fmtIT, parseDecimalIT, formatThousandsTyping } from '../utils/format'
 import { showToast } from '../services/notifications'
 import { isCompensated, compensateGroup, netAmt } from '../data/compensation'
 import ImportModal from './ImportModal'
 import { commitParsedTxs, logImport } from '../data/importCommit'
 import HoverTip from './HoverTip'
 import ImportHistoryModal from './ImportHistoryModal'
+import LongText from './LongText'
 import CompDaConfermare, { findCompPairs } from './CompDaConfermare'
 import { PaypalImportModal, applyPaypalImport, isPayPal } from '../pages/PaypalPage'
 import { RuleApplyPopup, autoDetectMatch, txMatchesRule, parseRuleText, learnException, SALDO_PIN } from '../pages/TransactionsPage'
@@ -804,6 +805,21 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
     [src, srcTxs, transactions, handled]
   )
 
+  // Transazioni già nel DB nello STESSO periodo dell'import (stessa categoria conto/carte),
+  // mostrate a sinistra come riferimento per il confronto manuale (richiesta utente 2026-09).
+  const dbInFrame = useMemo(() => {
+    const dates = srcTxs.map(t => t.date).filter(Boolean)
+    if (!dates.length) return []
+    const minD = dates.reduce((a, b) => a < b ? a : b)
+    const maxD = dates.reduce((a, b) => a > b ? a : b)
+    const isCarta = t => !!t.cardImportCard4
+    const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
+    const srcIds = new Set(srcTxs.map(t => t.txId))
+    return transactions
+      .filter(t => !t.excluded && !srcIds.has(t.txId) && sameCategory(t) && (t.date || '') >= minD && (t.date || '') <= maxD)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  }, [transactions, srcTxs, src])
+
   // ── Controllo saldo → target doppioni (richiesta utente 2026-07-15, solo conto,
   // solo se l'utente ha dichiarato il "nuovo saldo" durante l'import — vedi
   // ImportModal.jsx targetGapDoppioni). A differenza del comportamento "elimina
@@ -824,13 +840,8 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
     saldoBreakdown && saldoBreakdown.nuovoSaldo != null ? String(saldoBreakdown.nuovoSaldo) : ''
   )
 
-  // Pre-seleziona i doppioni rilevati automaticamente al primo render di questo step
-  const seededRef = useRef(false)
-  if (reconciling && !seededRef.current) {
-    seededRef.current = true
-    setSelected(new Set(dupes.map(d => d.t.txId)))
-  }
-
+  // Niente pre-selezione automatica (richiesta utente 2026-09): l'utente seleziona a
+  // mano i doppioni confrontando le due colonne finché la differenza non torna a zero.
   const dupeIdsSet = useMemo(() => new Set(dupes.map(d => d.t.txId)), [dupes])
   const selectedSum = useMemo(() => {
     if (!reconciling) return 0
@@ -1000,60 +1011,35 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                 : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
           </div>
           {saldoBreakdown && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '2px 0 10px', alignItems: 'center' }}>
-              <MetricChip label="Saldo pre import" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoAttuale, 2)} />
-              <MetricChip label="Somma operazioni caricate" fg="var(--gold)" bg="var(--gold-l)" value={fmtIT(saldoBreakdown.rawParsedTotal, 2)} />
-              <MetricChip label="Saldo post import" fg="var(--blue)" bg="var(--blue-l)" value={fmtIT(saldoBreakdown.saldoSistema, 2)} />
-              <MetricChip label="Nuovo saldo (da banca)" fg="var(--green)" bg="var(--green-l)">
-                <input type="text" inputMode="decimal" value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(e.target.value)}
-                  style={{ width: 108, padding: '2px 6px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12,
+            <div style={{ marginTop: 4, fontSize: 12.5, fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 3, lineHeight: 1.55 }}>
+              <div style={{ color: 'var(--text3)' }}>Conto usato: {saldoBreakdown.account}</div>
+              <div>Saldo pre import: <strong>€ {fmtIT(saldoBreakdown.saldoAttuale, 2)}</strong></div>
+              <div>+ Somma operazioni caricate: <strong>€ {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</strong></div>
+              <div>= Saldo post import: <strong>€ {fmtIT(saldoBreakdown.saldoSistema, 2)}</strong></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span>− Nuovo saldo (da banca): €</span>
+                <input type="text" inputMode="decimal" value={editedNuovoSaldo} onChange={e => setEditedNuovoSaldo(formatThousandsTyping(e.target.value))}
+                  style={{ width: 118, padding: '2px 6px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5,
                     border: '1px solid var(--green)', borderRadius: 6, background: 'var(--surface, #fff)', color: 'var(--text)' }} />
-              </MetricChip>
-              <MetricChip label="Gap" strong value={fmtIT(effectiveTarget, 2)}
-                fg={resolved ? 'var(--green)' : 'var(--red)'} bg={resolved ? 'var(--green-l)' : 'var(--red-l)'} />
-            </div>
-          )}
-          {gapPositive && (
-            <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span>Doppioni attesi: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong></span>
-              <span>Selezionati: <strong style={{ fontFamily: 'var(--font-mono)' }}>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></span>
-              {hasTappo && (
-                <span>Rettifica: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></span>
+              </div>
+              <div style={{ fontWeight: 700 }}>= Gap: <strong style={{ color: resolved ? 'var(--green)' : 'var(--red)' }}>€ {fmtIT(effectiveTarget, 2)}</strong></div>
+              <div style={{ borderTop: '1px solid var(--border)', margin: '6px 0 1px' }} />
+              <div>Doppioni selezionati: <strong>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></div>
+              {hasTappo && <div>Rettifica (tappo): <strong style={{ color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></div>}
+              <div style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>Differenza: € {fmtIT(Math.abs(remaining), 2)}</div>
+              {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
+                <div style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 4, fontSize: 11 }}>
+                  ⚠️ Saldo pre import risulta 0 — se hai già transazioni registrate, qualcosa non torna nel calcolo del saldo.
+                </div>
               )}
-              <span style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>
-                Differenza: € {fmtIT(Math.abs(remaining), 2)}
-              </span>
             </div>
           )}
           {gapNegative && !resolved && (
-            <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.5, marginTop: 10, fontFamily: 'var(--font-sans, inherit)' }}>
               Il sistema calcola <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> in <strong>meno</strong> del saldo
               che hai dichiarato dalla banca. Togliere doppioni abbasserebbe ancora il saldo, quindi qui non è possibile:
               puoi creare una rettifica (tappo) di <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> per allineare al
               saldo banca, oppure lasciare così e proseguire (Salta).
-            </div>
-          )}
-          {saldoBreakdown && (
-            <div style={{ marginTop: 8 }}>
-              <button onClick={() => setShowBreakdown(v => !v)}
-                style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
-                {showBreakdown ? '▾' : '▸'} Il numero sembra sbagliato? Vedi il dettaglio del calcolo
-              </button>
-              {showBreakdown && (
-                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span>Conto usato: {saldoBreakdown.account}</span>
-                  <span>Saldo pre import: € {fmtIT(saldoBreakdown.saldoAttuale, 2)}</span>
-                  <span>+ Somma operazioni caricate: € {fmtIT(saldoBreakdown.rawParsedTotal, 2)}</span>
-                  <span>= Saldo post import: € {fmtIT(saldoBreakdown.saldoSistema, 2)}</span>
-                  <span>− Nuovo saldo (da banca): € {fmtIT(nuovoSaldoNum, 2)}</span>
-                  <span style={{ fontWeight: 700 }}>= Gap: € {fmtIT(effectiveTarget, 2)}</span>
-                  {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
-                    <span style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 2 }}>
-                      ⚠️ Saldo pre import risulta 0 — se hai già transazioni registrate, qualcosa non torna nel calcolo del saldo.
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           )}
           {!resolved && reconcileAccount && (
@@ -1108,68 +1094,57 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
             </div>
           ))}
         </div>
-      ) : (
-        <>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Rilevati automaticamente ({dupes.length})</div>
-          {dupes.length === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>Nessun doppione rilevato automaticamente — se il saldo non torna, cercalo qui sotto fra tutte le transazioni.</div>
-          )}
-          {/* Confronto a due colonne (richiesta utente 2026-09): a sinistra la transazione
-              GIÀ nel DB, a destra la NUOVA in arrivo dal CSV — così si verifica se è davvero
-              un doppione prima di eliminarla. */}
-          <div style={{ display:'flex', gap:8, padding:'0 12px 4px 32px', fontSize:10, fontWeight:800, letterSpacing:'.04em', textTransform:'uppercase', color:'var(--text3)' }}>
-            <span style={{flex:1}}>🗄️ Già nel DB</span>
-            <span style={{width:16}}/>
-            <span style={{flex:1}}>📥 In arrivo dal CSV</span>
-          </div>
-          <div style={{ maxHeight: '34vh', overflow: 'auto', marginBottom: 12 }}>
-            {dupes.map(d => {
-              const cell = (tx, bg) => (
-                <div style={{ flex:1, minWidth:0, background:bg, borderRadius:6, padding:'5px 8px' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', gap:6 }}>
-                    <span style={{ fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11 }}>{fmtDate(tx.date)}</span>
-                    <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, color:tx.amount<0?'var(--red)':'var(--green)' }}>
-                      {tx.amount<0?'−':'+'}€ {fmtIT(Math.abs(tx.amount),2)}
-                    </span>
-                  </div>
-                  <div style={{ fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:11.5 }}
-                    title={tx.descAI||tx.description||''}>{tx.descAI || (tx.description||'').slice(0,60)}</div>
-                </div>
-              )
-              return (
-                <label key={d.t.txId} style={{ display:'flex', alignItems:'center', gap:8,
-                  border:`1px solid ${selected.has(d.t.txId)?'var(--accent)':'var(--border)'}`, borderRadius:8, padding:'6px 10px', marginBottom:6, cursor:'pointer' }}>
-                  <input type="checkbox" checked={selected.has(d.t.txId)} onChange={() => toggleSelected(d.t.txId)}/>
-                  {cell(d.match, 'var(--surface2)')}
-                  <span style={{ color:'var(--text3)', fontSize:14, flexShrink:0 }}>≈</span>
-                  {cell(d.t, 'var(--gold-l)')}
-                </label>
-              )
-            })}
-          </div>
-          <button onClick={() => setShowAll(v => !v)}
-            style={{ fontSize: 12, background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, marginBottom: 8 }}>
-            {showAll ? '▾' : '▸'} Non hai trovato il doppione che cerchi? Sfoglia tutte le transazioni di questo import ({srcTxs.length})
-          </button>
-          {showAll && (
-            <div style={{ maxHeight: '32vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
-              {srcTxs.map(t => (
-                <label key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '5px 6px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={selected.has(t.txId)} onChange={() => toggleSelected(t.txId)}/>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(t.date)}</span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.descAI || t.description?.slice(0, 50)}
-                  </span>
-                  {dupeIdsSet.has(t.txId) && <span style={{ fontSize: 10, color: 'var(--gold)' }}>🔁 rilevato</span>}
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: t.amount < 0 ? 'var(--red)' : 'var(--green)' }}>
-                    {t.amount < 0 ? '−' : '+'}€ {fmtIT(Math.abs(t.amount), 2)}
-                  </span>
-                </label>
-              ))}
+      ) : (() => {
+        // Due colonne indipendenti (richiesta utente 2026-09): a sinistra TUTTE le transazioni
+        // del DB nello stesso periodo dell'import, a destra TUTTE quelle in arrivo dal CSV con
+        // checkbox (nessuna pre-selezionata). Una riga per voce: data · descrizione originale
+        // (popup se lunga) · importo. I possibili doppioni rilevati sono marcati con 🔁.
+        const Line = ({ tx, checkbox }) => {
+          const Wrap = checkbox ? 'label' : 'div'
+          return (
+            <Wrap style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 9px', borderBottom:'1px solid var(--border)',
+              fontSize:12, cursor: checkbox ? 'pointer' : 'default',
+              background: checkbox && selected.has(tx.txId) ? 'var(--accent-l)' : 'transparent' }}>
+              {checkbox && <input type="checkbox" style={{ flexShrink:0 }} checked={selected.has(tx.txId)} onChange={() => toggleSelected(tx.txId)}/>}
+              <span style={{ fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11, flexShrink:0, width:62 }}>{fmtDate(tx.date)}</span>
+              <span style={{ flex:1, minWidth:0 }}>
+                <LongText text={tx.description} label="Descrizione originale" style={{ fontSize:12, fontWeight:600 }}/>
+              </span>
+              {checkbox && dupeIdsSet.has(tx.txId) && <span title="Possibile doppione (stesso importo, data e descrizione a DB)" style={{ fontSize:11, flexShrink:0 }}>🔁</span>}
+              <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, flexShrink:0, color:tx.amount<0?'var(--red)':'var(--green)' }}>
+                {tx.amount<0?'−':'+'}€ {fmtIT(Math.abs(tx.amount),2)}
+              </span>
+            </Wrap>
+          )
+        }
+        const paneHead = { fontSize:11, fontWeight:800, letterSpacing:'.03em', textTransform:'uppercase', color:'var(--text2)',
+          padding:'8px 10px', background:'var(--surface2)', borderBottom:'1px solid var(--border)', position:'sticky', top:0, zIndex:1 }
+        const pane = { flex:1, minWidth:0, border:'1px solid var(--border)', borderRadius:10, overflow:'hidden', display:'flex', flexDirection:'column' }
+        return (
+          <>
+            <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8 }}>
+              Confronta le due colonne e <strong>spunta a destra i doppioni</strong> finché la differenza non torna a zero.
+              {dupes.length > 0 && <> {dupes.length} possibil{dupes.length===1?'e':'i'} doppion{dupes.length===1?'e':'i'} 🔁 rilevat{dupes.length===1?'o':'i'} in automatico.</>}
             </div>
-          )}
-        </>
-      )}
+            <div style={{ display:'flex', gap:10, marginBottom:12, alignItems:'flex-start' }}>
+              <div style={pane}>
+                <div style={paneHead}>🗄️ Già nel DB · stesso periodo ({dbInFrame.length})</div>
+                <div style={{ maxHeight:'44vh', overflow:'auto' }}>
+                  {dbInFrame.length
+                    ? dbInFrame.map(t => <Line key={t.txId} tx={t} checkbox={false}/>)
+                    : <div style={{ padding:'18px 10px', textAlign:'center', color:'var(--text3)', fontSize:12 }}>Nessuna transazione a DB in questo periodo.</div>}
+                </div>
+              </div>
+              <div style={pane}>
+                <div style={paneHead}>📥 In arrivo dal CSV ({srcTxs.length})</div>
+                <div style={{ maxHeight:'44vh', overflow:'auto' }}>
+                  {srcTxs.map(t => <Line key={t.txId} tx={t} checkbox={true}/>)}
+                </div>
+              </div>
+            </div>
+          </>
+        )
+      })()}
 
       {!embedded && !reconciling && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
@@ -1902,13 +1877,13 @@ export default function ImportWizard({ onClose }) {
                 </span>
               </div>
               <div style={{overflow:'auto',maxHeight:'52vh',border:'1px solid var(--border)',borderRadius:10}}>
-                <table style={{width:'100%',borderCollapse:'collapse',minWidth:620}}>
+                <table style={{width:'100%',borderCollapse:'collapse',minWidth:760}}>
                   <thead>
                     <tr>
                       <th style={{padding:'8px 10px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:1,width:36}}>
                         <input type="checkbox" checked={allSel} onChange={toggleAll} title="Seleziona/deseleziona tutte"/>
                       </th>
-                      {['Data','Descrizione','Importo'].map((h,i)=>(
+                      {['Data','Descrizione','Descrizione originale','Importo'].map((h,i)=>(
                         <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
                           color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',
                           textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1}}>{h}</th>
@@ -1927,8 +1902,11 @@ export default function ImportWizard({ onClose }) {
                           <td style={{padding:'6px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                             {fmtDate(t._effDate||t.date)}
                           </td>
-                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:340,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={t.description||''}>
-                            {t.descAI || (t.description||'').slice(0,80) || '—'}
+                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:300,minWidth:120}}>
+                            <LongText text={t.descAI || t.description} label="Descrizione" style={{fontSize:12}}/>
+                          </td>
+                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:300,minWidth:120,color:'var(--text3)'}}>
+                            <LongText text={t.description} label="Descrizione originale" style={{fontSize:12}}/>
                           </td>
                           <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
                             color:(t.amount||0)>=0?'var(--green)':'var(--red)',whiteSpace:'nowrap'}}>
