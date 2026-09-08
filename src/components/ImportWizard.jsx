@@ -1886,7 +1886,8 @@ export default function ImportWizard({ onClose }) {
                       {['Data','Descrizione','Descrizione originale','Importo'].map((h,i)=>(
                         <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
                           color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',
-                          textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1}}>{h}</th>
+                          textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1,
+                          width: h==='Descrizione'?170 : h==='Descrizione originale'?'auto' : undefined}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1902,10 +1903,10 @@ export default function ImportWizard({ onClose }) {
                           <td style={{padding:'6px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                             {fmtDate(t._effDate||t.date)}
                           </td>
-                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:300,minWidth:120}}>
+                          <td style={{padding:'6px 6px 6px 10px',fontSize:12,width:170,maxWidth:170}}>
                             <LongText text={t.descAI || t.description} label="Descrizione" style={{fontSize:12}}/>
                           </td>
-                          <td style={{padding:'6px 10px',fontSize:12,maxWidth:300,minWidth:120,color:'var(--text3)'}}>
+                          <td style={{padding:'6px 10px 6px 6px',fontSize:12,maxWidth:1,color:'var(--text3)'}}>
                             <LongText text={t.description} label="Descrizione originale" style={{fontSize:12}}/>
                           </td>
                           <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
