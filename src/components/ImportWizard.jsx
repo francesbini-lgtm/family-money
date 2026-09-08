@@ -1060,7 +1060,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               <div>Doppioni selezionati: <strong>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></div>
               {hasTappo && <div>Rettifica (tappo): <strong style={{ color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></div>}
               <div>= Saldo post rimozione doppioni: <strong>€ {fmtIT(saldoPostRimozione, 2)}</strong></div>
-              <div style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>Differenza (saldo banca − post rimozione): € {fmtIT(Math.abs(diffBancaPost), 2)}</div>
+              <div style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>Differenza: € {fmtIT(Math.abs(diffBancaPost), 2)}</div>
               {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
                 <div style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 4, fontSize: 11 }}>
                   ⚠️ Saldo pre import risulta 0 — se hai già transazioni registrate, qualcosa non torna nel calcolo del saldo.
