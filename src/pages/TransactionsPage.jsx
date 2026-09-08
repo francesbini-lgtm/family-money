@@ -3109,7 +3109,60 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                   </>
                 )}
               </>
-            ) : fmtIT(Math.abs(tx.amount), 2)}
+            ) : (tx._mergedFrom && tx._mergedFrom.length) ? (() => {
+              const parts = (Array.isArray(tx._mergedParts) && tx._mergedParts.length)
+                ? tx._mergedParts
+                : (tx._mergedFrom || []).map((id, i) => ({ txId: id, description: (tx.description || '').split(' | ')[i] || '', amount: null, date: null }))
+              const hasAmounts = parts.some(p => p.amount != null)
+              return (
+                <>
+                  <span style={{ cursor:'pointer', borderBottom:'1px dotted var(--text3)' }}
+                    title="Operazione unita — clicca per vedere cosa è stato unito"
+                    onClick={e=>{
+                      e.stopPropagation()
+                      if (amtPopup) { setAmtPopup(null); return }
+                      const r = e.currentTarget.getBoundingClientRect()
+                      setAmtPopup({ x: r.right, y: r.bottom + 4 })
+                    }}>
+                    {fmtIT(Math.abs(tx.amount), 2)}<span style={{ fontSize:9, marginLeft:2 }}>🔗</span>
+                  </span>
+                  {amtPopup && (
+                    <>
+                      <div style={{ position:'fixed', inset:0, zIndex:9998 }} onClick={e=>{ e.stopPropagation(); setAmtPopup(null) }}/>
+                      <div onClick={e=>e.stopPropagation()} style={{
+                        position:'fixed', right: window.innerWidth - amtPopup.x, top: amtPopup.y, zIndex:9999,
+                        background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 16px',
+                        minWidth:280, maxWidth:420, boxShadow:'0 8px 24px rgba(0,0,0,.18)', fontSize:13 }}>
+                        <div style={{ fontWeight:700, marginBottom:8, fontSize:12, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.05em' }}>
+                          🔗 Operazione unita da {parts.length} movimenti
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:'40vh', overflow:'auto' }}>
+                          {parts.map((p, i) => (
+                            <div key={p.txId || i} style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'baseline' }}>
+                              <span style={{ minWidth:0 }}>
+                                {p.date && <span style={{ fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11, marginRight:6 }}>{fmtDate(p.date)}</span>}
+                                <span style={{ color:'var(--text1)' }}>{p.descAI || p.description || p.txId || '—'}</span>
+                              </span>
+                              {p.amount != null && <span style={{ fontWeight:600, fontFamily:'var(--font-mono)', whiteSpace:'nowrap', color: p.amount<0?'var(--red)':'var(--green)' }}>{p.amount<0?'−':'+'} {fmtIT(Math.abs(p.amount),2)} €</span>}
+                            </div>
+                          ))}
+                        </div>
+                        {hasAmounts && (
+                          <div style={{ borderTop:'1px solid var(--border)', marginTop:8, paddingTop:8, display:'flex', justifyContent:'space-between', gap:16 }}>
+                            <span style={{ color:'var(--text2)', fontWeight:700 }}>Totale unito</span>
+                            <span style={{ fontWeight:700 }}>{fmtIT(Math.abs(tx.amount),2)} €</span>
+                          </div>
+                        )}
+                        {!hasAmounts && (
+                          <div style={{ marginTop:8, fontSize:11, color:'var(--text3)' }}>Importi dei singoli movimenti non disponibili per unioni fatte prima di questo aggiornamento.</div>
+                        )}
+                        <button onClick={()=>setAmtPopup(null)} style={{ marginTop:10, width:'100%', padding:'5px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', cursor:'pointer', fontSize:12, color:'var(--text2)' }}>Chiudi</button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )
+            })() : fmtIT(Math.abs(tx.amount), 2)}
           </td>
         )
         return null
@@ -3308,6 +3361,17 @@ function MergeTransactionsModal({ txs, onClose }) {
       userEditedCat:  true,
       userEditedDesc: true,
       _mergedFrom: txs.map(t => t.txId),
+      // Dettaglio dei pezzi originali (data/descrizione/importo) — così dall'operazione
+      // unita si può sempre risalire a cosa è stato unito, anche dopo che gli originali
+      // sono stati cancellati (richiesta utente 2026-09).
+      _mergedParts: txs.map(t => ({
+        txId: t.txId,
+        date: t._effDate || t.date || null,
+        description: t.description || '',
+        descAI: t.descAI || '',
+        amount: t.amount,
+        account: t.account || '',
+      })),
     }])
     txs.forEach(t => deleteTransaction(t.txId))
     setDone(true)
