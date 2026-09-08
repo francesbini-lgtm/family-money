@@ -844,29 +844,25 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
     saldoBreakdown && saldoBreakdown.nuovoSaldo != null ? fmtIT(saldoBreakdown.nuovoSaldo, 2) : ''
   )
 
-  // Doppioni come "fusioni" CSV↔DB (richiesta utente 2026-09): pairMap associa ogni riga
-  // CSV considerata doppione alla riga DB corrispondente. I doppioni suggeriti dal sistema
-  // (dupes) sono pre-selezionati (evidenziati); l'utente può separarli o crearne di nuovi
-  // cliccando in sequenza le due operazioni che ritiene identiche.
-  const [pairMap, setPairMap] = useState({})            // csvTxId -> dbTxId
-  const [pendingMerge, setPendingMerge] = useState(null) // { id, kind:'csv'|'db' }: prima metà di un abbinamento manuale
+  // Selezione doppioni via checkbox (richiesta utente 2026-09): l'utente SPUNTA a sinistra
+  // le operazioni in arrivo dal CSV che sono doppioni (già a DB) e quindi NON vanno importate.
+  // I doppioni suggeriti dal sistema (dupes) sono pre-spuntati. Le righe del DB dello stesso
+  // periodo restano come riferimento (sola lettura) per il confronto.
+  const dupeIdsSet = useMemo(() => new Set(dupes.map(d => d.t.txId)), [dupes])
+  const [selected, setSelected] = useState(() => new Set())
   const seededRef = useRef(false)
   useEffect(() => {
     if (!reconciling || seededRef.current || !dupes.length) return
     seededRef.current = true
-    const m = {}
-    dupes.forEach(d => { m[d.t.txId] = d.match.txId })
-    setPairMap(m)
+    setSelected(new Set(dupes.map(d => d.t.txId)))
   }, [reconciling, dupes])
-
-  const selected = useMemo(() => new Set(Object.keys(pairMap)), [pairMap])
-  const dupeIdsSet = useMemo(() => new Set(dupes.map(d => d.t.txId)), [dupes])
-  const srcById = useMemo(() => new Map(srcTxs.map(t => [t.txId, t])), [srcTxs])
-  const dbById = useMemo(() => new Map(dbInFrame.map(t => [t.txId, t])), [dbInFrame])
   const selectedSum = useMemo(() => {
     if (!reconciling) return 0
-    return Object.keys(pairMap).reduce((s, id) => s + (srcById.get(id)?.amount || 0), 0)
-  }, [reconciling, pairMap, srcById])
+    return srcTxs.reduce((s, t) => selected.has(t.txId) ? s + (t.amount || 0) : s, 0)
+  }, [reconciling, srcTxs, selected])
+  function toggleSelected(txId) {
+    setSelected(prev => { const n = new Set(prev); n.has(txId) ? n.delete(txId) : n.add(txId); return n })
+  }
   // Possibilità estrema (richiesta utente 2026-07-15): se l'utente non riesce a
   // trovare doppioni sufficienti a spiegare TUTTO lo scarto, può creare un "tappo"
   // (rettifica nascosta, stesso spirito del Saldo Forzato in Transazioni, stesso
@@ -888,29 +884,6 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   const resolved = reconciling && Math.abs(remaining) < 0.01
   const hasTappo = Math.abs(tappoCovered) > 0.005
 
-  // Crea un abbinamento (doppione) fra una riga CSV e una riga DB.
-  function pairCsvDb(csvId, dbId) {
-    setPairMap(prev => {
-      if (prev[csvId]) return prev
-      if (Object.values(prev).includes(dbId)) return prev  // quella riga DB è già abbinata
-      return { ...prev, [csvId]: dbId }
-    })
-  }
-  // Separa un doppione: la riga CSV torna importabile e la riga DB riappare da sola.
-  function unmerge(csvId) {
-    setPairMap(prev => { const n = { ...prev }; delete n[csvId]; return n })
-  }
-  // Click su una riga CSV (in arrivo): se c'è già una riga DB "in attesa" le fonde,
-  // altrimenti mette questa CSV in attesa del suo doppione.
-  function clickCsv(csvId) {
-    if (pendingMerge && pendingMerge.kind === 'db') { pairCsvDb(csvId, pendingMerge.id); setPendingMerge(null); return }
-    setPendingMerge(pendingMerge && pendingMerge.kind === 'csv' && pendingMerge.id === csvId ? null : { id: csvId, kind: 'csv' })
-  }
-  // Click su una riga DB: speculare a clickCsv.
-  function clickDb(dbId) {
-    if (pendingMerge && pendingMerge.kind === 'csv') { pairCsvDb(pendingMerge.id, dbId); setPendingMerge(null); return }
-    setPendingMerge(pendingMerge && pendingMerge.kind === 'db' && pendingMerge.id === dbId ? null : { id: dbId, kind: 'db' })
-  }
 
   function createTappo() {
     const gapNow = Math.round((effectiveTarget - selectedSum - tappoCovered) * 100) / 100
@@ -1141,71 +1114,57 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
           ))}
         </div>
       ) : (() => {
-        // Lista UNICA (richiesta utente 2026-09): DB dello stesso periodo + operazioni in arrivo
-        // dal CSV, in un solo elenco ordinato per data. I doppioni sono "fusioni" CSV↔DB
-        // evidenziate in giallo, pre-selezionate dai suggerimenti del sistema. L'utente può
-        // separare una fusione (× → torna a due operazioni) o crearne una nuova cliccando in
-        // sequenza le due operazioni che ritiene identiche.
-        const consumedDb = new Set(Object.values(pairMap))
-        const items = []
-        Object.entries(pairMap).forEach(([csvId, dbId]) => {
-          const csv = srcById.get(csvId); if (!csv) return
-          items.push({ key: 'dup-' + csvId, kind: 'dup', date: csv.date, csv, db: dbById.get(dbId) })
-        })
-        srcTxs.forEach(t => { if (!pairMap[t.txId]) items.push({ key: 'csv-' + t.txId, kind: 'csv', date: t.date, tx: t }) })
-        dbInFrame.forEach(t => { if (!consumedDb.has(t.txId)) items.push({ key: 'db-' + t.txId, kind: 'db', date: t.date, tx: t }) })
-        items.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+        // Elenco unico (richiesta utente 2026-09): operazioni in arrivo dal CSV (📥, con
+        // checkbox a sinistra) + operazioni già a DB nello stesso periodo (🗄️, solo
+        // riferimento), ordinate per data. Spuntare una riga in arrivo = "è un doppione,
+        // non importarla": i suggeriti dal sistema (🔁) sono già spuntati. 🔍 = descrizione intera.
+        const items = [
+          ...srcTxs.map(t => ({ key: 'csv-' + t.txId, tx: t, isCsv: true, date: t.date })),
+          ...dbInFrame.map(t => ({ key: 'db-' + t.txId, tx: t, isCsv: false, date: t.date })),
+        ].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
         const amtStyle = amt => ({ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, flexShrink:0, color: amt<0?'var(--red)':'var(--green)' })
         const dateStyle = { fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11, flexShrink:0, width:62 }
         const rowBase = { display:'flex', alignItems:'center', gap:8, padding:'6px 9px', borderBottom:'1px solid var(--border)', fontSize:12 }
-        const pending = pendingMerge
+        const descCell = desc => (
+          <span style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6 }}>
+            <span title={desc || ''} style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:12 }}>{desc || '—'}</span>
+            {desc && <button onClick={e => { e.stopPropagation(); setDescPopup(desc) }} title="Vedi descrizione completa"
+              style={{ flexShrink:0, border:'none', background:'transparent', cursor:'pointer', fontSize:11, padding:'0 2px', color:'var(--text3)' }}>🔍</button>}
+          </span>
+        )
         return (
           <>
             <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8, lineHeight:1.5 }}>
-              🟡 = <strong>doppione</strong> (già a DB, non verrà importato): clicca <strong>×</strong> per separarlo.
-              Per segnarne uno a mano: <strong>clicca una riga</strong> (si evidenzia), poi <strong>clicca l'operazione identica</strong> → si fondono. 🔍 mostra la descrizione intera.
-              {pending && <span style={{ color:'var(--accent)', fontWeight:700 }}> · In attesa: clicca ora l'operazione doppia</span>}
-              {pending && <button onClick={() => setPendingMerge(null)} style={{ marginLeft:6, border:'none', background:'transparent', color:'var(--red)', cursor:'pointer', fontSize:12, padding:0 }}>Annulla</button>}
+              <strong>Spunta a sinistra</strong> le operazioni <strong>📥 in arrivo</strong> che sono doppioni (già a DB) e non vanno importate — i 🔁 suggeriti sono già spuntati.
+              Le righe <strong>🗄️</strong> sono già a DB (solo riferimento per il confronto). 🔍 mostra la descrizione intera.
             </div>
             <div style={{ border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
               <div style={{ display:'flex', fontSize:11, fontWeight:800, textTransform:'uppercase', letterSpacing:'.03em', color:'var(--text2)',
                 padding:'8px 10px', background:'var(--surface2)', borderBottom:'1px solid var(--border)', gap:8 }}>
                 <span style={{ flex:1 }}>Operazioni nel periodo ({items.length})</span>
-                <span style={{ color:'var(--text3)' }}>🟡 doppioni {selected.size} · 📥 in arrivo {srcTxs.length}</span>
+                <span style={{ color:'var(--text3)' }}>✅ doppioni {selected.size} · 📥 in arrivo {srcTxs.length}</span>
               </div>
               <div style={{ maxHeight:'46vh', overflow:'auto' }}>
                 {items.map(it => {
-                  const descCell = (desc, weight) => (
-                    <span style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6 }}>
-                      <span title={desc || ''} style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:12, fontWeight:weight }}>{desc || '—'}</span>
-                      {desc && <button onClick={e => { e.stopPropagation(); setDescPopup(desc) }} title="Vedi descrizione completa"
-                        style={{ flexShrink:0, border:'none', background:'transparent', cursor:'pointer', fontSize:11, padding:'0 2px', color:'var(--text3)' }}>🔍</button>}
-                    </span>
-                  )
-                  if (it.kind === 'dup') {
+                  const t = it.tx
+                  if (it.isCsv) {
+                    const on = selected.has(t.txId)
                     return (
-                      <div key={it.key} style={{ ...rowBase, background:'var(--gold-l)' }}>
-                        <button onClick={() => unmerge(it.csv.txId)} title="Separa: torna a due operazioni distinte"
-                          style={{ flexShrink:0, border:'none', background:'transparent', color:'var(--text3)', cursor:'pointer', fontSize:15, lineHeight:1, padding:0, width:18 }}>×</button>
-                        <span style={{ flexShrink:0, fontSize:11 }} title="Doppione: non verrà importata">🔁</span>
-                        <span style={dateStyle}>{fmtDate(it.csv.date)}</span>
-                        {descCell(it.csv.description, 700)}
-                        <span style={amtStyle(it.csv.amount)}>{it.csv.amount<0?'−':'+'}€ {fmtIT(Math.abs(it.csv.amount),2)}</span>
-                      </div>
+                      <label key={it.key} style={{ ...rowBase, cursor:'pointer', background: on ? 'var(--gold-l)' : 'transparent' }}>
+                        <input type="checkbox" style={{ flexShrink:0 }} checked={on} onChange={() => toggleSelected(t.txId)}/>
+                        <span style={dateStyle}>{fmtDate(t.date)}</span>
+                        {descCell(t.description)}
+                        {dupeIdsSet.has(t.txId) && <span title="Il sistema lo considera un possibile doppione" style={{ fontSize:11, flexShrink:0 }}>🔁</span>}
+                        <span style={amtStyle(t.amount)}>{t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}</span>
+                      </label>
                     )
                   }
-                  const t = it.tx
-                  const isCsv = it.kind === 'csv'
-                  const isPending = pending && pending.id === t.txId
                   return (
-                    <div key={it.key} onClick={() => isCsv ? clickCsv(t.txId) : clickDb(t.txId)}
-                      style={{ ...rowBase, cursor:'pointer', background: isPending ? 'var(--accent-l)' : 'transparent',
-                        outline: isPending ? '2px solid var(--accent)' : 'none', outlineOffset:'-2px', opacity: isCsv ? 1 : .7 }}>
-                      <span style={{ flexShrink:0, fontSize:11, width:18, textAlign:'center' }} title={isCsv ? 'In arrivo dal CSV' : 'Già nel DB (riferimento)'}>{isCsv ? '📥' : '🗄️'}</span>
+                    <div key={it.key} style={{ ...rowBase, opacity:.65 }}>
+                      <span style={{ flexShrink:0, width:16, textAlign:'center', fontSize:11 }} title="Già nel DB (riferimento)">🗄️</span>
                       <span style={dateStyle}>{fmtDate(t.date)}</span>
-                      {descCell(t.description, 600)}
-                      {isCsv && dupeIdsSet.has(t.txId) && <span title="Il sistema lo considera un possibile doppione" style={{ fontSize:11, flexShrink:0 }}>🔁</span>}
+                      {descCell(t.description)}
                       <span style={amtStyle(t.amount)}>{t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}</span>
                     </div>
                   )
@@ -1986,7 +1945,14 @@ export default function ImportWizard({ onClose }) {
                 </span>
               </div>
               <div style={{overflow:'auto',maxHeight:'52vh',border:'1px solid var(--border)',borderRadius:10}}>
-                <table style={{width:'100%',borderCollapse:'collapse',minWidth:760}}>
+                <table style={{width:'100%',borderCollapse:'collapse',tableLayout:'fixed'}}>
+                  <colgroup>
+                    <col style={{width:38}}/>
+                    <col style={{width:88}}/>
+                    <col style={{width:150}}/>
+                    <col/>
+                    <col style={{width:108}}/>
+                  </colgroup>
                   <thead>
                     <tr>
                       <th style={{padding:'8px 10px',background:'var(--surface2)',borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:1,width:36}}>
@@ -1995,8 +1961,7 @@ export default function ImportWizard({ onClose }) {
                       {['Data','Descrizione','Descrizione originale','Importo'].map((h,i)=>(
                         <th key={i} style={{padding:'8px 10px',fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',
                           color:'var(--text3)',background:'var(--surface2)',borderBottom:'1px solid var(--border)',
-                          textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1,
-                          width: h==='Descrizione'?170 : h==='Descrizione originale'?'auto' : undefined}}>{h}</th>
+                          textAlign:h==='Importo'?'right':'left',whiteSpace:'nowrap',position:'sticky',top:0,zIndex:1,overflow:'hidden',textOverflow:'ellipsis'}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -2012,10 +1977,10 @@ export default function ImportWizard({ onClose }) {
                           <td style={{padding:'6px 10px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
                             {fmtDate(t._effDate||t.date)}
                           </td>
-                          <td style={{padding:'6px 6px 6px 10px',fontSize:12,width:170,maxWidth:170}}>
+                          <td style={{padding:'6px 6px 6px 10px',fontSize:12,overflow:'hidden'}}>
                             <LongText text={t.descAI || t.description} label="Descrizione" style={{fontSize:12}}/>
                           </td>
-                          <td style={{padding:'6px 10px 6px 6px',fontSize:12,maxWidth:1,color:'var(--text3)'}}>
+                          <td style={{padding:'6px 10px 6px 6px',fontSize:12,overflow:'hidden',color:'var(--text3)'}}>
                             <LongText text={t.description} label="Descrizione originale" style={{fontSize:12}}/>
                           </td>
                           <td style={{padding:'6px 10px',textAlign:'right',fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
