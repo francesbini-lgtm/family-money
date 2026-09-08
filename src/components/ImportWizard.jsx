@@ -756,7 +756,9 @@ export function findDuplicatesForSource(src, srcTxs, allTransactions) {
   const isCarta = t => !!t.cardImportCard4
   const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
   const srcIds = new Set(srcTxs.map(t => t.txId))
-  const dbPool = allTransactions.filter(t => !srcIds.has(t.txId) && !t.excluded && sameCategory(t))
+  // INCLUSE anche le escluse (richiesta utente 2026-09): vedi nota in dbInFrame — un
+  // movimento escluso che ritorna nel CSV va comunque riconosciuto come doppione.
+  const dbPool = allTransactions.filter(t => !srcIds.has(t.txId) && sameCategory(t))
   const results = []
   // Doppioni verificati SEMPRE contro il DB (richiesta utente 2026-09: "i doppioni
   // devono SEMPRE verificare con i dati a DB, non quelli derivanti da questa import").
@@ -821,8 +823,11 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
     const isCarta = t => !!t.cardImportCard4
     const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
     const srcIds = new Set(srcTxs.map(t => t.txId))
+    // INCLUSE anche le operazioni escluse (richiesta utente 2026-09): un movimento reale
+    // escluso (estratto riconciliato, riga compensata messa a excluded, ecc.) che ritorna
+    // nel CSV deve comunque essere riconosciuto come doppione, altrimenti verrebbe re-importato.
     return transactions
-      .filter(t => !t.excluded && !srcIds.has(t.txId) && sameCategory(t) && (t.date || '') >= minD && (t.date || '') <= maxD)
+      .filter(t => !srcIds.has(t.txId) && sameCategory(t) && (t.date || '') >= minD && (t.date || '') <= maxD)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
   }, [transactions, srcTxs, src])
 
@@ -1136,9 +1141,10 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                   }
                   return (
                     <div key={it.key} style={{ ...rowBase, opacity:.65 }}>
-                      <span style={{ flexShrink:0, width:16, textAlign:'center', fontSize:11 }} title="Già nel DB (riferimento)">🗄️</span>
+                      <span style={{ flexShrink:0, width:16, textAlign:'center', fontSize:11 }} title={t.excluded ? 'Già nel DB · esclusa (riferimento)' : 'Già nel DB (riferimento)'}>🗄️</span>
                       <span style={dateStyle}>{fmtDate(t.date)}</span>
                       {descCell(t.description)}
+                      {t.excluded && <span style={{ flexShrink:0, fontSize:9.5, fontWeight:700, color:'var(--text3)', border:'1px solid var(--border)', borderRadius:4, padding:'0 4px' }} title="Operazione esclusa dal saldo">ESCL.</span>}
                       <span style={amtStyle(t.amount)}>{t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}</span>
                     </div>
                   )
