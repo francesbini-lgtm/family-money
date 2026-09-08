@@ -888,6 +888,14 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   const remaining = Math.round((effectiveTarget - selectedSum - tappoCovered) * 100) / 100
   const resolved = reconciling && Math.abs(remaining) < 0.01
   const hasTappo = Math.abs(tappoCovered) > 0.005
+  // Saldo dopo aver tolto i doppioni selezionati (= Saldo post import − doppioni) e la sua
+  // differenza col saldo dichiarato dalla banca (richiesta utente 2026-09).
+  const saldoPostRimozione = (reconciling && saldoBreakdown)
+    ? Math.round((saldoBreakdown.saldoSistema - selectedSum) * 100) / 100
+    : null
+  const diffBancaPost = (reconciling && saldoBreakdown)
+    ? Math.round((nuovoSaldoNum - saldoPostRimozione) * 100) / 100
+    : null
 
 
   function createTappo() {
@@ -1051,7 +1059,8 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               <div style={{ borderTop: '1px solid var(--border)', margin: '6px 0 1px' }} />
               <div>Doppioni selezionati: <strong>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></div>
               {hasTappo && <div>Rettifica (tappo): <strong style={{ color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></div>}
-              <div style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>Differenza: € {fmtIT(Math.abs(remaining), 2)}</div>
+              <div>= Saldo post rimozione doppioni: <strong>€ {fmtIT(saldoPostRimozione, 2)}</strong></div>
+              <div style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>Differenza (saldo banca − post rimozione): € {fmtIT(Math.abs(diffBancaPost), 2)}</div>
               {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
                 <div style={{ color: '#b45309', fontFamily: 'var(--font-sans, inherit)', marginTop: 4, fontSize: 11 }}>
                   ⚠️ Saldo pre import risulta 0 — se hai già transazioni registrate, qualcosa non torna nel calcolo del saldo.
