@@ -1961,6 +1961,9 @@ export default function ImportWizard({ onClose }) {
           const toggleAll = () => setPreviewSel(allSel ? new Set() : new Set(rows.map((_, i) => i)))
           const selCount = previewSel.size
           const selSum = rows.reduce((s, t, i) => previewSel.has(i) ? s + (t.amount || 0) : s, 0)
+          const selDates = rows.filter((_, i) => previewSel.has(i)).map(t => t.date).filter(Boolean)
+          const minDate = selDates.length ? selDates.reduce((a, b) => a < b ? a : b) : null
+          const maxDate = selDates.length ? selDates.reduce((a, b) => a > b ? a : b) : null
           return (
             <>
               <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
@@ -1971,9 +1974,12 @@ export default function ImportWizard({ onClose }) {
                 verranno ignorate. Con <strong>Continua</strong> si passa al controllo doppioni; con <strong>Annulla</strong>
                 l'importazione del conto viene annullata.
               </div>
-              <div style={{display:'flex',gap:10,marginBottom:10,fontSize:12}}>
+              <div style={{display:'flex',gap:10,marginBottom:10,fontSize:12,flexWrap:'wrap'}}>
                 <span style={{padding:'4px 10px',borderRadius:8,background:'var(--accent-l)',border:'1px solid var(--accent)',fontWeight:700}}>
-                  ✅ {selCount} selezionate
+                  ✅ {selCount} transazioni
+                </span>
+                <span style={{padding:'4px 10px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',fontWeight:700}}>
+                  📅 {minDate ? fmtDate(minDate) : '—'} → {maxDate ? fmtDate(maxDate) : '—'}
                 </span>
                 <span style={{padding:'4px 10px',borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'var(--font-mono)',fontWeight:700,color:selSum<0?'var(--red)':'var(--green)'}}>
                   Σ {selSum<0?'−':'+'}€ {fmtIT(Math.abs(selSum),2)}
