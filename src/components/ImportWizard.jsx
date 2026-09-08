@@ -746,6 +746,12 @@ function VacanzeMegaStep({ importedIdSet, vacMinDate, vacMaxDate, registerUndo }
 // automatico e silenzioso già fatto da addTransactions() in fase di salvataggio
 // (che invece confronta data+importo+prime 60 char della descrizione, e scarta
 // senza mostrare nulla). Qui l'utente vede ogni possibile doppione e decide.
+// Normalizza una descrizione per il confronto doppioni: MAIUSCOLE, via ogni carattere
+// non alfanumerico (punteggiatura, spazi). Così "DA: BINI FRANCESCO PER: TRN: 129…" e
+// "DA BINI FRANCESCO PER TRN 129…" risultano identiche (differivano solo per i due punti),
+// senza allentare il vincolo su importo e data — richiesta utente 2026-09.
+const normDupDesc = s => (s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '')
+
 export function findDuplicatesForSource(src, srcTxs, allTransactions) {
   const isCarta = t => !!t.cardImportCard4
   const sameCategory = t => src === 'carta' ? isCarta(t) : !isCarta(t)
@@ -757,17 +763,17 @@ export function findDuplicatesForSource(src, srcTxs, allTransactions) {
   // Il vecchio confronto intra-batch (due righe identiche nello stesso CSV) è stato
   // rimosso — coerente con la stessa scelta già fatta per PayPal.
   srcTxs.filter(t => !t.excluded).forEach(t => {
-    const origDesc = (t.description || '').trim()
-    if (!origDesc) return
-    // Doppione = STESSO importo + STESSA data + STESSA descrizione (richiesta utente
-    // 2026-09). Prima si ignorava l'importo: voci ricorrenti con la stessa descrizione
-    // (Satispay, Paypal Europe, Commissioni, affitto…) venivano segnalate come doppioni
-    // anche quando erano pagamenti distinti, gonfiando i doppioni rilevati ben oltre lo
-    // scarto di saldo reale. Aggiungendo l'importo si scartano quasi tutti i falsi positivi.
+    const nOrig = normDupDesc(t.description)
+    if (!nOrig) return
+    // Doppione = STESSO importo + STESSA data + STESSA descrizione NORMALIZZATA (richiesta
+    // utente 2026-09): importo + data restano esatti (evita i falsi positivi delle voci
+    // ricorrenti tipo "Commissioni"), mentre la descrizione è confrontata ignorando
+    // punteggiatura e spazi — così "DA: BINI FRANCESCO PER: TRN: 129…" e "DA BINI FRANCESCO
+    // PER TRN 129…" (che differivano solo per i due punti) risultano lo stesso movimento.
     const dbMatch = dbPool.find(e =>
       e.date === t.date
       && Math.abs((e.amount || 0) - (t.amount || 0)) < 0.01
-      && (e.description || '').trim() === origDesc)
+      && normDupDesc(e.description) === nOrig)
     if (dbMatch) results.push({ t, match: dbMatch })
   })
   return results
@@ -831,6 +837,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   const reconciling = targetGapDoppioni != null
   const [committed, setCommitted] = useState(false)
   const [saldoOpen, setSaldoOpen] = useState(false)  // box "Controllo saldo" chiuso di default (richiesta utente 2026-09)
+  const [descPopup, setDescPopup] = useState(null)   // descrizione originale mostrata per intero (bottone 🔍)
   // Nuovo saldo (da banca) modificabile: valore iniziale già formattato IT (migliaia col
   // punto, decimali con virgola) — richiesta utente 2026-09.
   const [editedNuovoSaldo, setEditedNuovoSaldo] = useState(
@@ -1156,9 +1163,9 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
         return (
           <>
             <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8, lineHeight:1.5 }}>
-              Elenco unico: 🟡 i <strong>doppioni</strong> (già a DB) sono evidenziati e pre-selezionati — clicca <strong>×</strong> per separarli in due operazioni.
-              Per segnare un doppione a mano, clicca un'operazione e poi quella che ritieni identica.
-              {pending && <span style={{ color:'var(--accent)', fontWeight:700 }}> · In attesa: clicca l'operazione doppia</span>}
+              🟡 = <strong>doppione</strong> (già a DB, non verrà importato): clicca <strong>×</strong> per separarlo.
+              Per segnarne uno a mano: <strong>clicca una riga</strong> (si evidenzia), poi <strong>clicca l'operazione identica</strong> → si fondono. 🔍 mostra la descrizione intera.
+              {pending && <span style={{ color:'var(--accent)', fontWeight:700 }}> · In attesa: clicca ora l'operazione doppia</span>}
               {pending && <button onClick={() => setPendingMerge(null)} style={{ marginLeft:6, border:'none', background:'transparent', color:'var(--red)', cursor:'pointer', fontSize:12, padding:0 }}>Annulla</button>}
             </div>
             <div style={{ border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
@@ -1169,6 +1176,13 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               </div>
               <div style={{ maxHeight:'46vh', overflow:'auto' }}>
                 {items.map(it => {
+                  const descCell = (desc, weight) => (
+                    <span style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6 }}>
+                      <span title={desc || ''} style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:12, fontWeight:weight }}>{desc || '—'}</span>
+                      {desc && <button onClick={e => { e.stopPropagation(); setDescPopup(desc) }} title="Vedi descrizione completa"
+                        style={{ flexShrink:0, border:'none', background:'transparent', cursor:'pointer', fontSize:11, padding:'0 2px', color:'var(--text3)' }}>🔍</button>}
+                    </span>
+                  )
                   if (it.kind === 'dup') {
                     return (
                       <div key={it.key} style={{ ...rowBase, background:'var(--gold-l)' }}>
@@ -1176,9 +1190,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                           style={{ flexShrink:0, border:'none', background:'transparent', color:'var(--text3)', cursor:'pointer', fontSize:15, lineHeight:1, padding:0, width:18 }}>×</button>
                         <span style={{ flexShrink:0, fontSize:11 }} title="Doppione: non verrà importata">🔁</span>
                         <span style={dateStyle}>{fmtDate(it.csv.date)}</span>
-                        <span style={{ flex:1, minWidth:0 }}>
-                          <LongText text={it.csv.description} label="Descrizione originale" style={{ fontSize:12, fontWeight:700 }}/>
-                        </span>
+                        {descCell(it.csv.description, 700)}
                         <span style={amtStyle(it.csv.amount)}>{it.csv.amount<0?'−':'+'}€ {fmtIT(Math.abs(it.csv.amount),2)}</span>
                       </div>
                     )
@@ -1192,9 +1204,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                         outline: isPending ? '2px solid var(--accent)' : 'none', outlineOffset:'-2px', opacity: isCsv ? 1 : .7 }}>
                       <span style={{ flexShrink:0, fontSize:11, width:18, textAlign:'center' }} title={isCsv ? 'In arrivo dal CSV' : 'Già nel DB (riferimento)'}>{isCsv ? '📥' : '🗄️'}</span>
                       <span style={dateStyle}>{fmtDate(t.date)}</span>
-                      <span style={{ flex:1, minWidth:0 }}>
-                        <LongText text={t.description} label="Descrizione originale" style={{ fontSize:12, fontWeight:600 }}/>
-                      </span>
+                      {descCell(t.description, 600)}
                       {isCsv && dupeIdsSet.has(t.txId) && <span title="Il sistema lo considera un possibile doppione" style={{ fontSize:11, flexShrink:0 }}>🔁</span>}
                       <span style={amtStyle(t.amount)}>{t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}</span>
                     </div>
@@ -1254,6 +1264,21 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                 Avanti →
               </button>
             </HoverTip>
+          </div>
+        </div>
+      )}
+
+      {descPopup && (
+        <div onClick={() => setDescPopup(null)}
+          style={{ position:'fixed', inset:0, zIndex:4000, background:'rgba(0,0,0,.45)', backdropFilter:'blur(2px)',
+            display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', borderRadius:12, padding:'18px 20px', maxWidth:560, width:'100%', boxShadow:'0 20px 60px rgba(0,0,0,.3)' }}>
+            <div style={{ fontSize:11, fontWeight:800, textTransform:'uppercase', letterSpacing:'.05em', color:'var(--text3)', marginBottom:8 }}>Descrizione originale</div>
+            <div style={{ fontSize:14, lineHeight:1.5, wordBreak:'break-word', color:'var(--text)' }}>{descPopup}</div>
+            <div style={{ textAlign:'right', marginTop:14 }}>
+              <button onClick={() => setDescPopup(null)} className="btn btn-secondary" style={{ fontSize:13, padding:'8px 18px' }}>Chiudi</button>
+            </div>
           </div>
         </div>
       )}
