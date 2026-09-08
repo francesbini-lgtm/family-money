@@ -758,7 +758,21 @@ export function findDuplicatesForSource(src, srcTxs, allTransactions) {
   const srcIds = new Set(srcTxs.map(t => t.txId))
   // INCLUSE anche le escluse (richiesta utente 2026-09): vedi nota in dbInFrame — un
   // movimento escluso che ritorna nel CSV va comunque riconosciuto come doppione.
-  const dbPool = allTransactions.filter(t => !srcIds.has(t.txId) && sameCategory(t))
+  const dbBase = allTransactions.filter(t => !srcIds.has(t.txId) && sameCategory(t))
+  // Espansione delle operazioni UNITE (richiesta utente 2026-09): quando si fa un merge gli
+  // originali vengono cancellati e sopravvivono solo dentro l'operazione unita. Il loro
+  // importo/data/descrizione ORIGINALI sono in _mergedParts: li aggiungiamo al pool come
+  // righe "virtuali" così un movimento identico che ritorna nel CSV viene riconosciuto come
+  // doppione anche se a DB è stato inglobato in un'unione (es. un −800 unito ad altro).
+  const dbPool = []
+  for (const t of dbBase) {
+    dbPool.push(t)
+    if (Array.isArray(t._mergedParts)) {
+      for (const p of t._mergedParts) {
+        dbPool.push({ txId: p.txId, date: p.date, amount: p.amount, description: p.description, cardImportCard4: t.cardImportCard4, _fromMergedTxId: t.txId })
+      }
+    }
+  }
   const results = []
   // Doppioni verificati SEMPRE contro il DB (richiesta utente 2026-09: "i doppioni
   // devono SEMPRE verificare con i dati a DB, non quelli derivanti da questa import").

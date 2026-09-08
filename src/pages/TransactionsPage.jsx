@@ -3366,7 +3366,8 @@ function MergeTransactionsModal({ txs, onClose }) {
       // sono stati cancellati (richiesta utente 2026-09).
       _mergedParts: txs.map(t => ({
         txId: t.txId,
-        date: t._effDate || t.date || null,
+        date: t.date || null,           // data VALUTA — usata per il match doppioni
+        effDate: t._effDate || null,    // competenza (solo per riferimento)
         description: t.description || '',
         descAI: t.descAI || '',
         amount: t.amount,
