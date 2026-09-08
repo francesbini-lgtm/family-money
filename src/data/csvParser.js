@@ -409,6 +409,8 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
     }
     return 0
   })()
+  // La colonna scelta è ESPLICITAMENTE una "valuta" (l'header contiene proprio "valuta")?
+  const colDateIsExplicitValuta = colDate >= 0 && (headers[colDate] || '').includes('valuta')
   // colDateReg = data registrazione/contabile (when transaction was posted to account —
   // per le carte è la data che conta per la riconciliazione mensile con l'estratto,
   // vedi cardMonthKey() in ImportModal.jsx).
@@ -428,6 +430,9 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
     if (otherDateIdx >= 0) return otherDateIdx
     return -1 // not found
   })()
+  // La colonna "registrazione" è stata riconosciuta ESPLICITAMENTE dall'header?
+  const colDateRegIsExplicit = colDateReg >= 0 &&
+    ['registrazione', 'contabil', 'booking'].some(k => (headers[colDateReg] || '').includes(k))
 
   // ── Verifica di sicurezza sul CONTENUTO, non sull'header ─────────────────
   // Gli header non sono affidabili al 100%: la dicitura cambia da banca a banca
@@ -441,7 +446,14 @@ export function parseCSV(text, accountName, customRules=[], existingTxs=[]) {
   // delle parole note. Basta anche solo un paio di righe con date diverse per
   // avere un segnale attendibile in un senso o nell'altro.
   let [colDateFinal, colDateRegFinal] = [colDate, colDateReg]
-  if (colDateReg >= 0 && colDateReg !== colDate) {
+  // Se ENTRAMBE le colonne hanno intestazioni esplicite e inequivocabili ("…valuta" e
+  // "…registrazione/contabile") ci fidiamo dell'header e NON applichiamo lo scambio basato
+  // sul contenuto: per alcune banche la valuta può cadere DOPO la registrazione (tipico dei
+  // bonifici in accredito), quindi il controllo "valuta ≤ contabile" darebbe un falso
+  // "colonne scambiate" e finirebbe per usare la data di registrazione (bug reale, header
+  // "Data registrazione" + "Data Valuta"). L'euristica resta attiva solo per header ambigui.
+  const headersAreExplicit = colDateIsExplicitValuta && colDateRegIsExplicit
+  if (!headersAreExplicit && colDateReg >= 0 && colDateReg !== colDate) {
     let regAfterValuta = 0   // atteso: contabile >= valuta
     let regBeforeValuta = 0  // sospetto: colonne scambiate
     for (let i = hi + 1; i < lines.length && (regAfterValuta + regBeforeValuta) < 15; i++) {

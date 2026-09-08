@@ -852,10 +852,10 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   const [selected, setSelected] = useState(() => new Set())
   const seededRef = useRef(false)
   useEffect(() => {
-    if (!reconciling || seededRef.current || !dupes.length) return
+    if (seededRef.current || !dupes.length) return
     seededRef.current = true
     setSelected(new Set(dupes.map(d => d.t.txId)))
-  }, [reconciling, dupes])
+  }, [dupes])
   const selectedSum = useMemo(() => {
     if (!reconciling) return 0
     return srcTxs.reduce((s, t) => selected.has(t.txId) ? s + (t.amount || 0) : s, 0)
@@ -973,7 +973,8 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   function confirmUnsavedPlain() {
     if (committed) return
     setCommitted(true)
-    onCommit?.(srcTxs.filter(t => !dropped.has(t.txId)), [])
+    // I doppioni spuntati (selected) NON vengono importati: si salvano solo i superstiti.
+    onCommit?.(srcTxs.filter(t => !selected.has(t.txId)), [])
   }
 
   function removeDupe(d) {
@@ -1081,39 +1082,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
         </div>
       )}
 
-      {dupes.length === 0 && !reconciling ? (
-        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
-          ✅ Nessun doppione trovato in questo import
-        </div>
-      ) : !reconciling ? (
-        <div style={{ maxHeight: '56vh', overflow: 'auto' }}>
-          {dupes.map(d => (
-            <div key={d.t.txId} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', marginBottom: 6 }}>
-                {d._sameBatch ? '⚠️ Doppione dentro questo stesso import (non contro il DB)' : 'Nuova (dal CSV) vs già presente nel DB'}
-              </div>
-              {[[d._sameBatch ? 'Riga 1' : 'Importata ora', d.t], [d._sameBatch ? 'Riga 2 (duplicata)' : 'Già nel DB', d.match]].map(([label, tx]) => (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, marginBottom: 3 }}>
-                  <span style={{ minWidth: 90, color: 'var(--text3)' }}>{label}:</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{fmtDate(tx.date)}</span>
-                  <span style={{ fontWeight: 700 }}>{tx.descAI || tx.description?.slice(0, 50)}</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--red)' }}>−€ {fmtIT(Math.abs(tx.amount), 2)}</span>
-                </div>
-              ))}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button onClick={() => removeDupe(d)}
-                  style={{ padding: '6px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  🗑️ Elimina doppione
-                </button>
-                <button onClick={() => keepBoth(d)}
-                  style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
-                  Non è un doppione, tieni entrambe
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (() => {
+      {(() => {
         // Elenco unico (richiesta utente 2026-09): operazioni in arrivo dal CSV (📥, con
         // checkbox a sinistra) + operazioni già a DB nello stesso periodo (🗄️, solo
         // riferimento), ordinate per data. Spuntare una riga in arrivo = "è un doppione,
@@ -1196,12 +1165,12 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               </button>
             )}
             <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-              {dropped.size > 0
-                ? `${dropped.size} scartat${dropped.size===1?'a':'e'} · ${srcTxs.length - dropped.size} da importare`
+              {selected.size > 0
+                ? `${selected.size} doppion${selected.size===1?'e':'i'} scartat${selected.size===1?'o':'i'} · ${srcTxs.length - selected.size} da importare`
                 : `${srcTxs.length} transazioni da importare`}
             </span>
           </div>
-          <HoverTip text={`Salva ${srcTxs.length - dropped.size} transazioni e passa alla rifinitura delle categorie.`}>
+          <HoverTip text={`Salva ${srcTxs.length - selected.size} transazioni e passa alla rifinitura delle categorie.`}>
             <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
               disabled={committed} onClick={confirmUnsavedPlain}>
               Avanti → salva e importa
