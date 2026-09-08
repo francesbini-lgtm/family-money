@@ -796,7 +796,7 @@ function MetricChip({ label, fg, bg, value, strong, children }) {
   )
 }
 
-export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown, unsaved = false, onCommit = null }) {
+export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targetGapDoppioni, reconcileAccount, saldoBreakdown, unsaved = false, onCommit = null, onBack = null }) {
   const transactions      = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const addTransactions   = useStore(s => s.addTransactions)
@@ -1226,13 +1226,22 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
       {/* Modalità non-salvata (conto) senza controllo saldo: il pulsante Avanti salva
           i superstiti (il wizard non aggiunge una propria StepNav in questo caso). */}
       {unsaved && !reconciling && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14,
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, gap: 12,
           position: 'sticky', bottom: 0, background: 'var(--surface)', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-            {dropped.size > 0
-              ? `${dropped.size} scartat${dropped.size===1?'a':'e'} · ${srcTxs.length - dropped.size} da importare`
-              : `${srcTxs.length} transazioni da importare`}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            {onBack && (
+              <button onClick={onBack} disabled={committed}
+                style={{ fontSize: 13, padding: '8px 16px', fontWeight: 700, borderRadius: 8, cursor: 'pointer',
+                  background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', flexShrink: 0 }}>
+                ← Indietro
+              </button>
+            )}
+            <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+              {dropped.size > 0
+                ? `${dropped.size} scartat${dropped.size===1?'a':'e'} · ${srcTxs.length - dropped.size} da importare`
+                : `${srcTxs.length} transazioni da importare`}
+            </span>
+          </div>
           <HoverTip text={`Salva ${srcTxs.length - dropped.size} transazioni e passa alla rifinitura delle categorie.`}>
             <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
               disabled={committed} onClick={confirmUnsavedPlain}>
@@ -1242,12 +1251,21 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
         </div>
       )}
       {reconciling && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14,
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, gap: 12,
           position: 'sticky', bottom: 0, background: 'var(--surface)', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-            {selected.size} transazion{selected.size===1?'e':'i'} selezionat{selected.size===1?'a':'e'} verrann{selected.size===1?'o':'o'} eliminate al click su "Avanti"
-          </span>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            {onBack && (
+              <button onClick={onBack} disabled={committed}
+                style={{ fontSize: 13, padding: '8px 16px', fontWeight: 700, borderRadius: 8, cursor: 'pointer',
+                  background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', flexShrink: 0 }}>
+                ← Indietro
+              </button>
+            )}
+            <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+              {selected.size} transazion{selected.size===1?'e':'i'} selezionat{selected.size===1?'a':'e'} verrann{selected.size===1?'o':'o'} eliminate al click su "Avanti"
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             {!resolved && (
               <button onClick={skipReconcile} disabled={committed}
                 style={{ fontSize: 12, padding: '8px 14px', fontWeight: 600, background: 'transparent',
@@ -2080,7 +2098,7 @@ export default function ImportWizard({ onClose }) {
         )}
         {step && step.id === 'doppioni' && !committing && step.src === 'conto' && pendingParsed && (
           <DoppioniStep src="conto" srcTxs={pendingParsed.parsedTxs} embedded registerUndo={registerUndo}
-            unsaved onCommit={commitConto}
+            unsaved onCommit={commitConto} onBack={() => setStepIdx(i => Math.max(0, i - 1))}
             targetGapDoppioni={pendingParsed.targetGapDoppioni ?? null}
             reconcileAccount={pendingParsed.account}
             saldoBreakdown={pendingParsed.saldoBreakdown ?? null} onNext={next} />
