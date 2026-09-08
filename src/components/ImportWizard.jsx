@@ -829,24 +829,37 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   // quelle rilevate se ritiene non siano doppioni veri) finché la somma di quelle
   // selezionate non coincide esattamente con lo scarto di saldo atteso.
   const reconciling = targetGapDoppioni != null
-  const [selected, setSelected] = useState(() => new Set())
-  const [showAll, setShowAll] = useState(false)
   const [committed, setCommitted] = useState(false)
-  const [showBreakdown, setShowBreakdown] = useState(false)
-  // Nuovo saldo (da banca) modificabile anche in questo step (richiesta utente):
-  // l'utente può ritoccare il valore inserito negli step precedenti e il gap /
-  // doppioni attesi si ricalcolano in tempo reale.
+  const [saldoOpen, setSaldoOpen] = useState(false)  // box "Controllo saldo" chiuso di default (richiesta utente 2026-09)
+  // Nuovo saldo (da banca) modificabile: valore iniziale già formattato IT (migliaia col
+  // punto, decimali con virgola) — richiesta utente 2026-09.
   const [editedNuovoSaldo, setEditedNuovoSaldo] = useState(
-    saldoBreakdown && saldoBreakdown.nuovoSaldo != null ? String(saldoBreakdown.nuovoSaldo) : ''
+    saldoBreakdown && saldoBreakdown.nuovoSaldo != null ? fmtIT(saldoBreakdown.nuovoSaldo, 2) : ''
   )
 
-  // Niente pre-selezione automatica (richiesta utente 2026-09): l'utente seleziona a
-  // mano i doppioni confrontando le due colonne finché la differenza non torna a zero.
+  // Doppioni come "fusioni" CSV↔DB (richiesta utente 2026-09): pairMap associa ogni riga
+  // CSV considerata doppione alla riga DB corrispondente. I doppioni suggeriti dal sistema
+  // (dupes) sono pre-selezionati (evidenziati); l'utente può separarli o crearne di nuovi
+  // cliccando in sequenza le due operazioni che ritiene identiche.
+  const [pairMap, setPairMap] = useState({})            // csvTxId -> dbTxId
+  const [pendingMerge, setPendingMerge] = useState(null) // { id, kind:'csv'|'db' }: prima metà di un abbinamento manuale
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (!reconciling || seededRef.current || !dupes.length) return
+    seededRef.current = true
+    const m = {}
+    dupes.forEach(d => { m[d.t.txId] = d.match.txId })
+    setPairMap(m)
+  }, [reconciling, dupes])
+
+  const selected = useMemo(() => new Set(Object.keys(pairMap)), [pairMap])
   const dupeIdsSet = useMemo(() => new Set(dupes.map(d => d.t.txId)), [dupes])
+  const srcById = useMemo(() => new Map(srcTxs.map(t => [t.txId, t])), [srcTxs])
+  const dbById = useMemo(() => new Map(dbInFrame.map(t => [t.txId, t])), [dbInFrame])
   const selectedSum = useMemo(() => {
     if (!reconciling) return 0
-    return srcTxs.filter(t => selected.has(t.txId)).reduce((s, t) => s + t.amount, 0)
-  }, [reconciling, srcTxs, selected])
+    return Object.keys(pairMap).reduce((s, id) => s + (srcById.get(id)?.amount || 0), 0)
+  }, [reconciling, pairMap, srcById])
   // Possibilità estrema (richiesta utente 2026-07-15): se l'utente non riesce a
   // trovare doppioni sufficienti a spiegare TUTTO lo scarto, può creare un "tappo"
   // (rettifica nascosta, stesso spirito del Saldo Forzato in Transazioni, stesso
@@ -868,12 +881,28 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   const resolved = reconciling && Math.abs(remaining) < 0.01
   const hasTappo = Math.abs(tappoCovered) > 0.005
 
-  function toggleSelected(txId) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      next.has(txId) ? next.delete(txId) : next.add(txId)
-      return next
+  // Crea un abbinamento (doppione) fra una riga CSV e una riga DB.
+  function pairCsvDb(csvId, dbId) {
+    setPairMap(prev => {
+      if (prev[csvId]) return prev
+      if (Object.values(prev).includes(dbId)) return prev  // quella riga DB è già abbinata
+      return { ...prev, [csvId]: dbId }
     })
+  }
+  // Separa un doppione: la riga CSV torna importabile e la riga DB riappare da sola.
+  function unmerge(csvId) {
+    setPairMap(prev => { const n = { ...prev }; delete n[csvId]; return n })
+  }
+  // Click su una riga CSV (in arrivo): se c'è già una riga DB "in attesa" le fonde,
+  // altrimenti mette questa CSV in attesa del suo doppione.
+  function clickCsv(csvId) {
+    if (pendingMerge && pendingMerge.kind === 'db') { pairCsvDb(csvId, pendingMerge.id); setPendingMerge(null); return }
+    setPendingMerge(pendingMerge && pendingMerge.kind === 'csv' && pendingMerge.id === csvId ? null : { id: csvId, kind: 'csv' })
+  }
+  // Click su una riga DB: speculare a clickCsv.
+  function clickDb(dbId) {
+    if (pendingMerge && pendingMerge.kind === 'csv') { pairCsvDb(pendingMerge.id, dbId); setPendingMerge(null); return }
+    setPendingMerge(pendingMerge && pendingMerge.kind === 'db' && pendingMerge.id === dbId ? null : { id: dbId, kind: 'db' })
   }
 
   function createTappo() {
@@ -1003,14 +1032,24 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
         <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14,
           background: resolved ? 'var(--green-l)' : 'rgba(245,158,11,.08)',
           border: `1px solid ${resolved ? 'var(--green)' : '#f59e0b'}` }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-            {resolved
-              ? '✅ Il saldo torna — puoi proseguire'
-              : gapNegative
-                ? '⚠️ Saldo di sistema INFERIORE al saldo banca — non ci possono essere doppioni'
-                : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
-          </div>
-          {saldoBreakdown && (
+          <button onClick={() => setSaldoOpen(o => !o)}
+            style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10,
+              background:'none', border:'none', cursor:'pointer', padding:0, textAlign:'left', color:'inherit',
+              marginBottom: saldoOpen ? 8 : 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>
+              {saldoOpen ? '▾' : '▸'}{' '}
+              {resolved
+                ? '✅ Il saldo torna — puoi proseguire'
+                : gapNegative
+                  ? '⚠️ Saldo di sistema INFERIORE al saldo banca — non ci possono essere doppioni'
+                  : '⚖️ Controllo saldo: seleziona i doppioni finché non torna a zero'}
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 800, fontFamily:'var(--font-mono)', flexShrink:0,
+              color: resolved ? 'var(--green)' : '#b45309' }}>
+              Diff. € {fmtIT(Math.abs(remaining), 2)}
+            </span>
+          </button>
+          {saldoOpen && saldoBreakdown && (
             <div style={{ marginTop: 4, fontSize: 12.5, fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 3, lineHeight: 1.55 }}>
               <div style={{ color: 'var(--text3)' }}>Conto usato: {saldoBreakdown.account}</div>
               <div>Saldo pre import: <strong>€ {fmtIT(saldoBreakdown.saldoAttuale, 2)}</strong></div>
@@ -1034,7 +1073,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               )}
             </div>
           )}
-          {gapNegative && !resolved && (
+          {saldoOpen && gapNegative && !resolved && (
             <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.5, marginTop: 10, fontFamily: 'var(--font-sans, inherit)' }}>
               Il sistema calcola <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> in <strong>meno</strong> del saldo
               che hai dichiarato dalla banca. Togliere doppioni abbasserebbe ancora il saldo, quindi qui non è possibile:
@@ -1042,7 +1081,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               saldo banca, oppure lasciare così e proseguire (Salta).
             </div>
           )}
-          {!resolved && reconcileAccount && (
+          {saldoOpen && !resolved && reconcileAccount && (
             <div style={{ marginTop: 8 }}>
               <button onClick={createTappo}
                 style={{ fontSize: 11, background: 'none', border: '1px solid #f59e0b', color: '#92400e',
@@ -1053,7 +1092,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               </button>
             </div>
           )}
-          {hasTappo && (
+          {saldoOpen && hasTappo && (
             <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 8 }}>
               🧾 Rettifica di € {fmtIT(Math.abs(tappoCovered), 2)} pronta (verrà creata solo confermando "Avanti")
               <button onClick={removeTappo} style={{ border: 'none', background: 'transparent', color: 'var(--red)', cursor: 'pointer', fontSize: 11, padding: 0 }}>Annulla rettifica</button>
@@ -1095,51 +1134,72 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
           ))}
         </div>
       ) : (() => {
-        // Due colonne indipendenti (richiesta utente 2026-09): a sinistra TUTTE le transazioni
-        // del DB nello stesso periodo dell'import, a destra TUTTE quelle in arrivo dal CSV con
-        // checkbox (nessuna pre-selezionata). Una riga per voce: data · descrizione originale
-        // (popup se lunga) · importo. I possibili doppioni rilevati sono marcati con 🔁.
-        const Line = ({ tx, checkbox }) => {
-          const Wrap = checkbox ? 'label' : 'div'
-          return (
-            <Wrap style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 9px', borderBottom:'1px solid var(--border)',
-              fontSize:12, cursor: checkbox ? 'pointer' : 'default',
-              background: checkbox && selected.has(tx.txId) ? 'var(--accent-l)' : 'transparent' }}>
-              {checkbox && <input type="checkbox" style={{ flexShrink:0 }} checked={selected.has(tx.txId)} onChange={() => toggleSelected(tx.txId)}/>}
-              <span style={{ fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11, flexShrink:0, width:62 }}>{fmtDate(tx.date)}</span>
-              <span style={{ flex:1, minWidth:0 }}>
-                <LongText text={tx.description} label="Descrizione originale" style={{ fontSize:12, fontWeight:600 }}/>
-              </span>
-              {checkbox && dupeIdsSet.has(tx.txId) && <span title="Possibile doppione (stesso importo, data e descrizione a DB)" style={{ fontSize:11, flexShrink:0 }}>🔁</span>}
-              <span style={{ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, flexShrink:0, color:tx.amount<0?'var(--red)':'var(--green)' }}>
-                {tx.amount<0?'−':'+'}€ {fmtIT(Math.abs(tx.amount),2)}
-              </span>
-            </Wrap>
-          )
-        }
-        const paneHead = { fontSize:11, fontWeight:800, letterSpacing:'.03em', textTransform:'uppercase', color:'var(--text2)',
-          padding:'8px 10px', background:'var(--surface2)', borderBottom:'1px solid var(--border)', position:'sticky', top:0, zIndex:1 }
-        const pane = { flex:1, minWidth:0, border:'1px solid var(--border)', borderRadius:10, overflow:'hidden', display:'flex', flexDirection:'column' }
+        // Lista UNICA (richiesta utente 2026-09): DB dello stesso periodo + operazioni in arrivo
+        // dal CSV, in un solo elenco ordinato per data. I doppioni sono "fusioni" CSV↔DB
+        // evidenziate in giallo, pre-selezionate dai suggerimenti del sistema. L'utente può
+        // separare una fusione (× → torna a due operazioni) o crearne una nuova cliccando in
+        // sequenza le due operazioni che ritiene identiche.
+        const consumedDb = new Set(Object.values(pairMap))
+        const items = []
+        Object.entries(pairMap).forEach(([csvId, dbId]) => {
+          const csv = srcById.get(csvId); if (!csv) return
+          items.push({ key: 'dup-' + csvId, kind: 'dup', date: csv.date, csv, db: dbById.get(dbId) })
+        })
+        srcTxs.forEach(t => { if (!pairMap[t.txId]) items.push({ key: 'csv-' + t.txId, kind: 'csv', date: t.date, tx: t }) })
+        dbInFrame.forEach(t => { if (!consumedDb.has(t.txId)) items.push({ key: 'db-' + t.txId, kind: 'db', date: t.date, tx: t }) })
+        items.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+        const amtStyle = amt => ({ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, flexShrink:0, color: amt<0?'var(--red)':'var(--green)' })
+        const dateStyle = { fontFamily:'var(--font-mono)', color:'var(--text3)', fontSize:11, flexShrink:0, width:62 }
+        const rowBase = { display:'flex', alignItems:'center', gap:8, padding:'6px 9px', borderBottom:'1px solid var(--border)', fontSize:12 }
+        const pending = pendingMerge
         return (
           <>
-            <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8 }}>
-              Confronta le due colonne e <strong>spunta a destra i doppioni</strong> finché la differenza non torna a zero.
-              {dupes.length > 0 && <> {dupes.length} possibil{dupes.length===1?'e':'i'} doppion{dupes.length===1?'e':'i'} 🔁 rilevat{dupes.length===1?'o':'i'} in automatico.</>}
+            <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8, lineHeight:1.5 }}>
+              Elenco unico: 🟡 i <strong>doppioni</strong> (già a DB) sono evidenziati e pre-selezionati — clicca <strong>×</strong> per separarli in due operazioni.
+              Per segnare un doppione a mano, clicca un'operazione e poi quella che ritieni identica.
+              {pending && <span style={{ color:'var(--accent)', fontWeight:700 }}> · In attesa: clicca l'operazione doppia</span>}
+              {pending && <button onClick={() => setPendingMerge(null)} style={{ marginLeft:6, border:'none', background:'transparent', color:'var(--red)', cursor:'pointer', fontSize:12, padding:0 }}>Annulla</button>}
             </div>
-            <div style={{ display:'flex', gap:10, marginBottom:12, alignItems:'flex-start' }}>
-              <div style={pane}>
-                <div style={paneHead}>🗄️ Già nel DB · stesso periodo ({dbInFrame.length})</div>
-                <div style={{ maxHeight:'44vh', overflow:'auto' }}>
-                  {dbInFrame.length
-                    ? dbInFrame.map(t => <Line key={t.txId} tx={t} checkbox={false}/>)
-                    : <div style={{ padding:'18px 10px', textAlign:'center', color:'var(--text3)', fontSize:12 }}>Nessuna transazione a DB in questo periodo.</div>}
-                </div>
+            <div style={{ border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
+              <div style={{ display:'flex', fontSize:11, fontWeight:800, textTransform:'uppercase', letterSpacing:'.03em', color:'var(--text2)',
+                padding:'8px 10px', background:'var(--surface2)', borderBottom:'1px solid var(--border)', gap:8 }}>
+                <span style={{ flex:1 }}>Operazioni nel periodo ({items.length})</span>
+                <span style={{ color:'var(--text3)' }}>🟡 doppioni {selected.size} · 📥 in arrivo {srcTxs.length}</span>
               </div>
-              <div style={pane}>
-                <div style={paneHead}>📥 In arrivo dal CSV ({srcTxs.length})</div>
-                <div style={{ maxHeight:'44vh', overflow:'auto' }}>
-                  {srcTxs.map(t => <Line key={t.txId} tx={t} checkbox={true}/>)}
-                </div>
+              <div style={{ maxHeight:'46vh', overflow:'auto' }}>
+                {items.map(it => {
+                  if (it.kind === 'dup') {
+                    return (
+                      <div key={it.key} style={{ ...rowBase, background:'var(--gold-l)' }}>
+                        <button onClick={() => unmerge(it.csv.txId)} title="Separa: torna a due operazioni distinte"
+                          style={{ flexShrink:0, border:'none', background:'transparent', color:'var(--text3)', cursor:'pointer', fontSize:15, lineHeight:1, padding:0, width:18 }}>×</button>
+                        <span style={{ flexShrink:0, fontSize:11 }} title="Doppione: non verrà importata">🔁</span>
+                        <span style={dateStyle}>{fmtDate(it.csv.date)}</span>
+                        <span style={{ flex:1, minWidth:0 }}>
+                          <LongText text={it.csv.description} label="Descrizione originale" style={{ fontSize:12, fontWeight:700 }}/>
+                        </span>
+                        <span style={amtStyle(it.csv.amount)}>{it.csv.amount<0?'−':'+'}€ {fmtIT(Math.abs(it.csv.amount),2)}</span>
+                      </div>
+                    )
+                  }
+                  const t = it.tx
+                  const isCsv = it.kind === 'csv'
+                  const isPending = pending && pending.id === t.txId
+                  return (
+                    <div key={it.key} onClick={() => isCsv ? clickCsv(t.txId) : clickDb(t.txId)}
+                      style={{ ...rowBase, cursor:'pointer', background: isPending ? 'var(--accent-l)' : 'transparent',
+                        outline: isPending ? '2px solid var(--accent)' : 'none', outlineOffset:'-2px', opacity: isCsv ? 1 : .7 }}>
+                      <span style={{ flexShrink:0, fontSize:11, width:18, textAlign:'center' }} title={isCsv ? 'In arrivo dal CSV' : 'Già nel DB (riferimento)'}>{isCsv ? '📥' : '🗄️'}</span>
+                      <span style={dateStyle}>{fmtDate(t.date)}</span>
+                      <span style={{ flex:1, minWidth:0 }}>
+                        <LongText text={t.description} label="Descrizione originale" style={{ fontSize:12, fontWeight:600 }}/>
+                      </span>
+                      {isCsv && dupeIdsSet.has(t.txId) && <span title="Il sistema lo considera un possibile doppione" style={{ fontSize:11, flexShrink:0 }}>🔁</span>}
+                      <span style={amtStyle(t.amount)}>{t.amount<0?'−':'+'}€ {fmtIT(Math.abs(t.amount),2)}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </>
