@@ -1087,9 +1087,14 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
         // checkbox a sinistra) + operazioni già a DB nello stesso periodo (🗄️, solo
         // riferimento), ordinate per data. Spuntare una riga in arrivo = "è un doppione,
         // non importarla": i suggeriti dal sistema (🔁) sono già spuntati. 🔍 = descrizione intera.
+        // Quando un doppione rilevato è spuntato, la sua copia a DB viene NASCOSTA (si vede
+        // solo la riga gialla, "fusione"); togliendo la spunta la riga DB riappare.
+        const matchByCsv = new Map(dupes.map(d => [d.t.txId, d.match.txId]))
+        const consumedDb = new Set()
+        srcTxs.forEach(t => { if (selected.has(t.txId) && matchByCsv.has(t.txId)) consumedDb.add(matchByCsv.get(t.txId)) })
         const items = [
           ...srcTxs.map(t => ({ key: 'csv-' + t.txId, tx: t, isCsv: true, date: t.date })),
-          ...dbInFrame.map(t => ({ key: 'db-' + t.txId, tx: t, isCsv: false, date: t.date })),
+          ...dbInFrame.filter(t => !consumedDb.has(t.txId)).map(t => ({ key: 'db-' + t.txId, tx: t, isCsv: false, date: t.date })),
         ].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
         const amtStyle = amt => ({ fontFamily:'var(--font-mono)', fontWeight:700, fontSize:11, flexShrink:0, color: amt<0?'var(--red)':'var(--green)' })
