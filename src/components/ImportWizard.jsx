@@ -2003,12 +2003,14 @@ export default function ImportWizard({ onClose }) {
         {/* ── Rifinitura (a/b): 3 schermate per sorgente ── */}
         {step && step.id === 'refine' && (
           <>
-            <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
-              {SRC_LABEL[step.src]} — {KIND_LABEL[step.kind].title}
-            </div>
-            <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>
-              Modifica direttamente i campi (come nello sheet Transazioni): la descrizione AI apre il popup per
-              creare una regola, le categorie si cambiano dalle tendine, ✚ Regola crea una regola dalla riga.
+            <div style={{position:'sticky',top:0,zIndex:3,background:'var(--surface)',paddingBottom:8}}>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
+                {SRC_LABEL[step.src]} — {KIND_LABEL[step.kind].title}
+              </div>
+              <div style={{fontSize:12,color:'var(--text3)'}}>
+                Modifica direttamente i campi (come nello sheet Transazioni): la descrizione AI apre il popup per
+                creare una regola, le categorie si cambiano dalle tendine, ✚ Regola crea una regola dalla riga.
+              </div>
             </div>
             <RefineTable
               txs={refineRows(step.src, step.kind)}
