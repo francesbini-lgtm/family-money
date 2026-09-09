@@ -2802,6 +2802,7 @@ function FilterBar() {
 // ── Transaction row ───────────────────────────────────────
 function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenCatTxId, showRegDate, setEnrichSingleTx, visibleCols, colOrder }) {
   const updateTransaction = useStore(s=>s.updateTransaction)
+  const deleteTransaction = useStore(s=>s.deleteTransaction)
   const userAccounts      = useStore(s=>s.userAccounts)
   const satiPots          = useStore(s=>s.satiPots)
   const allTxs            = useStore(s=>s.transactions)
@@ -3114,6 +3115,9 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                 ? tx._mergedParts
                 : (tx._mergedFrom || []).map((id, i) => ({ txId: id, description: (tx.description || '').split(' | ')[i] || '', amount: null, date: null }))
               const hasAmounts = parts.some(p => p.amount != null)
+              // Si può disfare solo se gli originali esistono ancora (unioni nuove: esclusi,
+              // non cancellati). Le unioni vecchie avevano cancellato gli originali.
+              const canUndo = (tx._mergedFrom || []).some(id => allTxs.some(x => x.txId === id))
               return (
                 <>
                   <span style={{ cursor:'pointer', borderBottom:'1px dotted var(--text3)' }}
@@ -3156,7 +3160,17 @@ function TxRow({ tx, selected, setSelected, setFeedbackTx, openCatTxId, setOpenC
                         {!hasAmounts && (
                           <div style={{ marginTop:8, fontSize:11, color:'var(--text3)' }}>Importi dei singoli movimenti non disponibili per unioni fatte prima di questo aggiornamento.</div>
                         )}
-                        <button onClick={()=>setAmtPopup(null)} style={{ marginTop:10, width:'100%', padding:'5px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', cursor:'pointer', fontSize:12, color:'var(--text2)' }}>Chiudi</button>
+                        {canUndo && (
+                          <button onClick={()=>{
+                            if (!window.confirm('Disfare l’unione? Le operazioni originali torneranno visibili e la riga unita verrà eliminata.')) return
+                            ;(tx._mergedFrom || []).forEach(id => {
+                              if (allTxs.some(x => x.txId === id)) updateTransaction(id, { excluded:false, excludedAt:null, excludedType:null, excludedReason:null, _mergedInto:null })
+                            })
+                            deleteTransaction(tx.txId)
+                            setAmtPopup(null)
+                          }} style={{ marginTop:10, width:'100%', padding:'6px', borderRadius:6, border:'1px solid var(--red)', background:'transparent', color:'var(--red)', cursor:'pointer', fontSize:12, fontWeight:700 }}>↩︎ Disfai unione</button>
+                        )}
+                        <button onClick={()=>setAmtPopup(null)} style={{ marginTop:8, width:'100%', padding:'5px', borderRadius:6, border:'1px solid var(--border)', background:'var(--surface2)', cursor:'pointer', fontSize:12, color:'var(--text2)' }}>Chiudi</button>
                       </div>
                     </>
                   )}
@@ -3313,7 +3327,7 @@ function SplitTxModal({ tx, onClose }) {
 // ── Merge transactions modal ──────────────────────────────
 function MergeTransactionsModal({ txs, onClose }) {
   const addTransactions   = useStore(s => s.addTransactions)
-  const deleteTransaction = useStore(s => s.deleteTransaction)
+  const updateTransaction = useStore(s => s.updateTransaction)
   const customCats        = useStore(s => s.customCats)
   const catDefs           = getMergedCats(customCats)
 
@@ -3361,9 +3375,8 @@ function MergeTransactionsModal({ txs, onClose }) {
       userEditedCat:  true,
       userEditedDesc: true,
       _mergedFrom: txs.map(t => t.txId),
-      // Dettaglio dei pezzi originali (data/descrizione/importo) — così dall'operazione
-      // unita si può sempre risalire a cosa è stato unito, anche dopo che gli originali
-      // sono stati cancellati (richiesta utente 2026-09).
+      // Snapshot dei pezzi originali (data valuta/descrizione/importo) — per il popup 🔗 e
+      // come rete di sicurezza; gli originali comunque NON vengono cancellati (vedi sotto).
       _mergedParts: txs.map(t => ({
         txId: t.txId,
         date: t.date || null,           // data VALUTA — usata per il match doppioni
@@ -3374,7 +3387,15 @@ function MergeTransactionsModal({ txs, onClose }) {
         account: t.account || '',
       })),
     }])
-    txs.forEach(t => deleteTransaction(t.txId))
+    // Gli originali NON vengono cancellati ma ESCLUSI (richiesta utente 2026-09): restano
+    // nel DB (fuori dal saldo, l'operazione unita conta al loro posto), così sono tracciabili,
+    // riconoscibili come doppioni in un futuro import, e l'unione è disfabile.
+    const now = new Date().toISOString()
+    txs.forEach(t => updateTransaction(t.txId, {
+      excluded: true, excludedAt: now, excludedType: 'manual',
+      excludedReason: `Unita nell'operazione ${newTxId}`,
+      _mergedInto: newTxId,
+    }))
     setDone(true)
     setTimeout(onClose, 1000)
   }
