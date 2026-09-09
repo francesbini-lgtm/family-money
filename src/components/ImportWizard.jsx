@@ -857,6 +857,7 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
   const [committed, setCommitted] = useState(false)
   const [saldoOpen, setSaldoOpen] = useState(false)  // box "Controllo saldo" chiuso di default (richiesta utente 2026-09)
   const [descPopup, setDescPopup] = useState(null)   // descrizione originale mostrata per intero (bottone 🔍)
+  const [avantiPopup, setAvantiPopup] = useState(false)  // conferma alla differenza residua (crea rettifica o continua)
   // Nuovo saldo (da banca) modificabile: valore iniziale già formattato IT (migliaia col
   // punto, decimali con virgola) — richiesta utente 2026-09.
   const [editedNuovoSaldo, setEditedNuovoSaldo] = useState(
@@ -912,54 +913,36 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
     : null
 
 
-  function createTappo() {
-    const gapNow = Math.round((effectiveTarget - selectedSum - tappoCovered) * 100) / 100
-    if (Math.abs(gapNow) < 0.01) return
-    if (!window.confirm(
-      `Stai per creare una rettifica nascosta di € ${fmtIT(Math.abs(gapNow), 2)} per il residuo che non riesci a spiegare come doppione. ` +
-      `Verrà creata SOLO quando confermi "Avanti" — puoi ancora annullarla prima. Continuare?`
-    )) return
-    const pin = window.prompt('Inserisci il codice per confermare la rettifica di saldo:')
-    if (pin == null) return
-    if (pin !== SALDO_PIN) { window.alert('Codice errato — rettifica non creata.'); return }
-    setTappoCovered(c => Math.round((c + gapNow) * 100) / 100)
-  }
-
-  function removeTappo() {
-    setTappoCovered(0)
-  }
-
-  // Riga di rettifica ("tappo") per il residuo non spiegabile con doppioni reali —
-  // già completa/categorizzata (nessuna AI necessaria), esclusa dal saldo.
-  function buildTappoRow() {
+  // Rettifica VISIBILE (conta nel saldo) pari al delta residuo, così il saldo del conto
+  // combacia col saldo dichiarato dalla banca (richiesta utente 2026-09). A differenza del
+  // vecchio "tappo" nascosto/PIN, questa è una normale transazione.
+  function buildRettificaRow() {
+    const maxDate = srcTxs.reduce((m, t) => (!m || (t.date || '') > m) ? (t.date || m) : m, null) || new Date().toISOString().slice(0, 10)
     return {
-      txId: '0000-' + Date.now().toString(36).toUpperCase(),
-      date: srcTxs.reduce((m, t) => (!m || (t.date||'') < m) ? (t.date||m) : m, null) || new Date().toISOString().slice(0,10),
-      amount: Math.round(-tappoCovered * 100) / 100,
-      description: `Rettifica doppioni non trovati — import del ${fmtDate(new Date().toISOString().slice(0,10))}`,
-      descAI: 'Rettifica doppioni non trovati',
+      txId: 'RETT-' + Date.now().toString(36).toUpperCase(),
+      date: maxDate,
+      amount: diffBancaPost,   // segnato: saldo post rimozione + diff = saldo banca
+      description: `Rettifica saldo — allineamento al saldo banca (import del ${fmtDate(new Date().toISOString().slice(0, 10))})`,
+      descAI: 'Rettifica saldo import',
       cat1: 'Altro', cat2: 'Altro',
       account: reconcileAccount, conf: 100, aiEnriched: true,
-      excluded: true,
-      excludedAt: new Date().toISOString(),
-      excludedType: 'manual',
-      excludedReason: 'Rettifica saldo — doppioni non trovati durante import (protetta da PIN)',
-      _doppioniTappo: true,
+      _saldoRettifica: true,
     }
   }
 
-  function confirmReconcile() {
-    if (!resolved || committed) return
+  // Conclude lo step: salva i superstiti (+ eventuale rettifica del delta).
+  function finishReconcile(withRettifica) {
+    if (committed) return
     setCommitted(true)
-    // Modalità non-salvata (conto): non cancelliamo nulla — salviamo solo i superstiti.
+    setAvantiPopup(false)
+    const extra = (withRettifica && reconcileAccount && Math.abs(diffBancaPost || 0) > 0.005) ? [buildRettificaRow()] : []
     if (unsaved) {
       const survivors = srcTxs.filter(t => !selected.has(t.txId))
-      const extra = (hasTappo && reconcileAccount) ? [buildTappoRow()] : []
       onCommit?.(survivors, extra)
       return
     }
     selected.forEach(txId => deleteTransaction(txId))
-    if (hasTappo && reconcileAccount) addTransactions([buildTappoRow()])
+    if (extra.length) addTransactions(extra)
     if (selected.size > 0) {
       registerUndo?.(`${selected.size} doppioni eliminati`, () => {
         for (let i = 0; i < selected.size; i++) useStore.getState().undoLastTx?.()
@@ -968,31 +951,12 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
     onNext?.()
   }
 
-  // Skip (richiesta utente 2026-07-26): a volte il gap non è spiegabile con doppioni
-  // reali (o il numero mostrato è palesemente sbagliato) — permette di proseguire
-  // SENZA creare la rettifica/tappo del residuo. Elimina comunque gli eventuali
-  // doppioni che l'utente ha già selezionato manualmente (quelli sono veri doppioni
-  // trovati, indipendenti dal fatto che il gap totale torni o meno).
-  function skipReconcile() {
+  // Click su "Avanti": se il saldo torna già (o non c'è controllo saldo) prosegue; altrimenti
+  // apre il popup che chiede se creare la rettifica del delta o continuare senza.
+  function handleAvanti() {
     if (committed) return
-    if (!window.confirm(
-      selected.size > 0
-        ? `Proseguire senza chiudere il gap di saldo (differenza € ${fmtIT(Math.abs(remaining), 2)})? Verranno comunque eliminati i ${selected.size} doppioni già selezionati, ma NESSUNA rettifica verrà creata per il residuo.`
-        : `Proseguire senza cercare altri doppioni? NESSUNA rettifica verrà creata per il residuo di € ${fmtIT(Math.abs(remaining), 2)}.`
-    )) return
-    setCommitted(true)
-    if (unsaved) {
-      const survivors = srcTxs.filter(t => !selected.has(t.txId))
-      onCommit?.(survivors, [])
-      return
-    }
-    selected.forEach(txId => deleteTransaction(txId))
-    if (selected.size > 0) {
-      registerUndo?.(`${selected.size} doppioni eliminati`, () => {
-        for (let i = 0; i < selected.size; i++) useStore.getState().undoLastTx?.()
-      })
-    }
-    onNext?.()
+    if (!reconciling || Math.abs(diffBancaPost || 0) < 0.01) { finishReconcile(false); return }
+    setAvantiPopup(true)
   }
 
   // Conferma in modalità non-salvata, ramo NON-reconciling (nessun saldo dichiarato):
@@ -1072,7 +1036,6 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
               <div style={{ fontWeight: 700 }}>= Gap: <strong style={{ color: resolved ? 'var(--green)' : 'var(--red)' }}>€ {fmtIT(effectiveTarget, 2)}</strong></div>
               <div style={{ borderTop: '1px solid var(--border)', margin: '6px 0 1px' }} />
               <div>Doppioni selezionati: <strong>€ {fmtIT(Math.abs(selectedSum), 2)}</strong></div>
-              {hasTappo && <div>Rettifica (tappo): <strong style={{ color: 'var(--gold)' }}>€ {fmtIT(Math.abs(tappoCovered), 2)}</strong></div>}
               <div>= Saldo post rimozione doppioni: <strong>€ {fmtIT(saldoPostRimozione, 2)}</strong></div>
               <div style={{ fontWeight: 800, color: resolved ? 'var(--green)' : '#b45309' }}>Differenza: € {fmtIT(Math.abs(diffBancaPost), 2)}</div>
               {Math.abs(saldoBreakdown.saldoAttuale) < 0.01 && (
@@ -1080,31 +1043,6 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
                   ⚠️ Saldo pre import risulta 0 — se hai già transazioni registrate, qualcosa non torna nel calcolo del saldo.
                 </div>
               )}
-            </div>
-          )}
-          {saldoOpen && gapNegative && !resolved && (
-            <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.5, marginTop: 10, fontFamily: 'var(--font-sans, inherit)' }}>
-              Il sistema calcola <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> in <strong>meno</strong> del saldo
-              che hai dichiarato dalla banca. Togliere doppioni abbasserebbe ancora il saldo, quindi qui non è possibile:
-              puoi creare una rettifica (tappo) di <strong>€ {fmtIT(Math.abs(effectiveTarget), 2)}</strong> per allineare al
-              saldo banca, oppure lasciare così e proseguire (Salta).
-            </div>
-          )}
-          {saldoOpen && !resolved && reconcileAccount && (
-            <div style={{ marginTop: 8 }}>
-              <button onClick={createTappo}
-                style={{ fontSize: 11, background: 'none', border: '1px solid #f59e0b', color: '#92400e',
-                  borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-                {gapNegative
-                  ? `🧾 Crea rettifica di € ${fmtIT(Math.abs(effectiveTarget), 2)} per allineare al saldo banca (protetta da PIN)`
-                  : '⚠️ Non trovo altri doppioni — crea rettifica per il residuo (protetta da PIN)'}
-              </button>
-            </div>
-          )}
-          {saldoOpen && hasTappo && (
-            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              🧾 Rettifica di € {fmtIT(Math.abs(tappoCovered), 2)} pronta (verrà creata solo confermando "Avanti")
-              <button onClick={removeTappo} style={{ border: 'none', background: 'transparent', color: 'var(--red)', cursor: 'pointer', fontSize: 11, padding: 0 }}>Annulla rettifica</button>
             </div>
           )}
         </div>
@@ -1228,19 +1166,11 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            {!resolved && (
-              <button onClick={skipReconcile} disabled={committed}
-                style={{ fontSize: 12, padding: '8px 14px', fontWeight: 600, background: 'transparent',
-                  color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer' }}
-                title="Prosegui senza chiudere il gap e senza creare rettifica del residuo">
-                ⏭️ Salta
-              </button>
-            )}
             <HoverTip text={resolved
-              ? 'Elimina i doppioni selezionati, salva le transazioni e passa alla rifinitura.'
-              : `Il saldo non torna ancora: differenza € ${fmtIT(Math.abs(remaining),2)} da azzerare prima di proseguire.`}>
+              ? 'Salva le transazioni (senza i doppioni) e passa alla rifinitura.'
+              : `Il saldo non torna: resta una differenza di € ${fmtIT(Math.abs(diffBancaPost||0),2)} — al click ti chiediamo come gestirla.`}>
               <button className="btn btn-primary" style={{ fontSize: 13, padding: '8px 22px', fontWeight: 700 }}
-                disabled={!resolved || committed} onClick={confirmReconcile}>
+                disabled={committed} onClick={handleAvanti}>
                 Avanti →
               </button>
             </HoverTip>
@@ -1262,6 +1192,44 @@ export function DoppioniStep({ src, srcTxs, onNext, embedded, registerUndo, targ
           </div>
         </div>
       )}
+
+      {avantiPopup && (() => {
+        const inferiore = (diffBancaPost || 0) > 0   // saldo calcolato < saldo banca
+        const abs = Math.abs(diffBancaPost || 0)
+        return (
+          <div onClick={() => setAvantiPopup(false)}
+            style={{ position:'fixed', inset:0, zIndex:4000, background:'rgba(0,0,0,.5)', backdropFilter:'blur(2px)',
+              display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background:'var(--surface)', borderRadius:14, padding:'22px 24px', maxWidth:520, width:'100%', boxShadow:'0 20px 60px rgba(0,0,0,.3)' }}>
+              <div style={{ fontSize:16, fontWeight:800, marginBottom:10 }}>⚖️ C'è ancora una differenza di € {fmtIT(abs, 2)}</div>
+              <div style={{ fontSize:13, lineHeight:1.55, color:'var(--text2)' }}>
+                Dopo aver tolto i doppioni, il saldo calcolato è <strong>€ {fmtIT(saldoPostRimozione, 2)}</strong>,
+                cioè <strong style={{ color: inferiore ? 'var(--red)' : 'var(--green)' }}>{inferiore ? 'INFERIORE' : 'SUPERIORE'} di € {fmtIT(abs, 2)}</strong> rispetto
+                al saldo banca che hai indicato (<strong>€ {fmtIT(nuovoSaldoNum, 2)}</strong>).
+              </div>
+              <div style={{ fontSize:13, lineHeight:1.55, color:'var(--text2)', marginTop:10 }}>
+                Vuoi creare una transazione di rettifica di <strong>{inferiore ? '+' : '−'}€ {fmtIT(abs, 2)}</strong> per
+                allineare esattamente il saldo a quello della banca? Oppure prosegui senza: il saldo resterà diverso di € {fmtIT(abs, 2)}.
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:18 }}>
+                <button className="btn btn-primary" style={{ fontSize:14, padding:'11px 18px', fontWeight:700 }}
+                  onClick={() => finishReconcile(true)}>
+                  🧾 Crea rettifica di {inferiore ? '+' : '−'}€ {fmtIT(abs, 2)} e allinea al saldo banca
+                </button>
+                <button className="btn btn-secondary" style={{ fontSize:14, padding:'11px 18px', fontWeight:700 }}
+                  onClick={() => finishReconcile(false)}>
+                  Continua senza rettifica
+                </button>
+                <button onClick={() => setAvantiPopup(false)}
+                  style={{ fontSize:13, padding:'8px', background:'transparent', border:'none', color:'var(--text3)', cursor:'pointer' }}>
+                  Annulla
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </>
   )
 }
