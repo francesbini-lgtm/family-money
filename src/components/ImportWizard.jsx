@@ -521,8 +521,13 @@ function VacCandidatesStep({ importedIdSet, onNext, embedded, registerUndo }) {
 function VacFuoriPeriodoStep({ importedIdSet, onNext, embedded, registerUndo }) {
   const transactions      = useStore(s => s.transactions)
   const updateTransaction = useStore(s => s.updateTransaction)
+  const setAppPref        = useStore(s => s.setAppPref)
   const { vacations } = useVacations()
   const [handled, setHandled] = useState({})
+  // Creazione di una nuova vacanza direttamente da qui (richiesta utente 2026-09):
+  // newVacFor = txId della riga che sta creando la vacanza; newVac = campi del form.
+  const [newVacFor, setNewVacFor] = useState(null)
+  const [newVac, setNewVac] = useState({ city: '', from: '', to: '' })
 
   const rows = useMemo(() => transactions.filter(t => {
     if (!importedIdSet.has(t.txId)) return false
@@ -555,6 +560,33 @@ function VacFuoriPeriodoStep({ importedIdSet, onNext, embedded, registerUndo }) 
     })
   }
 
+  // Crea una nuova vacanza (nome + periodo) e assegna subito la spesa corrente.
+  function createAndAssign(t) {
+    const city = newVac.city.trim()
+    if (!city || !newVac.from || !newVac.to) return
+    const vac = { id: Date.now(), name: city, city, from: newVac.from, to: newVac.to }
+    setAppPref('calendarVacations', [...(useStore.getState().appPrefs?.calendarVacations || []), vac])
+    // assignTo legge da `vacations` (stato del render corrente): assegniamo con la stessa
+    // logica ma sulla vacanza appena creata, senza aspettare il re-render.
+    const prev = { competenza: t.competenza ?? null, _effDate: t._effDate ?? null, cat2: t.cat2 ?? null }
+    const inRange = t.date >= vac.from && t.date <= vac.to
+    const nights = Math.max(0, Math.round((new Date(vac.to) - new Date(vac.from)) / 86400000))
+    updateTransaction(t.txId, {
+      competenza: inRange ? (vac.from === t.date ? null : t.competenza) : vac.from,
+      _effDate: inRange ? (t.competenza || t.date) : vac.from,
+      cat1: 'Weekend e Vacanze', cat2: nights >= 3 ? 'Vacanze' : 'Weekend', userEditedCat: true,
+    })
+    setHandled(h => ({ ...h, [t.txId]: true }))
+    setNewVacFor(null); setNewVac({ city: '', from: '', to: '' })
+    showToast(`✅ Creata "${city}" e assegnata`, 'success')
+    registerUndo?.(`Creata "${city}" e assegnata`, () => {
+      updateTransaction(t.txId, prev)
+      const cur = useStore.getState().appPrefs?.calendarVacations || []
+      setAppPref('calendarVacations', cur.filter(v => v.id !== vac.id))
+      setHandled(h => { const n = { ...h }; delete n[t.txId]; return n })
+    })
+  }
+
   return (
     <>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>📆 Spese fuori periodo in questo import ({rows.length})</div>
@@ -570,24 +602,51 @@ function VacFuoriPeriodoStep({ importedIdSet, onNext, embedded, registerUndo }) 
       ) : (
         <div>
           {rows.map(t => (
-            <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(t.competenza || t.date)}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.merchant || t.descAI || t.description?.slice(0, 40)}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
-                −€ {fmtIT(Math.abs(t.amount), 2)}
-              </span>
-              <select defaultValue="" onChange={e => { if (e.target.value) assignTo(t, e.target.value); e.target.value = '' }}
-                style={{ ...SEL_STYLE, width: 'auto', minWidth: 180, marginLeft: 'auto' }}>
-                <option value="">Assegna a…</option>
-                {vacations.map(v => (
-                  <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
-                ))}
-              </select>
-              <button onClick={() => setHandled(h => ({ ...h, [t.txId]: true }))}
-                style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
-                Lascia così
-              </button>
+            <div key={t.txId} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(t.competenza || t.date)}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, minWidth: 140 }}>{t.merchant || t.descAI || t.description?.slice(0, 40)}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)' }}>
+                  −€ {fmtIT(Math.abs(t.amount), 2)}
+                </span>
+                <select value="" onChange={e => {
+                    const v = e.target.value
+                    if (v === '__new__') { setNewVacFor(t.txId); setNewVac({ city: '', from: t.competenza || t.date || '', to: t.competenza || t.date || '' }) }
+                    else if (v) assignTo(t, v)
+                    e.target.value = ''
+                  }}
+                  style={{ ...SEL_STYLE, width: 'auto', minWidth: 180, marginLeft: 'auto' }}>
+                  <option value="">Assegna a…</option>
+                  {vacations.map(v => (
+                    <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
+                  ))}
+                  <option value="__new__">➕ Aggiungi vacanza…</option>
+                </select>
+                <button onClick={() => setHandled(h => ({ ...h, [t.txId]: true }))}
+                  style={{ padding: '6px 12px', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)', borderRadius: 7, fontSize: 12, cursor: 'pointer' }}>
+                  Lascia così
+                </button>
+              </div>
+              {newVacFor === t.txId && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase' }}>➕ Nuova vacanza</span>
+                  <input value={newVac.city} onChange={e => setNewVac(f => ({ ...f, city: e.target.value }))} placeholder="Nome / località" autoFocus
+                    style={{ ...SEL_STYLE, width: 160 }} />
+                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>dal</span>
+                  <input type="date" value={newVac.from} onChange={e => setNewVac(f => ({ ...f, from: e.target.value }))} style={{ ...SEL_STYLE, width: 'auto' }} />
+                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>al</span>
+                  <input type="date" value={newVac.to} onChange={e => setNewVac(f => ({ ...f, to: e.target.value }))} style={{ ...SEL_STYLE, width: 'auto' }} />
+                  <button disabled={!newVac.city.trim() || !newVac.from || !newVac.to} onClick={() => createAndAssign(t)}
+                    style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700,
+                      cursor: 'pointer', opacity: (!newVac.city.trim() || !newVac.from || !newVac.to) ? .5 : 1 }}>
+                    ✅ Crea e assegna
+                  </button>
+                  <button onClick={() => { setNewVacFor(null); setNewVac({ city: '', from: '', to: '' }) }}
+                    style={{ padding: '6px 10px', background: 'transparent', color: 'var(--text3)', border: 'none', fontSize: 12, cursor: 'pointer' }}>
+                    Annulla
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
