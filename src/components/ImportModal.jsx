@@ -216,6 +216,19 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
     return list.sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 30)
   }, [searchMonth, searchQuery, transactions, choice])
 
+  // Rilevamento "già importato" (richiesta utente 2026-09): un mese le cui transazioni sono
+  // GIÀ presenti a DB per questa carta (stessa data+importo) è stato importato in passato e
+  // non va ri-riconciliato — così i mesi passati non appaiono come "da cercare" (fuorvianti)
+  // e il mese corrente/non chiuso resta come "in attesa dell'estratto".
+  const importedCardKeys = useMemo(() => {
+    const s = new Set()
+    transactions.forEach(t => {
+      if (t.cardImportCard4 === account.card4 && t.date) s.add(`${t.date}|${Math.abs(t.amount || 0).toFixed(2)}`)
+    })
+    return s
+  }, [transactions, account.card4])
+  const monthImportedCount = g => g.txs.filter(t => importedCardKeys.has(`${t.date}|${Math.abs(t.amount || 0).toFixed(2)}`)).length
+
   const matchedMonths = monthGroups.filter(g => choice[g.month])
   const matchedCount = matchedMonths.length
   const totalToImport = matchedMonths.reduce((s, g) => s + g.txs.length, 0)
@@ -265,6 +278,9 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
               {monthGroups.map(g => {
                 const txId = choice[g.month]
                 const chosenTx = txId ? transactions.find(t => t.txId === txId) : null
+                const impN = monthImportedCount(g)
+                const fullyImported = !chosenTx && g.txs.length > 0 && impN === g.txs.length
+                const partlyImported = !chosenTx && !fullyImported && impN > 0
                 const status = statusFor(g)
                 const statusIcon = status === 'ok' ? '✅' : status === 'card-mismatch' ? '⚠️' : status === 'partial' ? '⚠️' : status === 'mismatch' ? '❌' : '🔍'
                 const statusColor = status === 'ok' ? 'var(--green)' : status === 'card-mismatch' ? 'var(--gold)' : status === 'partial' ? 'var(--gold)' : status === 'mismatch' ? 'var(--red)' : 'var(--text3)'
@@ -278,7 +294,11 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                         {chosenTx
                           ? <><div style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{chosenTx.date} · €{Math.abs(chosenTx.amount).toFixed(2)}</div>
                               <div style={{ fontSize: 10, color: 'var(--text3)' }}>{chosenTx.descAI || chosenTx.description?.slice(0, 50)}</div></>
-                          : <span style={{ color: 'var(--text3)' }}>— non trovato —</span>}
+                          : fullyImported
+                            ? <span style={{ color: 'var(--green)', fontWeight: 600 }}>— già a DB —</span>
+                            : partlyImported
+                              ? <span style={{ color: 'var(--gold)' }}>{impN}/{g.txs.length} già a DB</span>
+                              : <span style={{ color: 'var(--text3)' }}>— non trovato —</span>}
                       </td>
                       <td style={{ padding: '8px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                         {!chosenTx
@@ -288,8 +308,13 @@ function CardImportReconcileModal({ account, monthGroups, candidates, transactio
                             : <span style={{ fontSize: 15, color: 'var(--red)' }} title="Importo NON esatto al centesimo">❌</span>}
                       </td>
                       <td style={{ padding: '8px 8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontSize: 15 }}>{statusIcon}</span>
-                        <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'card-mismatch' ? 'carta diversa' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div>
+                        {fullyImported ? (
+                          <><span style={{ fontSize: 15 }}>✅</span>
+                            <div style={{ fontSize: 9, color: 'var(--green)' }}>già importato</div></>
+                        ) : (
+                          <><span style={{ fontSize: 15 }}>{statusIcon}</span>
+                            <div style={{ fontSize: 9, color: statusColor }}>{status === 'ok' ? 'esatto' : status === 'card-mismatch' ? 'carta diversa' : status === 'partial' ? 'differenza lieve' : status === 'mismatch' ? 'importo diverso' : 'da cercare'}</div></>
+                        )}
                       </td>
                       <td style={{ padding: '8px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}
