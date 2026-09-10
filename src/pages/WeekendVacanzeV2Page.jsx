@@ -422,7 +422,7 @@ function OrigDot({ description }) {
 // Location, L1, L2, Importo — tutti i campi modificabili (l'importo no: tocca il saldo).
 // La Competenza è la data usata per stabilire se la spesa cade dentro/fuori un periodo
 // vacanza (vedi effDate() sopra) — editabile qui come in Transazioni.
-function TxEditRow({ t, allCats, updateTransaction, children, leading }) {
+function TxEditRow({ t, allCats, updateTransaction, children, leading, leadingCellProps }) {
   // Cambio categoria L1/L2: se la nuova L1 ha sottocategorie, NON si scrive subito
   // nello store — altrimenti la riga sparisce IMMEDIATAMENTE da questa tabella
   // (filtrata su cat1 === / !== 'Weekend e Vacanze') prima che l'utente possa
@@ -466,7 +466,10 @@ function TxEditRow({ t, allCats, updateTransaction, children, leading }) {
   return (
     <tr style={pending ? { background: 'var(--gold-l,#fef9e7)' } : undefined}>
       {leading !== undefined && (
-        <td style={{ ...td, textAlign: 'center' }}>{leading}</td>
+        <td {...(leadingCellProps || {})}
+          style={{ ...td, textAlign: 'center', userSelect: 'none', cursor: leadingCellProps ? 'pointer' : undefined }}>
+          {leading}
+        </td>
       )}
       <td style={td}>
         <EditCell type="date" value={t.date_reg || t.date} width={105}
@@ -797,17 +800,98 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
   neverAiDescs, onAddNever, onRemoveNever, onClose }) {
   const [selected, setSelected] = useState(new Set())
   const [showNeverPanel, setShowNeverPanel] = useState(false)
-  const allSelected = rows.length > 0 && selected.size === rows.length
 
-  function toggleOne(txId) {
-    setSelected(s => {
-      const next = new Set(s)
-      if (next.has(txId)) next.delete(txId); else next.add(txId)
-      return next
+  // ── Vista a "riquadri per vacanza" (richiesta utente 2026-09-10): all'apertura si
+  // vedono grandi box, uno per vacanza del periodo, con nome + n° spese possibili.
+  // Cliccando un box si entra nel dettaglio con TUTTE le spese di quel periodo GIÀ
+  // selezionate: basta confermare in basso a destra per assegnarle a Weekend e
+  // Vacanze (L1/L2). activeKey = null → griglia dei box; altrimenti → dettaglio. ──
+  const [activeKey, setActiveKey] = useState(null)
+
+  const groups = useMemo(() => {
+    const map = new Map()
+    rows.forEach(r => {
+      const v = r.vac
+      const key = `${v.from || ''}|${v.to || ''}|${v.city || v.name || ''}`
+      if (!map.has(key)) map.set(key, { key, vac: v, vacType: r.vacType, rows: [] })
+      map.get(key).rows.push(r)
     })
+    return [...map.values()].sort((a, b) => (b.vac.from || '').localeCompare(a.vac.from || ''))
+  }, [rows])
+
+  const activeGroup = activeKey ? groups.find(g => g.key === activeKey) : null
+  const displayRows = activeGroup ? activeGroup.rows : rows
+  const allSelected = displayRows.length > 0 && displayRows.every(r => selected.has(r.t.txId))
+
+  // Apre un box: entra nel dettaglio della vacanza con tutte le sue spese pre-selezionate
+  function openGroup(g) {
+    setSelected(new Set(g.rows.map(r => r.t.txId)))
+    setActiveKey(g.key)
   }
+  function backToGrid() {
+    setActiveKey(null)
+    setSelected(new Set())
+  }
+
+  // ── Selezione a trascinamento (drag-to-select) + Shift+click (richiesta utente
+  // 2026-09-10: "non c'è un modo che col mouse posso trascinare le selezioni?").
+  // Premi sulla checkbox di una riga e trascina su/giù: tutte le righe attraversate
+  // vengono selezionate (o deselezionate, se parti da una già selezionata — il verso
+  // lo decide la prima riga toccata). Shift+click estende la selezione dall'ultima
+  // riga cliccata fino a quella corrente. La checkbox "tutte" e i tasti riga-per-riga
+  // restano invariati. dragRef.mode = true→aggiunge, false→rimuove; baseRef = snapshot
+  // della selezione a inizio drag, così il "pennello" è reversibile senza lasciare
+  // residui se torni indietro col mouse.
+  const dragRef = useRef({ active: false, mode: true, anchor: 0 })
+  const baseRef = useRef(new Set())
+  const lastIdxRef = useRef(null)
+
+  useEffect(() => {
+    const stop = () => { dragRef.current.active = false }
+    window.addEventListener('mouseup', stop)
+    return () => window.removeEventListener('mouseup', stop)
+  }, [])
+
+  function paintDragTo(i) {
+    const { anchor, mode } = dragRef.current
+    const lo = Math.min(anchor, i), hi = Math.max(anchor, i)
+    const next = new Set(baseRef.current)
+    for (let k = lo; k <= hi; k++) {
+      const id = displayRows[k].t.txId
+      if (mode) next.add(id); else next.delete(id)
+    }
+    setSelected(next)
+  }
+  function onLeadMouseDown(i, e) {
+    e.preventDefault() // evita la selezione di testo mentre si trascina
+    const id = displayRows[i].t.txId
+    if (e.shiftKey && lastIdxRef.current != null) {
+      const lo = Math.min(lastIdxRef.current, i), hi = Math.max(lastIdxRef.current, i)
+      setSelected(s => {
+        const next = new Set(s)
+        for (let k = lo; k <= hi; k++) next.add(displayRows[k].t.txId)
+        return next
+      })
+      lastIdxRef.current = i
+      return
+    }
+    const mode = !selected.has(id)
+    baseRef.current = new Set(selected)
+    dragRef.current = { active: true, mode, anchor: i }
+    paintDragTo(i)
+    lastIdxRef.current = i
+  }
+  function onLeadMouseEnter(i) {
+    if (dragRef.current.active) paintDragTo(i)
+  }
+
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(rows.map(r => r.t.txId)))
+    if (allSelected) {
+      // deseleziona solo le righe visibili nel gruppo corrente
+      setSelected(s => { const next = new Set(s); displayRows.forEach(r => next.delete(r.t.txId)); return next })
+    } else {
+      setSelected(s => { const next = new Set(s); displayRows.forEach(r => next.add(r.t.txId)); return next })
+    }
   }
 
   function acceptSelected() {
@@ -840,10 +924,16 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
     <Modal title={`🚩 Spese in giorni di vacanza non allocate (${rows.length})`} onClose={onClose} width={1480}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: 'var(--text3)', flex: 1 }}>
-          Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
-          Seleziona una o più righe a sinistra e usa i bottoni per accettarle o ignorarle tutte insieme,
-          oppure agisci su una singola riga con ✅/✕. Con &quot;MAI&quot; una spesa non verrà mai più
-          proposta qui in futuro, indipendentemente dalla transazione — in base alla sua descrizione AI.
+          {!activeGroup ? (
+            <>Spese avvenute mentre era in corso una vacanza/weekend dichiarata ma categorizzate altrove.
+            <strong> Scegli una vacanza</strong> qui sotto: troverai tutte le spese di quel periodo già
+            selezionate, pronte da assegnare in un click.</>
+          ) : (
+            <>Tutte le spese del periodo sono <strong>già selezionate</strong>: togli quelle che non
+            c&apos;entrano (<strong>trascina il mouse</strong> sulle caselle o <strong>Shift+click</strong>
+            per un intervallo), poi conferma in basso a destra. Con &quot;MAI&quot; una spesa non verrà
+            mai più proposta qui in futuro.</>
+          )}
         </div>
         <button onClick={() => setShowNeverPanel(true)} title='Descrizioni AI da escludere sempre da questa tabella'
           style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', background: 'var(--surface2)',
@@ -852,27 +942,46 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
         </button>
       </div>
       <UndoBanner undo={undo} setUndo={setUndo} />
-      {selected.size > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, padding: '7px 10px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}>
-          <strong>{selected.size} selezionate</strong>
-          <button onClick={acceptSelected}
-            style={{ padding: '5px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            ✅ Accetta selezionate
-          </button>
-          <button onClick={ignoreSelected}
-            style={{ padding: '5px 12px', background: 'var(--surface)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
-            ✕ Ignora selezionate
-          </button>
-          <button onClick={() => setSelected(new Set())}
-            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}>
-            Deseleziona
-          </button>
-        </div>
-      )}
+
       {rows.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--green)', fontSize: 14, fontWeight: 600 }}>✅ Niente da rivedere</div>
+      ) : !activeGroup ? (
+        /* ── GRIGLIA: un grande box per vacanza (nome + n° spese del periodo) ── */
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+          {groups.map(g => {
+            const isVac = g.vacType === 'Vacanze'
+            const accent = isVac ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
+            const bg = isVac ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)'
+            return (
+              <button key={g.key} onClick={() => openGroup(g)}
+                title={`Rivedi le ${g.rows.length} spese di ${g.vac.city || g.vac.name || 'questa vacanza'}`}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  gap: 5, minHeight: 128, padding: '16px 12px', cursor: 'pointer', textAlign: 'center',
+                  background: bg, border: `2px solid ${accent}`, borderRadius: 12, color: 'var(--text1)' }}>
+                <span style={{ fontSize: 26 }}>{isVac ? '🏖️' : '🎒'}</span>
+                <span style={{ fontWeight: 800, fontSize: 14, color: accent }}>{g.vac.city || g.vac.name || '—'}</span>
+                <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtDate(g.vac.from)}–{fmtDate(g.vac.to)}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, marginTop: 2 }}>
+                  {g.rows.length} spes{g.rows.length === 1 ? 'a' : 'e'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       ) : (
-        <div style={{ maxHeight: '60vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+        /* ── DETTAGLIO: spese del periodo, già selezionate, conferma in basso a destra ── */
+        <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          <button onClick={backToGrid}
+            style={{ padding: '5px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: 'var(--text2)', fontWeight: 700 }}>
+            ← Vacanze
+          </button>
+          <strong style={{ fontSize: 14 }}>{activeGroup.vac.city || activeGroup.vac.name || '—'}</strong>
+          <span style={{ fontSize: 12, color: 'var(--text3)' }}>
+            {fmtDate(activeGroup.vac.from)}–{fmtDate(activeGroup.vac.to)} · {displayRows.length} spese · <strong style={{ color: 'var(--text2)' }}>{selected.size} selezionate</strong>
+          </span>
+        </div>
+        <div style={{ maxHeight: '54vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1410 }}>
             <thead><tr>
               <th style={{ ...OVERLAY_TH, textAlign: 'center', width: 30 }}>
@@ -883,9 +992,10 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
               ))}
             </tr></thead>
             <tbody>
-              {rows.map(({ t, vac, vacType }) => (
+              {displayRows.map(({ t, vac, vacType }, i) => (
                 <TxEditRow key={t.txId} t={t} allCats={allCats} updateTransaction={updateTransaction}
-                  leading={<input type="checkbox" checked={selected.has(t.txId)} onChange={() => toggleOne(t.txId)} style={{ cursor: 'pointer' }} />}>
+                  leadingCellProps={{ onMouseDown: e => onLeadMouseDown(i, e), onMouseEnter: () => onLeadMouseEnter(i) }}
+                  leading={<input type="checkbox" readOnly checked={selected.has(t.txId)} style={{ cursor: 'pointer', pointerEvents: 'none' }} />}>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', fontSize: 11 }}>
                     <span style={{ padding: '2px 8px', borderRadius: 10, fontWeight: 700,
                       background: vacType === 'Vacanze' ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)',
@@ -928,6 +1038,18 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
             </tbody>
           </table>
         </div>
+        {/* Conferma in basso a destra: assegna tutte le selezionate a questa vacanza */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+          <button onClick={ignoreSelected} disabled={selected.size === 0}
+            style={{ padding: '8px 14px', background: 'var(--surface)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, cursor: selected.size === 0 ? 'default' : 'pointer', opacity: selected.size === 0 ? 0.5 : 1 }}>
+            ✕ Ignora selezionate
+          </button>
+          <button onClick={() => { acceptSelected(); backToGrid() }} disabled={selected.size === 0}
+            style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: selected.size === 0 ? 'default' : 'pointer', opacity: selected.size === 0 ? 0.5 : 1 }}>
+            ✅ Assegna a {activeGroup.vac.city || activeGroup.vac.name || 'vacanza'} ({selected.size})
+          </button>
+        </div>
+        </>
       )}
       {showNeverPanel && (
         <NeverAiDescsModal list={neverAiDescs || []} onAdd={onAddNever} onRemove={onRemoveNever}

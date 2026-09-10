@@ -862,8 +862,12 @@ export default function AltreEntratePage() {
       if (t._forcedBalance) return false
       if (!(t.cat1 === 'Entrate' || t.cat2 === 'Prestiti' || t.cat2 === 'Altro')) return false
       // Filtro categorie configurato dall'utente (rotella ⚙️) — se vuoto nessuna
-      // restrizione aggiuntiva (comportamento invariato)
-      if (aeCatFilters.length > 0 && !aeCatFilters.some(f => f.cat1===t.cat1 && (!f.cat2 || f.cat2===t.cat2))) return false
+      // restrizione aggiuntiva. ECCEZIONE (richiesta utente 2026-09): un'entrata generica
+      // "Entrate" SENZA L2 (tipico rimborso da persona, es. "Biagiotti", "Riccardo Rimborso")
+      // deve comparire SEMPRE, anche col filtro attivo — il filtro non può prenderla di mira
+      // (non ha una L2) e non vogliamo che sparisca per una sottocategoria mancante.
+      const isGenericEntrata = t.cat1 === 'Entrate' && !(t.cat2 && t.cat2.trim())
+      if (!isGenericEntrata && aeCatFilters.length > 0 && !aeCatFilters.some(f => f.cat1===t.cat1 && (!f.cat2 || f.cat2===t.cat2))) return false
       return true
     })
   }, [transactions, nicknames, aeCatFilters])

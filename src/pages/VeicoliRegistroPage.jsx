@@ -432,13 +432,36 @@ function AddExpenseModal({ vehicles, preVehicleId, expense: editingExpense, onCl
 }
 
 // ── Attachments viewer modal ──────────────────────────────
-function AttachmentsModal({ expense, onClose, onDelete }) {
+function AttachmentsModal({ expense, onClose, onDelete, onAdd }) {
   const atts = expense.attachments || []
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef()
 
   function isImage(att) { return att.type?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name) }
 
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList || [])
+    if (!files.length || !onAdd) return
+    setUploading(true)
+    try { await onAdd(files) } catch (e) { console.error(e) }
+    setUploading(false)
+  }
+
   return (
     <Modal title={`📎 Allegati — ${expense.desc || 'Spesa'}`} onClose={onClose} width={520}>
+      {onAdd && (
+        <div style={{marginBottom:12}}>
+          <input ref={fileRef} type="file" multiple accept="image/*,.pdf" style={{display:'none'}}
+            onChange={e=>{ handleFiles(e.target.files); e.target.value='' }}/>
+          <div onClick={()=>!uploading && fileRef.current?.click()}
+            onDrop={e=>{ e.preventDefault(); handleFiles(e.dataTransfer.files) }}
+            onDragOver={e=>e.preventDefault()}
+            style={{border:'1px dashed var(--border)',borderRadius:8,padding:'14px',textAlign:'center',
+              cursor:uploading?'default':'pointer',color:'var(--text3)',fontSize:12,background:'var(--surface2)'}}>
+            {uploading ? '⏳ Caricamento…' : '📎 Trascina qui foto/PDF oppure clicca per allegare'}
+          </div>
+        </div>
+      )}
       {atts.length === 0
         ? <div style={{textAlign:'center',color:'var(--text3)',padding:24}}>Nessun allegato.</div>
         : <div style={{display:'flex',flexDirection:'column',gap:10}}>
@@ -845,6 +868,13 @@ const CHART_TOOLTIP = { fontSize:11, border:'1px solid var(--border)', borderRad
 function VehicleCharts({ vehicles, allRows = [] }) {
   const last6 = getLast6Months()
   const noData = allRows.length === 0
+
+  // Filtro "anno di competenza" per i due donut (Costo per Veicolo / Costi per
+  // Categoria) — richiesta utente 2026-09-10. r.date qui è già la competenza
+  // (_effDate) impostata a monte. 'all' = tutti gli anni (comportamento invariato).
+  const [vehYear, setVehYear] = useState('all')
+  const [catYear, setCatYear] = useState('all')
+  const allYears = [...new Set(allRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))].sort().reverse()
   const empty = <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>Nessuna spesa registrata.</div>
 
   // ── Chart 1: Andamento Carburante (bar, 6 mesi) ──────────
@@ -856,9 +886,10 @@ function VehicleCharts({ vehicles, allRows = [] }) {
 
   // ── Chart 2: Distribuzione categorie (escluso carburante) ──
   const nonFuelRows = allRows.filter(r => r.cat !== 'Carburante')
+  const cat4Rows = catYear==='all' ? nonFuelRows : nonFuelRows.filter(r=>(r.date||'').startsWith(catYear))
   const catTotals = VEH_CATS.filter(c=>c!=='Carburante').map(c=>({
     name: c,
-    value: Math.round(nonFuelRows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
+    value: Math.round(cat4Rows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
   })).filter(x=>x.value>0)
 
   // ── Chart 3: Costo per veicolo donut (MEDIA ANNUA, solo costi allocabili) ──
@@ -868,7 +899,8 @@ function VehicleCharts({ vehicles, allRows = [] }) {
   // allocabili a un singolo veicolo (spesso senza vehicleId assegnato, o comuni
   // a più veicoli), quindi falserebbero il confronto per-veicolo; restano invece
   // visibili nel grafico "Costi per Categoria" qui sotto, che non è per-veicolo.
-  const vehAllocRows = allRows.filter(r => !['Carburante','Autostrada','Parcheggio'].includes(r.cat))
+  const vehAllocRowsAll = allRows.filter(r => !['Carburante','Autostrada','Parcheggio'].includes(r.cat))
+  const vehAllocRows = vehYear==='all' ? vehAllocRowsAll : vehAllocRowsAll.filter(r=>(r.date||'').startsWith(vehYear))
   const vehAllocYears = new Set(vehAllocRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))
   const numYearsVehAlloc = vehAllocYears.size || 1
   const vehTotals = vehicles.map((v,i)=>({
@@ -901,11 +933,25 @@ function VehicleCharts({ vehicles, allRows = [] }) {
     )
   }
 
-  const ChartCard = ({title, children}) => (
+  const ChartCard = ({title, children, right}) => (
     <div className="card" style={{padding:'16px 18px'}}>
-      <div style={{fontSize:13,fontWeight:700,marginBottom:10,color:'var(--text)'}}>{title}</div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:10}}>
+        <div style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{title}</div>
+        {right}
+      </div>
       {noData ? empty : children}
     </div>
+  )
+
+  // Selettore anno di competenza per un chart (in alto a destra della card)
+  const YearFilter = ({value,onChange}) => (
+    <select value={value} onChange={e=>onChange(e.target.value)}
+      title="Filtra per anno di competenza"
+      style={{fontSize:11,padding:'2px 6px',border:'1px solid var(--border)',borderRadius:6,
+        background:'var(--surface)',color:'var(--text2)',cursor:'pointer',flexShrink:0}}>
+      <option value="all">Tutti gli anni</option>
+      {allYears.map(y=><option key={y} value={y}>{y}</option>)}
+    </select>
   )
 
   const renderLegend = (items, colors) => (
@@ -964,7 +1010,8 @@ function VehicleCharts({ vehicles, allRows = [] }) {
       </ChartCard>
 
       {/* 3 — Costo per Veicolo donut (media annua, solo costi allocabili) */}
-      <ChartCard title="🚗 Costo per Veicolo (media annua, escluso carburante/autostrada/parcheggio)">
+      <ChartCard title="🚗 Costo per Veicolo (media annua, escluso carburante/autostrada/parcheggio)"
+        right={<YearFilter value={vehYear} onChange={setVehYear} />}>
         {vehTotals.length === 0
           ? empty
           : <>
@@ -984,7 +1031,8 @@ function VehicleCharts({ vehicles, allRows = [] }) {
       </ChartCard>
 
       {/* 4 — Distribuzione categorie (escluso carburante) */}
-      <ChartCard title="📊 Costi per Categoria (escluso carburante)">
+      <ChartCard title="📊 Costi per Categoria (escluso carburante)"
+        right={<YearFilter value={catYear} onChange={setCatYear} />}>
         {catTotals.length === 0
           ? empty
           : (
@@ -1021,7 +1069,7 @@ function VehicleCharts({ vehicles, allRows = [] }) {
 
 // ── All Expenses Table ────────────────────────────────────
 function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, onAddExpense }) {
-  const { deleteVehExpense, updateVehExpense, appPrefs, setAppPref } = useStore()
+  const { deleteVehExpense, updateVehExpense, updateTransaction, appPrefs, setAppPref } = useStore()
   const customCats = useStore(s => s.customCats)
   const satiMatches = useMemo(() => appPrefs?.satiMatches || {}, [appPrefs?.satiMatches])
 
@@ -1101,6 +1149,7 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
             amount: Math.abs(t.amount),
             txId: t.txId,
             cat1: t.cat1, cat2: t.cat2,
+            attachments: t.attachments,
           }))
       : []
 
@@ -1385,22 +1434,23 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
                         )}
                       </td>
 
-                      {/* Allegati (manual only) — richiesta utente 2026-07-26 */}
+                      {/* Allegati — sempre disponibile su ogni riga (manuale o auto):
+                          richiesta utente 2026-09-10 "la graffetta per allegare documenti
+                          deve esserci sempre". Per le righe auto gli allegati vengono salvati
+                          sulla transazione (updateTransaction), per le manuali sulla spesa. */}
                       <td style={{ padding: '5px 6px', textAlign: 'center' }}>
-                        {r._type === 'manual' && (
-                          <button className="btn btn-ghost" style={{ padding: '2px 5px', position: 'relative',
-                              color: (r.attachments||[]).length ? 'var(--accent)' : 'var(--text3)' }}
-                            title={(r.attachments||[]).length ? `${r.attachments.length} allegat${r.attachments.length===1?'o':'i'}` : 'Nessun allegato'}
-                            onClick={() => setAttExp(r)}>
-                            📎
-                            {(r.attachments||[]).length > 0 && (
-                              <span style={{ position:'absolute', top:-2, right:-2, fontSize:8, fontWeight:800,
-                                background:'var(--accent)', color:'#fff', borderRadius:8, padding:'0 3px', lineHeight:'12px' }}>
-                                {r.attachments.length}
-                              </span>
-                            )}
-                          </button>
-                        )}
+                        <button className="btn btn-ghost" style={{ padding: '2px 5px', position: 'relative',
+                            color: (r.attachments||[]).length ? 'var(--accent)' : 'var(--text3)' }}
+                          title={(r.attachments||[]).length ? `${r.attachments.length} allegat${r.attachments.length===1?'o':'i'}` : 'Allega documento'}
+                          onClick={() => setAttExp(r)}>
+                          📎
+                          {(r.attachments||[]).length > 0 && (
+                            <span style={{ position:'absolute', top:-2, right:-2, fontSize:8, fontWeight:800,
+                              background:'var(--accent)', color:'#fff', borderRadius:8, padding:'0 3px', lineHeight:'12px' }}>
+                              {r.attachments.length}
+                            </span>
+                          )}
+                        </button>
                       </td>
 
                       {/* Edit (manual only) */}
@@ -1459,11 +1509,21 @@ function AllExpensesTable({ vehicles, allExpenses, transactions, cashEntries, on
         <AttachmentsModal
           expense={attExp}
           onClose={() => setAttExp(null)}
+          onAdd={async (files) => {
+            // chiave storage: txId per righe auto, id spesa per manuali
+            const key = attExp._type === 'auto' ? attExp.txId : attExp.id
+            const uploaded = await uploadExpenseFiles(key, files)
+            const newAtts = [...(attExp.attachments || []), ...uploaded]
+            if (attExp._type === 'auto') updateTransaction(attExp.txId, { attachments: newAtts })
+            else updateVehExpense(attExp.id, { attachments: newAtts })
+            setAttExp({ ...attExp, attachments: newAtts })
+          }}
           onDelete={async (att, i) => {
             if (!confirm(`Eliminare "${att.name}"?`)) return
             if (att.path) await deleteExpenseFile(att.path)
             const newAtts = (attExp.attachments || []).filter((_, j) => j !== i)
-            updateVehExpense(attExp.id, { attachments: newAtts })
+            if (attExp._type === 'auto') updateTransaction(attExp.txId, { attachments: newAtts })
+            else updateVehExpense(attExp.id, { attachments: newAtts })
             setAttExp({ ...attExp, attachments: newAtts })
           }}
         />
