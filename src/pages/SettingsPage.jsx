@@ -1260,6 +1260,7 @@ function PendingReceiptsTab() {
   const pendingReceipts     = useStore(s => s.pendingReceipts)
   const deletePendingReceipt = useStore(s => s.deletePendingReceipt)
   const [preview, setPreview] = useState(null)
+  const [matchRcpt, setMatchRcpt] = useState(null)   // ricevuta da abbinare a mano
   const list = [...(pendingReceipts||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''))
 
   async function handleDelete(r) {
@@ -1273,7 +1274,9 @@ function PendingReceiptsTab() {
       <div style={{fontSize:13,color:'var(--text3)',marginBottom:16,lineHeight:1.5}}>
         Foto ricevuta caricate da mobile per transazioni non ancora presenti nel sistema.
         Verranno abbinate automaticamente alla transazione corrispondente al prossimo import del conto
-        (step dedicato durante l'import, con conferma).
+        (step dedicato durante l'import, con conferma). Oppure usa <strong>🔗 Abbina</strong> per
+        collegarle subito a mano a una transazione già presente — anche forzando l'abbinamento se
+        importo o data non coincidono esattamente.
       </div>
       {list.length === 0 ? (
         <div style={{textAlign:'center',padding:'40px 24px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',color:'var(--text3)'}}>
@@ -1300,7 +1303,10 @@ function PendingReceiptsTab() {
                   <td style={{padding:'9px 14px',fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>{fmtDate(r.date)}</td>
                   <td style={{padding:'9px 14px',fontSize:13}}>{r.description}</td>
                   <td style={{padding:'9px 14px',fontSize:13,fontFamily:'var(--font-mono)',textAlign:'right',fontWeight:700}}>€ {fmtIT(Math.abs(r.amount||0),2)}</td>
-                  <td style={{padding:'6px 14px',textAlign:'right'}}>
+                  <td style={{padding:'6px 14px',textAlign:'right',whiteSpace:'nowrap'}}>
+                    <button className="btn btn-secondary" title="Abbina a una transazione esistente"
+                      style={{fontSize:12,padding:'4px 10px',marginRight:6}}
+                      onClick={()=>setMatchRcpt(r)}>🔗 Abbina</button>
                     <button className="btn btn-ghost" title="Elimina" onClick={()=>handleDelete(r)}><Trash2 size={13}/></button>
                   </td>
                 </tr>
@@ -1314,7 +1320,99 @@ function PendingReceiptsTab() {
           <img src={preview} alt="" style={{maxWidth:'90vw',maxHeight:'90vh',borderRadius:8}}/>
         </div>
       )}
+      {matchRcpt && (
+        <PendingMatchModal receipt={matchRcpt} onClose={()=>setMatchRcpt(null)} />
+      )}
     </div>
+  )
+}
+
+// ── PendingMatchModal — abbina a mano una foto ricevuta a una transazione esistente
+// (richiesta utente 2026-09-10: "fai in modo che qui sia facile abbinarli o forzare
+// l'abbinamento"). Elenca le transazioni di spesa ordinate per vicinanza di importo e
+// data alla ricevuta (le più probabili in cima), con ricerca libera per forzare un
+// abbinamento qualsiasi. Alla conferma la foto viene collegata alla transazione
+// (updateTransaction attachments) e la ricevuta rimossa dai "documenti da assegnare"
+// — il file su Storage NON viene toccato, cambia solo il record che lo referenzia. ──
+function PendingMatchModal({ receipt, onClose }) {
+  const transactions = useStore(s => s.transactions)
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const deletePendingReceipt = useStore(s => s.deletePendingReceipt)
+  const [search, setSearch] = useState('')
+  const rAmt = Math.abs(receipt.amount || 0)
+  const rDate = receipt.date || ''
+
+  const candidates = useMemo(() => {
+    const list = (transactions || [])
+      .filter(t => !t.excluded && t.amount < 0)
+      .map(t => {
+        const amtDelta = Math.abs(Math.abs(t.amount) - rAmt)
+        const td = t._effDate || t.date || ''
+        const dayDelta = (rDate && td) ? Math.abs((new Date(td) - new Date(rDate)) / 86400000) : 999
+        return { t, amtDelta, dayDelta, score: amtDelta + dayDelta * 3 }
+      })
+    const q = search.trim().toLowerCase()
+    const filtered = q
+      ? list.filter(c => `${c.t.descAI || ''} ${c.t.description || ''}`.toLowerCase().includes(q))
+      : list
+    return filtered.sort((a, b) => a.score - b.score).slice(0, q ? 80 : 25)
+  }, [transactions, search, rAmt, rDate])
+
+  function assign(t) {
+    const existing = t.attachments || []
+    updateTransaction(t.txId, { attachments: [...existing, receipt.attachment] })
+    deletePendingReceipt(receipt.id)
+    onClose()
+  }
+
+  return (
+    <Modal title={`🔗 Abbina documento — ${receipt.description || 'Ricevuta'}`} onClose={onClose} width={640}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 12px', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:8, marginBottom:12 }}>
+        {receipt.attachment?.url && (
+          <img src={receipt.attachment.url} alt="" style={{ width:44, height:44, objectFit:'cover', borderRadius:6, flexShrink:0 }}/>
+        )}
+        <div style={{ fontSize:13 }}>
+          <strong>{receipt.description || 'Ricevuta'}</strong>
+          <div style={{ fontSize:12, color:'var(--text3)', fontFamily:'var(--font-mono)' }}>
+            {fmtDate(rDate)} · € {fmtIT(rAmt, 2)}
+          </div>
+        </div>
+      </div>
+      <input value={search} onChange={e=>setSearch(e.target.value)} autoFocus
+        placeholder="Cerca una transazione per descrizione…"
+        style={{ width:'100%', padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, fontSize:13, marginBottom:10, background:'var(--surface)', color:'var(--text1)', boxSizing:'border-box' }}/>
+      <div style={{ maxHeight:'46vh', overflow:'auto', border:'1px solid var(--border)', borderRadius:8 }}>
+        {candidates.length === 0 ? (
+          <div style={{ padding:24, textAlign:'center', color:'var(--text3)', fontSize:13 }}>Nessuna transazione trovata.</div>
+        ) : candidates.map(({ t, amtDelta, dayDelta }) => {
+          const exactAmt = amtDelta < 0.01
+          const closeDate = dayDelta <= 4
+          const suggested = exactAmt && closeDate
+          return (
+            <div key={t.txId} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', borderBottom:'1px solid var(--border)', background: suggested ? 'var(--green-l,#e7f6ec)' : undefined }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {t.descAI || t.description || t.txId}
+                </div>
+                <div style={{ fontSize:11, color:'var(--text3)', fontFamily:'var(--font-mono)', display:'flex', gap:8, flexWrap:'wrap' }}>
+                  <span>{fmtDate(t._effDate || t.date)}</span>
+                  <span>€ {fmtIT(Math.abs(t.amount), 2)}</span>
+                  {exactAmt
+                    ? <span style={{ color:'var(--green,#16a34a)', fontWeight:700 }}>✓ importo esatto</span>
+                    : <span style={{ color:'var(--gold,#b45309)' }}>Δ € {fmtIT(amtDelta, 2)}</span>}
+                  {rDate && dayDelta < 999 && <span style={{ color: closeDate ? 'var(--green,#16a34a)' : 'var(--text3)' }}>{Math.round(dayDelta)}g</span>}
+                </div>
+              </div>
+              <button className="btn btn-primary" style={{ fontSize:12, padding:'5px 12px', flexShrink:0 }}
+                onClick={()=>assign(t)}>
+                {suggested ? 'Abbina' : 'Forza'}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <ModalFooter><button className="btn btn-secondary" onClick={onClose}>Annulla</button></ModalFooter>
+    </Modal>
   )
 }
 
