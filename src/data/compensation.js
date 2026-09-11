@@ -128,8 +128,11 @@ export function compensateGroup(selTxs, updateTransaction) {
  * _compensatedBy su TUTTI i lati coinvolti, indipendentemente da quale pagina
  * l'ha creata (Carte/PayPal/AltreEntrate condividono lo stesso registro).
  */
-export function removeCompensationGroup(tx, updateTransaction) {
+export function removeCompensationGroup(tx, updateTransaction, transactions = null) {
   const links = { ...getCompLinks() }
+  // Snapshot dei compLinks PRIMA di modificarli — per l'undo (richiesta utente
+  // 2026-09-11: poter annullare una rimozione compensazione fatta per errore).
+  const prevLinks = JSON.parse(JSON.stringify(getCompLinks()))
   const touched = new Set([tx.txId])
 
   // 1) tx è un'entrata con una entry diretta in compLinks?
@@ -153,11 +156,29 @@ export function removeCompensationGroup(tx, updateTransaction) {
   byGroup.forEach(id => touched.add(id))
 
   saveCompLinks(links)
+
+  // Snapshot dei campi _compensatedAmt/_compensatedBy PRIMA di azzerarli, per l'undo.
+  // Serve la lista `transactions` per leggere i valori delle spese collegate (non solo tx).
+  const prevFields = {}
+  ;[...touched].forEach(id => {
+    if (!id) return
+    const t = (transactions || []).find(x => x.txId === id || x.id === id) || (id === tx.txId ? tx : null)
+    prevFields[id] = { _compensatedAmt: t?._compensatedAmt ?? null, _compensatedBy: t?._compensatedBy ?? null }
+  })
+
   // Guard (fix 2026-07-12): per le entrate MANUALI di Altre Entrate la chiave è
   // tx.id e tx.txId è undefined — updateTransaction(undefined) era un no-op
   // innocuo ma sporco. Le entrate manuali non vivono nella collection
   // transactions: il loro stato di compensazione è interamente in compLinks
   // (già ripulito sopra), quindi si saltano gli id non validi.
   touched.forEach(id => { if (id) updateTransaction(id, { _compensatedAmt: null, _compensatedBy: null }) })
-  return [...touched]
+
+  // Ripristina esattamente lo stato precedente (compLinks + campi) — usato dall'undo-toast.
+  const restore = () => {
+    saveCompLinks(prevLinks)
+    Object.entries(prevFields).forEach(([id, f]) => { if (id) updateTransaction(id, f) })
+  }
+  // Retro-compatibile: i chiamanti storici ignorano il ritorno; chi vuole l'undo
+  // usa .restore. (Array-like conservato via proprietà `touched`.)
+  return { touched: [...touched], restore }
 }

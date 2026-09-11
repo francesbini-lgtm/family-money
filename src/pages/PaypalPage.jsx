@@ -7,7 +7,7 @@ import { useStore } from '../store/useStore'
 import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
-import { showToast } from '../services/notifications'
+import { showToast, showUndoToast } from '../services/notifications'
 import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
 import { PaypalIcon } from '../components/BrandIcons'
 import CompDaConfermare from '../components/CompDaConfermare'
@@ -1333,8 +1333,8 @@ export default function PaypalPage() {
   }
 
   function handlePpRemoveComp(t) {
-    removeCompensationGroup(t, updateTransaction)
-    showToast('Abbinamento rimosso', 'info')
+    const { restore } = removeCompensationGroup(t, updateTransaction, transactions)
+    showUndoToast('Abbinamento rimosso', restore, 20000)
   }
 
   function handleImport(newItems) {

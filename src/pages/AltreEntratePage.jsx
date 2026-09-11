@@ -6,6 +6,7 @@ import './AltreEntratePage.css'
 import { fmtIT, fmtDate } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 import { getCompLinks, saveCompLinks, getLinksArray, availableAmount, removeCompensationGroup, isCompensated } from '../data/compensation'
+import { showUndoToast } from '../services/notifications'
 
 const ENTRY_TYPES = ['Rimborso Costo','Prestito Ricevuto','Trasferimento','Entrata Generica']
 const TYPE_COLORS  = {
@@ -1190,7 +1191,8 @@ export default function AltreEntratePage() {
                             // removeCompensationGroup ripulisce compLinks E i campi
                             // _compensatedAmt/_compensatedBy su tutti i lati coinvolti,
                             // indipendentemente da quale pagina ha creato il link.
-                            removeCompensationGroup(e, useStore.getState().updateTransaction)
+                            const { restore } = removeCompensationGroup(e, useStore.getState().updateTransaction, transactions)
+                            showUndoToast('Compensazione rimossa', restore, 20000)
                           }} style={{border:'none',background:'transparent',cursor:'pointer',color:'var(--red)',fontSize:11,padding:0}}>✕</button>
                         </div>
                       )}

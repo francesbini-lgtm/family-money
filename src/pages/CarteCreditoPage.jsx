@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import { useStore, computeUser } from '../store/useStore'
 import { fmtIT } from '../utils/format'
 import { getMergedCats } from '../data/categories'
-import { showToast } from '../services/notifications'
+import { showToast, showUndoToast } from '../services/notifications'
 import { netAmt, isCompensated, compensateGroup, removeCompensationGroup } from '../data/compensation'
 import CompDaConfermare from '../components/CompDaConfermare'
 import {
@@ -237,8 +237,9 @@ export default function CarteCreditoPage() {
   }
 
   function handleRemoveComp(t) {
-    removeCompensationGroup(t, updateTransaction)
-    showToast('Compensazione rimossa', 'info')
+    const { restore } = removeCompensationGroup(t, updateTransaction, transactions)
+    // Toast con "Annulla" per 20s: se l'ho tolta per errore la recupero (richiesta utente 2026-09-11)
+    showUndoToast('Compensazione rimossa', restore, 20000)
   }
 
   // Righe di estratto conto carta ancora NON abbinate/riconciliate (non ancora escluse
