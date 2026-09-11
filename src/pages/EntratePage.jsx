@@ -874,6 +874,30 @@ export default function EntratePage() {
   const chartMax = chartTotals.length ? Math.max(...chartTotals) : 0
   const chartMin = chartTotals.length ? Math.min(...chartTotals) : 0
 
+  // Confronto della MEDIA con lo stesso periodo dell'anno prima e di due anni prima
+  // (richiesta utente 2026-09-11: "+% vs 2025 / +% vs 2024" ma dinamici = anno prima
+  // e anno prima meno 1). Ha senso solo nella vista a 12 mesi: sposto la finestra
+  // mostrata di 12/24 mesi e ricalcolo la media con la STESSA logica (toggle bonus).
+  const shiftYm = (ym, delta) => {
+    const [y, m] = ym.split('-').map(Number)
+    const idx = y * 12 + (m - 1) + delta
+    return `${Math.floor(idx / 12)}-${String(idx % 12 + 1).padStart(2, '0')}`
+  }
+  const windowAvg = (months) => {
+    const rows = months.map(ym => buildRow(ymLabel(ym), incomeTxs.filter(t => (t._effDate||t.date).startsWith(ym)), bonusMap))
+    const display = chartBonusSeparate ? rows : rows.map(r => ({ Fra: r['Fra'] || 0, Sofi: r['Sofi'] || 0 }))
+    const totals = display
+      .map(r => Object.entries(r).reduce((s, [k, v]) => (k !== 'label' && typeof v === 'number') ? s + v : s, 0))
+      .filter(v => v > 0)
+    return totals.length ? totals.reduce((s, v) => s + v, 0) / totals.length : 0
+  }
+  const showVsYear = period === 'month'
+  const endYear = chartMonths.length ? parseInt(chartMonths[chartMonths.length - 1].slice(0, 4)) : now.getFullYear()
+  const avgPrev1 = showVsYear ? windowAvg(chartMonths.map(ym => shiftYm(ym, -12))) : 0
+  const avgPrev2 = showVsYear ? windowAvg(chartMonths.map(ym => shiftYm(ym, -24))) : 0
+  const pctPrev1 = avgPrev1 > 0 ? (chartAvg - avgPrev1) / avgPrev1 * 100 : null
+  const pctPrev2 = avgPrev2 > 0 ? (chartAvg - avgPrev2) / avgPrev2 * 100 : null
+
   return (
     <>
       {/* Header + tab pills — stesso schema padding/stile di UscitePage (richiesta utente 2026-07-14) */}
@@ -1048,6 +1072,23 @@ export default function EntratePage() {
                       <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--red)'}}>€ {fmtIT(Math.round(chartMin),0)}</div>
                     </div>
                   </div>
+                  {/* Media vs stesso periodo anno prima / due anni prima (dinamici) —
+                      richiesta utente 2026-09-11. Solo nella vista a 12 mesi. */}
+                  {showVsYear && (pctPrev1 !== null || pctPrev2 !== null) && (
+                    <div style={{display:'flex',gap:10,marginTop:8}}>
+                      {[{y:endYear-1,pct:pctPrev1,prev:avgPrev1},{y:endYear-2,pct:pctPrev2,prev:avgPrev2}].map(({y,pct,prev}) => (
+                        <div key={y} style={{flex:1,textAlign:'center',padding:'7px 6px',background:'var(--surface2)',borderRadius:8}}>
+                          <div style={{fontSize:10,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>Media vs {y}</div>
+                          {pct === null
+                            ? <div style={{fontSize:13,color:'var(--text3)'}}>—</div>
+                            : <div style={{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:pct>=0?'var(--green)':'var(--red)'}}>
+                                {pct>=0?'▲ +':'▼ '}{fmtIT(Math.abs(pct),1)}%
+                              </div>}
+                          {pct !== null && <div style={{fontSize:9,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>era € {fmtIT(Math.round(prev),0)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Chart 2 — Stipendio RAL vs Netto */}
