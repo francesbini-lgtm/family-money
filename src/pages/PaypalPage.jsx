@@ -4,7 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 import { useStore } from '../store/useStore'
-import { fmtIT, fmtDate } from '../utils/format'
+import { fmtIT, fmtDate, parseDecimalIT } from '../utils/format'
 import { CATS, getMergedCats } from '../data/categories'
 import { callPaypalVision, callPaypalText, callPaypalReclassify } from '../data/aiService'
 import { showToast, showUndoToast } from '../services/notifications'
@@ -883,7 +883,7 @@ export function PaypalImportModal({ onClose, onImport, transactions, apiKey, pay
 }
 
 // ── Unmatched overlay ─────────────────────────────────────
-function UnmatchedOverlay({ imports, paypalTxs, onManualMatch, onClose }) {
+function UnmatchedOverlay({ imports, paypalTxs, onManualMatch, onEditImport, onClose }) {
   return (
     <div className="pp-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="pp-unmatched-modal">
@@ -892,12 +892,16 @@ function UnmatchedOverlay({ imports, paypalTxs, onManualMatch, onClose }) {
           <div className="pp-modal-title" style={{ margin:0 }}>Operazioni non abbinate ({imports.length})</div>
           <button className="pp-modal-close" style={{ position:'static', marginLeft:'auto' }} onClick={onClose}>✕</button>
         </div>
+        <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10 }}>
+          Se l'importo o la valuta sono sbagliati (es. l'AI ha letto 519 SEK come €519), usa ✏️ per correggerli.
+        </div>
         <table className="pp-table">
           <thead>
             <tr>
               <th className="pp-th">Data</th>
               <th className="pp-th">Merchant</th>
               <th className="pp-th">Importo</th>
+              <th className="pp-th">Valuta</th>
               <th className="pp-th">Categoria suggerita</th>
               <th className="pp-th">Fonte</th>
               <th className="pp-th">Azioni</th>
@@ -905,7 +909,8 @@ function UnmatchedOverlay({ imports, paypalTxs, onManualMatch, onClose }) {
           </thead>
           <tbody>
             {imports.map(imp => (
-              <UnmatchedRow key={imp.id} imp={imp} paypalTxs={paypalTxs} onManualMatch={(id, txId) => { onManualMatch(id, txId); onClose() }} />
+              <UnmatchedRow key={imp.id} imp={imp} paypalTxs={paypalTxs} onEditImport={onEditImport}
+                onManualMatch={(id, txId) => { onManualMatch(id, txId); onClose() }} />
             ))}
           </tbody>
         </table>
@@ -915,9 +920,26 @@ function UnmatchedOverlay({ imports, paypalTxs, onManualMatch, onClose }) {
 }
 
 // ── Manual match row ──────────────────────────────────────
-function UnmatchedRow({ imp, paypalTxs, onManualMatch }) {
+function UnmatchedRow({ imp, paypalTxs, onManualMatch, onEditImport }) {
   const [open, setOpen] = useState(false)
   const [chosen, setChosen] = useState('')
+  // Modifica importo/valuta (richiesta utente 2026-09-11)
+  const [editing, setEditing] = useState(false)
+  const [amtDraft, setAmtDraft] = useState('')
+  const [currDraft, setCurrDraft] = useState('')
+  const isForeign = imp.currency && String(imp.currency).toUpperCase() !== 'EUR'
+  function startEdit() {
+    setAmtDraft(fmtIT(Math.abs(imp.amount), 2))
+    setCurrDraft(imp.currency || 'EUR')
+    setEditing(true)
+  }
+  function saveEdit() {
+    const parsed = parseDecimalIT(amtDraft)
+    const abs = Number.isFinite(parsed) ? Math.abs(parsed) : Math.abs(imp.amount)
+    const sign = imp.amount < 0 ? -1 : 1
+    onEditImport?.(imp.id, { amount: sign * abs, currency: (currDraft || 'EUR').toUpperCase().trim() })
+    setEditing(false)
+  }
 
   const nearby = useMemo(() => {
     const impDate = new Date(imp.date)
@@ -934,8 +956,26 @@ function UnmatchedRow({ imp, paypalTxs, onManualMatch }) {
     <tr className="pp-tr">
       <td className="pp-td">{fmtDate(imp.date)}</td>
       <td className="pp-td">{imp.merchant}</td>
-      <td className="pp-td" style={{ color: imp.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:600 }}>
-        {imp.amount < 0 ? '-' : '+'}€{fmtIT(Math.abs(imp.amount), 2)}
+      <td className="pp-td" style={{ color: imp.amount < 0 ? 'var(--red,#d64e4e)' : '#16a34a', fontWeight:600, whiteSpace:'nowrap' }}>
+        {editing ? (
+          <input value={amtDraft} onChange={e => setAmtDraft(e.target.value)}
+            style={{ width:80, padding:'3px 6px', border:'1px solid var(--accent)', borderRadius:5, fontSize:12, fontFamily:'var(--font-mono)', textAlign:'right' }} />
+        ) : (
+          <span onClick={onEditImport ? startEdit : undefined} title={onEditImport ? 'Modifica importo/valuta' : undefined} style={{ cursor: onEditImport ? 'pointer' : 'default' }}>
+            {imp.amount < 0 ? '-' : '+'}{isForeign ? `${fmtIT(Math.abs(imp.amount), 2)} ${imp.currency}` : `€${fmtIT(Math.abs(imp.amount), 2)}`}
+            {onEditImport && <span style={{ marginLeft:5, opacity:.5, fontSize:10 }}>✏️</span>}
+          </span>
+        )}
+      </td>
+      <td className="pp-td" style={{ whiteSpace:'nowrap' }}>
+        {editing ? (
+          <input value={currDraft} onChange={e => setCurrDraft(e.target.value)} maxLength={4} placeholder="EUR"
+            style={{ width:52, padding:'3px 6px', border:'1px solid var(--accent)', borderRadius:5, fontSize:12, textTransform:'uppercase' }} />
+        ) : (
+          <span style={{ fontWeight: isForeign ? 700 : 400, color: isForeign ? 'var(--gold,#b45309)' : 'var(--text3)' }}>
+            {isForeign && '⚠️ '}{imp.currency || 'EUR'}
+          </span>
+        )}
       </td>
       <td className="pp-td">
         {imp.cat1_suggestion && (
@@ -947,7 +987,12 @@ function UnmatchedRow({ imp, paypalTxs, onManualMatch }) {
       </td>
       <td className="pp-td">screenshot</td>
       <td className="pp-td">
-        {open ? (
+        {editing ? (
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <button className="pp-btn-confirm" onClick={saveEdit}>Salva</button>
+            <button className="pp-btn-sm" onClick={() => setEditing(false)}>✕</button>
+          </div>
+        ) : open ? (
           <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
             <select
               className="pp-match-select"
@@ -1387,6 +1432,14 @@ export default function PaypalPage() {
     const updated = paypalImports.map(i =>
       i.id === importId ? { ...i, status: 'matched', matchedTxId: txId } : i
     )
+    setAppPref('paypalImports', updated)
+  }
+
+  // Modifica di un'operazione PayPal non abbinata (importo/valuta) DOPO l'import —
+  // richiesta utente 2026-09-11: l'AI a volte legge male la valuta (es. 519 SEK
+  // importato come €519), qui si corregge senza rifare l'import.
+  function handleEditImport(importId, patch) {
+    const updated = paypalImports.map(i => i.id === importId ? { ...i, ...patch } : i)
     setAppPref('paypalImports', updated)
   }
 
@@ -1888,6 +1941,7 @@ export default function PaypalPage() {
           imports={unmatchedImports}
           paypalTxs={paypalTxs}
           onManualMatch={handleManualMatch}
+          onEditImport={handleEditImport}
           onClose={() => setShowUnmatched(false)}
         />
       )}
