@@ -108,11 +108,16 @@ function SaldoChart({ transactions }) {
       const label = view==='M'
         ? MONTHS_SHORT[parseInt(k.slice(5,7))-1]+' '+k.slice(2,4)
         : view==='Q' ? k.replace(/(\d{4})-/,'$1 ') : k
+      // Etichetta compatta per l'asse X, mostrata su OGNI barra (richiesta utente
+      // 2026-09-11: "non si capisce che mese è, metti numeri"): mese/anno numerico.
+      const labelShort = view==='M'
+        ? `${parseInt(k.slice(5,7))}/${k.slice(2,4)}`
+        : view==='Q' ? k.slice(5)+' '+k.slice(2,4) : k
       const saldo = Math.round(running*100)/100
       const saldoPrecRounded = Math.round(prevRunning*100)/100
       const delta = Math.round((running - prevRunning)*100)/100
       return {
-        label, key:k, saldo,
+        label, labelShort, key:k, saldo,
         saldoPrec: Math.min(saldoPrecRounded, saldo),
         delta: Math.abs(delta),
         isGrowth: delta >= 0,
@@ -154,6 +159,16 @@ function SaldoChart({ transactions }) {
     )
   }
 
+  // Tick asse X angolato che mostra l'etichetta compatta (mese/anno) su OGNI barra
+  function MonthTick({ x, y, payload }) {
+    const d = chartData[payload?.index]
+    const txt = d?.labelShort ?? payload?.value
+    return (
+      <text x={x} y={y + 8} textAnchor="end" transform={`rotate(-45, ${x}, ${y + 8})`}
+        fontSize={8} fill="var(--text3)" style={{ pointerEvents: 'none' }}>{txt}</text>
+    )
+  }
+
   return (
     <div>
       <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
@@ -179,11 +194,11 @@ function SaldoChart({ transactions }) {
           ))}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={200}>
-        <BarChart data={chartData} margin={{top:20,right:4,bottom:0,left:4}} barCategoryGap="28%">
+      <ResponsiveContainer width="100%" height={224}>
+        <BarChart data={chartData} margin={{top:20,right:4,bottom:20,left:4}} barCategoryGap="28%">
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-          <XAxis dataKey="label" tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false}
-            interval={chartData.length>24?Math.floor(chartData.length/12):0}/>
+          <XAxis dataKey="label" axisLine={false} tickLine={false}
+            interval={0} height={38} tick={<MonthTick/>}/>
           <YAxis tick={{fontSize:10,fill:'var(--text3)'}} axisLine={false} tickLine={false} width={44}
             tickFormatter={v=>fmtIT(to000(v))}
             domain={[minVal-pad, maxVal+pad]}/>

@@ -886,8 +886,11 @@ export default function EntratePage() {
   const windowAvg = (months) => {
     const rows = months.map(ym => buildRow(ymLabel(ym), incomeTxs.filter(t => (t._effDate||t.date).startsWith(ym)), bonusMap))
     const display = chartBonusSeparate ? rows : rows.map(r => ({ Fra: r['Fra'] || 0, Sofi: r['Sofi'] || 0 }))
+    // ATTENZIONE: buildRow include anche un campo `total` (= somma delle categorie) —
+    // va ESCLUSO dalla somma o si conterebbe due volte (bug 2026-09-11: media anni
+    // precedenti risultava ~doppia). Si sommano solo le serie di categoria.
     const totals = display
-      .map(r => Object.entries(r).reduce((s, [k, v]) => (k !== 'label' && typeof v === 'number') ? s + v : s, 0))
+      .map(r => Object.entries(r).reduce((s, [k, v]) => (k !== 'label' && k !== 'total' && typeof v === 'number') ? s + v : s, 0))
       .filter(v => v > 0)
     return totals.length ? totals.reduce((s, v) => s + v, 0) / totals.length : 0
   }
