@@ -401,6 +401,18 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
     }
   }, [tab, filtered])
 
+  // Auto-seleziona il suggerimento (match d'importo esatto) all'apertura, così il
+  // tasto "Conferma compensazione" è subito attivo nel caso tipico e non serve
+  // capire che bisogna prima cliccare la riga (segnalazione utente: "non riesco a
+  // cliccare... il tasto conferma non va" — in realtà nessuna riga era selezionata).
+  const autoSelInit = useRef(false)
+  useEffect(() => {
+    if (autoSelInit.current) return
+    if (selected) { autoSelInit.current = true; return }
+    const suggestion = eligible.find(t => t._exactMatch)
+    if (suggestion) { setSelected(suggestion); autoSelInit.current = true }
+  }, [eligible, selected])
+
   function searchByCode() {
     const code = codeInput.trim()
     if (!code) return
@@ -541,7 +553,7 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
                             {t.amount>0?'+':'−'}€ {absAmt.toLocaleString('it-IT',{minimumFractionDigits:2})}
                           </td>
                           <td style={{padding:'6px 10px',textAlign:'center',fontSize:14}}>
-                            {isSuggested ? '✅' : ''}
+                            {isSel ? '✅' : isSuggested ? <span style={{fontSize:11,color:'var(--green)'}}>○</span> : ''}
                           </td>
                         </tr>
                       </>
@@ -598,7 +610,12 @@ function CompensaModal({ incomeEntry, transactions, onClose }) {
 
         {saved && <div style={{padding:'8px 12px',background:'var(--green-l)',borderRadius:8,marginBottom:12,fontSize:12,color:'var(--green)',fontWeight:600}}>✅ Compensazione salvata!</div>}
 
-        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end',alignItems:'center'}}>
+          {!selected && !saved && (
+            <span style={{fontSize:11,color:'var(--text3)',marginRight:'auto'}}>
+              👆 Seleziona una transazione dalla lista per abilitare la conferma
+            </span>
+          )}
           <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
           <button className="btn btn-primary" onClick={confirm} disabled={!selected||saved}>Conferma compensazione</button>
         </div>

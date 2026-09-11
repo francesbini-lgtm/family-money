@@ -310,7 +310,11 @@ function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, 
   }, [year, month, startDay, endDay])
 
   const firstDateStr = rangeDates[0]
-  const label = vacation.name || vacation.city || '—'
+  // Mostra il NOME reale del periodo; se è solo il placeholder "Weekend e Vacanze"
+  // (periodi auto-rilevati) usa la città, così nel calendario non si legge la
+  // categoria al posto del nome (segnalazione utente 2026-09-10).
+  const realName = vacation.name && vacation.name !== 'Weekend e Vacanze' ? vacation.name : ''
+  const label = realName || vacation.city || vacation.name || '—'
   // Colore cella per TIPO di periodo (richiesta utente 2026-07-19: "fai i weekend
   // arancioni, invece vacanze lasciale così blu") — vacationType() è la stessa
   // funzione condivisa usata ovunque nell'app (WeekendVacanzeV2Page, Forecast…),

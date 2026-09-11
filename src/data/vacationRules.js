@@ -75,14 +75,23 @@ export function groupConsecutiveDates(dates) {
   const sorted = [...dates].sort()
   const runs = []
   if (!sorted.length) return runs
+  // Differenza in giorni tra due 'YYYY-MM-DD' calcolata SOLO con Date.UTC su
+  // entrambi gli estremi — così è indipendente dal fuso orario del browser. Bug
+  // storico (segnalazione utente 2026-09-10 "creata una vacanza dal 27/8 al 5/9,
+  // le ha create singolarmente"): il vecchio codice faceva new Date(local) + 1
+  // giorno e poi toISOString() (UTC); in fuso UTC+ (Italia) il "giorno dopo"
+  // ricadeva sullo stesso giorno, così OGNI giorno risultava non-consecutivo e
+  // ogni data diventava un periodo a sé. Riguardava anche l'auto-rilevamento.
+  const dayDiff = (a, b) => {
+    const [ay, am, ad] = a.split('-').map(Number)
+    const [by, bm, bd] = b.split('-').map(Number)
+    return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000)
+  }
   let start = sorted[0]
   let prev  = sorted[0]
   for (let i = 1; i < sorted.length; i++) {
     const d = sorted[i]
-    const prevDate = new Date(prev + 'T00:00:00')
-    prevDate.setDate(prevDate.getDate() + 1)
-    const expected = prevDate.toISOString().slice(0, 10)
-    if (d === expected) {
+    if (dayDiff(prev, d) === 1) {
       prev = d
     } else {
       runs.push([start, prev])
