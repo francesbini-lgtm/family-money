@@ -1302,6 +1302,129 @@ function daysSince(dateStr) {
   return Math.max(0, Math.round((now - d) / 86400000))
 }
 
+// ── Tabella abbinamenti PayPal↔conto da confermare (richiesta utente 2026-09-11:
+// "va semplificata, confermarli a mano tutti non ha senso, serve una tabella con
+// preselezionati tutti quelli con importo identico e sotto i 3 giorni di distanza,
+// e un tasto Approva in basso a destra"). Preseleziona le coppie con importo uguale
+// (±0,01) e distanza < 3 giorni; il tasto in basso a destra approva le selezionate. ──
+function PaypalReconcileTable({ pending, transactions, onApprove, onReject }) {
+  const ppDayDiff = (d1, d2) => (!d1 || !d2) ? Infinity : Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
+  const rows = pending.map(imp => {
+    const tx = transactions.find(t => t.txId === imp.pendingTxId)
+    const dd = tx ? ppDayDiff(imp.date, tx._effDate || tx.date) : Infinity
+    const sameAmt = tx ? Math.abs(Math.abs(imp.amount) - Math.abs(tx.amount)) < 0.01 : false
+    const isForeign = imp.currency && String(imp.currency).toUpperCase() !== 'EUR'
+    // Preselezione: importo identico + meno di 3 giorni. Le valute estere NON si
+    // preselezionano: sul conto l'importo è in EUR mentre PayPal è in valuta origine,
+    // quindi l'importo non torna e l'abbinamento va verificato a mano.
+    const auto = sameAmt && dd < 3 && !isForeign
+    return { imp, tx, dd, sameAmt, isForeign, auto }
+  })
+
+  const [selected, setSelected] = useState(new Set())
+  const initRef = useRef(false)
+  useEffect(() => {
+    if (initRef.current) return
+    if (!rows.length) return
+    initRef.current = true
+    setSelected(new Set(rows.filter(r => r.auto).map(r => r.imp.id)))
+  }, [rows])
+
+  const selCount = rows.filter(r => selected.has(r.imp.id)).length
+  const allSel = rows.length > 0 && selCount === rows.length
+  const foreignCount = rows.filter(r => r.isForeign).length
+  const toggle = id => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSelected(allSel ? new Set() : new Set(rows.map(r => r.imp.id)))
+  const approveSelected = () => rows.filter(r => selected.has(r.imp.id)).forEach(r => onApprove(r.imp.id))
+
+  const th = { padding: '7px 9px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text3)', textAlign: 'left', background: 'var(--surface2)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+  const thGroup = { ...th, textAlign: 'center', borderBottom: 'none', paddingBottom: 2 }
+  const td = { padding: '7px 9px', fontSize: 12, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+  const num = { ...td, textAlign: 'right', fontFamily: 'var(--font-mono)' }
+  const nameCell = { ...td, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 700 }
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>🔗 Abbinamenti PayPal ↔ conto da confermare ({pending.length})</div>
+        <div style={{ fontSize: 11, color: 'var(--text3)' }}>Preselezionati quelli con <strong>importo identico</strong> e <strong>meno di 3 giorni</strong> di distanza.</div>
+      </div>
+      {foreignCount > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--gold,#b45309)', background: 'var(--gold-l,#fef9e7)', border: '1px solid var(--gold,#b45309)', borderRadius: 8, padding: '6px 10px', marginBottom: 8 }}>
+          ⚠️ {foreignCount} operazion{foreignCount === 1 ? 'e' : 'i'} in valuta ≠ EUR: sul conto l'importo è in euro, su PayPal in valuta origine — l'importo non combacia, verifica e abbina a mano.
+        </div>
+      )}
+      <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 12 }}>
+        <div style={{ maxHeight: '46vh', overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ ...thGroup, width: 30 }} rowSpan={2}>
+                  <input type="checkbox" checked={allSel} onChange={toggleAll} style={{ cursor: 'pointer' }} />
+                </th>
+                <th style={{ ...thGroup, color: 'var(--blue,#2563eb)' }} colSpan={3}>📱 Da PayPal</th>
+                <th style={{ ...thGroup, color: 'var(--text2)' }} colSpan={3}>🏦 Dal conto</th>
+                <th style={{ ...thGroup, width: 60 }} rowSpan={2}>Δ gg</th>
+                <th style={{ ...thGroup, width: 90 }} rowSpan={2}>Stato</th>
+                <th style={{ ...thGroup, width: 70 }} rowSpan={2}></th>
+              </tr>
+              <tr>
+                <th style={th}>Nome</th><th style={{ ...th, textAlign: 'right' }}>Importo</th><th style={th}>Data</th>
+                <th style={th}>Nome</th><th style={{ ...th, textAlign: 'right' }}>Importo</th><th style={th}>Data</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ imp, tx, dd, sameAmt, isForeign }) => {
+                const isSel = selected.has(imp.id)
+                return (
+                  <tr key={imp.id} style={{ background: isSel ? 'var(--green-l,#e7f6ec)' : isForeign ? 'var(--gold-l,#fef9e7)' : undefined }}>
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      <input type="checkbox" checked={isSel} onChange={() => toggle(imp.id)} style={{ cursor: 'pointer' }} />
+                    </td>
+                    <td style={nameCell}>{imp.merchant || '—'}</td>
+                    <td style={{ ...num, color: isForeign ? 'var(--gold,#b45309)' : 'var(--text1)' }}>
+                      {isForeign ? `${fmtIT(Math.abs(imp.amount), 2)} ${imp.currency}` : `€ ${fmtIT(Math.abs(imp.amount), 2)}`}
+                    </td>
+                    <td style={{ ...td, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{fmtDate(imp.date)}</td>
+                    <td style={nameCell}>{tx ? (tx.merchant || tx.descAI || (tx.description || '').slice(0, 40)) : <span style={{ color: 'var(--text3)', fontWeight: 400 }}>—</span>}</td>
+                    <td style={num}>{tx ? `€ ${fmtIT(Math.abs(tx.amount), 2)}` : '—'}</td>
+                    <td style={{ ...td, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{tx ? fmtDate(tx._effDate || tx.date) : '—'}</td>
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      {dd === Infinity ? '—' : (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 10,
+                          background: dd < 3 ? 'var(--green-l,#e7f6ec)' : 'var(--gold-l,#fef9e7)',
+                          color: dd < 3 ? 'var(--green)' : 'var(--gold,#b45309)' }}>{dd}</span>
+                      )}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                        {sameAmt
+                          ? <span title="Importo identico" style={{ color: 'var(--green)', fontWeight: 700, fontSize: 12 }}>✓ importo</span>
+                          : <span title="Importi diversi" style={{ color: 'var(--gold,#b45309)', fontSize: 11 }}>≠ importo</span>}
+                        {isForeign && <span title="Valuta diversa da EUR: verifica manualmente" style={{ color: 'var(--gold,#b45309)', fontWeight: 700, fontSize: 10 }}>⚠️ {imp.currency}</span>}
+                      </div>
+                    </td>
+                    <td style={{ ...td, textAlign: 'right' }}>
+                      <button onClick={() => onReject(imp.id)} title="Rifiuta questo abbinamento"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 11, fontWeight: 700 }}>✕ Rifiuta</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginBottom: 16 }}>
+        <button className="btn btn-primary" onClick={approveSelected} disabled={selCount === 0}
+          style={{ opacity: selCount === 0 ? 0.5 : 1 }}>
+          ✅ Approva selezionate ({selCount})
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ═══════════════════════════════ WIZARD ═════════════════════════════════════
 export default function ImportWizard({ onClose }) {
   const transactions      = useStore(s => s.transactions)
@@ -2125,10 +2248,6 @@ export default function ImportWizard({ onClose }) {
           const pp = results.paypal
           const pending = (appPrefs?.paypalImports || []).filter(i => i.status === 'pending_approval')
           const unmatched = (appPrefs?.paypalImports || []).filter(i => i.status === 'unmatched')
-          const dayDiff = (d1, d2) => {
-            if (!d1 || !d2) return '?'
-            return Math.round(Math.abs(new Date(d1) - new Date(d2)) / 86400000)
-          }
           return (
             <>
               <div style={{fontSize:15,fontWeight:700,marginBottom:10}}>💙 Esito import PayPal</div>
@@ -2151,40 +2270,8 @@ export default function ImportWizard({ onClose }) {
                   da autoMatch, qui restano solo le coppie "stesso importo, pochi giorni
                   di distanza" che vanno confermate a mano). */}
               {pending.length > 0 && (
-                <>
-                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>🔗 Abbinamenti PayPal ↔ conto da confermare ({pending.length})</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
-                    {pending.map(imp => {
-                      const tx = transactions.find(t => t.txId === imp.pendingTxId)
-                      return (
-                        <div key={imp.id} style={{border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px'}}>
-                          <div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:8,fontSize:12}}>
-                            <div style={{flex:1,minWidth:200}}>
-                              <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>📱 Da PayPal</div>
-                              <div style={{fontWeight:700}}>{imp.merchant || '—'}</div>
-                              <div style={{color:'var(--text3)'}}>{fmtDate(imp.date)} · €{fmtIT(Math.abs(imp.amount),2)}</div>
-                            </div>
-                            <div style={{flex:1,minWidth:200}}>
-                              <div style={{fontSize:10,textTransform:'uppercase',letterSpacing:'.05em',color:'var(--text3)',marginBottom:2}}>🏦 Dal conto</div>
-                              {tx ? (
-                                <>
-                                  <div style={{fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tx.merchant || tx.descAI || (tx.description||'').slice(0,40)}</div>
-                                  <div style={{color:'var(--text3)'}}>{fmtDate(tx._effDate||tx.date)} · €{fmtIT(Math.abs(tx.amount),2)} · {dayDiff(imp.date, tx._effDate||tx.date)}g di distanza</div>
-                                </>
-                              ) : <div style={{color:'var(--text3)'}}>Transazione non trovata</div>}
-                            </div>
-                          </div>
-                          <div style={{display:'flex',gap:8}}>
-                            <button className="btn btn-primary" style={{fontSize:12,padding:'5px 12px'}}
-                              onClick={()=>approvePendingPaypal(imp.id)}>✅ Approva</button>
-                            <button className="btn btn-ghost" style={{fontSize:12,padding:'5px 12px',color:'var(--red)'}}
-                              onClick={()=>rejectPendingPaypal(imp.id)}>❌ Rifiuta</button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
+                <PaypalReconcileTable pending={pending} transactions={transactions}
+                  onApprove={approvePendingPaypal} onReject={rejectPendingPaypal} />
               )}
               {unmatched.length > 0 && (
                 <>

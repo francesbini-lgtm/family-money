@@ -98,6 +98,10 @@ export function applyPaypalImport(newItems, { paypalImports, transactions, updat
     merchant: item.merchant,
     date: item.date,
     amount: item.amount,
+    // Valuta origine PayPal (per il badge ⚠️ non-EUR in fase di conferma abbinamento —
+    // richiesta utente 2026-09-11: sul conto l'importo è sempre in EUR, PayPal invece
+    // lo riporta in valuta origine, quindi l'abbinamento va verificato a mano).
+    currency: item.currency || '',
     type: item.type || '',
     cat1_suggestion: item.cat1_suggestion || '',
     cat2_suggestion: item.cat2_suggestion || '',
