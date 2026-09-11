@@ -15,6 +15,11 @@
   box-shadow: 0 20px 60px rgba(0,0,0,.2);
   animation: slidein .15s ease;
   overflow: hidden;
+  /* Modali alte: il box non supera l'altezza della finestra e il corpo scrolla al
+     suo interno invece di far scrollare la pagina dietro (segnalazione utente 2026-09-11). */
+  display: flex;
+  flex-direction: column;
+  max-height: 92vh;
 }
 
 @keyframes slidein { from { transform: translateY(12px); opacity:.6 } to { transform: none; opacity:1 } }
@@ -31,7 +36,14 @@
 
 .modal-close { padding: 4px 6px; }
 
-.modal-body { padding: 18px 22px; }
+.modal-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  overscroll-behavior: contain; /* niente scroll-chaining sulla pagina dietro */
+}
+
+.modal-hdr, .modal-ftr { flex-shrink: 0; }
 
 .modal-ftr {
   display: flex; gap: 8px;

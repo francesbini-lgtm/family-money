@@ -6,7 +6,14 @@ export default function Modal({ title, onClose, children, width = 480 }) {
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    // Blocca lo scroll della pagina dietro mentre la modale è aperta (segnalazione
+    // utente 2026-09-11: "se scrollo, scrolla la pagina dietro").
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', handler)
+      document.body.style.overflow = prevOverflow
+    }
   }, [onClose])
 
   return (
