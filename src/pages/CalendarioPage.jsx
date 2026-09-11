@@ -146,7 +146,7 @@ function DayCell({ year, month, day, txs, filter, vacations, boatDaySet, quickFi
       )}
       {hasData && (
         <div className={`cal-day-total ${total >= 0 ? 'positive' : 'negative'}`}>
-          {Math.abs(Math.round(total)).toLocaleString('it-IT')}
+          € {fmtIT(Math.abs(Math.round(total)), 0)}
         </div>
       )}
       {editingCity ? (
@@ -247,7 +247,7 @@ function MergedCell({ year, month, startDay, endDay, city, txs, filter, vacation
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:'100%', padding:'2px 5px', gap:3 }}>
         {total !== 0 && (
           <div className={`cal-day-total ${total >= 0 ? 'positive' : 'negative'}`} style={{ fontSize:9, flex:1 }}>
-            {Math.abs(Math.round(total)).toLocaleString('it-IT')}
+            € {fmtIT(Math.abs(Math.round(total)), 0)}
           </div>
         )}
         {editingCity ? (
@@ -294,13 +294,6 @@ function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, 
   const colspan = endDay - startDay + 1
   const total = useMemo(() => vacationTotalCost(transactions, vacation), [transactions, vacation])
 
-  const isWeekendCell = useMemo(() => {
-    for (let d = startDay; d <= endDay; d++) {
-      if (!IS_WEEKEND(year, month, d)) return false
-    }
-    return true
-  }, [year, month, startDay, endDay])
-
   const rangeDates = useMemo(() => {
     const arr = []
     for (let d = startDay; d <= endDay; d++) {
@@ -311,10 +304,19 @@ function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, 
 
   const firstDateStr = rangeDates[0]
   // Mostra il NOME reale del periodo; se è solo il placeholder "Weekend e Vacanze"
-  // (periodi auto-rilevati) usa la città, così nel calendario non si legge la
-  // categoria al posto del nome (segnalazione utente 2026-09-10).
+  // (periodi auto-rilevati) usa la città e, se manca anche quella, un intervallo di
+  // date compatto — così nel calendario non si legge mai la categoria al posto del
+  // nome della vacanza (segnalazione utente 2026-09-10).
   const realName = vacation.name && vacation.name !== 'Weekend e Vacanze' ? vacation.name : ''
-  const label = realName || vacation.city || vacation.name || '—'
+  const shortRange = (() => {
+    const p = s => (s || '').split('-')
+    const f = p(vacation.from), t = p(vacation.to)
+    if (f.length !== 3) return ''
+    return t.length === 3 && vacation.to !== vacation.from
+      ? `${+f[2]}/${+f[1]}–${+t[2]}/${+t[1]}`
+      : `${+f[2]}/${+f[1]}`
+  })()
+  const label = realName || vacation.city || shortRange || '—'
   // Colore cella per TIPO di periodo (richiesta utente 2026-07-19: "fai i weekend
   // arancioni, invece vacanze lasciale così blu") — vacationType() è la stessa
   // funzione condivisa usata ovunque nell'app (WeekendVacanzeV2Page, Forecast…),
@@ -325,7 +327,7 @@ function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, 
 
   return (
     <td
-      className={`cal-cell cal-merged-cell vacation${periodType==='Weekend' ? ' period-weekend' : ''}${isWeekendCell ? ' weekend' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
+      className={`cal-cell cal-merged-cell vacation${periodType==='Weekend' ? ' period-weekend' : ''}${selectMode ? ' selectable' : ''}${selected ? ' cell-selected' : ''}`}
       colSpan={colspan}
       onClick={() => { if (!selectMode) onClick(firstDateStr) }}
       onMouseDown={selectMode ? (e => { e.preventDefault(); onCellMouseDown(rangeDates) }) : undefined}
@@ -338,7 +340,7 @@ function VacMergedCell({ year, month, startDay, endDay, vacation, transactions, 
         </div>
         {total !== 0 && (
           <div className="cal-day-total negative" style={{ fontSize:9, flexShrink:0 }}>
-            {Math.abs(Math.round(total)).toLocaleString('it-IT')}
+            € {fmtIT(Math.abs(Math.round(total)), 0)}
           </div>
         )}
       </div>
