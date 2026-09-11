@@ -984,13 +984,17 @@ function ToReviewModal({ rows, allCats, updateTransaction, onDismiss, onBulkDism
             const isVac = g.vacType === 'Vacanze'
             const accent = isVac ? 'var(--blue,#2563eb)' : 'var(--gold,#b45309)'
             const bg = isVac ? 'var(--blue-l,#e8f0fe)' : 'var(--gold-l,#fef9e7)'
+            // Icona per DESTINAZIONE (mare/montagna/città…), la stessa della colonna
+            // DOVE nella tabella — richiesta utente 2026-09-11: "l'icona che guida è
+            // quella lì". Il colore del box resta per TIPO (blu Vacanza / arancio Weekend).
+            const destEmoji = labelToEmoji(g.vac.destType || destCategoryLabel(g.vac.city))
             return (
               <button key={g.key} onClick={() => openGroup(g)}
                 title={`Rivedi le ${g.rows.length} spese di ${g.vac.city || g.vac.name || 'questa vacanza'}`}
                 style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                   gap: 5, minHeight: 128, padding: '16px 12px', cursor: 'pointer', textAlign: 'center',
                   background: bg, border: `2px solid ${accent}`, borderRadius: 12, color: 'var(--text1)' }}>
-                <span style={{ fontSize: 26 }}>{isVac ? '🏖️' : '🎒'}</span>
+                <span style={{ fontSize: 26 }}>{destEmoji || (isVac ? '🏖️' : '🎒')}</span>
                 <span style={{ fontWeight: 800, fontSize: 14, color: accent }}>{g.vac.city || g.vac.name || '—'}</span>
                 <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtDate(g.vac.from)}–{fmtDate(g.vac.to)}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, marginTop: 2 }}>
