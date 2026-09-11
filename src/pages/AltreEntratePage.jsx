@@ -232,7 +232,7 @@ function NoteCell({ entryKey, notes, onSave }) {
   )
   return (
     <span onClick={()=>setEditing(true)} style={{fontSize:12,color:val?'var(--text2)':'var(--text3)',
-      cursor:'text',fontStyle:val?'normal':'italic',display:'block',minWidth:80}}>
+      cursor:'text',fontStyle:val?'normal':'italic',display:'block',minWidth:160,whiteSpace:'normal'}}>
       {val || '+ nota'}
     </span>
   )
