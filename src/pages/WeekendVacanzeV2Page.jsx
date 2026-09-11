@@ -436,6 +436,17 @@ function TxEditRow({ t, allCats, updateTransaction, children, leading, leadingCe
   const cat2Val = pending ? pending.cat2 : (t.cat2 || '')
   const cat2Options = allCats[cat1Val]?.sub || []
 
+  // Assegnazione veicolo: quando L1 = "Veicoli" chiediamo A QUALE veicolo (richiesta
+  // utente 2026-09-11). Il collegamento tx→veicolo vive in appPrefs.vehTxVehicles,
+  // lo stesso usato dalla pagina Veicoli (VeicoliRegistroPage.setTxVehicle).
+  const vehicles = useStore(s => s.vehicles)
+  const appPrefs = useStore(s => s.appPrefs)
+  const setAppPref = useStore(s => s.setAppPref)
+  const assignedVeh = appPrefs?.vehTxVehicles?.[t.txId] || ''
+  function setVeh(vehicleId) {
+    setAppPref('vehTxVehicles', { ...(appPrefs?.vehTxVehicles || {}), [t.txId]: vehicleId })
+  }
+
   function chooseCat1(newCat1) {
     const hasSub = (allCats[newCat1]?.sub || []).length > 0
     if (!hasSub) {
@@ -484,9 +495,20 @@ function TxEditRow({ t, allCats, updateTransaction, children, leading, leadingCe
           title="Data competenza — usata per capire se la spesa cade dentro o fuori il periodo vacanza"
           onSave={v => v && updateTransaction(t.txId, { competenza: v === t.date ? null : v, _effDate: v })} />
       </td>
-      <td style={{ ...td, fontWeight: 600, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        <EditCell value={t.descAI || ''} width={130}
-          onSave={v => updateTransaction(t.txId, { descAI: v || null, userEditedDesc: true })} />
+      <td style={{ ...td, fontWeight: 600, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {/* Flag "da rivedere" (richiesta utente 2026-09-11: "iconcina easy non
+              invadente per flaggare qualcosa che non so cosa sia"). Usa _flagged,
+              lo stesso campo del filtro "🚩 To review" in Uscite/Transazioni. */}
+          <button onClick={() => updateTransaction(t.txId, { _flagged: !t._flagged })}
+            title={t._flagged ? 'Segnata da rivedere — clic per togliere' : 'Segna come da rivedere'}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11,
+              lineHeight: 1, opacity: t._flagged ? 1 : 0.22, flexShrink: 0, filter: t._flagged ? 'none' : 'grayscale(1)' }}>
+            🚩
+          </button>
+          <EditCell value={t.descAI || ''} width={112}
+            onSave={v => updateTransaction(t.txId, { descAI: v || null, userEditedDesc: true })} />
+        </div>
       </td>
       <td style={{ ...td, textAlign: 'center' }}><OrigDot description={t.description} /></td>
       <td style={td}>
@@ -507,6 +529,16 @@ function TxEditRow({ t, allCats, updateTransaction, children, leading, leadingCe
             <option value="">—</option>
             {cat2Options.map(n => <option key={n} value={n}>{n}</option>)}
           </select>
+          {cat1Val === 'Veicoli' && (
+            <select value={assignedVeh} onChange={e => setVeh(e.target.value)} title="A quale veicolo?"
+              style={{ ...selStyle, maxWidth: 118, flexShrink: 0,
+                border: assignedVeh ? '1px solid var(--border)' : '1.5px solid var(--gold,#b45309)',
+                background: assignedVeh ? 'var(--surface)' : 'var(--gold-l,#fef9e7)',
+                color: assignedVeh ? 'var(--text1)' : 'var(--gold,#b45309)', fontWeight: assignedVeh ? 400 : 700 }}>
+              <option value="">🚗 quale?</option>
+              {(vehicles || []).map(v => <option key={v.id} value={v.id}>{v.icon || '🚗'} {v.name}</option>)}
+            </select>
+          )}
           {pending && (
             <>
               <button onClick={confirmPending} title="Conferma categoria (anche senza L2)"
