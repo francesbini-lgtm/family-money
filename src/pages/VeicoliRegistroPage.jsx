@@ -877,6 +877,15 @@ function VehicleCharts({ vehicles, allRows = [] }) {
   const allYears = [...new Set(allRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))].sort().reverse()
   const empty = <div style={{color:'var(--text3)',fontSize:12,padding:'20px 0',textAlign:'center'}}>Nessuna spesa registrata.</div>
 
+  // Periodo selezionabile: 'all' (tutti gli anni), 'L12M' (ultimi 12 mesi, richiesta
+  // utente 2026-09-11) oppure un anno specifico. r.date è la competenza (_effDate).
+  const l12mCutoff = (() => { const d = new Date(); d.setMonth(d.getMonth()-12); return d.toISOString().slice(0,10) })()
+  const filterByPeriod = (rows, sel) => {
+    if (sel === 'all') return rows
+    if (sel === 'L12M') return rows.filter(r => (r.date||'') >= l12mCutoff)
+    return rows.filter(r => (r.date||'').startsWith(sel))
+  }
+
   // ── Chart 1: Andamento Carburante (bar, 6 mesi) ──────────
   const fuelData = last6.map(ym => ({
     label: MONTHS_IT[parseInt(ym.slice(5))-1],
@@ -886,7 +895,7 @@ function VehicleCharts({ vehicles, allRows = [] }) {
 
   // ── Chart 2: Distribuzione categorie (escluso carburante) ──
   const nonFuelRows = allRows.filter(r => r.cat !== 'Carburante')
-  const cat4Rows = catYear==='all' ? nonFuelRows : nonFuelRows.filter(r=>(r.date||'').startsWith(catYear))
+  const cat4Rows = filterByPeriod(nonFuelRows, catYear)
   const catTotals = VEH_CATS.filter(c=>c!=='Carburante').map(c=>({
     name: c,
     value: Math.round(cat4Rows.filter(r=>r.cat===c).reduce((s,r)=>s+r.amount,0))
@@ -900,9 +909,11 @@ function VehicleCharts({ vehicles, allRows = [] }) {
   // a più veicoli), quindi falserebbero il confronto per-veicolo; restano invece
   // visibili nel grafico "Costi per Categoria" qui sotto, che non è per-veicolo.
   const vehAllocRowsAll = allRows.filter(r => !['Carburante','Autostrada','Parcheggio'].includes(r.cat))
-  const vehAllocRows = vehYear==='all' ? vehAllocRowsAll : vehAllocRowsAll.filter(r=>(r.date||'').startsWith(vehYear))
+  const vehAllocRows = filterByPeriod(vehAllocRowsAll, vehYear)
   const vehAllocYears = new Set(vehAllocRows.map(r=>(r.date||'').slice(0,4)).filter(Boolean))
-  const numYearsVehAlloc = vehAllocYears.size || 1
+  // L12M = una finestra di 12 mesi = 1 anno (non dividere per il numero di anni
+  // solari toccati, altrimenti Ott25–Set26 dividerebbe per 2). 'all' = media annua.
+  const numYearsVehAlloc = vehYear==='L12M' ? 1 : (vehAllocYears.size || 1)
   const vehTotals = vehicles.map((v,i)=>({
     name: v.name,
     value: Math.round(vehAllocRows.filter(r=>r.vehicleId===v.id).reduce((s,r)=>s+r.amount,0) / numYearsVehAlloc),
@@ -950,6 +961,7 @@ function VehicleCharts({ vehicles, allRows = [] }) {
       style={{fontSize:11,padding:'2px 6px',border:'1px solid var(--border)',borderRadius:6,
         background:'var(--surface)',color:'var(--text2)',cursor:'pointer',flexShrink:0}}>
       <option value="all">Tutti gli anni</option>
+      <option value="L12M">Ultimi 12 mesi (L12M)</option>
       {allYears.map(y=><option key={y} value={y}>{y}</option>)}
     </select>
   )
