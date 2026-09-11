@@ -675,7 +675,7 @@ const OVERLAY_TH = { padding: '7px 8px', fontSize: 10, fontWeight: 700, letterSp
 // vacanza dichiarata — modificabili, assegnabili a una vacanza esistente (la
 // competenza della spesa si sposta al primo giorno di quel periodo) o a una
 // vacanza creata al volo (usa la competenza della spesa come date iniziali) ──
-function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransaction, addVacation, updateVacation, undo, setUndo, onClose }) {
+function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransaction, addVacation, updateVacation, onAddNever, undo, setUndo, onClose }) {
   const [newVacFor, setNewVacFor] = useState(null) // txId per cui si sta creando una vacanza
   const [nv, setNv] = useState({ name: '', from: '', to: '' })
 
@@ -779,15 +779,24 @@ function FuoriPeriodoModal({ txs, vacations, allCats, transactions, updateTransa
                 <Fragment key={t.txId}>
                   <TxEditRow t={t} allCats={allCats} updateTransaction={updateTransaction}>
                     <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                      <select defaultValue="" onChange={e => { assignTo(t, e.target.value); e.target.value = '' }}
-                        style={{ padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
-                          background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, maxWidth: 170, fontFamily: 'var(--font-sans)' }}>
-                        <option value="">Assegna a…</option>
-                        {vacations.map(v => (
-                          <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
-                        ))}
-                        <option value="__new__">➕ Nuova vacanza…</option>
-                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <select defaultValue="" onChange={e => { assignTo(t, e.target.value); e.target.value = '' }}
+                          style={{ padding: '3px 5px', border: '1px solid var(--border)', borderRadius: 5,
+                            background: 'var(--surface)', color: 'var(--text1)', fontSize: 11, maxWidth: 170, fontFamily: 'var(--font-sans)' }}>
+                          <option value="">Assegna a…</option>
+                          {vacations.map(v => (
+                            <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
+                          ))}
+                          <option value="__new__">➕ Nuova vacanza…</option>
+                        </select>
+                        {onAddNever && (
+                          <button title={`Escludi SEMPRE le spese con descrizione AI "${t.descAI || t.description || ''}" — non compariranno più qui`}
+                            onClick={() => onAddNever(t.descAI || t.description)}
+                            style={{ padding: '3px 8px', background: 'var(--surface2)', color: 'var(--red,#dc2626)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+                            MAI
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </TxEditRow>
                   {newVacFor === t.txId && (
@@ -1313,17 +1322,24 @@ export default function WeekendVacanzeV2Page() {
     return n
   }, [appPrefs])
 
+  // Descrizioni AI da escludere SEMPRE (pannello ⚙️ "Escluse sempre" / tasto "MAI")
+  // — definite qui in alto perché usate sia da fuoriTxs sia da reviewRows.
+  const neverAiDescs = appPrefs?.wv2NeverAiDescs || []
+  const neverAiDescsSet = useMemo(() => new Set(neverAiDescs.map(normDesc)), [neverAiDescs])
+
   // KPI "Fuori periodo": spese Weekend e Vacanze non coperte da NESSUNA vacanza dichiarata
   // — esclude anche le spese interamente compensate (rimborsate, importo netto zero:
   // netAmt() da src/data/compensation.js, es. Airbnb/Booking rimborsati) perché non
-  // sono più "spese vacanza" vere (richiesta utente 2026-07-13)
+  // sono più "spese vacanza" vere (richiesta utente 2026-07-13). Esclude inoltre le
+  // descrizioni AI marcate "MAI" (richiesta utente 2026-09-11: poter dire MAI anche qui).
   const fuoriTxs = useMemo(() =>
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 === 'Weekend e Vacanze' &&
         Math.abs(netAmt(t)) > 0.005 &&
+        !neverAiDescsSet.has(normDesc(t.descAI || t.description)) &&
         !findVacationForDate(effDate(t), vacations))
       .sort((a, b) => (effDate(b) || '').localeCompare(effDate(a) || ''))
-  , [transactions, vacations])
+  , [transactions, vacations, neverAiDescsSet])
 
   // "To review": spese avvenute DENTRO una vacanza dichiarata ma NON in Weekend e Vacanze
   // (esclusi i txId già liquidati con ✕ — persistiti in appPrefs.wv2ReviewDismissed, e
@@ -1335,8 +1351,7 @@ export default function WeekendVacanzeV2Page() {
   // sempre" / tasto "MAI" su una riga) — a differenza di reviewDismissed (per
   // singolo txId), questa è una regola permanente su tutte le transazioni
   // future/passate con quella descAI, richiesta utente 2026-07-13.
-  const neverAiDescs = appPrefs?.wv2NeverAiDescs || []
-  const neverAiDescsSet = useMemo(() => new Set(neverAiDescs.map(normDesc)), [neverAiDescs])
+  // (neverAiDescs / neverAiDescsSet sono definiti più in alto, prima di fuoriTxs.)
   const reviewRows = useMemo(() =>
     transactions
       .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Weekend e Vacanze' &&
@@ -2116,6 +2131,7 @@ export default function WeekendVacanzeV2Page() {
       {showFuori && (
         <FuoriPeriodoModal txs={fuoriTxs} vacations={sorted} allCats={allCats} transactions={transactions}
           updateTransaction={updateTransaction} addVacation={add} updateVacation={update}
+          onAddNever={addNeverAiDesc}
           undo={undo} setUndo={setUndo} onClose={() => setShowFuori(false)} />
       )}
 
