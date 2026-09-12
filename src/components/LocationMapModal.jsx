@@ -130,7 +130,10 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
     return () => { cancelled = true }
   }, [])
 
-  // Ridisegna i marker quando cambiano città/coord
+  // Ridisegna i marker quando cambiano città/coord. Marker TUTTI della stessa
+  // dimensione (richiesta utente 2026-09-12: "non voglio cerchi più grandi/piccoli")
+  // e TRASCINABILI: se una città è geocodificata male (es. "Como" finita nel lago) la
+  // si trascina al punto giusto e la posizione corretta viene salvata in cityCoords.
   useEffect(() => {
     const L = window.L
     const map = mapRef.current
@@ -138,15 +141,21 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
     if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null }
     const group = L.layerGroup().addTo(map)
     layerRef.current = group
-    const maxTotal = Math.max(1, ...cities.map(c => c.total))
+    const icon = L.divIcon({
+      className: '',
+      html: '<div style="width:16px;height:16px;border-radius:50%;background:#e8905f;border:2px solid #c8622a;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>',
+      iconSize: [16, 16], iconAnchor: [8, 8],
+    })
     const pts = []
     cities.forEach(c => {
       const co = cityCoords[norm(c.city)]
       if (!co || co.lat == null) return
-      const radius = 6 + 30 * Math.sqrt(c.total / maxTotal)
-      const m = L.circleMarker([co.lat, co.lng], {
-        radius, color: '#c8622a', weight: 1.5, fillColor: '#e8905f', fillOpacity: 0.55,
-      }).bindPopup(`<strong>${c.city}</strong><br>€ ${fmtIT(Math.round(c.total), 0)} · ${c.count} spese`)
+      const m = L.marker([co.lat, co.lng], { icon, draggable: true })
+      m.bindPopup(`<strong>${c.city}</strong><br>€ ${fmtIT(Math.round(c.total), 0)} · ${c.count} spese<br><span style="color:#888;font-size:11px">Trascina per correggere la posizione</span>`)
+      m.on('dragend', e => {
+        const ll = e.target.getLatLng()
+        setAppPref('cityCoords', { ...(useStore.getState().appPrefs?.cityCoords || {}), [norm(c.city)]: { lat: ll.lat, lng: ll.lng } })
+      })
       m.addTo(group)
       pts.push([co.lat, co.lng])
     })
