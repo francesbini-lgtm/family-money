@@ -162,12 +162,26 @@ function DestTypeSelect({ value, onSave }) {
 }
 
 // ── Riga spesa nel drill-down di una vacanza ──────────────
-function VacationTxRow({ t, onDeleteRequest }) {
+function VacationTxRow({ t, onDeleteRequest, vacations = [], currentVacId, onReassign }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12, borderBottom: '1px solid var(--border)' }}>
       <span style={{ color: 'var(--text3)', width: 76, flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtDate(t._effDate || t.date)}</span>
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>{t.descAI || t.description}</span>
       <span style={{ fontWeight: 600, color: 'var(--text1)', flexShrink: 0 }}>€ {fmtIT(Math.abs(t.amount), 2)}</span>
+      {/* Sposta la spesa in un'altra vacanza (richiesta utente 2026-09-12: "come cambio
+          vacanza di una spesa? es. Donna Silvi non va lì"). Sposta la competenza al
+          periodo scelto (l'appartenenza è per data), stesso meccanismo di "Assegna a…". */}
+      {onReassign && (
+        <select value="" onChange={e => { if (e.target.value) onReassign(t, e.target.value) }}
+          title="Sposta in un'altra vacanza"
+          style={{ flexShrink: 0, padding: '2px 4px', border: '1px solid var(--border)', borderRadius: 5,
+            background: 'var(--surface)', color: 'var(--text2)', fontSize: 11, maxWidth: 150, fontFamily: 'var(--font-sans)' }}>
+          <option value="">↔ Sposta…</option>
+          {vacations.filter(v => String(v.id) !== String(currentVacId)).map(v => (
+            <option key={v.id} value={v.id}>{v.city || v.name || '—'} ({fmtDate(v.from)}–{fmtDate(v.to)})</option>
+          ))}
+        </select>
+      )}
       <button onClick={() => onDeleteRequest(t)} title="Togli dalla vacanza (richiede una nuova categoria)"
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         <Trash2 size={11} />
@@ -1535,6 +1549,27 @@ export default function WeekendVacanzeV2Page() {
   // "Elimina" = segna tutti i giorni del periodo come "non vacanza" (flagga le eventuali
   // transazioni Weekend e Vacanze per la revisione competenza) + rimuove il record dichiarato.
   // Reversibile per 8s tramite la snackbar "Annulla" (setUndo)
+  // Sposta una singola spesa in un'altra vacanza (richiesta utente 2026-09-12).
+  // L'appartenenza a una vacanza è per DATA: spostiamo la competenza della spesa al
+  // primo giorno del periodo scelto (stesso meccanismo di "Assegna a…" nel fuori
+  // periodo) e allineiamo la L2 al tipo del periodo. Reversibile con lo snackbar.
+  function reassignTx(t, vacId) {
+    const v = sorted.find(x => String(x.id) === String(vacId))
+    if (!v) return
+    const prevCompetenza = t.competenza ?? null
+    const prevEffDate    = t._effDate ?? t.date
+    const prevCat2       = t.cat2 ?? null
+    const newCompetenza  = v.from === t.date ? null : v.from
+    const newCat2        = vacationType(v, transactions)
+    const patch = { competenza: newCompetenza, _effDate: v.from }
+    if (newCat2 !== t.cat2) patch.cat2 = newCat2
+    updateTransaction(t.txId, patch)
+    setUndo({
+      label: `Spesa spostata in "${v.city || v.name || 'vacanza'}" (${fmtDate(v.from)}–${fmtDate(v.to)})`,
+      onUndo: () => { updateTransaction(t.txId, { competenza: prevCompetenza, _effDate: prevEffDate, cat2: prevCat2 }); setUndo(null) },
+    })
+  }
+
   function removeRow(v) {
     const dates = allDatesBetween(v.from, v.to)
     mark(dates)
@@ -2100,7 +2135,8 @@ export default function WeekendVacanzeV2Page() {
                                     <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 8px' }}>Nessuna spesa categorizzata in questo periodo.</div>
                                   )}
                                   {vacTxs.map(t => (
-                                    <VacationTxRow key={t.txId} t={t} onDeleteRequest={tx => setRecatTx(tx)} />
+                                    <VacationTxRow key={t.txId} t={t} onDeleteRequest={tx => setRecatTx(tx)}
+                                      vacations={sorted} currentVacId={v.id} onReassign={reassignTx} />
                                   ))}
                                   <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '10px 0 2px' }}>
                                     Costi manuali (aggiunti al totale vacanza)
