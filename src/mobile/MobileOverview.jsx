@@ -59,7 +59,7 @@ function buildForecast(income, expense, years, startSav) {
 function PieLegend({ data, total }) {
   return (
     <div style={{ marginTop: 10 }}>
-      {data.slice(0, 6).map(d => (
+      {data.map(d => (
         <div key={d.name} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
           <div style={{ width:8, height:8, borderRadius:'50%', background:d.color, flexShrink:0 }}/>
           <div style={{ flex:1, fontSize:12, color:'var(--text2)', fontWeight:600, overflow:'hidden',
@@ -67,8 +67,13 @@ function PieLegend({ data, total }) {
           <div style={{ fontSize:12, fontFamily:'var(--font-mono,monospace)', color:'var(--text3)', flexShrink:0 }}>
             {fmtK(d.value)}
           </div>
-          <div style={{ fontSize:10, color:'var(--text3)', width:30, textAlign:'right', flexShrink:0 }}>
+          <div style={{ fontSize:9, color:'var(--text3)', width:26, textAlign:'right', flexShrink:0 }}>
             {total > 0 ? Math.round(d.value / total * 100) + '%' : ''}
+          </div>
+          {/* % crescita/riduzione vs periodo precedente: aumento spesa = rosso, calo = verde */}
+          <div style={{ fontSize:10, fontWeight:700, width:52, textAlign:'right', flexShrink:0, fontFamily:'var(--font-mono,monospace)',
+            color: d.pct == null ? 'var(--text3)' : d.pct > 0 ? 'var(--red,#dc2626)' : 'var(--green,#16a34a)' }}>
+            {d.pct == null ? '—' : `${d.pct > 0 ? '▲' : '▼'}${Math.abs(Math.round(d.pct))}%`}
           </div>
         </div>
       ))}
@@ -135,15 +140,32 @@ export default function MobileOverview() {
       .reduce((s, l) => s + (l.residualBalance || l.amount || 0), 0)
     const netWorth = saldo + invTotal - loanTotal
 
-    // Cat breakdown
+    // Cat breakdown (periodo corrente)
     const catMap = {}
     inPeriod.filter(t => t.amount < 0).forEach(t => {
       const k = t.cat1 || 'Non Categorizzato'
       if (k !== 'Entrate') catMap[k] = (catMap[k] || 0) + Math.abs(t.amount)
     })
+    // Finestra PRECEDENTE (stessa durata, subito prima) per la % di crescita/riduzione
+    // vs periodo precedente (richiesta utente 2026-09-12).
+    const allMonths = getMonthsList(n * 2)
+    const prevFrom = allMonths[0], prevTo = fromDate // [prevFrom, fromDate)
+    const prevCatMap = {}
+    transactions.filter(t => !t.excluded && t.amount < 0).forEach(t => {
+      const d = t._effDate || t.date || ''
+      if (d >= prevFrom && d < prevTo) {
+        const k = t.cat1 || 'Non Categorizzato'
+        if (k !== 'Entrate') prevCatMap[k] = (prevCatMap[k] || 0) + Math.abs(t.amount)
+      }
+    })
+    // TUTTE le categorie (niente slice) con confronto vs periodo precedente
     const catData = Object.entries(catMap)
-      .map(([name, value]) => ({ name, value, color: CATS[name]?.color || '#888' }))
-      .sort((a, b) => b.value - a.value).slice(0, 8)
+      .map(([name, value]) => {
+        const prev = prevCatMap[name] || 0
+        const pct = prev > 0 ? (value - prev) / prev * 100 : null
+        return { name, value, prev, pct, color: CATS[name]?.color || '#888' }
+      })
+      .sort((a, b) => b.value - a.value)
 
     // Monthly bars
     const monthBars = months.map(ym => {
