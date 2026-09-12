@@ -753,6 +753,37 @@ export default function ContantiPage() {
   const thisAtm   = Math.abs(atmTxsAll.filter(t=>(t._effDate||(t._effDate||t.date||'')).startsWith(thisYM)).reduce((s,t)=>s+t.amount,0))
   const thisSpent = cashEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
 
+  // ── KPI Analytics contanti (richiesta utente 2026-09-12) ──────────────────
+  // 1) % contanti sulle spese totali del mese: prelievi contanti / uscite totali.
+  const speseMeseTot = useMemo(() => transactions
+    .filter(t => !t.excluded && t.amount < 0 && (t._effDate||t.date||'').slice(0,7) === thisYM)
+    .reduce((s,t)=>s+Math.abs(t.amount),0), [transactions, thisYM])
+  const pctContantiMese = speseMeseTot > 0 ? (thisAtm / speseMeseTot) * 100 : 0
+
+  // 2) Categorie in cui i contanti sono più usati (ultimi 12 mesi), da cashEntries.
+  const catUseArr = useMemo(() => {
+    const m = {}
+    ;(cashEntries||[]).forEach(e => {
+      if (!last12.includes((e.date||'').slice(0,7))) return
+      const k = e.cat1 || 'Altro'
+      m[k] = (m[k]||0) + (e.amount||0)
+    })
+    return Object.entries(m).map(([cat,amt])=>({cat,amt})).sort((a,b)=>b.amt-a.amt)
+  }, [cashEntries, last12])
+  const catUseMax = Math.max(1, ...catUseArr.map(c=>c.amt))
+  const catUseTot = catUseArr.reduce((s,c)=>s+c.amt,0)
+
+  // 3) Residuo prelievi NON riconciliato per mese (ultimi 12 mesi) — quanto dei
+  //    prelievi non è stato ancora abbinato a Nanny/Colf/spese contanti/altro.
+  const residuoByMonth = useMemo(() => last12.map(ym => {
+    const txs = atmTxsAll.filter(t => (t._effDate||t.date||'').slice(0,7) === ym)
+    const importo = txs.reduce((s,t)=>s+Math.abs(t.amount),0)
+    const used = txs.reduce((s,t)=>s+computeAtmUsed(t.txId),0)
+    return { ym, residuo: Math.max(0, Math.round((importo-used)*100)/100) }
+  }), [atmTxsAll, last12, computeAtmUsed])
+  const residuoMax = Math.max(1, ...residuoByMonth.map(m=>m.residuo))
+  const residuoTot = residuoByMonth.reduce((s,m)=>s+m.residuo,0)
+
   // Registra (task #137): promuove una spesa in contanti tracciata solo in
   // cashEntries a vera transazione, consumando/spaccando il prelievo collegato —
   // stesso motore condiviso (postCashExpense) usato per Nanny/Colf.
@@ -864,6 +895,55 @@ export default function ContantiPage() {
             <div className="cash-kpi-val" style={{color:c}}>{v}</div>
           </div>
         ))}
+      </div>
+
+      {/* ── Analytics contanti (richiesta utente 2026-09-12) ── */}
+      <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) minmax(0,1.4fr)',gap:16,marginBottom:20}}>
+        {/* % contanti sul totale + categorie */}
+        <div className="card" style={{padding:'16px 18px'}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>% Contanti sulle spese del mese</div>
+          <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:2}}>
+            <span style={{fontSize:28,fontWeight:800,color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{fmtIT(pctContantiMese,1)}%</span>
+            <span style={{fontSize:12,color:'var(--text3)'}}>€ {fmtIT(thisAtm,0)} prelievi / € {fmtIT(speseMeseTot,0)} uscite</span>
+          </div>
+          <div style={{height:8,borderRadius:6,background:'var(--surface2)',overflow:'hidden',marginBottom:16}}>
+            <div style={{height:'100%',width:`${Math.min(100,pctContantiMese)}%`,background:'var(--accent)'}}/>
+          </div>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>Contanti per categoria <span style={{fontWeight:400,color:'var(--text3)',fontSize:11}}>(ultimi 12 mesi)</span></div>
+          {catUseArr.length === 0 ? (
+            <div style={{fontSize:12,color:'var(--text3)',padding:'8px 0'}}>Nessuna spesa contanti registrata.</div>
+          ) : catUseArr.slice(0,6).map(c => (
+            <div key={c.cat} style={{marginBottom:7}}>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:2}}>
+                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.cat}</span>
+                <span style={{fontFamily:'var(--font-mono)',fontWeight:700,flexShrink:0,marginLeft:8}}>€ {fmtIT(Math.round(c.amt),0)} · {catUseTot>0?Math.round(c.amt/catUseTot*100):0}%</span>
+              </div>
+              <div style={{height:7,borderRadius:5,background:'var(--surface2)',overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${(c.amt/catUseMax)*100}%`,background:'#c8622a'}}/>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Residuo prelievi non riconciliato per mese — istogramma orizzontale */}
+        <div className="card" style={{padding:'16px 18px'}}>
+          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:2,gap:8,flexWrap:'wrap'}}>
+            <div style={{fontSize:13,fontWeight:700}}>Prelievi non riconciliati per mese <span style={{fontWeight:400,color:'var(--text3)',fontSize:11}}>(ultimi 12 mesi)</span></div>
+            <div style={{fontSize:12,color:'var(--text3)'}}>Aperti: <strong style={{color:'var(--red)'}}>€ {fmtIT(Math.round(residuoTot),0)}</strong></div>
+          </div>
+          <div style={{fontSize:11,color:'var(--text3)',marginBottom:12}}>Residuo dei prelievi non ancora abbinato a {nannyName}, {colfName}, spese contanti o altro.</div>
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {residuoByMonth.map(m => (
+              <div key={m.ym} style={{display:'flex',alignItems:'center',gap:8,fontSize:11}}>
+                <span style={{width:56,flexShrink:0,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>{meseLabelContanti(m.ym)}</span>
+                <div style={{flex:1,height:16,background:'var(--surface2)',borderRadius:5,overflow:'hidden',position:'relative'}}>
+                  <div style={{height:'100%',width:`${(m.residuo/residuoMax)*100}%`,background:m.residuo>0?'#e0a63a':'transparent',borderRadius:5,transition:'width .2s'}}/>
+                </div>
+                <span style={{width:64,flexShrink:0,textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:700,color:m.residuo>0?'var(--text1)':'var(--text3)'}}>€ {fmtIT(Math.round(m.residuo),0)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Charts */}
