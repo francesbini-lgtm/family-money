@@ -5,6 +5,7 @@ import { useAuth }    from '../auth/AuthContext'
 import { getMergedCats } from '../data/categories'
 import { fmtIT }     from '../utils/format'
 import { enrichBatch, lookupPlaceForMerchant } from '../data/aiService'
+import { netAmt } from '../data/compensation'
 import { applyCatRulesTo } from '../data/ruleMatching'
 import {
   learnException,
@@ -26,6 +27,9 @@ function saveLog(log)   { localStorage.setItem(LOG_KEY, JSON.stringify(log)) }
 
 // ── Helpers ───────────────────────────────────────────────
 function isCommission(t) { return t.cat1 === 'Altro' && t.cat2 === 'Commissioni' }
+// Operazione già compensata che va a ZERO (netto ≈ 0): la sua categoria non è più
+// rilevante, quindi non deve mai comparire nel Discovery (richiesta utente 2026-09-12).
+function isZeroedByComp(t) { return t._compensatedAmt > 0 && Math.abs(netAmt(t)) < 0.005 }
 const fmtAmt = n => '€ ' + fmtIT(Math.abs(n), 2)
 function dateValuta(t) {
   const d = t.date || ''
@@ -43,6 +47,7 @@ const MODES = [
 function matchesAnyMode(t, modeSet) {
   if (t.excluded) return false
   if (isCommission(t)) return false
+  if (isZeroedByComp(t)) return false
   if (t.userEditedCat) return false
   return MODES.some(m => modeSet.has(m.id) && m.filter(t))
 }
@@ -457,7 +462,7 @@ export default function MobileDiscovery() {
   const modeCounts = useMemo(() => {
     const c = {}
     MODES.forEach(m => {
-      c[m.id] = transactions.filter(t => !isCommission(t) && !t.userEditedCat && m.filter(t)).length
+      c[m.id] = transactions.filter(t => !isCommission(t) && !isZeroedByComp(t) && !t.userEditedCat && m.filter(t)).length
     })
     return c
   }, [transactions])
@@ -467,7 +472,7 @@ export default function MobileDiscovery() {
     if (phase !== 'review') return []
     const seen = loadSeen()
     const cands = transactions.filter(t =>
-      queuedIds.has(t.txId) && !t.userEditedCat && !skipMatchFn(t)
+      queuedIds.has(t.txId) && !t.userEditedCat && !isZeroedByComp(t) && !skipMatchFn(t)
     )
     const unseen  = cands.filter(t => !seen[t.txId])
     const seenTxs = cands.filter(t =>  seen[t.txId]).sort((a,b)=>(seen[a.txId]||0)-(seen[b.txId]||0))
