@@ -895,11 +895,22 @@ export default function UscitePage() {
                 const r = (innerRadius + outerRadius) / 2
                 const x = cx + r * Math.cos(-midAngle * RADIAN)
                 const y = cy + r * Math.sin(-midAngle * RADIAN)
-                const short = name.split(' ')[0].slice(0, 7)
+                // Nome INTERO mandato a capo (~9 caratteri per riga) invece di troncato
+                // (richiesta utente 2026-09-12: "si chiama solo weekend, fallo stare intero").
+                const words = String(name).split(' ')
+                const lines = []
+                let cur = ''
+                words.forEach(w => {
+                  if ((cur + ' ' + w).trim().length <= 9) cur = (cur + ' ' + w).trim()
+                  else { if (cur) lines.push(cur); cur = w }
+                })
+                if (cur) lines.push(cur)
+                const lh = 8
+                const startY = y - ((lines.length - 1) * lh) / 2
                 return (
-                  <text x={x} y={y} fill="rgba(255,255,255,.9)" textAnchor="middle"
-                    dominantBaseline="central" fontSize={8} fontWeight={700}>
-                    {short}
+                  <text x={x} y={y} fill="rgba(255,255,255,.95)" textAnchor="middle"
+                    dominantBaseline="central" fontSize={7.5} fontWeight={700}>
+                    {lines.map((ln, i) => <tspan key={i} x={x} y={startY + i * lh}>{ln}</tspan>)}
                   </text>
                 )
               }}
