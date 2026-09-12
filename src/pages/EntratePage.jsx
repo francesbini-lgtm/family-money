@@ -617,6 +617,32 @@ function InsightsBox({ insights }) {
 }
 
 // ── Row aggregator (used by all three chart views) ────────
+// Cella data editabile inline (richiesta utente 2026-09-12: "posso modificare la
+// data a lato della transazione, come nella pagina transazioni"). Come lì, l'edit
+// scrive la competenza; qui aggiorno anche _effDate così la lista si ri-raggruppa
+// subito per anno/mese (updateTransaction non ricalcola _effDate).
+function EnDateCell({ t }) {
+  const updateTransaction = useStore(s => s.updateTransaction)
+  const [editing, setEditing] = useState(false)
+  const shown = t._effDate || t.date
+  const isOverride = t.competenza && t.competenza !== t.date
+  if (editing) return (
+    <input type="date" defaultValue={shown} autoFocus
+      style={{ width:120, fontSize:11, border:'1px solid var(--accent)', borderRadius:4, padding:'2px 4px',
+        background:'var(--surface)', color:'var(--accent)', outline:'none', fontFamily:'var(--font-mono)' }}
+      onChange={e=>{ if(e.target.value) updateTransaction(t.txId, { competenza: e.target.value === t.date ? null : e.target.value, _effDate: e.target.value }) }}
+      onBlur={()=>setEditing(false)}
+      onKeyDown={e=>{ if(e.key==='Escape'||e.key==='Enter') setEditing(false) }} />
+  )
+  return (
+    <span onClick={()=>setEditing(true)} title="Clicca per cambiare data"
+      style={{ cursor:'pointer', color: isOverride?'var(--red)':'var(--text3)', fontWeight: isOverride?700:400,
+        textDecoration: isOverride?'underline dotted':'none' }}>
+      {fmtDate(shown)}{isOverride && <span style={{ fontSize:9, marginLeft:2 }}>✎</span>}
+    </span>
+  )
+}
+
 function buildRow(label, txs, bonusMap) {
   const row = { label }
   row['Fra']  = txs.filter(t => t.cat2 === 'Fra').reduce((s,t) => s + (t.amount - (bonusMap[t.txId]?.amt||0)), 0)
@@ -1318,7 +1344,7 @@ export default function EntratePage() {
                       {txs.map(t => (
                         <tr key={t.txId} className="en-row">
                           <td style={{fontSize:12,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-                            {fmtDate(t._effDate||t.date)}
+                            <EnDateCell t={t} />
                           </td>
                           <td>
                             <div style={{fontSize:13,fontWeight:500}}>{t.descAI || t.description}</div>
