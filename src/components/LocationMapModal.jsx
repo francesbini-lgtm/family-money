@@ -151,7 +151,15 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
       const co = cityCoords[norm(c.city)]
       if (!co || co.lat == null) return
       const m = L.marker([co.lat, co.lng], { icon, draggable: true })
-      m.bindPopup(`<strong>${c.city}</strong><br>€ ${fmtIT(Math.round(c.total), 0)} · ${c.count} spese<br><span style="color:#888;font-size:11px">Trascina per correggere la posizione</span>`)
+      m.bindPopup(
+        `<strong>${c.city}</strong><br>€ ${fmtIT(Math.round(c.total), 0)} · ${c.count} spese` +
+        `<br><button class="redo-geo" style="margin-top:6px;font-size:11px;padding:3px 8px;border:1px solid #c8622a;background:#fff;color:#c8622a;border-radius:6px;cursor:pointer">📍 Posizione sbagliata? Rifai ricerca</button>` +
+        `<br><span style="color:#888;font-size:11px">…oppure trascina il marker per spostarlo a mano</span>`
+      )
+      m.on('popupopen', e => {
+        const btn = e.popup.getElement()?.querySelector('.redo-geo')
+        if (btn) btn.onclick = () => { m.closePopup(); reGeocode(c.city) }
+      })
       m.on('dragend', e => {
         const ll = e.target.getLatLng()
         setAppPref('cityCoords', { ...(useStore.getState().appPrefs?.cityCoords || {}), [norm(c.city)]: { lat: ll.lat, lng: ll.lng } })
@@ -161,6 +169,25 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
     })
     if (pts.length) { try { map.fitBounds(pts, { padding: [40, 40], maxZoom: 6 }) } catch {} }
   }, [cities, geoVer])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Rifai la geocodifica di una città (popup "posizione sbagliata"): l'utente può
+  // dare un nome più preciso (es. "Agios Nikolaos, Creta, Grecia") — richiesta utente
+  // 2026-09-12. Salva la nuova coordinata e ridisegna i marker.
+  async function reGeocode(city) {
+    const q = window.prompt(`Posizione sbagliata per "${city}".\nScrivi un nome più preciso (es. "${city}, Grecia"):`, city)
+    if (!q || !q.trim()) return
+    setStatus(`Ricerco "${q.trim()}"…`)
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q.trim())}`,
+        { headers: { 'Accept-Language': 'it' } })
+      const j = await r.json()
+      if (j && j[0]) {
+        setAppPref('cityCoords', { ...(useStore.getState().appPrefs?.cityCoords || {}), [norm(city)]: { lat: +j[0].lat, lng: +j[0].lon } })
+        setGeoVer(v => v + 1)
+        setStatus('')
+      } else { setStatus('Nessun risultato — prova un nome diverso o trascina il marker'); setTimeout(() => setStatus(''), 4000) }
+    } catch { setStatus('Errore nella ricerca'); setTimeout(() => setStatus(''), 3000) }
+  }
 
   const placed = cities.filter(c => { const co = cityCoords[norm(c.city)]; return co && co.lat != null }).length
 
