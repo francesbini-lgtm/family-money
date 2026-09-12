@@ -71,7 +71,7 @@
 
 /* Table */
 .cal-table {
-  border-collapse: collapse; width: max-content; min-width: 100%;
+  border-collapse: collapse; width: 100%; min-width: 900px;
   background: var(--surface);
   /* Fix 2026-07-13 (segnalazione utente: "le celle cambiano larghezza se è
      vacanza o no"): con table-layout:auto (default) il browser ridistribuisce
@@ -85,9 +85,13 @@
   table-layout: fixed;
 }
 
-.cal-month-th { width: 50px; }
+/* Larghezze colonne governate dal colgroup: mese fisso + 31 giorni uguali */
+.cal-col-month { width: 46px; }
+.cal-col-day   { width: calc((100% - 46px) / 31); }
+
+.cal-month-th { width: 46px; }
 .cal-day-th {
-  width: 36px; min-width: 36px; padding: 6px 2px;
+  padding: 6px 2px;
   font-size: 10px; font-weight: 700; color: var(--text3);
   text-align: center; position: sticky; top: 0;
   background: var(--surface2); border-bottom: 1px solid var(--border);
@@ -105,7 +109,6 @@
 
 /* Day cell */
 .cal-cell {
-  width: 36px; min-width: 36px; max-width: 36px;
   height: 52px; min-height: 52px; max-height: 52px;
   padding: 3px 4px; vertical-align: top;
   cursor: pointer; transition: background .1s;

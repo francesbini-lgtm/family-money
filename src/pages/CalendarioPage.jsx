@@ -860,6 +860,13 @@ export default function CalendarioPage() {
       {/* Calendar grid */}
       <div className={`cal-scroll${selectMode ? ' cal-selecting' : ''}`}>
         <table className="cal-table">
+          {/* colgroup: colonna mese + 31 colonne giorno TUTTE uguali (richiesta utente
+              2026-09-12). Con table-layout:fixed le larghezze le decide il colgroup,
+              indipendentemente dalle celle unite (colspan) delle vacanze. */}
+          <colgroup>
+            <col className="cal-col-month" />
+            {Array.from({length:31},(_,i)=>(<col key={i} className="cal-col-day" />))}
+          </colgroup>
           <thead>
             <tr>
               <th className="cal-month-th"/>
