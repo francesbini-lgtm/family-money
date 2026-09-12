@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore'
 // una spesa rimborsata non deve più pesare per il lordo solo in questa pagina
 import { netAmt } from '../data/compensation'
 import { CATS, getMergedCats } from '../data/categories'
+import LocationMapModal from '../components/LocationMapModal'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -562,6 +563,7 @@ function LocationTab({ transactions }) {
   const [savedFlash, setSavedFlash] = useState(null)
   const [newExclusion, setNewExclusion] = useState('')
   const [showExclusions, setShowExclusions] = useState(false)
+  const [showMap, setShowMap] = useState(false)
   const editRef = useRef(null)
   const exclInputRef = useRef(null)
 
@@ -724,7 +726,19 @@ function LocationTab({ transactions }) {
         }}>
           🚫 Filtri {locationExclusions.length>0&&<span style={{background:'var(--accent)',color:'#fff',borderRadius:10,padding:'0 5px',fontSize:10}}>{locationExclusions.length}</span>}
         </button>
+        {/* Mappa mondo delle spese per location (richiesta utente 2026-09-12) */}
+        <button onClick={()=>setShowMap(true)} title="Apri la mappa mondo delle spese"
+          style={{ padding:'4px 12px', borderRadius:16, border:'1px solid var(--border)',
+            background:'var(--surface)', color:'var(--text2)', fontSize:14, cursor:'pointer',
+            display:'flex', alignItems:'center', gap:5 }}>
+          🌍
+        </button>
       </div>
+
+      {showMap && (
+        <LocationMapModal transactions={transactions} cityOverrides={cityOverrides}
+          locationExclusions={locationExclusions} onClose={()=>setShowMap(false)} />
+      )}
 
       {/* Exclusions panel */}
       {showExclusions && (
