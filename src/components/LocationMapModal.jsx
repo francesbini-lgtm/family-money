@@ -47,6 +47,7 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
   const [period, setPeriod] = useState('all')   // 'all' | 'L12M' | 'YYYY'
   const [status, setStatus] = useState('')       // messaggio geocoding
   const [mapErr, setMapErr] = useState(false)
+  const [selCity, setSelCity] = useState(null)   // città selezionata → pannello spese
   const [geoVer, setGeoVer] = useState(0)        // bump quando arrivano nuove coord
   const mapDivRef = useRef(null)
   const mapRef = useRef(null)
@@ -88,6 +89,19 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
   }, [transactions, period, cityOverrides, locationExclusions, l12mCutoff])
+
+  // Spese della città selezionata (stessi filtri) — pannello "vedi le spese"
+  const selCityTxs = useMemo(() => {
+    if (!selCity) return []
+    return transactions.filter(t => {
+      if (t.excluded || t.amount >= 0) return false
+      const d = t._effDate || t.date || ''
+      if (period === 'L12M') { if (d < l12mCutoff) return false }
+      else if (period !== 'all') { if (!d.startsWith(period)) return false }
+      if (isExcluded(t)) return false
+      return resolveCity(t) === selCity
+    }).sort((a, b) => (b._effDate || b.date || '').localeCompare(a._effDate || a.date || ''))
+  }, [selCity, transactions, period, cityOverrides, locationExclusions, l12mCutoff])
 
   // Geocoding delle città mancanti (una alla volta, rispettando Nominatim ~1 req/s)
   useEffect(() => {
@@ -160,6 +174,7 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
         const btn = e.popup.getElement()?.querySelector('.redo-geo')
         if (btn) btn.onclick = () => { m.closePopup(); reGeocode(c.city) }
       })
+      m.on('click', () => setSelCity(c.city))
       m.on('dragend', e => {
         const ll = e.target.getLatLng()
         setAppPref('cityCoords', { ...(useStore.getState().appPrefs?.cityCoords || {}), [norm(c.city)]: { lat: ll.lat, lng: ll.lng } })
@@ -232,6 +247,34 @@ export default function LocationMapModal({ transactions, cityOverrides = {}, loc
             </div>
           ) : (
             <div ref={mapDivRef} style={{ position: 'absolute', inset: 0 }} />
+          )}
+
+          {/* Pannello spese della città selezionata (richiesta utente 2026-09-12:
+              "se clicco vedo anche le spese") */}
+          {selCity && (
+            <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(340px, 80%)',
+              background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '-4px 0 16px rgba(0,0,0,.12)',
+              display: 'flex', flexDirection: 'column', zIndex: 500 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selCity}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
+                    € {fmtIT(Math.round(selCityTxs.reduce((s, t) => s + Math.abs(netAmt(t)), 0)), 0)} · {selCityTxs.length} spese
+                  </div>
+                </div>
+                <button onClick={() => setSelCity(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text3)' }}>✕</button>
+              </div>
+              <div style={{ flex: 1, overflow: 'auto' }}>
+                {selCityTxs.map(t => (
+                  <div key={t.txId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                    <span style={{ color: 'var(--text3)', fontFamily: 'var(--font-mono)', flexShrink: 0, width: 62 }}>{new Date(t._effDate || t.date).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })}</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.descAI || t.description}</span>
+                    <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--red)', flexShrink: 0 }}>€ {fmtIT(Math.abs(netAmt(t)), 2)}</span>
+                  </div>
+                ))}
+                {selCityTxs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>Nessuna spesa nel periodo.</div>}
+              </div>
+            </div>
           )}
         </div>
       </div>
