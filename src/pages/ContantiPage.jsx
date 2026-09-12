@@ -754,22 +754,34 @@ export default function ContantiPage() {
   const thisSpent = cashEntries.filter(e=>(e.date||'').startsWith(thisYM)).reduce((s,e)=>s+(e.amount||0),0)
 
   // ── KPI Analytics contanti (richiesta utente 2026-09-12) ──────────────────
-  // 1) % contanti sulle spese totali del mese: prelievi contanti / uscite totali.
-  const speseMeseTot = useMemo(() => transactions
-    .filter(t => !t.excluded && t.amount < 0 && (t._effDate||t.date||'').slice(0,7) === thisYM)
+  // 1) % contanti sulle spese del mese. IMPORTANTE (correzione 2026-09-12): si basa
+  // sul contante SPESO nel mese (Nanny/Colf/Veicoli/spese contanti da utilizzoRows),
+  // NON sui prelievi del mese — un mese può avere 0 prelievi ma tanto contante speso.
+  // Totale = contante speso + uscite bancarie non-contanti del mese (i prelievi
+  // Contanti sono movimenti, non consumo, quindi esclusi dal denominatore).
+  const cashSpentMonth = useMemo(() => utilizzoRows
+    .filter(r => (r.date||'').slice(0,7) === thisYM)
+    .reduce((s,r)=>s+(r.amount||0),0), [utilizzoRows, thisYM])
+  const nonCashSpentMonth = useMemo(() => transactions
+    .filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Contanti' && (t._effDate||t.date||'').slice(0,7) === thisYM)
     .reduce((s,t)=>s+Math.abs(t.amount),0), [transactions, thisYM])
-  const pctContantiMese = speseMeseTot > 0 ? (thisAtm / speseMeseTot) * 100 : 0
+  const totalSpentMonth = cashSpentMonth + nonCashSpentMonth
+  const pctContantiMese = totalSpentMonth > 0 ? (cashSpentMonth / totalSpentMonth) * 100 : 0
 
-  // 2) Categorie in cui i contanti sono più usati (ultimi 12 mesi), da cashEntries.
+  // 2) Categorie in cui i contanti sono più usati (ultimi 12 mesi) — da utilizzoRows,
+  // così includono Nanny/Colf/Veicoli oltre alle spese contanti manuali per categoria.
   const catUseArr = useMemo(() => {
     const m = {}
-    ;(cashEntries||[]).forEach(e => {
-      if (!last12.includes((e.date||'').slice(0,7))) return
-      const k = e.cat1 || 'Altro'
-      m[k] = (m[k]||0) + (e.amount||0)
+    utilizzoRows.forEach(r => {
+      if (!last12.includes((r.date||'').slice(0,7))) return
+      const k = r.tipo === 'nanny' ? nannyName
+        : r.tipo === 'colf' ? colfName
+        : r.tipo === 'veicoli' ? 'Veicoli'
+        : (r.cat1 || 'Altro')
+      m[k] = (m[k]||0) + (r.amount||0)
     })
     return Object.entries(m).map(([cat,amt])=>({cat,amt})).sort((a,b)=>b.amt-a.amt)
-  }, [cashEntries, last12])
+  }, [utilizzoRows, last12, nannyName, colfName])
   const catUseMax = Math.max(1, ...catUseArr.map(c=>c.amt))
   const catUseTot = catUseArr.reduce((s,c)=>s+c.amt,0)
 
@@ -902,9 +914,9 @@ export default function ContantiPage() {
         {/* % contanti sul totale + categorie */}
         <div className="card" style={{padding:'16px 18px'}}>
           <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>% Contanti sulle spese del mese</div>
-          <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:2}}>
+          <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:2,flexWrap:'wrap'}}>
             <span style={{fontSize:28,fontWeight:800,color:'var(--accent)',fontFamily:'var(--font-mono)'}}>{fmtIT(pctContantiMese,1)}%</span>
-            <span style={{fontSize:12,color:'var(--text3)'}}>€ {fmtIT(thisAtm,0)} prelievi / € {fmtIT(speseMeseTot,0)} uscite</span>
+            <span style={{fontSize:12,color:'var(--text3)'}}>€ {fmtIT(Math.round(cashSpentMonth),0)} contanti / € {fmtIT(Math.round(totalSpentMonth),0)} totale speso</span>
           </div>
           <div style={{height:8,borderRadius:6,background:'var(--surface2)',overflow:'hidden',marginBottom:16}}>
             <div style={{height:'100%',width:`${Math.min(100,pctContantiMese)}%`,background:'var(--accent)'}}/>
