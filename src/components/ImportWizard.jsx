@@ -1700,9 +1700,13 @@ export default function ImportWizard({ onClose }) {
     // vecchio/nuovo saldo e tappo per la schermata "Storico import".
     try {
       const sum = Math.round(survivors.reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
-      const tappo = Math.round((extraTxs || []).filter(t => t._doppioniTappo).reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
+      // Il "tappo" include SIA il tappo doppioni (_doppioniTappo) SIA la rettifica saldo
+      // creata nel flusso "Avanti" (_saldoRettifica) — prima contava solo il primo, così
+      // la colonna Tappo dello Storico import restava "—" pur avendo creato una rettifica
+      // (segnalazione utente 2026-09-12). Il tappo è incluso anche nel nuovo saldo.
+      const tappo = Math.round((extraTxs || []).filter(t => t._doppioniTappo || t._saldoRettifica).reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
       const oldSaldo = pp.saldoBreakdown?.saldoAttuale ?? null
-      const newSaldo = oldSaldo != null ? Math.round((oldSaldo + sum) * 100) / 100 : null
+      const newSaldo = oldSaldo != null ? Math.round((oldSaldo + sum + tappo) * 100) / 100 : null
       logImport({ type: 'conto', account: pp.account, count: survivors.length, sum,
         oldSaldo, newSaldo, tappo, declaredSaldo: pp.saldoBreakdown?.nuovoSaldo ?? null })
     } catch (e) { console.warn('[wizard] logImport conto', e) }
