@@ -183,7 +183,24 @@ export default function MobileOverview() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [kpiModal, setKpiModal] = useState(null) // 'entrate' | 'patrimonio'
+  const [periodHint, setPeriodHint] = useState(null) // overlay lampo con le date dell'analisi
+  const hintTimer = useRef(null)
   const chatEndRef = useRef(null)
+
+  // Cambio periodo: mostra per ~1,3s le date coperte dall'analisi (richiesta utente 2026-09-14)
+  function selectPeriod(id) {
+    setPeriod(id)
+    const { months } = getPeriodMonths(id)
+    const first = months[0], last = months[months.length - 1]
+    const [ly, lm] = last.split('-').map(Number)
+    const now = new Date()
+    const isCurrentMonth = ly === now.getFullYear() && lm === now.getMonth() + 1
+    const lastDay = isCurrentMonth ? now.getDate() : new Date(ly, lm, 0).getDate()
+    const fmt = (ym, day) => { const [y, m] = ym.split('-'); return `${String(day).padStart(2, '0')}/${m}/${y}` }
+    setPeriodHint(`${fmt(first, 1)} – ${fmt(last, lastDay)}`)
+    clearTimeout(hintTimer.current)
+    hintTimer.current = setTimeout(() => setPeriodHint(null), 1300)
+  }
 
   const transactions  = useStore(s => s.transactions)
   const portfolios    = useStore(s => s.portfolios)
@@ -304,12 +321,20 @@ export default function MobileOverview() {
     <>
     <div className="m-content">
       {/* Period selector */}
-      <div className="m-period-row">
+      <div className="m-period-row" style={{ position:'relative' }}>
         {PERIOD_OPTS.map(p => (
           <button key={p.id}
             className={'m-period-btn' + (period === p.id ? ' active' : '')}
-            onClick={() => setPeriod(p.id)}>{p.label}</button>
+            onClick={() => selectPeriod(p.id)}>{p.label}</button>
         ))}
+        {periodHint && (
+          <div style={{ position:'absolute', top:'100%', left:'50%', transform:'translateX(-50%)', marginTop:6,
+            background:'rgba(30,30,30,.92)', color:'#fff', padding:'6px 14px', borderRadius:10, fontSize:12,
+            fontFamily:'var(--font-mono,monospace)', fontWeight:700, whiteSpace:'nowrap', zIndex:50,
+            boxShadow:'0 4px 16px rgba(0,0,0,.3)', pointerEvents:'none' }}>
+            {periodHint}
+          </div>
+        )}
       </div>
 
       {/* KPI grid */}

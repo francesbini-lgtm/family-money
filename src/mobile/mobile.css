@@ -45,9 +45,19 @@
 }
 
 /* Bottom nav — floating pill */
+/* Fascia opaca dietro la barra: copre i bordi/sotto così scrollando non si vede il
+   contenuto passare sotto la pill (richiesta utente 2026-09-14). */
+.m-nav-backdrop {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: calc(74px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  z-index: 19;
+  pointer-events: none;
+}
 .m-nav {
   position: absolute;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(3px + env(safe-area-inset-bottom, 0px));
   left: 12px;
   right: 12px;
   display: flex;

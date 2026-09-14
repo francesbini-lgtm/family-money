@@ -14,7 +14,7 @@ import './mobile.css'
 
 // Bottom nav — Discovery & Accuracy live as icon shortcuts in the top bar instead (see topbar-actions)
 const TABS = [
-  { id: 'overview',  icon: '🏠', label: 'Overview'  },
+  { id: 'overview',  icon: '📈', label: 'Overview'  },
   { id: 'contanti',  icon: '💵', label: 'Contanti'  },
   { id: 'nanny',     icon: '👩', label: 'Nanny'     },
   { id: 'colf',      icon: '🧹', label: 'Colf'      },
@@ -195,6 +195,8 @@ export default function MobileApp() {
         +
       </button>
 
+      {/* Fascia opaca dietro la barra (nasconde il contenuto che scorre sotto la pill) */}
+      <div className="m-nav-backdrop" />
       {/* Bottom nav — floating pill */}
       <nav className="m-nav">
         {TABS.map(t => {
