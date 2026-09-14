@@ -227,6 +227,13 @@ export default function MobileOverview() {
     const income  = inPeriod.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
     const expense = Math.abs(inPeriod.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0))
 
+    // Entrate/Spese del periodo PRECEDENTE per la % di crescita (richiesta utente 2026-09-14)
+    const prevInPeriod = transactions.filter(t => !t.excluded && prevSet.has(monthOf(t)))
+    const prevIncome  = prevInPeriod.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+    const prevExpense = Math.abs(prevInPeriod.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+    const incomePct  = prevIncome  > 0 ? (income - prevIncome) / prevIncome * 100 : null
+    const expensePct = prevExpense > 0 ? (expense - prevExpense) / prevExpense * 100 : null
+
     // Running saldo — exactly as DashboardPage: sum of ALL active txs (including tappo)
     const saldo = active.reduce((s, t) => s + t.amount, 0)
 
@@ -271,7 +278,7 @@ export default function MobileOverview() {
       }
     })
 
-    return { income, expense, saldo, netWorth, nwGrowthPct, catData, monthBars, balance }
+    return { income, expense, incomePct, expensePct, saldo, netWorth, nwGrowthPct, catData, monthBars, balance }
   }, [transactions, portfolios, loans, satiPots, vehicles, appPrefs, period])
 
   // Forecast data
@@ -310,7 +317,7 @@ export default function MobileOverview() {
           <div className="m-kpi">
             <div className="m-kpi-label">Patrimonio Netto</div>
             <div className={'m-kpi-value ' + (stats.netWorth >= 0 ? 'green' : 'red')}>
-              {stats.netWorth >= 0 ? '+' : '−'}{fmtK(Math.abs(stats.netWorth))}
+              {stats.netWorth < 0 ? '−' : ''}{fmtK(Math.abs(stats.netWorth))}
             </div>
             <div className="m-kpi-delta" style={{ color:'var(--text3)' }}>
               Saldo conti: {fmtK(stats.saldo)}
@@ -331,17 +338,25 @@ export default function MobileOverview() {
           <div className="m-kpi">
             <div className="m-kpi-label">Entrate</div>
             <div className="m-kpi-value green">{fmtK(stats.income)}</div>
-            <div className="m-kpi-delta" style={{ color:'var(--text3)', fontSize:10 }}>{periodCfg.label}</div>
+            {/* crescita entrate vs periodo prec.: aumento = verde (bene), calo = rosso */}
+            <div className="m-kpi-delta" style={{ fontSize:10,
+              color: stats.incomePct == null ? 'var(--text3)' : stats.incomePct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {stats.incomePct == null ? 'vs prec. —' : `${stats.incomePct >= 0 ? '▲' : '▼'}${Math.abs(Math.round(stats.incomePct))}% vs prec.`}
+            </div>
           </div>
           <div className="m-kpi">
             <div className="m-kpi-label">Spese</div>
             <div className="m-kpi-value red">{fmtK(stats.expense)}</div>
-            <div className="m-kpi-delta" style={{ color:'var(--text3)', fontSize:10 }}>{periodCfg.label}</div>
+            {/* crescita spese vs periodo prec.: aumento = rosso (male), calo = verde */}
+            <div className="m-kpi-delta" style={{ fontSize:10,
+              color: stats.expensePct == null ? 'var(--text3)' : stats.expensePct > 0 ? 'var(--red)' : 'var(--green)' }}>
+              {stats.expensePct == null ? 'vs prec. —' : `${stats.expensePct > 0 ? '▲' : '▼'}${Math.abs(Math.round(stats.expensePct))}% vs prec.`}
+            </div>
           </div>
           <div className="m-kpi">
             <div className="m-kpi-label">Risparmio</div>
             <div className={'m-kpi-value ' + (stats.balance >= 0 ? 'green' : 'red')}>
-              {stats.balance >= 0 ? '+' : '−'}{fmtK(Math.abs(stats.balance))}
+              {stats.balance < 0 ? '−' : ''}{fmtK(Math.abs(stats.balance))}
             </div>
             <div className="m-kpi-delta"
               style={{ color: stats.balance >= 0 ? 'var(--green)' : 'var(--red)', fontSize:10 }}>
