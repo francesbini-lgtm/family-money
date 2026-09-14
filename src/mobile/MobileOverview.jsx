@@ -2,6 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'react'
 import Portal from './Portal'
 import { useStore } from '../store/useStore'
 import { CATS } from '../data/categories'
+import { netAmt } from '../data/compensation'
 import { useFinancials } from '../hooks/useFinancials'
 import { chatWithData } from '../data/aiService'
 import {
@@ -54,6 +55,25 @@ function buildForecast(income, expense, years, startSav) {
     inc *= 1 + GROWTH / 100; exp *= 1 + INFLATION / 100
   }
   return pts
+}
+
+// Stessa logica del desktop (UscitePage): le transazioni Satispay-linked si esplodono
+// nei loro split di categoria, le altre usano il netto post-compensazione. Prima il
+// mobile contava la Satispay come un'unica voce "Altro" col lordo → numeri diversi dal
+// desktop (segnalazione utente 2026-09-14).
+const isSatiLinked = t => !!(t._satiLinked && t.splits?.length > 0)
+function accumCat(map, t) {
+  if (isSatiLinked(t)) {
+    t.splits.forEach(sp => {
+      if (sp.amount > 0) {
+        const k = sp.cat1 || 'Non Categorizzato'
+        if (k !== 'Entrate') map[k] = (map[k] || 0) + sp.amount
+      }
+    })
+  } else {
+    const k = t.cat1 || 'Non Categorizzato'
+    if (k !== 'Entrate') map[k] = (map[k] || 0) + Math.abs(netAmt(t))
+  }
 }
 
 function PieLegend({ data, total }) {
@@ -140,23 +160,17 @@ export default function MobileOverview() {
       .reduce((s, l) => s + (l.residualBalance || l.amount || 0), 0)
     const netWorth = saldo + invTotal - loanTotal
 
-    // Cat breakdown (periodo corrente)
+    // Cat breakdown (periodo corrente) — stesso spaccato del desktop (split Satispay + netto)
     const catMap = {}
-    inPeriod.filter(t => t.amount < 0).forEach(t => {
-      const k = t.cat1 || 'Non Categorizzato'
-      if (k !== 'Entrate') catMap[k] = (catMap[k] || 0) + Math.abs(t.amount)
-    })
+    inPeriod.filter(t => t.amount < 0 && t.cat1 !== 'Entrate').forEach(t => accumCat(catMap, t))
     // Finestra PRECEDENTE (stessa durata, subito prima) per la % di crescita/riduzione
     // vs periodo precedente (richiesta utente 2026-09-12).
     const allMonths = getMonthsList(n * 2)
     const prevFrom = allMonths[0], prevTo = fromDate // [prevFrom, fromDate)
     const prevCatMap = {}
-    transactions.filter(t => !t.excluded && t.amount < 0).forEach(t => {
-      const d = t._effDate || t.date || ''
-      if (d >= prevFrom && d < prevTo) {
-        const k = t.cat1 || 'Non Categorizzato'
-        if (k !== 'Entrate') prevCatMap[k] = (prevCatMap[k] || 0) + Math.abs(t.amount)
-      }
+    transactions.filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Entrate').forEach(t => {
+      const d = t._effDate || t.competenza || t.date || ''
+      if (d >= prevFrom && d < prevTo) accumCat(prevCatMap, t)
     })
     // TUTTE le categorie (niente slice) con confronto vs periodo precedente
     const catData = Object.entries(catMap)
