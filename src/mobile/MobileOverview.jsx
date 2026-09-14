@@ -234,17 +234,27 @@ export default function MobileOverview() {
             Saldo conti: {fmtK(stats.saldo)}
           </div>
         </div>
-        <div className="m-kpi">
-          <div className="m-kpi-label">Entrate</div>
-          <div className="m-kpi-value green">{fmtK(stats.income)}</div>
-          <div className="m-kpi-delta" style={{ color:'var(--text3)', fontSize:10 }}>{periodCfg.label}</div>
-        </div>
-        <div className="m-kpi">
-          <div className="m-kpi-label">Spese</div>
-          <div className="m-kpi-value red">{fmtK(stats.expense)}</div>
-          <div className="m-kpi-delta"
-            style={{ color: stats.balance >= 0 ? 'var(--green)' : 'var(--red)', fontSize:11 }}>
-            {stats.balance >= 0 ? '▲' : '▼'} {fmtK(Math.abs(stats.balance))}
+        {/* Entrate / Spese / Risparmio sulla STESSA riga (richiesta utente 2026-09-14) */}
+        <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+          <div className="m-kpi">
+            <div className="m-kpi-label">Entrate</div>
+            <div className="m-kpi-value green">{fmtK(stats.income)}</div>
+            <div className="m-kpi-delta" style={{ color:'var(--text3)', fontSize:10 }}>{periodCfg.label}</div>
+          </div>
+          <div className="m-kpi">
+            <div className="m-kpi-label">Spese</div>
+            <div className="m-kpi-value red">{fmtK(stats.expense)}</div>
+            <div className="m-kpi-delta" style={{ color:'var(--text3)', fontSize:10 }}>{periodCfg.label}</div>
+          </div>
+          <div className="m-kpi">
+            <div className="m-kpi-label">Risparmio</div>
+            <div className={'m-kpi-value ' + (stats.balance >= 0 ? 'green' : 'red')}>
+              {stats.balance >= 0 ? '+' : '−'}{fmtK(Math.abs(stats.balance))}
+            </div>
+            <div className="m-kpi-delta"
+              style={{ color: stats.balance >= 0 ? 'var(--green)' : 'var(--red)', fontSize:10 }}>
+              {stats.income > 0 ? `${Math.round(stats.balance / stats.income * 100)}% su entrate` : periodCfg.label}
+            </div>
           </div>
         </div>
       </div>
