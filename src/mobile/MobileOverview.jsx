@@ -3,6 +3,7 @@ import Portal from './Portal'
 import { useStore } from '../store/useStore'
 import { CATS } from '../data/categories'
 import { netAmt } from '../data/compensation'
+import { computeNetWorth } from '../data/networth'
 import { useFinancials } from '../hooks/useFinancials'
 import { chatWithData } from '../data/aiService'
 import {
@@ -113,6 +114,9 @@ export default function MobileOverview() {
   const transactions  = useStore(s => s.transactions)
   const portfolios    = useStore(s => s.portfolios)
   const loans         = useStore(s => s.loans)
+  const satiPots      = useStore(s => s.satiPots)
+  const vehicles      = useStore(s => s.vehicles)
+  const appPrefs      = useStore(s => s.appPrefs)
   const aiChat        = useStore(s => s.aiChatHistory)
   const addChatMsg    = useStore(s => s.addChatMessage)
   const { thisIncome, thisExpense } = useFinancials()
@@ -153,12 +157,15 @@ export default function MobileOverview() {
     // Running saldo — exactly as DashboardPage: sum of ALL active txs (including tappo)
     const saldo = active.reduce((s, t) => s + t.amount, 0)
 
-    // Patrimonio = saldo + portfolios - loans
-    const invTotal  = (portfolios || []).reduce((s, p) =>
-      s + (p.positions || []).reduce((ps, pos) => ps + (pos.currentValue || pos.shares * pos.price || 0), 0), 0)
-    const loanTotal = (loans || []).filter(l => l.active !== false)
-      .reduce((s, l) => s + (l.residualBalance || l.amount || 0), 0)
-    const netWorth = saldo + invTotal - loanTotal
+    // Patrimonio Netto — STESSO calcolo della pagina Patrimonio (conto + investimenti
+    // + Satispay netto + veicoli + asset manuali − mutui/prestiti − passività manuali).
+    const nw = computeNetWorth({ transactions, portfolios, loans, satiPots, vehicles, appPrefs })
+    const netWorth = nw.netWorth
+    // Crescita del patrimonio nel periodo, guidata dal risparmio (income − expense):
+    // patrimonio inizio periodo ≈ netWorth − risparmio; crescita % = risparmio / iniziale.
+    const balance = income - expense
+    const prevNW = netWorth - balance
+    const nwGrowthPct = Math.abs(prevNW) > 1 ? (balance / prevNW) * 100 : null
 
     // Cat breakdown (periodo corrente) — stesso spaccato del desktop (split Satispay + netto)
     const catMap = {}
@@ -191,7 +198,7 @@ export default function MobileOverview() {
       }
     })
 
-    return { income, expense, saldo, netWorth, catData, monthBars, balance: income - expense }
+    return { income, expense, saldo, netWorth, nwGrowthPct, catData, monthBars, balance }
   }, [transactions, portfolios, loans, period])
 
   // Forecast data
@@ -225,13 +232,25 @@ export default function MobileOverview() {
 
       {/* KPI grid */}
       <div className="m-kpi-grid">
-        <div className="m-kpi full">
-          <div className="m-kpi-label">Patrimonio Netto</div>
-          <div className={'m-kpi-value ' + (stats.netWorth >= 0 ? 'green' : 'red')}>
-            {stats.netWorth >= 0 ? '+' : '−'}{fmtK(Math.abs(stats.netWorth))}
+        {/* Patrimonio Netto + Crescita periodo sulla stessa riga (richiesta utente 2026-09-14) */}
+        <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'1.6fr 1fr', gap:10 }}>
+          <div className="m-kpi">
+            <div className="m-kpi-label">Patrimonio Netto</div>
+            <div className={'m-kpi-value ' + (stats.netWorth >= 0 ? 'green' : 'red')}>
+              {stats.netWorth >= 0 ? '+' : '−'}{fmtK(Math.abs(stats.netWorth))}
+            </div>
+            <div className="m-kpi-delta" style={{ color:'var(--text3)' }}>
+              Saldo conti: {fmtK(stats.saldo)}
+            </div>
           </div>
-          <div className="m-kpi-delta" style={{ color:'var(--text3)' }}>
-            Saldo conti: {fmtK(stats.saldo)}
+          <div className="m-kpi">
+            <div className="m-kpi-label">Crescita</div>
+            <div className="m-kpi-value" style={{ color: stats.nwGrowthPct == null ? 'var(--text3)' : stats.nwGrowthPct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {stats.nwGrowthPct == null ? '—' : `${stats.nwGrowthPct >= 0 ? '▲' : '▼'}${Math.abs(stats.nwGrowthPct).toFixed(1)}%`}
+            </div>
+            <div className="m-kpi-delta" style={{ color:'var(--text3)', fontSize:10 }}>
+              vs inizio {periodCfg.label.toLowerCase()}
+            </div>
           </div>
         </div>
         {/* Entrate / Spese / Risparmio sulla STESSA riga (richiesta utente 2026-09-14) */}
