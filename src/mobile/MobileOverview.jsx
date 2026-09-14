@@ -27,13 +27,33 @@ const fmtK = n => {
 const _nowY = new Date().getFullYear()
 const PERIOD_OPTS = [
   { id:'YTD', label:'YTD' },
-  { id:'1M',  label:'1M' },
+  { id:'MTD', label:'MTD' },   // mese corrente (month-to-date)
+  { id:'LM',  label:'LM' },    // ultimo mese CHIUSO (v. lastClosedMonth)
   { id:'2M',  label:'2M' },
   { id:'3M',  label:'3M' },
   { id:'FY' + String(_nowY - 1).slice(2), label:'FY' + String(_nowY - 1).slice(2), fy: _nowY - 1 },
   { id:'FY' + String(_nowY - 2).slice(2), label:'FY' + String(_nowY - 2).slice(2), fy: _nowY - 2 },
   { id:'5Y',  label:'5Y' },
 ]
+
+// Mese precedente a un 'YYYY-MM'
+function prevYM(ym) {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 2, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+// Ultimo mese COMPLETAMENTE CHIUSO: il mese prima del mese con i dati più recenti.
+// Se i dati più recenti sono a maggio, aprile è chiuso (esistono movimenti a maggio,
+// cioè dopo la fine di aprile) — richiesta utente 2026-09-14.
+function lastClosedMonth(transactions) {
+  let maxYM = ''
+  ;(transactions || []).forEach(t => {
+    if (t.excluded) return
+    const ym = (t._effDate || t.competenza || t.date || '').slice(0, 7)
+    if (ym && ym > maxYM) maxYM = ym
+  })
+  return maxYM ? prevYM(maxYM) : null
+}
 
 function ymOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 // n mesi che finiscono `endOffset` mesi fa (0 = fino al mese corrente)
@@ -46,10 +66,11 @@ function yearMonths(year, upTo = 12) {
   return Array.from({ length: upTo }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
 }
 // Restituisce { months, prevMonths } per la finestra corrente e quella precedente
-function getPeriodMonths(id) {
+function getPeriodMonths(id, lmYM) {
   const now = new Date(); const y = now.getFullYear(); const m = now.getMonth() + 1
   if (id === 'YTD') return { months: yearMonths(y, m), prevMonths: yearMonths(y - 1, m) }
-  if (id === '1M')  return { months: monthsWindow(1), prevMonths: monthsWindow(1, 1) }
+  if (id === 'MTD') return { months: monthsWindow(1), prevMonths: monthsWindow(1, 1) }
+  if (id === 'LM')  return lmYM ? { months: [lmYM], prevMonths: [prevYM(lmYM)] } : { months: [], prevMonths: [] }
   if (id === '2M')  return { months: monthsWindow(2), prevMonths: monthsWindow(2, 2) }
   if (id === '3M')  return { months: monthsWindow(3), prevMonths: monthsWindow(3, 3) }
   if (id === '5Y')  return { months: monthsWindow(60), prevMonths: monthsWindow(60, 60) }
@@ -190,7 +211,8 @@ export default function MobileOverview() {
   // Cambio periodo: mostra per ~1,3s le date coperte dall'analisi (richiesta utente 2026-09-14)
   function selectPeriod(id) {
     setPeriod(id)
-    const { months } = getPeriodMonths(id)
+    const { months } = getPeriodMonths(id, lmYM)
+    if (!months.length) { setPeriodHint('nessun dato'); clearTimeout(hintTimer.current); hintTimer.current = setTimeout(() => setPeriodHint(null), 1300); return }
     const first = months[0], last = months[months.length - 1]
     const [ly, lm] = last.split('-').map(Number)
     const now = new Date()
@@ -234,8 +256,10 @@ export default function MobileOverview() {
   const periodCfg  = PERIOD_OPTS.find(p => p.id === period)
   const horizonYrs = HORIZONS.find(h => h.id === horizon)?.years || 10
 
+  const lmYM = useMemo(() => lastClosedMonth(transactions), [transactions])
+
   const stats = useMemo(() => {
-    const { months, prevMonths } = getPeriodMonths(period)
+    const { months, prevMonths } = getPeriodMonths(period, lmYM)
     const monthSet = new Set(months)
     const prevSet  = new Set(prevMonths)
     const monthOf  = t => (t._effDate || t.competenza || t.date || '').slice(0, 7)
@@ -298,7 +322,7 @@ export default function MobileOverview() {
     })
 
     return { income, expense, incomePct, expensePct, saldo, netWorth, nwDetail: nw, nwGrowthPct, catData, monthBars, balance, months, monthSet }
-  }, [transactions, portfolios, loans, satiPots, vehicles, appPrefs, period])
+  }, [transactions, portfolios, loans, satiPots, vehicles, appPrefs, period, lmYM])
 
   // Forecast data
   const income  = Math.round(thisIncome)  || 5300
