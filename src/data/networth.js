@@ -57,5 +57,19 @@ export function computeNetWorth({ transactions = [], portfolios = [], loans = []
 
   const totalAssets = ccAsset + invTotal + satiNet + vehTotal + extraA
   const totalLiabilities = loanTotal + extraL
-  return { netWorth: totalAssets - totalLiabilities, totalAssets, totalLiabilities, ccBalance, invTotal, satiNet, vehTotal }
+
+  // Componenti itemizzate (per il breakdown visuale nel popup Patrimonio mobile)
+  const assets = [
+    { name: 'Conto Corrente', value: ccAsset,  color: '#2a5c8a' },
+    { name: 'Investimenti',   value: invTotal, color: '#2a7a4a' },
+    { name: 'Satispay',       value: satiNet,  color: '#c8622a' },
+    { name: 'Veicoli',        value: vehTotal, color: '#b8942a' },
+    { name: 'Altri asset',    value: extraA,   color: '#9b59b6' },
+  ].filter(a => a.value > 0)
+  const liabilities = [
+    { name: 'Mutui / Prestiti', value: loanTotal, color: '#c0392b' },
+    { name: 'Altre passività',  value: extraL,    color: '#e07b39' },
+  ].filter(l => l.value > 0)
+
+  return { netWorth: totalAssets - totalLiabilities, totalAssets, totalLiabilities, assets, liabilities, ccBalance, invTotal, satiNet, vehTotal }
 }

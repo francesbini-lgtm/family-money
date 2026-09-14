@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore'
 import { CATS } from '../data/categories'
 import { netAmt } from '../data/compensation'
 import { computeNetWorth } from '../data/networth'
+import { EntrateBreakdownModal, PatrimonioBreakdownModal } from './MobileKpiModals'
 import { useFinancials } from '../hooks/useFinancials'
 import { chatWithData } from '../data/aiService'
 import {
@@ -181,6 +182,7 @@ export default function MobileOverview() {
   const [chatOpen,  setChatOpen]  = useState(false)
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
+  const [kpiModal, setKpiModal] = useState(null) // 'entrate' | 'patrimonio'
   const chatEndRef = useRef(null)
 
   const transactions  = useStore(s => s.transactions)
@@ -278,7 +280,7 @@ export default function MobileOverview() {
       }
     })
 
-    return { income, expense, incomePct, expensePct, saldo, netWorth, nwGrowthPct, catData, monthBars, balance }
+    return { income, expense, incomePct, expensePct, saldo, netWorth, nwDetail: nw, nwGrowthPct, catData, monthBars, balance, months, monthSet }
   }, [transactions, portfolios, loans, satiPots, vehicles, appPrefs, period])
 
   // Forecast data
@@ -314,8 +316,8 @@ export default function MobileOverview() {
       <div className="m-kpi-grid">
         {/* Patrimonio Netto + Crescita periodo sulla stessa riga (richiesta utente 2026-09-14) */}
         <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'1.6fr 1fr', gap:10 }}>
-          <div className="m-kpi">
-            <div className="m-kpi-label">Patrimonio Netto</div>
+          <div className="m-kpi" onClick={() => setKpiModal('patrimonio')} style={{ cursor:'pointer' }}>
+            <div className="m-kpi-label">Patrimonio Netto ›</div>
             <div className={'m-kpi-value ' + (stats.netWorth >= 0 ? 'green' : 'red')}>
               {stats.netWorth < 0 ? '−' : ''}{fmtK(Math.abs(stats.netWorth))}
             </div>
@@ -335,8 +337,8 @@ export default function MobileOverview() {
         </div>
         {/* Entrate / Spese / Risparmio sulla STESSA riga (richiesta utente 2026-09-14) */}
         <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
-          <div className="m-kpi">
-            <div className="m-kpi-label">Entrate</div>
+          <div className="m-kpi" onClick={() => setKpiModal('entrate')} style={{ cursor:'pointer' }}>
+            <div className="m-kpi-label">Entrate ›</div>
             <div className="m-kpi-value green">{fmtK(stats.income)}</div>
             {/* crescita entrate vs periodo prec.: aumento = verde (bene), calo = rosso */}
             <div className="m-kpi-delta" style={{ fontSize:10,
@@ -623,6 +625,18 @@ export default function MobileOverview() {
           </div>
         </div>
       </div>
+      </Portal>
+    )}
+
+    {kpiModal === 'entrate' && (
+      <Portal>
+        <EntrateBreakdownModal transactions={transactions} appPrefs={appPrefs}
+          period={period} monthSet={stats.monthSet} onClose={() => setKpiModal(null)} />
+      </Portal>
+    )}
+    {kpiModal === 'patrimonio' && (
+      <Portal>
+        <PatrimonioBreakdownModal nw={stats.nwDetail} onClose={() => setKpiModal(null)} />
       </Portal>
     )}
   </>
