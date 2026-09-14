@@ -76,28 +76,71 @@ function accumCat(map, t) {
     if (k !== 'Entrate') map[k] = (map[k] || 0) + Math.abs(netAmt(t))
   }
 }
+// Come accumCat ma nidificato per L2 (per il drill-down: clic su una categoria →
+// dettaglio per sottocategoria, come nel desktop — richiesta utente 2026-09-14).
+function accumCatNested(map, t) {
+  const add = (c1, c2, v) => {
+    if (c1 === 'Entrate') return
+    if (!map[c1]) map[c1] = { total: 0, l2: {} }
+    map[c1].total += v
+    const k2 = c2 || '(altro)'
+    map[c1].l2[k2] = (map[c1].l2[k2] || 0) + v
+  }
+  if (isSatiLinked(t)) {
+    t.splits.forEach(sp => { if (sp.amount > 0) add(sp.cat1 || 'Non Categorizzato', sp.cat2, sp.amount) })
+  } else {
+    add(t.cat1 || 'Non Categorizzato', t.cat2, Math.abs(netAmt(t)))
+  }
+}
 
 function PieLegend({ data, total }) {
+  // Clic su una categoria → apre sotto il dettaglio per L2 (come nel desktop)
+  const [openCat, setOpenCat] = useState(null)
   return (
     <div style={{ marginTop: 10 }}>
-      {data.map(d => (
-        <div key={d.name} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
-          <div style={{ width:8, height:8, borderRadius:'50%', background:d.color, flexShrink:0 }}/>
-          <div style={{ flex:1, fontSize:12, color:'var(--text2)', fontWeight:600, overflow:'hidden',
-            textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0 }}>{d.name}</div>
-          <div style={{ fontSize:12, fontFamily:'var(--font-mono,monospace)', color:'var(--text3)', flexShrink:0 }}>
-            {fmtK(d.value)}
+      {data.map(d => {
+        const isOpen = openCat === d.name
+        const hasL2 = (d.l2 || []).length > 0
+        return (
+          <div key={d.name}>
+            <div onClick={() => hasL2 && setOpenCat(isOpen ? null : d.name)}
+              style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5, cursor: hasL2 ? 'pointer' : 'default' }}>
+              <div style={{ width:8, height:8, borderRadius:'50%', background:d.color, flexShrink:0 }}/>
+              <div style={{ flex:1, fontSize:12, color:'var(--text2)', fontWeight:600, overflow:'hidden',
+                textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0 }}>
+                {hasL2 && <span style={{ color:'var(--text3)', marginRight:3, fontSize:10 }}>{isOpen ? '▾' : '▸'}</span>}
+                {d.name}
+              </div>
+              <div style={{ fontSize:12, fontFamily:'var(--font-mono,monospace)', color:'var(--text3)', flexShrink:0 }}>
+                {fmtK(d.value)}
+              </div>
+              <div style={{ fontSize:9, color:'var(--text3)', width:26, textAlign:'right', flexShrink:0 }}>
+                {total > 0 ? Math.round(d.value / total * 100) + '%' : ''}
+              </div>
+              {/* % crescita/riduzione vs periodo precedente: aumento spesa = rosso, calo = verde */}
+              <div style={{ fontSize:10, fontWeight:700, width:52, textAlign:'right', flexShrink:0, fontFamily:'var(--font-mono,monospace)',
+                color: d.pct == null ? 'var(--text3)' : d.pct > 0 ? 'var(--red,#dc2626)' : 'var(--green,#16a34a)' }}>
+                {d.pct == null ? '—' : `${d.pct > 0 ? '▲' : '▼'}${Math.abs(Math.round(d.pct))}%`}
+              </div>
+            </div>
+            {/* Dettaglio L2 */}
+            {isOpen && (
+              <div style={{ margin:'0 0 8px 16px', paddingLeft:8, borderLeft:`2px solid ${d.color}` }}>
+                {d.l2.map(s => (
+                  <div key={s.name} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                    <div style={{ flex:1, fontSize:11, color:'var(--text3)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', minWidth:0 }}>{s.name}</div>
+                    <div style={{ fontSize:11, fontFamily:'var(--font-mono,monospace)', color:'var(--text3)', flexShrink:0 }}>{fmtK(s.value)}</div>
+                    <div style={{ fontSize:9, color:'var(--text3)', width:26, textAlign:'right', flexShrink:0 }}>
+                      {d.value > 0 ? Math.round(s.value / d.value * 100) + '%' : ''}
+                    </div>
+                    <div style={{ width:52, flexShrink:0 }}/>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div style={{ fontSize:9, color:'var(--text3)', width:26, textAlign:'right', flexShrink:0 }}>
-            {total > 0 ? Math.round(d.value / total * 100) + '%' : ''}
-          </div>
-          {/* % crescita/riduzione vs periodo precedente: aumento spesa = rosso, calo = verde */}
-          <div style={{ fontSize:10, fontWeight:700, width:52, textAlign:'right', flexShrink:0, fontFamily:'var(--font-mono,monospace)',
-            color: d.pct == null ? 'var(--text3)' : d.pct > 0 ? 'var(--red,#dc2626)' : 'var(--green,#16a34a)' }}>
-            {d.pct == null ? '—' : `${d.pct > 0 ? '▲' : '▼'}${Math.abs(Math.round(d.pct))}%`}
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -167,9 +210,10 @@ export default function MobileOverview() {
     const prevNW = netWorth - balance
     const nwGrowthPct = Math.abs(prevNW) > 1 ? (balance / prevNW) * 100 : null
 
-    // Cat breakdown (periodo corrente) — stesso spaccato del desktop (split Satispay + netto)
-    const catMap = {}
-    inPeriod.filter(t => t.amount < 0 && t.cat1 !== 'Entrate').forEach(t => accumCat(catMap, t))
+    // Cat breakdown (periodo corrente) — stesso spaccato del desktop (split Satispay + netto),
+    // nidificato per L2 così il clic su una categoria apre il dettaglio per sottocategoria.
+    const catNested = {}
+    inPeriod.filter(t => t.amount < 0 && t.cat1 !== 'Entrate').forEach(t => accumCatNested(catNested, t))
     // Finestra PRECEDENTE (stessa durata, subito prima) per la % di crescita/riduzione
     // vs periodo precedente (richiesta utente 2026-09-12).
     const allMonths = getMonthsList(n * 2)
@@ -179,12 +223,15 @@ export default function MobileOverview() {
       const d = t._effDate || t.competenza || t.date || ''
       if (d >= prevFrom && d < prevTo) accumCat(prevCatMap, t)
     })
-    // TUTTE le categorie (niente slice) con confronto vs periodo precedente
-    const catData = Object.entries(catMap)
-      .map(([name, value]) => {
+    // TUTTE le categorie (niente slice) con confronto vs periodo precedente + dettaglio L2
+    const catData = Object.entries(catNested)
+      .map(([name, o]) => {
         const prev = prevCatMap[name] || 0
-        const pct = prev > 0 ? (value - prev) / prev * 100 : null
-        return { name, value, prev, pct, color: CATS[name]?.color || '#888' }
+        const pct = prev > 0 ? (o.total - prev) / prev * 100 : null
+        const l2 = Object.entries(o.l2)
+          .map(([n2, v2]) => ({ name: n2, value: v2 }))
+          .sort((a, b) => b.value - a.value)
+        return { name, value: o.total, prev, pct, l2, color: CATS[name]?.color || '#888' }
       })
       .sort((a, b) => b.value - a.value)
 
