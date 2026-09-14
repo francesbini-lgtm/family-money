@@ -45,13 +45,14 @@
 }
 
 /* Bottom nav — floating pill */
-/* Fascia opaca dietro la barra: copre i bordi/sotto così scrollando non si vede il
-   contenuto passare sotto la pill (richiesta utente 2026-09-14). */
+/* Sfumatura sotto la barra: il contenuto che scorre svanisce gradualmente verso il
+   fondo invece di essere coperto da una fascia piena (richiesta utente 2026-09-14).
+   Trasparente in alto → colore sfondo in basso. */
 .m-nav-backdrop {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  height: calc(74px + env(safe-area-inset-bottom, 0px));
-  background: var(--bg);
+  height: calc(120px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to bottom, transparent 0%, var(--bg) 55%, var(--bg) 100%);
   z-index: 19;
   pointer-events: none;
 }

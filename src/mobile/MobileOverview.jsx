@@ -320,15 +320,18 @@ export default function MobileOverview() {
   return (
     <>
     <div className="m-content">
-      {/* Period selector */}
-      <div className="m-period-row" style={{ position:'relative' }}>
-        {PERIOD_OPTS.map(p => (
-          <button key={p.id}
-            className={'m-period-btn' + (period === p.id ? ' active' : '')}
-            onClick={() => selectPeriod(p.id)}>{p.label}</button>
-        ))}
+      {/* Period selector (il contenitore ESTERNO è senza overflow così l'hint non
+          viene tagliato dallo scroll orizzontale dei tab) */}
+      <div style={{ position:'relative' }}>
+        <div className="m-period-row">
+          {PERIOD_OPTS.map(p => (
+            <button key={p.id}
+              className={'m-period-btn' + (period === p.id ? ' active' : '')}
+              onClick={() => selectPeriod(p.id)}>{p.label}</button>
+          ))}
+        </div>
         {periodHint && (
-          <div style={{ position:'absolute', top:'100%', left:'50%', transform:'translateX(-50%)', marginTop:6,
+          <div style={{ position:'absolute', top:'100%', left:'50%', transform:'translateX(-50%)', marginTop:2,
             background:'rgba(30,30,30,.92)', color:'#fff', padding:'6px 14px', borderRadius:10, fontSize:12,
             fontFamily:'var(--font-mono,monospace)', fontWeight:700, whiteSpace:'nowrap', zIndex:50,
             boxShadow:'0 4px 16px rgba(0,0,0,.3)', pointerEvents:'none' }}>
