@@ -21,12 +21,41 @@ const fmtK = n => {
   return fmt(n)
 }
 
+// Tab periodo snelli (richiesta utente 2026-09-14): YTD (default), 1M, 2M, 3M,
+// FY<anno corrente-1>, FY<anno corrente-2>, 5Y. FY = anno solare intero.
+const _nowY = new Date().getFullYear()
 const PERIOD_OPTS = [
-  { id:'1M',  label:'1 Mese',   months: 1 },
-  { id:'3M',  label:'3 Mesi',   months: 3 },
-  { id:'1A',  label:'1 Anno',   months: 12 },
-  { id:'5A',  label:'5 Anni',   months: 60 },
+  { id:'YTD', label:'YTD' },
+  { id:'1M',  label:'1M' },
+  { id:'2M',  label:'2M' },
+  { id:'3M',  label:'3M' },
+  { id:'FY' + String(_nowY - 1).slice(2), label:'FY' + String(_nowY - 1).slice(2), fy: _nowY - 1 },
+  { id:'FY' + String(_nowY - 2).slice(2), label:'FY' + String(_nowY - 2).slice(2), fy: _nowY - 2 },
+  { id:'5Y',  label:'5Y' },
 ]
+
+function ymOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+// n mesi che finiscono `endOffset` mesi fa (0 = fino al mese corrente)
+function monthsWindow(n, endOffset = 0) {
+  const now = new Date(); const out = []
+  for (let i = n - 1; i >= 0; i--) out.push(ymOf(new Date(now.getFullYear(), now.getMonth() - endOffset - i, 1)))
+  return out
+}
+function yearMonths(year, upTo = 12) {
+  return Array.from({ length: upTo }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
+}
+// Restituisce { months, prevMonths } per la finestra corrente e quella precedente
+function getPeriodMonths(id) {
+  const now = new Date(); const y = now.getFullYear(); const m = now.getMonth() + 1
+  if (id === 'YTD') return { months: yearMonths(y, m), prevMonths: yearMonths(y - 1, m) }
+  if (id === '1M')  return { months: monthsWindow(1), prevMonths: monthsWindow(1, 1) }
+  if (id === '2M')  return { months: monthsWindow(2), prevMonths: monthsWindow(2, 2) }
+  if (id === '3M')  return { months: monthsWindow(3), prevMonths: monthsWindow(3, 3) }
+  if (id === '5Y')  return { months: monthsWindow(60), prevMonths: monthsWindow(60, 60) }
+  const opt = PERIOD_OPTS.find(p => p.id === id)
+  if (opt?.fy) return { months: yearMonths(opt.fy), prevMonths: yearMonths(opt.fy - 1) }
+  return { months: monthsWindow(1), prevMonths: monthsWindow(1, 1) }
+}
 const HORIZONS = [
   { id:'1',  label:'1A',  years:1  },
   { id:'5',  label:'5A',  years:5  },
@@ -146,7 +175,7 @@ function PieLegend({ data, total }) {
 }
 
 export default function MobileOverview() {
-  const [period,    setPeriod]    = useState('1M')
+  const [period,    setPeriod]    = useState('YTD')
   const [horizon,   setHorizon]   = useState('10')
   const [fcOpen,    setFcOpen]    = useState(false)
   const [chatOpen,  setChatOpen]  = useState(false)
@@ -187,12 +216,13 @@ export default function MobileOverview() {
   const horizonYrs = HORIZONS.find(h => h.id === horizon)?.years || 10
 
   const stats = useMemo(() => {
-    const n        = periodCfg.months
-    const months   = getMonthsList(n)
-    const fromDate = months[0]
+    const { months, prevMonths } = getPeriodMonths(period)
+    const monthSet = new Set(months)
+    const prevSet  = new Set(prevMonths)
+    const monthOf  = t => (t._effDate || t.competenza || t.date || '').slice(0, 7)
     // include _forcedBalance tappo (same as TransactionsPage)
     const active   = transactions.filter(t => !t.excluded || t._forcedBalance)
-    const inPeriod = transactions.filter(t => !t.excluded && ((t._effDate||t.date||'')) >= fromDate)
+    const inPeriod = transactions.filter(t => !t.excluded && monthSet.has(monthOf(t)))
 
     const income  = inPeriod.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0)
     const expense = Math.abs(inPeriod.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0))
@@ -214,15 +244,11 @@ export default function MobileOverview() {
     // nidificato per L2 così il clic su una categoria apre il dettaglio per sottocategoria.
     const catNested = {}
     inPeriod.filter(t => t.amount < 0 && t.cat1 !== 'Entrate').forEach(t => accumCatNested(catNested, t))
-    // Finestra PRECEDENTE (stessa durata, subito prima) per la % di crescita/riduzione
-    // vs periodo precedente (richiesta utente 2026-09-12).
-    const allMonths = getMonthsList(n * 2)
-    const prevFrom = allMonths[0], prevTo = fromDate // [prevFrom, fromDate)
+    // Finestra PRECEDENTE (stessa durata) per la % di crescita/riduzione vs periodo
+    // precedente (richiesta utente 2026-09-12).
     const prevCatMap = {}
-    transactions.filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Entrate').forEach(t => {
-      const d = t._effDate || t.competenza || t.date || ''
-      if (d >= prevFrom && d < prevTo) accumCat(prevCatMap, t)
-    })
+    transactions.filter(t => !t.excluded && t.amount < 0 && t.cat1 !== 'Entrate' && prevSet.has(monthOf(t)))
+      .forEach(t => accumCat(prevCatMap, t))
     // TUTTE le categorie (niente slice) con confronto vs periodo precedente + dettaglio L2
     const catData = Object.entries(catNested)
       .map(([name, o]) => {
@@ -246,7 +272,7 @@ export default function MobileOverview() {
     })
 
     return { income, expense, saldo, netWorth, nwGrowthPct, catData, monthBars, balance }
-  }, [transactions, portfolios, loans, period])
+  }, [transactions, portfolios, loans, satiPots, vehicles, appPrefs, period])
 
   // Forecast data
   const income  = Math.round(thisIncome)  || 5300

@@ -137,7 +137,7 @@
 /* Period selector */
 .m-period-row {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   padding: 12px 14px 4px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -145,8 +145,8 @@
 .m-period-row::-webkit-scrollbar { display: none; }
 .m-period-btn {
   flex-shrink: 0;
-  padding: 5px 14px;
-  border-radius: 20px;
+  padding: 4px 10px;
+  border-radius: 16px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text3);
